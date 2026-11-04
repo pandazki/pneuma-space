@@ -275,6 +275,7 @@ export class PlatformRegistry implements Registry {
       .map((b) => this.#provider(b.provider).inject(id, b.resource));
     return {
       app: id,
+      name: app.name,
       release: release.number,
       image: release.image,
       injection: {

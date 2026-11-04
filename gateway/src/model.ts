@@ -392,6 +392,7 @@ export type Injection = { readonly env: Readonly<Record<string, string>>; readon
 /** Everything the Runtime needs to run an app; it never reads a Manifest. */
 export type RunSpec = {
   readonly app: AppId;
+  readonly name: AppName;
   readonly release: ReleaseNumber;
   readonly image: ImageId;
   readonly injection: Injection;

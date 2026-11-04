@@ -246,7 +246,7 @@ export class DockerRuntime implements Runtime {
   private create(spec: RunSpec): Promise<string> {
     const container: ContainerSpec = {
       image: spec.image,
-      env: { ...spec.injection.env, PNEUMA_APP: spec.app, PNEUMA_RELEASE: String(spec.release) },
+      env: { ...spec.injection.env, PNEUMA_APP: spec.name, PNEUMA_RELEASE: String(spec.release) },
       labels: {
         [LABEL.app]: spec.app, [LABEL.release]: String(spec.release), [LABEL.spec]: specHash(spec), [LABEL.network]: this.network,
       },

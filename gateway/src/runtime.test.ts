@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { demux, Docker } from './docker.ts';
-import { DEFAULT_POLICY, newAppId, NotFound, type AppId, type ImageId, type Lease, type Policy, type ReleaseNumber, type RunSpec } from './model.ts';
+import { appName, DEFAULT_POLICY, newAppId, NotFound, type AppId, type ImageId, type Lease, type Policy, type ReleaseNumber, type RunSpec } from './model.ts';
 import { DockerRuntime } from './runtime.ts';
 
 const SERVER = `require('http').createServer((q, s) => s.end(process.env.PNEUMA_APP + ' ' + process.env.PNEUMA_RELEASE)).listen(8000);
@@ -76,7 +76,7 @@ function inner(image: ImageId, network: string): void {
     const app = newAppId();
     const specs = new Map<AppId, RunSpec>();
     const publish = (release: number, env: Record<string, string> = {}, id: AppId = app) => specs.set(id, {
-      app: id, release: release as ReleaseNumber, image, injection: { env, mounts: [] }, policy: { ...DEFAULT_POLICY, ...policy },
+      app: id, name: appName('fixture'), release: release as ReleaseNumber, image, injection: { env, mounts: [] }, policy: { ...DEFAULT_POLICY, ...policy },
     });
     publish(1);
     const runtimes: DockerRuntime[] = [];
@@ -108,7 +108,7 @@ function inner(image: ImageId, network: string): void {
     t.diagnostic(`cold wake (create, start, ready): ${Math.round(performance.now() - started)} ms`);
     assert.equal(docker.starts, 1);
     assert.equal(a.address, b.address);
-    assert.equal(await answer(a.address), `${app} 1`);
+    assert.equal(await answer(a.address), 'fixture 1');
   });
 
   test('acquire rejects with NotFound when the app has no RunSpec', async (t) => {
@@ -137,7 +137,7 @@ function inner(image: ImageId, network: string): void {
     const lease = await pending;
     assert.equal(docker.stops, 1);
     assert.equal(docker.starts, 2);
-    assert.equal(await answer(lease.address), `${app} 1`);
+    assert.equal(await answer(lease.address), 'fixture 1');
   });
 
   test('retire waits for the held lease, then removes the container; the next acquire runs the new release', async (t) => {
@@ -152,7 +152,7 @@ function inner(image: ImageId, network: string): void {
     await retired;
     assert.deepEqual(await containers(app), []);
     const next = await runtime.acquire(app, 'request');
-    assert.equal(await answer(next.address), `${app} 2`);
+    assert.equal(await answer(next.address), 'fixture 2');
   });
 
   test('retire stops after drain_timeout_seconds when a request lease is never released', async (t) => {
@@ -187,7 +187,7 @@ function inner(image: ImageId, network: string): void {
     const ms = performance.now() - started;
     t.diagnostic(`wake after external stop (start, ready): ${Math.round(ms)} ms`);
     assert.ok(ms < 3000, `wake took ${Math.round(ms)} ms`);
-    assert.equal(await answer(lease.address), `${app} 1`);
+    assert.equal(await answer(lease.address), 'fixture 1');
   });
 
   test('reconcile adopts a matching running container as awake and removes one whose spec label differs', async (t) => {
@@ -204,7 +204,7 @@ function inner(image: ImageId, network: string): void {
     assert.deepEqual(await containers(stale), []);
     const lease = await runtime.acquire(app, 'request');
     assert.equal(docker.starts, 0);
-    assert.equal(await answer(lease.address), `${app} 1`);
+    assert.equal(await answer(lease.address), 'fixture 1');
   });
 
   async function helper(t: TestContext): Promise<void> {
