@@ -7,7 +7,7 @@ import {
   type AppId, type ImageId, type InstanceState, type Job, type JobResult, type Lease, type Runtime, type RunSpec,
 } from './model.ts';
 
-const LABEL = { app: 'pneuma.app', release: 'pneuma.release', spec: 'pneuma.spec', network: 'pneuma.network' } as const;
+const LABEL = { app: 'pneuma-space.app', release: 'pneuma-space.release', spec: 'pneuma-space.spec', network: 'pneuma-space.network' } as const;
 const MAX_TICK_SECONDS = 10;
 const READY_POLL_MS = 50;
 
@@ -27,7 +27,7 @@ type Instance = {
 
 export type RuntimeOptions = {
   readonly docker: Docker;
-  /** PNEUMA_NETWORK: app containers join it, and only containers labelled with it are this gateway's. */
+  /** PNEUMA_SPACE_NETWORK: app containers join it, and only containers labelled with it are this gateway's. */
   readonly network: string;
   /** The Registry's runSpec; re-read on every wake and reaper tick so policy changes apply without a publish. */
   readonly specFor: (app: AppId) => RunSpec | null;
@@ -39,11 +39,11 @@ export type RuntimeOptions = {
 const specHash = (spec: RunSpec): string => canonicalHash(spec.injection);
 const sameRun = (a: RunSpec, b: RunSpec): boolean => a.release === b.release && a.image === b.image && specHash(a) === specHash(b);
 
-/** PNEUMA_COMPOSE_PROJECT, else the compose project label of the container this process runs in, else `pneuma`. */
+/** PNEUMA_SPACE_COMPOSE_PROJECT, else the compose project label of the container this process runs in, else `pneuma-space`. */
 export async function composeProject(docker: Docker): Promise<string> {
-  return process.env.PNEUMA_COMPOSE_PROJECT
+  return process.env.PNEUMA_SPACE_COMPOSE_PROJECT
     ?? (await docker.inspect(hostname()))?.Config.Labels['com.docker.compose.project']
-    ?? 'pneuma';
+    ?? 'pneuma-space';
 }
 
 function canConnect(host: string, port: number): Promise<boolean> {
@@ -248,14 +248,14 @@ export class DockerRuntime implements Runtime {
   private create(spec: RunSpec): Promise<string> {
     const container: ContainerSpec = {
       image: spec.image,
-      env: { ...spec.injection.env, PNEUMA_APP: spec.name, PNEUMA_RELEASE: String(spec.release) },
+      env: { ...spec.injection.env, PNEUMA_SPACE_APP: spec.name, PNEUMA_SPACE_RELEASE: String(spec.release) },
       labels: {
         [LABEL.app]: spec.app, [LABEL.release]: String(spec.release), [LABEL.spec]: specHash(spec), [LABEL.network]: this.network,
       },
       mounts: spec.injection.mounts,
       network: this.network,
     };
-    return this.docker.create(`pneuma-${spec.app}-${spec.release}`, container);
+    return this.docker.create(`pneuma-space-${spec.app}-${spec.release}`, container);
   }
 
   private async drain(inst: Instance): Promise<void> {

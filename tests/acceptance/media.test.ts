@@ -36,9 +36,9 @@ test('AC-MEDIA-1', { timeout: 60_000 }, async (t) => {
   const a = await deploy(t, objectApp);
   const b = await deploy(t, objectApp);
   const env = await appJson(a.name, '/env');
-  for (const name of ['ENDPOINT', 'PUBLIC_ENDPOINT', 'BUCKET', 'ACCESS_KEY', 'SECRET_KEY']) assert.ok(env[`PNEUMA_OBJECT_${name}`], name);
+  for (const name of ['ENDPOINT', 'PUBLIC_ENDPOINT', 'BUCKET', 'ACCESS_KEY', 'SECRET_KEY']) assert.ok(env[`PNEUMA_SPACE_OBJECT_${name}`], name);
   assert.equal((await appJson(a.name, '/bucket-status')).status, 200, 'own bucket exists');
-  const other = (await appJson(b.name, '/env')).PNEUMA_OBJECT_BUCKET;
+  const other = (await appJson(b.name, '/env')).PNEUMA_SPACE_OBJECT_BUCKET;
   assert.equal((await appJson(a.name, `/bucket-status?bucket=${other}`)).status, 403);
 });
 
@@ -57,7 +57,7 @@ test('AC-MEDIA-2', { timeout: 300_000 }, async (t) => {
 
 test('AC-MEDIA-3', { timeout: 60_000 }, async (t) => {
   const app = await deploy(t, objectApp);
-  const { PNEUMA_OBJECT_PUBLIC_ENDPOINT: endpoint, PNEUMA_OBJECT_BUCKET: bucket } = await appJson(app.name, '/env');
+  const { PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT: endpoint, PNEUMA_SPACE_OBJECT_BUCKET: bucket } = await appJson(app.name, '/env');
   const bytes = Buffer.from(Array.from({ length: 5000 }, (_, i) => i % 251));
   const { url } = await appJson(app.name, '/presign?method=PUT&key=public/clip.bin');
   assert.equal((await fetch(url, { method: 'PUT', body: bytes })).status, 200);
@@ -69,7 +69,7 @@ test('AC-MEDIA-3', { timeout: 60_000 }, async (t) => {
 test('AC-MEDIA-4', { timeout: 600_000 }, async (t) => {
   const app = await deploy(t, objectApp);
   await setIdle(app.name, 2);
-  const { PNEUMA_OBJECT_PUBLIC_ENDPOINT: endpoint, PNEUMA_OBJECT_BUCKET: bucket } = await appJson(app.name, '/env');
+  const { PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT: endpoint, PNEUMA_SPACE_OBJECT_BUCKET: bucket } = await appJson(app.name, '/env');
   const { url } = await appJson(app.name, '/presign?method=PUT&key=public/movie.bin');
   assert.equal(await putBytes(url, 1024 * MiB), 200);
   await waitInstance(app.name, 'asleep', 20_000);

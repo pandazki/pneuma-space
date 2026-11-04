@@ -27,17 +27,17 @@ test('url is relative to the app address whether or not the prefix was already s
   assert.equal(stripped.ctx && stripped.ctx.url.pathname + stripped.ctx.url.search, '/items?page=2');
 });
 
-test('identity comes from the X-Pneuma headers and is null without a subject', async () => {
-  const owner = await capture('/', { headers: { 'x-pneuma-subject': 'user:ann', 'x-pneuma-name': 'Ann', 'x-pneuma-owner': '1' } });
+test('identity comes from the X-Pneuma-Space headers and is null without a subject', async () => {
+  const owner = await capture('/', { headers: { 'x-pneuma-space-subject': 'user:ann', 'x-pneuma-space-name': 'Ann', 'x-pneuma-space-owner': '1' } });
   const anonymous = await capture('/');
   assert.deepEqual(owner.ctx?.identity, { subject: 'user:ann', name: 'Ann', owner: true });
   assert.equal(anonymous.ctx?.identity, null);
 });
 
 test('a trigger POST reaches the registered function with its delivery and answers 204', async () => {
-  const got = await capture('/_pneuma/trigger/tick', {
+  const got = await capture('/_pneuma-space/trigger/tick', {
     method: 'POST',
-    headers: { 'x-pneuma-delivery': 'd1', 'x-pneuma-attempt': '2', 'x-pneuma-scheduled-for': '2026-01-01T00:00:00Z' },
+    headers: { 'x-pneuma-space-delivery': 'd1', 'x-pneuma-space-attempt': '2', 'x-pneuma-space-scheduled-for': '2026-01-01T00:00:00Z' },
   });
   assert.equal(got.status, 204);
   assert.equal(got.ctx, undefined);

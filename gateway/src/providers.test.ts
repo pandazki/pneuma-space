@@ -11,11 +11,11 @@ import { Conflict, ENV_BY_KIND, newAppId, type BundleId, type CapabilityKind, ty
 import { createProviders, objectUrl, presign, providerConfig, S3BundleStore, signedFetch } from './providers.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const project = 'pneuma-u6';
+const project = 'pneuma-space-u6';
 const objectPort = 26000;
 const stackEnv = {
   ...process.env,
-  PNEUMA_HTTP_PORT: '26080', PNEUMA_ADMIN_PORT: '26081', PNEUMA_OBJECT_PORT: String(objectPort), PNEUMA_NETWORK: project,
+  PNEUMA_SPACE_HTTP_PORT: '26080', PNEUMA_SPACE_ADMIN_PORT: '26081', PNEUMA_SPACE_OBJECT_PORT: String(objectPort), PNEUMA_SPACE_NETWORK: project,
 };
 const dockerUp = spawnSync('docker', ['info'], { stdio: 'ignore' }).status === 0;
 
@@ -37,9 +37,9 @@ const runtime = {
   removeVolume: async (name: string) => void docker('volume', 'rm', '-f', name),
 };
 const config = providerConfig({
-  PNEUMA_OBJECT_ENDPOINT: `http://127.0.0.1:${objectPort}`,
-  PNEUMA_OBJECT_PUBLIC_ENDPOINT: `http://127.0.0.1:${objectPort}`,
-  PNEUMA_RTC_SECRET: 'pneuma-local-rtc',
+  PNEUMA_SPACE_OBJECT_ENDPOINT: `http://127.0.0.1:${objectPort}`,
+  PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT: `http://127.0.0.1:${objectPort}`,
+  PNEUMA_SPACE_RTC_SECRET: 'pneuma-local-rtc',
 });
 const providers = createProviders(runtime, config, async () => true);
 
@@ -67,7 +67,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
   });
   after(() => compose('down', '-v'));
 
-  for (const [name, kind, prefix] of [['volume', 'files', 'pneuma-files-'], ['sqlite', 'db', 'pneuma-db-']] as const) {
+  for (const [name, kind, prefix] of [['volume', 'files', 'pneuma-space-files-'], ['sqlite', 'db', 'pneuma-space-db-']] as const) {
     describe(name, () => {
       const app = newAppId();
       const volumes = () => docker('volume', 'ls', '-q', '--filter', `name=^${prefix}${app}$`).split('\n').filter(Boolean);
@@ -98,7 +98,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       return exec('postgres', ['env', `PGPASSWORD=${password}`, 'psql', '-h', '127.0.0.1', '-U', username, '-d', database ?? pathname.slice(1), '-tAc', 'select 1']);
     };
     const count = async (sql: string) => (await exec('postgres', ['psql', '-U', 'postgres', '-tAc', sql])).stdout.trim();
-    const url = () => pg.inject(app, resource).env.PNEUMA_DB_URL;
+    const url = () => pg.inject(app, resource).env.PNEUMA_SPACE_DB_URL;
 
     test('ensure twice is one role and one database, and the URL logs in', async () => {
       resource = await pg.ensure(app, null);
@@ -112,7 +112,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
 
     test("another app's role cannot connect to the database", async () => {
       const other = newAppId();
-      const otherUrl = pg.inject(other, await pg.ensure(other, null)).env.PNEUMA_DB_URL;
+      const otherUrl = pg.inject(other, await pg.ensure(other, null)).env.PNEUMA_SPACE_DB_URL;
       const denied = await login(otherUrl, `app_${app}`);
       await pg.destroy(other, {});
       assert.notEqual(denied.exitCode, 0);
@@ -152,8 +152,8 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       assert.equal((await asRoot('ACL LIST')).split('\n').filter((line) => line.startsWith(`user app_${app} `)).length, 1);
       const { env } = kv.inject(app, resource);
       assertEnvNames('kv', kv.inject(app, resource));
-      assert.equal(env.PNEUMA_KV_PREFIX, `${app}:`);
-      assert.equal(env.PNEUMA_KV_URL, `redis://app_${app}:${resource.password}@redis:6379`);
+      assert.equal(env.PNEUMA_SPACE_KV_PREFIX, `${app}:`);
+      assert.equal(env.PNEUMA_SPACE_KV_URL, `redis://app_${app}:${resource.password}@redis:6379`);
     });
 
     test('a key inside the prefix works and one outside fails with NOPERM', async () => {
@@ -205,7 +205,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       resource = { ...(await s3.ensure(app, null)) };
       assert.deepEqual(await s3.ensure(app, resource), resource);
       assertEnvNames('object', s3.inject(app, resource));
-      assert.equal(s3.inject(app, resource).env.PNEUMA_OBJECT_BUCKET, `app-${app}`);
+      assert.equal(s3.inject(app, resource).env.PNEUMA_SPACE_OBJECT_BUCKET, `app-${app}`);
       assert.equal((await signedFetch(key(), 'PUT', url(resource.bucket, 'private/a.txt'), 'secret')).status, 200);
       assert.equal(await (await signedFetch(key(), 'GET', url(resource.bucket, 'private/a.txt'))).text(), 'secret');
     });
@@ -267,9 +267,9 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       assert.deepEqual(await rtc.ensure(app, null), {});
       assert.deepEqual(await rtc.ensure(app, {}), {});
       assert.deepEqual(rtc.inject(app, {}).env, {
-        PNEUMA_RTC_STUN_URLS: 'stun:127.0.0.1:3478',
-        PNEUMA_RTC_TURN_URLS: 'turn:127.0.0.1:3478?transport=udp',
-        PNEUMA_RTC_TURN_SECRET: 'pneuma-local-rtc',
+        PNEUMA_SPACE_RTC_STUN_URLS: 'stun:127.0.0.1:3478',
+        PNEUMA_SPACE_RTC_TURN_URLS: 'turn:127.0.0.1:3478?transport=udp',
+        PNEUMA_SPACE_RTC_TURN_SECRET: 'pneuma-local-rtc',
       });
     });
 
@@ -280,7 +280,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
 
     test('coturn accepts a credential minted from the injected secret', async () => {
       const username = `${Math.floor(Date.now() / 1000) + 600}:alice`;
-      const credential = createHmac('sha1', rtc.inject(app, {}).env.PNEUMA_RTC_TURN_SECRET).update(username).digest('base64');
+      const credential = createHmac('sha1', rtc.inject(app, {}).env.PNEUMA_SPACE_RTC_TURN_SECRET).update(username).digest('base64');
       const run = await exec('coturn', ['sh', '-c', `turnutils_uclient -y -n 5 -m 1 -u '${username}' -w '${credential}' $(hostname -i)`]);
       assert.equal(run.exitCode, 0, run.stderr);
       assert.match(run.stdout, /Total lost packets 0/);
@@ -289,7 +289,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
 
   describe('bundles', () => {
     const bundles = new S3BundleStore(config.object);
-    const dir = mkdtempSync(join(tmpdir(), 'pneuma-bundle-'));
+    const dir = mkdtempSync(join(tmpdir(), 'pneuma-space-bundle-'));
     mkdirSync(join(dir, 'assets'));
     writeFileSync(join(dir, 'index.html'), '<!doctype html><title>hi</title>');
     writeFileSync(join(dir, 'app.js'), 'console.log(1)');
@@ -319,7 +319,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       writeFileSync(join(dir, 'app.js'), 'console.log(2)');
       const stale = await bundles.put(Readable.from([pack()]));
       await bundles.deleteUnreferenced(new Set([id]));
-      const list = await signedFetch(config.object.root, 'GET', objectUrl(config.object, 'pneuma-bundles', '', `?list-type=2&prefix=${stale}/`));
+      const list = await signedFetch(config.object.root, 'GET', objectUrl(config.object, 'pneuma-space-bundles', '', `?list-type=2&prefix=${stale}/`));
       assert.doesNotMatch(await list.text(), /<Key>/);
       assert.equal((await bundles.index(id)).id, id);
     });
@@ -329,7 +329,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
     const probe = () => {
       const script = `
         import { createProviders, providerConfig } from '/src/providers.ts';
-        const p = createProviders({ runJob: async () => ({ exitCode: 0, stdout: '', stderr: '' }) }, providerConfig({ PNEUMA_RTC_SECRET: 's' }));
+        const p = createProviders({ runJob: async () => ({ exitCode: 0, stdout: '', stderr: '' }) }, providerConfig({ PNEUMA_SPACE_RTC_SECRET: 's' }));
         for (const name of ['postgres', 'coturn']) {
           const t = Date.now();
           const outcome = await p[name].ensure('${newAppId()}', null).then(() => 'up', (e) => e.constructor.name);

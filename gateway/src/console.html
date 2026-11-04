@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pneuma Space</title>
+<title>PneumaSpace</title>
 <style>
 :root {
   --bg: #f7f7f5; --panel: #fff; --text: #1d1d1f; --muted: #6b6b70; --line: #e3e3e0;
@@ -57,7 +57,7 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 </head>
 <body>
 <header>
-  <strong>Pneuma Space</strong>
+  <strong>PneumaSpace</strong>
   <nav><a href="#/">Apps</a><a href="#/publish">Publish</a></nav>
 </header>
 <main id="main"></main>
@@ -284,7 +284,7 @@ async function publishView(prefill) {
         h('label', {}, 'Name', name, h('small', {}, 'Lowercase letters, digits and -; the address is /apps/<name>/.')),
         h('label', {}, 'Image reference', image),
         ownerField),
-      h('label', {}, 'Manifest (pneuma.json)', manifest),
+      h('label', {}, 'Manifest (pneuma-space.json)', manifest),
       h('label', {}, 'Static bundle', bundle, h('small', {}, 'Optional tar of the static directory.')),
       h('div', { class: 'actions' }, h('button', { type: 'submit' }, 'Publish')),
       status),

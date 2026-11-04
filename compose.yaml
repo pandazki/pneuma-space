@@ -1,6 +1,6 @@
 # Every default credential below is for a single trusted machine only; override it in .env for anything else.
 # Host ports and the network name are variables so a second stack (the acceptance suite) can run beside this one.
-name: pneuma
+name: pneuma-space
 
 services:
   gateway:
@@ -14,36 +14,36 @@ services:
       interval: 2s
       retries: 30
     ports:
-      - "127.0.0.1:${PNEUMA_HTTP_PORT:-8080}:8080"
-      - "127.0.0.1:${PNEUMA_ADMIN_PORT:-8081}:8081"
+      - "127.0.0.1:${PNEUMA_SPACE_HTTP_PORT:-8080}:8080"
+      - "127.0.0.1:${PNEUMA_SPACE_ADMIN_PORT:-8081}:8081"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - gateway-data:/data
     environment:
-      PNEUMA_NETWORK: ${PNEUMA_NETWORK:-pneuma}
-      PNEUMA_OBJECT_ROOT_USER: ${PNEUMA_OBJECT_ROOT_USER:-pneuma-local}
-      PNEUMA_OBJECT_ROOT_PASSWORD: ${PNEUMA_OBJECT_ROOT_PASSWORD:-pneuma-local-secret}
-      PNEUMA_OBJECT_PUBLIC_ENDPOINT: ${PNEUMA_OBJECT_PUBLIC_ENDPOINT:-http://127.0.0.1:${PNEUMA_OBJECT_PORT:-9000}}
-      PNEUMA_RTC_SECRET: ${PNEUMA_RTC_SECRET:-pneuma-local-rtc}
-      PNEUMA_RTC_PUBLIC_HOST: ${PNEUMA_RTC_PUBLIC_HOST:-127.0.0.1}
-      PNEUMA_REDIS_PASSWORD: ${PNEUMA_REDIS_PASSWORD:-pneuma}
-    networks: [pneuma]
+      PNEUMA_SPACE_NETWORK: ${PNEUMA_SPACE_NETWORK:-pneuma}
+      PNEUMA_SPACE_OBJECT_ROOT_USER: ${PNEUMA_SPACE_OBJECT_ROOT_USER:-pneuma-local}
+      PNEUMA_SPACE_OBJECT_ROOT_PASSWORD: ${PNEUMA_SPACE_OBJECT_ROOT_PASSWORD:-pneuma-local-secret}
+      PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT: ${PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT:-http://127.0.0.1:${PNEUMA_SPACE_OBJECT_PORT:-9000}}
+      PNEUMA_SPACE_RTC_SECRET: ${PNEUMA_SPACE_RTC_SECRET:-pneuma-local-rtc}
+      PNEUMA_SPACE_RTC_PUBLIC_HOST: ${PNEUMA_SPACE_RTC_PUBLIC_HOST:-127.0.0.1}
+      PNEUMA_SPACE_REDIS_PASSWORD: ${PNEUMA_SPACE_REDIS_PASSWORD:-pneuma}
+    networks: [pneuma-space]
 
   rustfs:
     image: rustfs/rustfs:latest
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${PNEUMA_OBJECT_PORT:-9000}:9000"
+      - "127.0.0.1:${PNEUMA_SPACE_OBJECT_PORT:-9000}:9000"
     volumes:
       - rustfs-data:/data
     environment:
-      RUSTFS_ACCESS_KEY: ${PNEUMA_OBJECT_ROOT_USER:-pneuma-local}
-      RUSTFS_SECRET_KEY: ${PNEUMA_OBJECT_ROOT_PASSWORD:-pneuma-local-secret}
+      RUSTFS_ACCESS_KEY: ${PNEUMA_SPACE_OBJECT_ROOT_USER:-pneuma-local}
+      RUSTFS_SECRET_KEY: ${PNEUMA_SPACE_OBJECT_ROOT_PASSWORD:-pneuma-local-secret}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9000/health"]
       interval: 2s
       retries: 30
-    networks: [pneuma]
+    networks: [pneuma-space]
 
   redis:
     image: redis:7-alpine
@@ -54,23 +54,23 @@ services:
       - -c
       - >-
         touch /data/users.acl && sed -i "/^user default /d" /data/users.acl &&
-        echo "user default on >$$PNEUMA_REDIS_PASSWORD ~* &* +@all" >> /data/users.acl &&
+        echo "user default on >$$PNEUMA_SPACE_REDIS_PASSWORD ~* &* +@all" >> /data/users.acl &&
         exec redis-server --appendonly yes --aclfile /data/users.acl
     environment:
-      PNEUMA_REDIS_PASSWORD: ${PNEUMA_REDIS_PASSWORD:-pneuma}
+      PNEUMA_SPACE_REDIS_PASSWORD: ${PNEUMA_SPACE_REDIS_PASSWORD:-pneuma}
     volumes:
       - redis-data:/data
-    networks: [pneuma]
+    networks: [pneuma-space]
 
   postgres:
     image: postgres:16-alpine
     profiles: [postgres]
     restart: unless-stopped
     environment:
-      POSTGRES_PASSWORD: ${PNEUMA_POSTGRES_PASSWORD:-pneuma-local}
+      POSTGRES_PASSWORD: ${PNEUMA_SPACE_POSTGRES_PASSWORD:-pneuma-local}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    networks: [pneuma]
+    networks: [pneuma-space]
 
   coturn:
     image: coturn/coturn:4.6
@@ -78,7 +78,7 @@ services:
     restart: unless-stopped
     command:
       - --use-auth-secret
-      - --static-auth-secret=${PNEUMA_RTC_SECRET:-pneuma-local-rtc}
+      - --static-auth-secret=${PNEUMA_SPACE_RTC_SECRET:-pneuma-local-rtc}
       - --realm=pneuma
       - --listening-port=3478
       - --min-port=49160
@@ -91,11 +91,11 @@ services:
       - "127.0.0.1:3478:3478/udp"
       - "127.0.0.1:3478:3478/tcp"
       - "127.0.0.1:49160-49200:49160-49200/udp"
-    networks: [pneuma]
+    networks: [pneuma-space]
 
 networks:
-  pneuma:
-    name: ${PNEUMA_NETWORK:-pneuma}
+  pneuma-space:
+    name: ${PNEUMA_SPACE_NETWORK:-pneuma}
 
 volumes:
   gateway-data:

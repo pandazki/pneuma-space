@@ -46,7 +46,7 @@ function challenge(who: Challenge): Reply {
   return who.status === 303 ? { status: 303, headers: { location: who.location } } : { status: 401, error: 'sign in or send Authorization: Bearer <token>' };
 }
 
-/** Inbound headers minus every X-Pneuma-* and X-Forwarded-Prefix, plus the ones the platform sets (INV-5). */
+/** Inbound headers minus every X-Pneuma-Space-* and X-Forwarded-Prefix, plus the ones the platform sets (INV-5). */
 function forwardedHeaders(req: IncomingMessage, view: RouteView, who: Principal | null): string[] {
   const out: string[] = [];
   const raw = req.rawHeaders;
@@ -152,7 +152,7 @@ export class Ingress {
     if (rest === undefined) return reply(view.app, 308, undefined, { location: `${APPS_PATH}/${view.name}/${search}` });
 
     if (rest === `/${RESERVED_SEGMENT}` || rest.startsWith(`/${RESERVED_SEGMENT}/`)) {
-      const trigger = /^\/_pneuma\/trigger\/([^/]+)$/.exec(rest);
+      const trigger = /^\/_pneuma-space\/trigger\/([^/]+)$/.exec(rest);
       if (upgrade || req.method !== 'POST' || !trigger) return reply(view.app, 404, `no platform endpoint at ${rest}`);
       return { to: 'trigger', view, trigger: trigger[1] };
     }

@@ -1,5 +1,5 @@
 // Container IPs are unreachable from a macOS host, so the suite runs where the gateway runs: in a container on the app network.
-// On the host this file builds the app image and that container; inside it (PNEUMA_TEST_IMAGE set) it runs the Runtime tests.
+// On the host this file builds the app image and that container; inside it (PNEUMA_SPACE_TEST_IMAGE set) it runs the Runtime tests.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -10,17 +10,17 @@ import { demux, Docker } from './docker.ts';
 import { appName, DEFAULT_POLICY, newAppId, NotFound, type AppId, type ImageId, type Lease, type Policy, type ReleaseNumber, type RunSpec } from './model.ts';
 import { DockerRuntime } from './runtime.ts';
 
-const SERVER = `require('http').createServer((q, s) => s.end(process.env.PNEUMA_APP + ' ' + process.env.PNEUMA_RELEASE)).listen(8000);
+const SERVER = `require('http').createServer((q, s) => s.end(process.env.PNEUMA_SPACE_APP + ' ' + process.env.PNEUMA_SPACE_RELEASE)).listen(8000);
 process.on('SIGTERM', () => process.exit(0));`;
 
-if (process.env.PNEUMA_TEST_IMAGE) inner(process.env.PNEUMA_TEST_IMAGE as ImageId, process.env.PNEUMA_NETWORK!);
+if (process.env.PNEUMA_SPACE_TEST_IMAGE) inner(process.env.PNEUMA_SPACE_TEST_IMAGE as ImageId, process.env.PNEUMA_SPACE_NETWORK!);
 else outer();
 
 function outer(): void {
   test('runtime suite passes inside a container on the app network', { timeout: 300_000 }, async (t) => {
     const docker = new Docker();
-    const network = `pneuma-u3-test-${randomBytes(4).toString('hex')}`;
-    const labels = { 'pneuma.test': '1', 'pneuma.network': network };
+    const network = `pneuma-space-u3-test-${randomBytes(4).toString('hex')}`;
+    const labels = { 'pneuma-space.test': '1', 'pneuma-space.network': network };
     const call = async (method: string, path: string, body?: unknown) => {
       const reply = await docker.request(method, path, body);
       assert.ok(reply.status < 300, `${method} ${path}: ${reply.status} ${reply.body}`);
@@ -30,12 +30,12 @@ function outer(): void {
     try {
       await call('POST', '/networks/create', { Name: network, Labels: labels });
       const build = await call('POST', `/containers/create?name=${network}-build`, { Image: 'node:24-alpine', Cmd: ['node', '-e', SERVER], Labels: labels });
-      image = (await call('POST', `/commit?container=${build.Id}&repo=pneuma-u3-test-app&tag=${network}`)).Id;
+      image = (await call('POST', `/commit?container=${build.Id}&repo=pneuma-space-u3-test-app&tag=${network}`)).Id;
       await call('DELETE', `/containers/${build.Id}`);
       const runner = await call('POST', `/containers/create?name=${network}-runner`, {
         Image: 'node:24-alpine',
         Cmd: ['node', '--test', '--test-reporter=spec', '/gateway/src/runtime.test.ts'],
-        Env: [`PNEUMA_TEST_IMAGE=${image}`, `PNEUMA_NETWORK=${network}`],
+        Env: [`PNEUMA_SPACE_TEST_IMAGE=${image}`, `PNEUMA_SPACE_NETWORK=${network}`],
         Labels: labels,
         HostConfig: { NetworkMode: network, Binds: ['/var/run/docker.sock:/var/run/docker.sock', `${resolve(import.meta.dirname, '..')}:/gateway:ro`] },
       });
@@ -45,11 +45,11 @@ function outer(): void {
       for (const line of (logs.stdout + logs.stderr).trimEnd().split('\n')) t.diagnostic(line);
       assert.equal(StatusCode, 0, 'inner suite failed; its output is in the diagnostics above');
     } finally {
-      for (const container of await docker.list({ label: [`pneuma.network=${network}`] })) await docker.remove(container.Id);
+      for (const container of await docker.list({ label: [`pneuma-space.network=${network}`] })) await docker.remove(container.Id);
       if (image) await docker.request('DELETE', `/images/${image}?force=1`);
       await docker.request('DELETE', `/networks/${network}`);
     }
-    const left = execFileSync('docker', ['ps', '-aq', '--filter', 'label=pneuma.test', '--filter', `label=pneuma.network=${network}`]).toString();
+    const left = execFileSync('docker', ['ps', '-aq', '--filter', 'label=pneuma-space.test', '--filter', `label=pneuma-space.network=${network}`]).toString();
     assert.equal(left, '', 'no test container is left behind');
   });
 }
@@ -89,14 +89,14 @@ function inner(image: ImageId, network: string): void {
     t.after(async () => {
       for (const runtime of runtimes) runtime.close();
       for (const id of specs.keys()) {
-        for (const container of await raw.list({ label: [`pneuma.app=${id}`] })) await raw.remove(container.Id);
+        for (const container of await raw.list({ label: [`pneuma-space.app=${id}`] })) await raw.remove(container.Id);
       }
     });
     return { app, publish, start, ...start() };
   }
 
   const answer = async (address: string) => (await fetch(`http://${address}/`)).text();
-  const containers = async (app: AppId) => (await raw.list({ label: [`pneuma.app=${app}`] })).map((c) => c.Labels['pneuma.release']);
+  const containers = async (app: AppId) => (await raw.list({ label: [`pneuma-space.app=${app}`] })).map((c) => c.Labels['pneuma-space.release']);
   async function until(what: string, condition: () => boolean, ms = 10_000): Promise<void> {
     for (const end = Date.now() + ms; !condition(); await sleep(10)) assert.ok(Date.now() < end, `timed out waiting for ${what}`);
   }
@@ -179,7 +179,7 @@ function inner(image: ImageId, network: string): void {
     const { app, runtime } = fixture(t);
     await runtime.reconcile();
     runtime.release(await runtime.acquire(app, 'request'));
-    const [container] = await raw.list({ label: [`pneuma.app=${app}`] });
+    const [container] = await raw.list({ label: [`pneuma-space.app=${app}`] });
     await raw.stop(container.Id);
     await until('die event', () => runtime.state(app) === 'asleep');
     const started = performance.now();
@@ -208,8 +208,8 @@ function inner(image: ImageId, network: string): void {
   });
 
   async function helper(t: TestContext): Promise<void> {
-    const helper = await raw.request('POST', `/containers/create?name=pneuma-u3-helper-${randomBytes(4).toString('hex')}`, {
-      Image: image, Labels: { 'pneuma.test': '1', 'com.docker.compose.project': network, 'com.docker.compose.service': 'redis' }, HostConfig: { NetworkMode: network },
+    const helper = await raw.request('POST', `/containers/create?name=pneuma-space-u3-helper-${randomBytes(4).toString('hex')}`, {
+      Image: image, Labels: { 'pneuma-space.test': '1', 'com.docker.compose.project': network, 'com.docker.compose.service': 'redis' }, HostConfig: { NetworkMode: network },
     });
     const { Id } = JSON.parse(helper.body.toString());
     t.after(() => raw.remove(Id));
@@ -231,6 +231,6 @@ function inner(image: ImageId, network: string): void {
   test('resolveImage returns the id of an existing image and null for a missing one', async (t) => {
     const { runtime } = fixture(t);
     assert.equal(await runtime.resolveImage(image), image);
-    assert.equal(await runtime.resolveImage('pneuma-u3-missing:none'), null);
+    assert.equal(await runtime.resolveImage('pneuma-space-u3-missing:none'), null);
   });
 }

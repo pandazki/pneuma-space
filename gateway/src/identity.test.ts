@@ -24,11 +24,11 @@ function request(headers: IncomingHttpHeaders, method = 'GET', url = '/apps/surv
 
 function cookie(payload: object, key: Buffer = secret): string {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  return `pneuma_session=${body}.${createHmac('sha256', key).update(body).digest('base64url')}`;
+  return `pneuma_space_session=${body}.${createHmac('sha256', key).update(body).digest('base64url')}`;
 }
 
 function login(name: string, next = '/apps/survey/?q=1'): Promise<Response> {
-  return fetch(`${base()}/_pneuma/login`, {
+  return fetch(`${base()}/_pneuma-space/login`, {
     method: 'POST',
     body: new URLSearchParams({ name, next }),
     redirect: 'manual',
@@ -58,7 +58,7 @@ test('an issued token authenticates as service:<name>', async () => {
 test('a browser is sent to the login page with its path as next; other clients get 401', async () => {
   assert.deepEqual(
     await identity.authenticate(request({ accept: 'text/html,application/xhtml+xml' }, 'GET', '/apps/survey/a?b=1')),
-    { status: 303, location: '/_pneuma/login?next=%2Fapps%2Fsurvey%2Fa%3Fb%3D1' },
+    { status: 303, location: '/_pneuma-space/login?next=%2Fapps%2Fsurvey%2Fa%3Fb%3D1' },
   );
   assert.deepEqual(await identity.authenticate(request({ accept: 'text/html' }, 'POST')), { status: 401 });
   assert.deepEqual(await identity.authenticate(request({ accept: 'application/json' })), { status: 401 });
@@ -85,7 +85,7 @@ test('login never redirects outside /apps/', async () => {
 });
 
 test('the platform secret is created once and read back on the next start', () => {
-  const path = join(mkdtempSync(join(tmpdir(), 'pneuma-secret-')), 'pneuma.secret');
+  const path = join(mkdtempSync(join(tmpdir(), 'pneuma-space-secret-')), 'pneuma-space.secret');
   const first = loadOrCreateSecret(path);
   assert.equal(first.length, 32);
   assert.deepEqual(loadOrCreateSecret(path), first);

@@ -146,27 +146,27 @@ async function websocket(path: string): Promise<net.Socket> {
 
 const frame = (text: string) => Buffer.concat([Buffer.from([0x81, text.length]), Buffer.from(text)]);
 
-test('forged X-Pneuma headers never reach the app (AC-FORM-2)', async () => {
-  const got = await request('/apps/plain/echo', { headers: { 'x-pneuma-subject': 'user:alice', 'X-Pneuma-Owner': '1', 'x-forwarded-prefix': '/evil' } });
+test('forged X-Pneuma-Space headers never reach the app (AC-FORM-2)', async () => {
+  const got = await request('/apps/plain/echo', { headers: { 'x-pneuma-space-subject': 'user:alice', 'X-Pneuma-Space-Owner': '1', 'x-forwarded-prefix': '/evil' } });
   const { headers } = JSON.parse(got.body);
-  assert.equal(headers['x-pneuma-subject'], undefined);
-  assert.equal(headers['x-pneuma-owner'], undefined);
+  assert.equal(headers['x-pneuma-space-subject'], undefined);
+  assert.equal(headers['x-pneuma-space-owner'], undefined);
   assert.equal(headers['x-forwarded-prefix'], '/apps/plain');
 });
 
 test('the identity provider\'s subject reaches the app in place of a forged one (AC-FORM-2)', async () => {
-  const got = await request('/apps/who/echo?q=1', { headers: { authorization: 'Bearer bob', 'x-pneuma-subject': 'user:alice' } });
+  const got = await request('/apps/who/echo?q=1', { headers: { authorization: 'Bearer bob', 'x-pneuma-space-subject': 'user:alice' } });
   const { url, headers } = JSON.parse(got.body);
   assert.equal(url, '/echo?q=1');
-  assert.equal(headers['x-pneuma-subject'], 'user:bob');
-  assert.equal(headers['x-pneuma-name'], 'Bob');
+  assert.equal(headers['x-pneuma-space-subject'], 'user:bob');
+  assert.equal(headers['x-pneuma-space-name'], 'Bob');
 });
 
-test('X-Pneuma-Owner is set only for the owner (AC-FORM-3)', async () => {
+test('X-Pneuma-Space-Owner is set only for the owner (AC-FORM-3)', async () => {
   const owner = JSON.parse((await request('/apps/who/echo', { headers: { authorization: 'Bearer alice' } })).body);
-  const other = JSON.parse((await request('/apps/who/echo', { headers: { authorization: 'Bearer bob', 'x-pneuma-owner': '1' } })).body);
-  assert.equal(owner.headers['x-pneuma-owner'], '1');
-  assert.equal(other.headers['x-pneuma-owner'], undefined);
+  const other = JSON.parse((await request('/apps/who/echo', { headers: { authorization: 'Bearer bob', 'x-pneuma-space-owner': '1' } })).body);
+  assert.equal(owner.headers['x-pneuma-space-owner'], '1');
+  assert.equal(other.headers['x-pneuma-space-owner'], undefined);
 });
 
 test('an unauthenticated caller of an identity app gets the provider\'s challenge', async () => {
@@ -177,18 +177,18 @@ test('an unauthenticated caller of an identity app gets the provider\'s challeng
 
 test('an anonymous visitor of an app with identity required false reaches it with no identity headers', async () => {
   reset();
-  const got = await request('/apps/guest/echo', { headers: { 'x-pneuma-subject': 'user:alice' } });
+  const got = await request('/apps/guest/echo', { headers: { 'x-pneuma-space-subject': 'user:alice' } });
   assert.equal(got.status, 200);
   const { headers } = JSON.parse(got.body);
-  assert.equal(headers['x-pneuma-subject'], undefined);
-  assert.equal(headers['x-pneuma-name'], undefined);
-  assert.equal(headers['x-pneuma-owner'], undefined);
+  assert.equal(headers['x-pneuma-space-subject'], undefined);
+  assert.equal(headers['x-pneuma-space-name'], undefined);
+  assert.equal(headers['x-pneuma-space-owner'], undefined);
 });
 
 test('a signed-in visitor of an app with identity required false still gets the identity headers', async () => {
   const { headers } = JSON.parse((await request('/apps/guest/echo', { headers: { authorization: 'Bearer alice' } })).body);
-  assert.equal(headers['x-pneuma-subject'], 'user:alice');
-  assert.equal(headers['x-pneuma-owner'], '1');
+  assert.equal(headers['x-pneuma-space-subject'], 'user:alice');
+  assert.equal(headers['x-pneuma-space-owner'], '1');
 });
 
 test('Range reaches the app unchanged and its 206 comes back unchanged', async () => {
@@ -277,7 +277,7 @@ test('a bundle file is served without acquiring and other paths wake the app (AC
 });
 
 test('a removed app answers 404 on every path', async () => {
-  for (const path of ['/apps/gone', '/apps/gone/', '/apps/gone/x', '/apps/gone/_pneuma/trigger/report']) {
+  for (const path of ['/apps/gone', '/apps/gone/', '/apps/gone/x', '/apps/gone/_pneuma-space/trigger/report']) {
     assert.equal((await request(path, { method: path.includes('trigger') ? 'POST' : 'GET' })).status, 404, path);
   }
 });
@@ -291,14 +291,14 @@ test('a missing trailing slash redirects with 308 and an unknown app is 404', as
 
 test('a trigger call without a service subject or the owner is 403', async () => {
   reset();
-  const got = await request('/apps/plain/_pneuma/trigger/report', { method: 'POST', headers: { authorization: 'Bearer bob' } });
+  const got = await request('/apps/plain/_pneuma-space/trigger/report', { method: 'POST', headers: { authorization: 'Bearer bob' } });
   assert.equal(got.status, 403);
   assert.deepEqual(invoked, []);
 });
 
 test('a service trigger call becomes a delivery with its Idempotency-Key and body', async () => {
   reset();
-  const got = await request('/apps/plain/_pneuma/trigger/report', {
+  const got = await request('/apps/plain/_pneuma-space/trigger/report', {
     method: 'POST', headers: { authorization: 'Bearer svc', 'idempotency-key': 'k1' }, body: 'payload',
   });
   assert.equal(got.status, 202);
@@ -321,5 +321,5 @@ test('stats count every request to an app, static included, and flush hands them
 });
 
 test('the gateway-root login page is delegated to the identity provider', async () => {
-  assert.equal((await request('/_pneuma/login?next=/apps/who/')).body, 'login page');
+  assert.equal((await request('/_pneuma-space/login?next=/apps/who/')).body, 'login page');
 });

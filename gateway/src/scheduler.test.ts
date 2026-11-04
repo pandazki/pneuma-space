@@ -87,7 +87,7 @@ test('a cron trigger yields one delivery per slot after publish and catches up o
   await scheduler.tick();
   await scheduler.tick();
   assert.deepEqual(rows.map((r) => new Date(r.scheduledFor!).toISOString()), ['2026-01-01T00:01:00.000Z']);
-  assert.equal(received[0].headers['x-pneuma-scheduled-for'], '2026-01-01T00:01:00.000Z');
+  assert.equal(received[0].headers['x-pneuma-space-scheduled-for'], '2026-01-01T00:01:00.000Z');
   clock.now = Date.parse('2026-01-01T00:11:10Z');
   await scheduler.tick();
   assert.deepEqual(rows.map((r) => new Date(r.scheduledFor!).toISOString()), ['2026-01-01T00:01:00.000Z', '2026-01-01T00:11:00.000Z']);
@@ -103,7 +103,7 @@ test('a retry after a 500 carries the same delivery id, the next attempt number,
   clock.now += 10_000;
   await scheduler.tick();
   assert.equal(rows[0].state, 'done');
-  assert.deepEqual(received.map((r) => [r.headers['x-pneuma-delivery'], r.headers['x-pneuma-attempt'], r.headers['x-pneuma-subject'], r.body]),
+  assert.deepEqual(received.map((r) => [r.headers['x-pneuma-space-delivery'], r.headers['x-pneuma-space-attempt'], r.headers['x-pneuma-space-subject'], r.body]),
     [[id, '1', caller, 'hello'], [id, '2', caller, 'hello']]);
 });
 
@@ -153,7 +153,7 @@ test('a second due delivery for an app starts only after the first finishes', as
   finishFirst();
   await firstTick;
   await scheduler.tick();
-  assert.deepEqual(received.map((r) => r.headers['x-pneuma-delivery']), [first, second]);
+  assert.deepEqual(received.map((r) => r.headers['x-pneuma-space-delivery']), [first, second]);
 });
 
 test('invoke with the same Idempotency-Key returns the same delivery; different keys create two', () => {
@@ -194,7 +194,7 @@ test('resume returns a delivering row to due and redelivers it with the same id'
   assert.deepEqual([rows[0].state, rows[0].nextAttemptAt], ['due', clock.now]);
   await scheduler.tick();
   scheduler.stop();
-  assert.deepEqual([rows[0].state, received[0].headers['x-pneuma-delivery'], received[0].headers['x-pneuma-attempt']], ['done', id, '2']);
+  assert.deepEqual([rows[0].state, received[0].headers['x-pneuma-space-delivery'], received[0].headers['x-pneuma-space-attempt']], ['done', id, '2']);
 });
 
 test('nextSlot follows the America/New_York wall clock across the 2026 DST changes', () => {

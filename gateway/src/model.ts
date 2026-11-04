@@ -123,19 +123,19 @@ export type DbBackend = (typeof CAPABILITIES)['db']['providers'][number];
 /** Variables a declared kind injects (docs/app-contract.md, Environment). */
 export const ENV_BY_KIND = {
   route:    [],
-  files:    ['PNEUMA_FILES_DIR'],
-  db:       ['PNEUMA_DB_URL'],
-  kv:       ['PNEUMA_KV_URL', 'PNEUMA_KV_PREFIX'],
-  object:   ['PNEUMA_OBJECT_ENDPOINT', 'PNEUMA_OBJECT_PUBLIC_ENDPOINT', 'PNEUMA_OBJECT_BUCKET', 'PNEUMA_OBJECT_ACCESS_KEY', 'PNEUMA_OBJECT_SECRET_KEY'],
+  files:    ['PNEUMA_SPACE_FILES_DIR'],
+  db:       ['PNEUMA_SPACE_DB_URL'],
+  kv:       ['PNEUMA_SPACE_KV_URL', 'PNEUMA_SPACE_KV_PREFIX'],
+  object:   ['PNEUMA_SPACE_OBJECT_ENDPOINT', 'PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT', 'PNEUMA_SPACE_OBJECT_BUCKET', 'PNEUMA_SPACE_OBJECT_ACCESS_KEY', 'PNEUMA_SPACE_OBJECT_SECRET_KEY'],
   static:   [],
   ws:       [],
   cron:     [],
   identity: [],
-  rtc:      ['PNEUMA_RTC_STUN_URLS', 'PNEUMA_RTC_TURN_URLS', 'PNEUMA_RTC_TURN_SECRET'],
+  rtc:      ['PNEUMA_SPACE_RTC_STUN_URLS', 'PNEUMA_SPACE_RTC_TURN_URLS', 'PNEUMA_SPACE_RTC_TURN_SECRET'],
 } as const satisfies Record<CapabilityKind, readonly string[]>;
 
 /** Set by the Runtime on every app container, declared or not. */
-export const RUNTIME_ENV = ['PNEUMA_APP', 'PNEUMA_RELEASE'] as const;
+export const RUNTIME_ENV = ['PNEUMA_SPACE_APP', 'PNEUMA_SPACE_RELEASE'] as const;
 
 function assertCoversKinds(label: string, table: object): void {
   const has = Object.keys(table).sort().join(',');
@@ -547,11 +547,11 @@ export interface CapabilityProvider {
 /** Hides how a request's caller is identified (local stub in M1, OIDC in M2). */
 export interface IdentityProvider {
   authenticate(request: IncomingMessage): Promise<Principal | Challenge>;
-  /** Serves the gateway-root pages under /_pneuma/ (login, logout). */
+  /** Serves the gateway-root pages under /_pneuma-space/ (login, logout). */
   serve(request: IncomingMessage, response: ServerResponse): Promise<void>;
 }
 
-/** Hides where static bundles live (object store `pneuma-bundles/<id>/`). */
+/** Hides where static bundles live (object store `pneuma-space-bundles/<id>/`). */
 export interface BundleStore {
   put(tar: Readable): Promise<BundleId>;
   index(id: BundleId): Promise<BundleIndex>;
@@ -606,23 +606,23 @@ export const INGRESS_PORT = 8080;
 export const ADMIN_PORT = 8081;
 export const FILES_DIR = '/data';
 export const APPS_PATH = '/apps';
-export const RESERVED_SEGMENT = '_pneuma';
+export const RESERVED_SEGMENT = '_pneuma-space';
 export const TRIGGER_PATH = `/${RESERVED_SEGMENT}/trigger/`;
 export const LOGIN_PATH = `/${RESERVED_SEGMENT}/login`;
 export const LOGOUT_PATH = `/${RESERVED_SEGMENT}/logout`;
-export const RESERVED_HEADER_PREFIX = 'x-pneuma-';
+export const RESERVED_HEADER_PREFIX = 'x-pneuma-space-';
 export const MAX_ATTEMPTS = 5;
 export const TRIGGER_BODY_LIMIT = 64 * 1024;
 export const IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export const HEADERS = {
   prefix: 'x-forwarded-prefix',
-  subject: 'x-pneuma-subject',
-  name: 'x-pneuma-name',
-  owner: 'x-pneuma-owner',
-  delivery: 'x-pneuma-delivery',
-  attempt: 'x-pneuma-attempt',
-  scheduledFor: 'x-pneuma-scheduled-for',
+  subject: 'x-pneuma-space-subject',
+  name: 'x-pneuma-space-name',
+  owner: 'x-pneuma-space-owner',
+  delivery: 'x-pneuma-space-delivery',
+  attempt: 'x-pneuma-space-attempt',
+  scheduledFor: 'x-pneuma-space-scheduled-for',
   idempotencyKey: 'idempotency-key',
 } as const;
 

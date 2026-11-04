@@ -22,13 +22,13 @@ export type ProviderConfig = {
 export function providerConfig(env: Readonly<Record<string, string | undefined>>): ProviderConfig {
   return {
     object: {
-      endpoint: env.PNEUMA_OBJECT_ENDPOINT ?? 'http://rustfs:9000',
-      root: { accessKey: env.PNEUMA_OBJECT_ROOT_USER ?? 'pneuma-local', secretKey: env.PNEUMA_OBJECT_ROOT_PASSWORD ?? 'pneuma-local-secret' },
+      endpoint: env.PNEUMA_SPACE_OBJECT_ENDPOINT ?? 'http://rustfs:9000',
+      root: { accessKey: env.PNEUMA_SPACE_OBJECT_ROOT_USER ?? 'pneuma-local', secretKey: env.PNEUMA_SPACE_OBJECT_ROOT_PASSWORD ?? 'pneuma-local-secret' },
     },
-    objectPublicEndpoint: env.PNEUMA_OBJECT_PUBLIC_ENDPOINT ?? 'http://127.0.0.1:9000',
-    redisPassword: env.PNEUMA_REDIS_PASSWORD ?? 'pneuma',
-    rtcSecret: env.PNEUMA_RTC_SECRET ?? '',
-    rtcPublicHost: env.PNEUMA_RTC_PUBLIC_HOST ?? '127.0.0.1',
+    objectPublicEndpoint: env.PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT ?? 'http://127.0.0.1:9000',
+    redisPassword: env.PNEUMA_SPACE_REDIS_PASSWORD ?? 'pneuma',
+    rtcSecret: env.PNEUMA_SPACE_RTC_SECRET ?? '',
+    rtcPublicHost: env.PNEUMA_SPACE_RTC_PUBLIC_HOST ?? '127.0.0.1',
   };
 }
 
@@ -118,7 +118,7 @@ REVOKE CONNECT ON DATABASE ${role} FROM PUBLIC;
   }
 
   inject(_app: AppId, resource: Resource): Injection {
-    return { env: { PNEUMA_DB_URL: `postgresql://${resource.role}:${resource.password}@postgres:5432/${resource.database}` }, mounts: [] };
+    return { env: { PNEUMA_SPACE_DB_URL: `postgresql://${resource.role}:${resource.password}@postgres:5432/${resource.database}` }, mounts: [] };
   }
 
   async suspend(app: AppId): Promise<void> {
@@ -164,7 +164,7 @@ class RedisProvider implements CapabilityProvider {
 
   inject(_app: AppId, resource: Resource): Injection {
     return {
-      env: { PNEUMA_KV_URL: `redis://${resource.user}:${resource.password}@redis:6379`, PNEUMA_KV_PREFIX: resource.prefix },
+      env: { PNEUMA_SPACE_KV_URL: `redis://${resource.user}:${resource.password}@redis:6379`, PNEUMA_SPACE_KV_PREFIX: resource.prefix },
       mounts: [],
     };
   }
@@ -203,11 +203,11 @@ class S3Provider implements CapabilityProvider {
   inject(_app: AppId, resource: Resource): Injection {
     return {
       env: {
-        PNEUMA_OBJECT_ENDPOINT: this.#store.endpoint,
-        PNEUMA_OBJECT_PUBLIC_ENDPOINT: this.#publicEndpoint,
-        PNEUMA_OBJECT_BUCKET: resource.bucket,
-        PNEUMA_OBJECT_ACCESS_KEY: resource.accessKey,
-        PNEUMA_OBJECT_SECRET_KEY: resource.secretKey,
+        PNEUMA_SPACE_OBJECT_ENDPOINT: this.#store.endpoint,
+        PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT: this.#publicEndpoint,
+        PNEUMA_SPACE_OBJECT_BUCKET: resource.bucket,
+        PNEUMA_SPACE_OBJECT_ACCESS_KEY: resource.accessKey,
+        PNEUMA_SPACE_OBJECT_SECRET_KEY: resource.secretKey,
       },
       mounts: [],
     };
@@ -247,7 +247,7 @@ class CoturnProvider implements CapabilityProvider {
   }
 
   async ensure(): Promise<Resource> {
-    if (this.#config.rtcSecret === '') throw new Conflict('capability "rtc" needs PNEUMA_RTC_SECRET set for the gateway and coturn');
+    if (this.#config.rtcSecret === '') throw new Conflict('capability "rtc" needs PNEUMA_SPACE_RTC_SECRET set for the gateway and coturn');
     await requireService(this.#probe, 'coturn', 'rtc', this.kind);
     return {};
   }
@@ -256,9 +256,9 @@ class CoturnProvider implements CapabilityProvider {
     const host = this.#config.rtcPublicHost;
     return {
       env: {
-        PNEUMA_RTC_STUN_URLS: `stun:${host}:3478`,
-        PNEUMA_RTC_TURN_URLS: `turn:${host}:3478?transport=udp`,
-        PNEUMA_RTC_TURN_SECRET: this.#config.rtcSecret,
+        PNEUMA_SPACE_RTC_STUN_URLS: `stun:${host}:3478`,
+        PNEUMA_SPACE_RTC_TURN_URLS: `turn:${host}:3478?transport=udp`,
+        PNEUMA_SPACE_RTC_TURN_SECRET: this.#config.rtcSecret,
       },
       mounts: [],
     };
@@ -272,8 +272,8 @@ export type Providers = { readonly [N in ProviderName]: CapabilityProvider };
 
 export function createProviders(runtime: ProviderRuntime, config: ProviderConfig, probe: ServiceProbe = resolvesOnNetwork): Providers {
   const providers: Providers = {
-    volume: new VolumeProvider('files', 'volume', runtime, 'pneuma-files-', FILES_DIR, { PNEUMA_FILES_DIR: FILES_DIR }),
-    sqlite: new VolumeProvider('db', 'sqlite', runtime, 'pneuma-db-', '/pneuma/db', { PNEUMA_DB_URL: 'sqlite:///pneuma/db/app.sqlite3' }),
+    volume: new VolumeProvider('files', 'volume', runtime, 'pneuma-space-files-', FILES_DIR, { PNEUMA_SPACE_FILES_DIR: FILES_DIR }),
+    sqlite: new VolumeProvider('db', 'sqlite', runtime, 'pneuma-space-db-', '/pneuma/db', { PNEUMA_SPACE_DB_URL: 'sqlite:///pneuma/db/app.sqlite3' }),
     postgres: new PostgresProvider(runtime, probe),
     redis: new RedisProvider(runtime, config.redisPassword),
     s3: new S3Provider(config.object, config.objectPublicEndpoint),
@@ -289,7 +289,7 @@ export function createProviders(runtime: ProviderRuntime, config: ProviderConfig
 
 // Bundles
 
-const BUNDLES = 'pneuma-bundles';
+const BUNDLES = 'pneuma-space-bundles';
 const indexKey = (id: BundleId) => `${id}/${RESERVED_SEGMENT}/index.json`;
 
 const CONTENT_TYPES: Readonly<Record<string, string>> = {
@@ -520,7 +520,7 @@ function sealAdminPayload(secretKey: string, plaintext: string): Buffer {
   return Buffer.concat([salt, Buffer.from([0x00]), nonce, fragment]);
 }
 
-const policyName = (bucket: string) => `pneuma-${bucket}`;
+const policyName = (bucket: string) => `pneuma-space-${bucket}`;
 
 async function createBucket(store: ObjectService, bucket: string): Promise<void> {
   const res = await signedFetch(store.root, 'PUT', objectUrl(store, bucket));

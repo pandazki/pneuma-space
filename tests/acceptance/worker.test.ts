@@ -11,7 +11,7 @@ after(teardownSuite);
 const withTriggers = (triggers: Record<string, object>) => ({ image: images.echo, capabilities: { files: {}, cron: { triggers } } });
 
 async function invoke(name: string, trigger: string, caller = uniqueName('svc')): Promise<{ delivery: string; caller: string }> {
-  const response = await fetch(appUrl(name, `/_pneuma/trigger/${trigger}`), {
+  const response = await fetch(appUrl(name, `/_pneuma-space/trigger/${trigger}`), {
     method: 'POST',
     headers: { authorization: `Bearer ${await serviceToken(caller)}` },
     body: 'payload',

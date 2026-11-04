@@ -28,7 +28,7 @@ async function page({ prefix, identity, res }: Context) {
   const tick = await readFile(join(files, 'last-tick.json'), 'utf8').catch(() => 'never');
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>Pneuma app</title><link rel="stylesheet" href="${prefix}/style.css"></head>
+<title>PneumaSpace app</title><link rel="stylesheet" href="${prefix}/style.css"></head>
 <body data-prefix="${html(prefix)}">
 <h1>Hello, ${html(identity?.name ?? 'anonymous')}</h1>
 <form method="post" action="${prefix}/notes"><input name="body" required><button>Add note</button></form>
@@ -47,7 +47,7 @@ async function addNote({ prefix, identity, req, res }: Context) {
   res.writeHead(303, { location: `${prefix}/` }).end();
 }
 
-// Declaring "static": {"dir": "public"} in pneuma.json makes the platform serve these
+// Declaring "static": {"dir": "public"} in pneuma-space.json makes the platform serve these
 // without waking the app; the URLs stay the same, so this function can then be deleted.
 async function asset({ url, res }: Context): Promise<boolean> {
   const file = join(PUBLIC, decodeURIComponent(url.pathname));

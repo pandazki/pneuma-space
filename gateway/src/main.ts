@@ -14,11 +14,11 @@ const STATS_FLUSH_MS = 10_000;
 
 const log = (ev: string, extra: Record<string, unknown> = {}) => console.log(JSON.stringify({ t: Date.now(), ev, app: null, ...extra }));
 
-const data = process.env.PNEUMA_DATA ?? '/data';
-const network = process.env.PNEUMA_NETWORK ?? 'pneuma';
+const data = process.env.PNEUMA_SPACE_DATA ?? '/data';
+const network = process.env.PNEUMA_SPACE_NETWORK ?? 'pneuma-space';
 const config = providerConfig(process.env);
 
-const store = new SqliteStore(join(data, 'pneuma.sqlite3'));
+const store = new SqliteStore(join(data, 'pneuma-space.sqlite3'));
 const docker = new Docker();
 const runtime = new DockerRuntime({ docker, network, project: await composeProject(docker), specFor: (app) => registry.runSpec(app) });
 const bundles = new S3BundleStore(config.object);
@@ -26,7 +26,7 @@ const registry = await PlatformRegistry.open({
   store, runtime, bundles, providers: Object.values(createProviders(runtime, config)), statsSource: () => ingress.snapshot(),
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app) });
-const identity = new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma.secret')), (hash) => store.token(hash));
+const identity = new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), (hash) => store.token(hash));
 const ingress = new Ingress({
   registry, runtime, identity, bundles, scheduler, stats: store.stats(), flushStats: (stats) => store.putStats(stats),
 });

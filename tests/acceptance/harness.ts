@@ -12,11 +12,11 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 
 /** Its own project, ports and network, so the suite never touches a developer's stack. */
 export const stack = {
-  project: 'pneuma-acc',
-  network: 'pneuma-acc',
-  httpPort: Number(process.env.PNEUMA_ACC_HTTP_PORT ?? 18080),
-  adminPort: Number(process.env.PNEUMA_ACC_ADMIN_PORT ?? 18081),
-  objectPort: Number(process.env.PNEUMA_ACC_OBJECT_PORT ?? 19000),
+  project: 'pneuma-space-acc',
+  network: 'pneuma-space-acc',
+  httpPort: Number(process.env.PNEUMA_SPACE_ACC_HTTP_PORT ?? 18080),
+  adminPort: Number(process.env.PNEUMA_SPACE_ACC_ADMIN_PORT ?? 18081),
+  objectPort: Number(process.env.PNEUMA_SPACE_ACC_OBJECT_PORT ?? 19000),
 };
 
 export const ingressUrl = `http://127.0.0.1:${stack.httpPort}`;
@@ -28,10 +28,10 @@ export function compose(...args: string[]): string {
     encoding: 'utf8',
     env: {
       ...process.env,
-      PNEUMA_NETWORK: stack.network,
-      PNEUMA_HTTP_PORT: String(stack.httpPort),
-      PNEUMA_ADMIN_PORT: String(stack.adminPort),
-      PNEUMA_OBJECT_PORT: String(stack.objectPort),
+      PNEUMA_SPACE_NETWORK: stack.network,
+      PNEUMA_SPACE_HTTP_PORT: String(stack.httpPort),
+      PNEUMA_SPACE_ADMIN_PORT: String(stack.adminPort),
+      PNEUMA_SPACE_OBJECT_PORT: String(stack.objectPort),
     },
   });
 }
@@ -89,7 +89,7 @@ export const adminClient = {
 // Fixtures and publishing
 
 export const fixtureDir = (name: string) => fileURLToPath(new URL(`./fixtures/${name}/`, import.meta.url));
-export const images = { echo: 'pneuma-acc-fixture/echo:1', echo2: 'pneuma-acc-fixture/echo:2' } as const;
+export const images = { echo: 'pneuma-space-acc-fixture/echo:1', echo2: 'pneuma-space-acc-fixture/echo:2' } as const;
 export const OWNER = 'user:acc-owner';
 
 export function docker(...args: string[]): string {
@@ -118,18 +118,18 @@ export function appctl(...args: string[]): string {
   return execFileSync(process.execPath, [join(root, 'cli/appctl.ts'), ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PNEUMA_ADMIN: adminUrl },
+    env: { ...process.env, PNEUMA_SPACE_ADMIN: adminUrl },
   });
 }
 
 /** `appctl publish` with a manifest written for this call; the static dir is copied next to it. */
 export function publish(name: string, { image, capabilities, staticDir, owner = OWNER }: PublishOptions): string {
-  const dir = mkdtempSync(join(tmpdir(), 'pneuma-acc-'));
+  const dir = mkdtempSync(join(tmpdir(), 'pneuma-space-acc-'));
   try {
     const caps = staticDir ? { ...capabilities, static: { dir: 'static' } } : capabilities;
     if (staticDir) cpSync(staticDir, join(dir, 'static'), { recursive: true });
-    writeFileSync(join(dir, 'pneuma.json'), JSON.stringify({ contract: 1, capabilities: caps }));
-    const target = image ? [image, '--manifest', join(dir, 'pneuma.json')] : [dir];
+    writeFileSync(join(dir, 'pneuma-space.json'), JSON.stringify({ contract: 1, capabilities: caps }));
+    const target = image ? [image, '--manifest', join(dir, 'pneuma-space.json')] : [dir];
     try {
       return appctl('publish', name, ...target, '--owner', owner);
     } catch (error) {
@@ -162,8 +162,8 @@ export async function cleanup(name: string): Promise<void> {
   await adminClient.remove(name).catch(() => null);
   const purged = await adminClient.purge(name).catch(() => null);
   if (!id || (purged && purged.status < 300)) return;
-  for (const container of docker('ps', '-aq', '--filter', `name=^pneuma-${id}-`).split('\n').filter(Boolean)) docker('rm', '-f', container);
-  for (const volume of [`pneuma-files-${id}`, `pneuma-db-${id}`]) {
+  for (const container of docker('ps', '-aq', '--filter', `name=^pneuma-space-${id}-`).split('\n').filter(Boolean)) docker('rm', '-f', container);
+  for (const volume of [`pneuma-space-files-${id}`, `pneuma-space-db-${id}`]) {
     try { docker('volume', 'rm', '-f', volume); } catch {}
   }
 }
@@ -188,8 +188,8 @@ export async function login(user: string): Promise<string> {
     body: new URLSearchParams({ name: user, next: '/apps/' }),
     redirect: 'manual',
   });
-  const cookie = response.headers.getSetCookie().find((c) => c.startsWith('pneuma_session='));
-  if (!cookie) throw new Error(`login as ${user}: ${response.status}, no pneuma_session cookie`);
+  const cookie = response.headers.getSetCookie().find((c) => c.startsWith('pneuma_space_session='));
+  if (!cookie) throw new Error(`login as ${user}: ${response.status}, no pneuma_space_session cookie`);
   return cookie.split(';')[0];
 }
 
@@ -247,9 +247,9 @@ export async function setIdle(name: string, seconds: number): Promise<void> {
   if (reply.status >= 300) throw new Error(`PUT policy for ${name}: ${reply.status} ${JSON.stringify(reply.body)}`);
 }
 
-/** The app's container, running or stopped, by the name the Runtime gives it (`pneuma-<id>-<release>`). */
-export const containerFor = (id: string): string | null => docker('ps', '-aq', '--filter', `name=^pneuma-${id}-`).split('\n')[0] || null;
-export const runningContainerFor = (id: string): string | null => docker('ps', '-q', '--filter', `name=^pneuma-${id}-`).split('\n')[0] || null;
+/** The app's container, running or stopped, by the name the Runtime gives it (`pneuma-space-<id>-<release>`). */
+export const containerFor = (id: string): string | null => docker('ps', '-aq', '--filter', `name=^pneuma-space-${id}-`).split('\n')[0] || null;
+export const runningContainerFor = (id: string): string | null => docker('ps', '-q', '--filter', `name=^pneuma-space-${id}-`).split('\n')[0] || null;
 export const startedAt = (container: string) => Date.parse(docker('inspect', '-f', '{{.State.StartedAt}}', container));
 export const dockerExec = (container: string, ...command: string[]) => docker('exec', container, ...command);
 
@@ -275,8 +275,8 @@ export async function restartGateway(how: 'restart' | 'kill' = 'restart'): Promi
 export const volumeExists = (volume: string) => docker('volume', 'ls', '-q', '--filter', `name=^${volume}$`) === volume;
 
 const rootCredential = {
-  accessKey: process.env.PNEUMA_OBJECT_ROOT_USER ?? 'pneuma-local',
-  secretKey: process.env.PNEUMA_OBJECT_ROOT_PASSWORD ?? 'pneuma-local-secret',
+  accessKey: process.env.PNEUMA_SPACE_OBJECT_ROOT_USER ?? 'pneuma-local',
+  secretKey: process.env.PNEUMA_SPACE_OBJECT_ROOT_PASSWORD ?? 'pneuma-local-secret',
 };
 export const objectUrl = `http://127.0.0.1:${stack.objectPort}`;
 

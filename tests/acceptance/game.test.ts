@@ -17,7 +17,7 @@ const CHROME = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/M
 test('AC-GAME-1', { timeout: 120_000 }, async (t) => {
   const app = await deploy(t, { image: images.echo, capabilities: { rtc: {} } });
   const env = await appJson(app.name, '/env');
-  for (const name of ['PNEUMA_RTC_STUN_URLS', 'PNEUMA_RTC_TURN_URLS', 'PNEUMA_RTC_TURN_SECRET']) assert.ok(env[name], name);
+  for (const name of ['PNEUMA_SPACE_RTC_STUN_URLS', 'PNEUMA_SPACE_RTC_TURN_URLS', 'PNEUMA_SPACE_RTC_TURN_SECRET']) assert.ok(env[name], name);
 
   const refused = uniqueName('acc');
   t.after(() => cleanup(refused));
@@ -33,7 +33,7 @@ test('AC-GAME-1', { timeout: 120_000 }, async (t) => {
 type Page = { evaluate(expression: string): Promise<unknown> };
 
 async function chrome(t: TestContext): Promise<(url: string) => Promise<Page>> {
-  const profile = mkdtempSync(join(tmpdir(), 'pneuma-acc-chrome-'));
+  const profile = mkdtempSync(join(tmpdir(), 'pneuma-space-acc-chrome-'));
   const browser = spawn(CHROME, [
     '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run',
     '--disable-features=WebRtcHideLocalIpsWithMdns', 'about:blank',
@@ -70,7 +70,7 @@ async function chrome(t: TestContext): Promise<(url: string) => Promise<Page>> {
 
 test('AC-GAME-2', { timeout: 120_000 }, async (t) => {
   const app = await deploy(t, { image: images.echo, capabilities: { kv: {}, ws: {}, rtc: {} } });
-  const { PNEUMA_RTC_TURN_SECRET: secret } = await appJson(app.name, '/env');
+  const { PNEUMA_SPACE_RTC_TURN_SECRET: secret } = await appJson(app.name, '/env');
   const username = `${Math.floor(Date.now() / 1000) + 600}:acc`;
   const credential = createHmac('sha1', secret).update(username).digest('base64');
   compose('exec', '-T', 'coturn', 'sh', '-c', `turnutils_uclient -y -n 5 -m 1 -u '${username}' -w '${credential}' $(hostname -i)`);

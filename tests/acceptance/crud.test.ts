@@ -32,7 +32,7 @@ test('AC-CRUD-3', { timeout: 60_000 }, async (t) => {
   const app = await deploy(t, { image: images.echo, capabilities: { identity: {} } });
   const service = uniqueName('bot');
   const fromService = await appJson(app.name, '/headers', { headers: { authorization: `Bearer ${await serviceToken(service)}` } });
-  assert.equal(fromService['x-pneuma-subject'], `service:${service}`);
+  assert.equal(fromService['x-pneuma-space-subject'], `service:${service}`);
   const fromBrowser = await appJson(app.name, '/headers', { headers: browser(await login('carol')) });
-  assert.equal(fromBrowser['x-pneuma-subject'], 'user:carol');
+  assert.equal(fromBrowser['x-pneuma-space-subject'], 'user:carol');
 });

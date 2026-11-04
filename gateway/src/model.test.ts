@@ -72,7 +72,7 @@ test('model.ts refuses to load when CAPABILITIES lacks a kind', async () => {
   const source = readFileSync(new URL('./model.ts', import.meta.url), 'utf8');
   const mutated = source.replace(/^ {2}rtc: .*\n/m, '');
   assert.notEqual(mutated, source);
-  const path = join(mkdtempSync(join(tmpdir(), 'pneuma-model-')), 'model.ts');
+  const path = join(mkdtempSync(join(tmpdir(), 'pneuma-space-model-')), 'model.ts');
   writeFileSync(path, mutated);
   await assert.rejects(import(pathToFileURL(path).href), /CAPABILITIES must cover exactly.*rtc/);
 });

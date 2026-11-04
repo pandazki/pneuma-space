@@ -30,10 +30,10 @@ const USAGE = `usage:
   appctl policy [<name>] key=value ...
   appctl owner <name> <subject>
   appctl token create <name>
-admin API: PNEUMA_ADMIN (default http://127.0.0.1:${ADMIN_PORT})`;
+admin API: PNEUMA_SPACE_ADMIN (default http://127.0.0.1:${ADMIN_PORT})`;
 
 const usage = (why: string) => new Failure(EXIT.usage, `${why}\n${USAGE}`);
-const admin = (process.env.PNEUMA_ADMIN ?? `http://127.0.0.1:${ADMIN_PORT}`).replace(/\/$/, '');
+const admin = (process.env.PNEUMA_SPACE_ADMIN ?? `http://127.0.0.1:${ADMIN_PORT}`).replace(/\/$/, '');
 
 type Options = { owner?: string; tag?: string; manifest?: string; static?: boolean; yes?: boolean };
 
@@ -74,7 +74,7 @@ function needsImage(manifest: Manifest): boolean {
 }
 
 function build(name: string, dir: string, tag: string | undefined): string {
-  const ref = `pneuma-app/${name}:${tag ?? new Date().toISOString().replace(/\D/g, '').slice(0, 14)}`;
+  const ref = `pneuma-space-app/${name}:${tag ?? new Date().toISOString().replace(/\D/g, '').slice(0, 14)}`;
   try {
     return execFileSync('docker', ['build', '-q', '-t', ref, dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim();
   } catch (error) {
@@ -138,10 +138,10 @@ async function* tar(root: string, files: { path: string; size: number }[]): Asyn
 async function publish([rawName, target, ...extra]: string[], options: Options): Promise<void> {
   if (!rawName || !target || extra.length) throw usage('publish takes <name> <dir|image>');
   const name = appName(rawName);
-  const owner = options.owner ?? (process.env.PNEUMA_OWNER || undefined);
+  const owner = options.owner ?? (process.env.PNEUMA_SPACE_OWNER || undefined);
   if (owner !== undefined) subject(owner);
   const fromDir = existsSync(target) && statSync(target).isDirectory();
-  const manifestFile = fromDir ? join(target, 'pneuma.json') : resolve(options.manifest ?? 'pneuma.json');
+  const manifestFile = fromDir ? join(target, 'pneuma-space.json') : resolve(options.manifest ?? 'pneuma-space.json');
   const manifest = readManifest(manifestFile);
   const root = dirname(manifestFile);
   const staticRoot = manifest.capabilities.static ? join(root, manifest.capabilities.static.dir) : null;

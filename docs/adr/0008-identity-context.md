@@ -2,7 +2,7 @@
 
 状态：**M1 决定**。
 
-决定：网关丢弃所有入站 `X-Pneuma-*`，由 `IdentityProvider.authenticate` 产生 Principal，写成三个平面头：`X-Pneuma-Subject`（`user:<id>` 或 `service:<id>`）、`X-Pneuma-Name`、`X-Pneuma-Owner`（主体等于 `App.owner` 时为 `1`）。M1 的提供者是本地桩：浏览器会话 cookie 加控制台签发的服务令牌。M2 换 OIDC 实现，头不变。
+决定：网关丢弃所有入站 `X-Pneuma-Space-*`，由 `IdentityProvider.authenticate` 产生 Principal，写成三个平面头：`X-Pneuma-Space-Subject`（`user:<id>` 或 `service:<id>`）、`X-Pneuma-Space-Name`、`X-Pneuma-Space-Owner`（主体等于 `App.owner` 时为 `1`）。M1 的提供者是本地桩：浏览器会话 cookie 加控制台签发的服务令牌。M2 换 OIDC 实现，头不变。
 
 理由：三个平面头让不用 SDK 的应用用 `headers.get` 就能做所有者判断。主体前缀携带种类，应用能分辨人和程序。提供者是 Protocol，SSO 是替换不是重写。
 

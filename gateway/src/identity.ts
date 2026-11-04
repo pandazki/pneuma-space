@@ -6,7 +6,7 @@ import {
   type Challenge, type IdentityProvider, type Principal, type Subject, type Token,
 } from './model.ts';
 
-const COOKIE = 'pneuma_session';
+const COOKIE = 'pneuma_space_session';
 const COOKIE_ATTRIBUTES = 'HttpOnly; SameSite=Lax; Path=/';
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
 const SECRET_BYTES = 32;
@@ -129,7 +129,7 @@ function escape(text: string): string {
 function loginPage(next: string, error: string): string {
   return `<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in · Pneuma Space</title>
+<title>Sign in · PneumaSpace</title>
 <style>
 body{font:16px/1.5 system-ui,sans-serif;max-width:22rem;margin:18vh auto;padding:0 1rem;color:#1d1d1f}
 input,button{font:inherit;padding:.5rem .6rem;border-radius:6px;border:1px solid #bbb;width:100%;box-sizing:border-box}

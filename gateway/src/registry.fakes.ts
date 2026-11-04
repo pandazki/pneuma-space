@@ -104,7 +104,7 @@ const temporary: string[] = [];
 process.once('exit', () => temporary.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
 export function world(): World {
-  const dir = mkdtempSync(join(tmpdir(), 'pneuma-registry-'));
+  const dir = mkdtempSync(join(tmpdir(), 'pneuma-space-registry-'));
   temporary.push(dir);
   const calls: Call[] = [];
   const providers = new Map<ProviderName, FakeProvider>();
@@ -116,7 +116,7 @@ export function world(): World {
   return {
     dir, calls, providers, runtime, bundles,
     async open() {
-      const store = new SqliteStore(join(dir, 'pneuma.sqlite3'));
+      const store = new SqliteStore(join(dir, 'pneuma-space.sqlite3'));
       const registry = await PlatformRegistry.open({ store, runtime, bundles, providers: [...providers.values()] });
       return { store, registry };
     },

@@ -14,7 +14,7 @@ export type Delivery = {
 };
 export type Triggers = Readonly<Record<string, (delivery: Delivery) => unknown>>;
 
-const TRIGGER = /^\/_pneuma\/trigger\/([^/]+)$/;
+const TRIGGER = /^\/_pneuma-space\/trigger\/([^/]+)$/;
 
 function header(req: IncomingMessage, name: string): string | null {
   const value = req.headers[name];
@@ -28,9 +28,9 @@ export function inbound(req: IncomingMessage): Inbound {
   if (prefix && (url.pathname === prefix || url.pathname.startsWith(prefix + '/'))) {
     url.pathname = url.pathname.slice(prefix.length) || '/';
   }
-  const subject = header(req, 'x-pneuma-subject');
+  const subject = header(req, 'x-pneuma-space-subject');
   const identity = subject
-    ? { subject, name: header(req, 'x-pneuma-name') ?? subject, owner: header(req, 'x-pneuma-owner') === '1' }
+    ? { subject, name: header(req, 'x-pneuma-space-name') ?? subject, owner: header(req, 'x-pneuma-space-owner') === '1' }
     : null;
   return { prefix, identity, url };
 }
@@ -46,10 +46,10 @@ async function trigger(ctx: Context, name: string, triggers: Triggers): Promise<
   if (!run) return void ctx.res.writeHead(404).end(`no trigger "${name}"`);
   if (ctx.req.method !== 'POST') return void ctx.res.writeHead(405, { allow: 'POST' }).end();
   await run({
-    id: header(ctx.req, 'x-pneuma-delivery') ?? '',
-    attempt: Number(header(ctx.req, 'x-pneuma-attempt') ?? 1),
-    scheduledFor: header(ctx.req, 'x-pneuma-scheduled-for'),
-    subject: header(ctx.req, 'x-pneuma-subject'),
+    id: header(ctx.req, 'x-pneuma-space-delivery') ?? '',
+    attempt: Number(header(ctx.req, 'x-pneuma-space-attempt') ?? 1),
+    scheduledFor: header(ctx.req, 'x-pneuma-space-scheduled-for'),
+    subject: header(ctx.req, 'x-pneuma-space-subject'),
     body: await body(ctx.req),
   });
   ctx.res.writeHead(204).end();

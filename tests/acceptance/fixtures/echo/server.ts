@@ -4,8 +4,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { fileURLToPath } from 'node:url';
 
 const env = process.env;
-const filesDir = env.PNEUMA_FILES_DIR ?? '/data';
-const kvPrefix = env.PNEUMA_KV_PREFIX ?? '';
+const filesDir = env.PNEUMA_SPACE_FILES_DIR ?? '/data';
+const kvPrefix = env.PNEUMA_SPACE_KV_PREFIX ?? '';
 
 const hmac = (key: string | Buffer, data: string) => createHmac('sha256', key).update(data).digest();
 const rfc3986 = (s: string) => encodeURIComponent(s).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   const { WebSocketServer, WebSocket } = await import('ws');
   let kvClient: Promise<any> | undefined;
   const kv = () => (kvClient ??= import('redis').then(async ({ createClient }) => {
-    const client = createClient({ url: env.PNEUMA_KV_URL });
+    const client = createClient({ url: env.PNEUMA_SPACE_KV_URL });
     client.on('error', () => {});
     await client.connect();
     return client;
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
   let dbHandle: Promise<{ get(k: string): Promise<string | null>; put(k: string, v: string): Promise<void> }> | undefined;
   const create = 'CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)';
   const db = () => (dbHandle ??= (async () => {
-    const url = env.PNEUMA_DB_URL!;
+    const url = env.PNEUMA_SPACE_DB_URL!;
     if (url.startsWith('sqlite:')) {
       const { DatabaseSync } = await import('node:sqlite');
       const sqlite = new DatabaseSync(decodeURIComponent(new URL(url).pathname));
@@ -104,7 +104,7 @@ async function main(): Promise<void> {
     };
   })());
 
-  const own = { endpoint: env.PNEUMA_OBJECT_ENDPOINT!, accessKey: env.PNEUMA_OBJECT_ACCESS_KEY!, secretKey: env.PNEUMA_OBJECT_SECRET_KEY! };
+  const own = { endpoint: env.PNEUMA_SPACE_OBJECT_ENDPOINT!, accessKey: env.PNEUMA_SPACE_OBJECT_ACCESS_KEY!, secretKey: env.PNEUMA_SPACE_OBJECT_SECRET_KEY! };
   const logDelivery = (record: object) => appendFile(`${filesDir}/deliveries.jsonl`, JSON.stringify(record) + '\n');
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -116,13 +116,13 @@ async function main(): Promise<void> {
     const reply = (status: number, value: unknown) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(value));
     const [, head, key] = path.match(/^\/([^/]+)\/?(.*)$/) ?? [];
 
-    if (req.method === 'POST' && path.startsWith('/_pneuma/trigger/')) {
+    if (req.method === 'POST' && path.startsWith('/_pneuma-space/trigger/')) {
       const record = {
-        trigger: path.slice('/_pneuma/trigger/'.length),
-        delivery: req.headers['x-pneuma-delivery'] ?? null,
-        attempt: Number(req.headers['x-pneuma-attempt']),
-        scheduledFor: req.headers['x-pneuma-scheduled-for'] ?? null,
-        subject: req.headers['x-pneuma-subject'] ?? null,
+        trigger: path.slice('/_pneuma-space/trigger/'.length),
+        delivery: req.headers['x-pneuma-space-delivery'] ?? null,
+        attempt: Number(req.headers['x-pneuma-space-attempt']),
+        scheduledFor: req.headers['x-pneuma-space-scheduled-for'] ?? null,
+        subject: req.headers['x-pneuma-space-subject'] ?? null,
         body,
       };
       await logDelivery({ ...record, phase: 'start', at: Date.now() });
@@ -136,7 +136,7 @@ async function main(): Promise<void> {
       const text = await readFile(`${filesDir}/deliveries.jsonl`, 'utf8').catch(() => '');
       return reply(200, text.split('\n').filter(Boolean).map((line) => JSON.parse(line)));
     }
-    if (path === '/env') return reply(200, Object.fromEntries(Object.entries(env).filter(([k]) => k.startsWith('PNEUMA_'))));
+    if (path === '/env') return reply(200, Object.fromEntries(Object.entries(env).filter(([k]) => k.startsWith('PNEUMA_SPACE_'))));
     if (path === '/headers') return reply(200, req.headers);
     if (head === 'files' && key) {
       if (req.method === 'PUT') return void (await writeFile(`${filesDir}/${key}`, body), reply(200, { ok: true }));
@@ -166,23 +166,23 @@ async function main(): Promise<void> {
       return reply(200, { received });
     }
     if (path === '/presign') {
-      const target = { ...own, endpoint: env.PNEUMA_OBJECT_PUBLIC_ENDPOINT!, bucket: env.PNEUMA_OBJECT_BUCKET! };
+      const target = { ...own, endpoint: env.PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT!, bucket: env.PNEUMA_SPACE_OBJECT_BUCKET! };
       return reply(200, { url: presign({ ...target, method: url.searchParams.get('method') ?? 'GET', key: url.searchParams.get('key')! }) });
     }
     if (path === '/bucket-status') {
-      const signed = presign({ ...own, method: 'HEAD', bucket: url.searchParams.get('bucket') ?? env.PNEUMA_OBJECT_BUCKET! });
+      const signed = presign({ ...own, method: 'HEAD', bucket: url.searchParams.get('bucket') ?? env.PNEUMA_SPACE_OBJECT_BUCKET! });
       return reply(200, { status: (await fetch(signed, { method: 'HEAD' })).status });
     }
     if (path === '/ice') {
       const username = `${Math.floor(Date.now() / 1000) + 3600}:acc`;
-      const credential = createHmac('sha1', env.PNEUMA_RTC_TURN_SECRET!).update(username).digest('base64');
+      const credential = createHmac('sha1', env.PNEUMA_SPACE_RTC_TURN_SECRET!).update(username).digest('base64');
       return reply(200, { iceServers: [
-        { urls: env.PNEUMA_RTC_STUN_URLS!.split(',') },
-        { urls: env.PNEUMA_RTC_TURN_URLS!.split(','), username, credential },
+        { urls: env.PNEUMA_SPACE_RTC_STUN_URLS!.split(',') },
+        { urls: env.PNEUMA_SPACE_RTC_TURN_URLS!.split(','), username, credential },
       ] });
     }
     if (path === '/rtc.html') return void res.writeHead(200, { 'content-type': 'text/html' }).end(RTC_PAGE);
-    reply(200, { app: env.PNEUMA_APP, release: env.PNEUMA_RELEASE, variant: env.FIXTURE_VARIANT, path: req.url, prefix: req.headers['x-forwarded-prefix'] ?? null });
+    reply(200, { app: env.PNEUMA_SPACE_APP, release: env.PNEUMA_SPACE_RELEASE, variant: env.FIXTURE_VARIANT, path: req.url, prefix: req.headers['x-forwarded-prefix'] ?? null });
   }
 
   const server = createServer((req, res) => handle(req, res).catch((e: Error) => {
@@ -199,12 +199,12 @@ async function main(): Promise<void> {
     if (url.pathname !== '/ws') return socket.destroy();
     wss.handleUpgrade(req, socket, head, async (ws) => {
       if (url.searchParams.get('mode') === 'echo') return ws.on('message', (data, binary) => ws.send(data, { binary }));
-      if (env.PNEUMA_KV_URL) await (room ??= subscriber(kvPrefix + 'room', broadcast));
+      if (env.PNEUMA_SPACE_KV_URL) await (room ??= subscriber(kvPrefix + 'room', broadcast));
       sockets.add(ws);
       ws.on('close', () => sockets.delete(ws));
       ws.on('message', (data) => {
         const text = data.toString();
-        if (env.PNEUMA_KV_URL) kv().then((c) => c.publish(kvPrefix + 'room', text));
+        if (env.PNEUMA_SPACE_KV_URL) kv().then((c) => c.publish(kvPrefix + 'room', text));
         else broadcast(text);
       });
       ws.send('ready');

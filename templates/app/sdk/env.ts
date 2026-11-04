@@ -1,15 +1,15 @@
 const VARS = {
-  files: { dir: 'PNEUMA_FILES_DIR' },
-  db: { url: 'PNEUMA_DB_URL' },
-  kv: { url: 'PNEUMA_KV_URL', prefix: 'PNEUMA_KV_PREFIX' },
+  files: { dir: 'PNEUMA_SPACE_FILES_DIR' },
+  db: { url: 'PNEUMA_SPACE_DB_URL' },
+  kv: { url: 'PNEUMA_SPACE_KV_URL', prefix: 'PNEUMA_SPACE_KV_PREFIX' },
   object: {
-    endpoint: 'PNEUMA_OBJECT_ENDPOINT',
-    publicEndpoint: 'PNEUMA_OBJECT_PUBLIC_ENDPOINT',
-    bucket: 'PNEUMA_OBJECT_BUCKET',
-    accessKey: 'PNEUMA_OBJECT_ACCESS_KEY',
-    secretKey: 'PNEUMA_OBJECT_SECRET_KEY',
+    endpoint: 'PNEUMA_SPACE_OBJECT_ENDPOINT',
+    publicEndpoint: 'PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT',
+    bucket: 'PNEUMA_SPACE_OBJECT_BUCKET',
+    accessKey: 'PNEUMA_SPACE_OBJECT_ACCESS_KEY',
+    secretKey: 'PNEUMA_SPACE_OBJECT_SECRET_KEY',
   },
-  rtc: { stunUrls: 'PNEUMA_RTC_STUN_URLS', turnUrls: 'PNEUMA_RTC_TURN_URLS', turnSecret: 'PNEUMA_RTC_TURN_SECRET' },
+  rtc: { stunUrls: 'PNEUMA_SPACE_RTC_STUN_URLS', turnUrls: 'PNEUMA_SPACE_RTC_TURN_URLS', turnSecret: 'PNEUMA_SPACE_RTC_TURN_SECRET' },
 } as const;
 
 export type Capability = keyof typeof VARS;
@@ -25,7 +25,7 @@ function section<K extends Capability>(kind: K): Section<K> | undefined {
 }
 
 export function env(): Env {
-  const view: Record<string, unknown> = { app: process.env.PNEUMA_APP ?? '', release: process.env.PNEUMA_RELEASE ?? '' };
+  const view: Record<string, unknown> = { app: process.env.PNEUMA_SPACE_APP ?? '', release: process.env.PNEUMA_SPACE_RELEASE ?? '' };
   for (const kind of Object.keys(VARS) as Capability[]) view[kind] = section(kind);
   return view as Env;
 }
@@ -33,7 +33,7 @@ export function env(): Env {
 export function need<K extends Capability>(kind: K): Section<K> {
   const found = section(kind);
   if (!found) {
-    throw new Error(`"${kind}" is not declared: add "${kind}": {} to capabilities in pneuma.json (${Object.values(VARS[kind]).join(', ')} not set)`);
+    throw new Error(`"${kind}" is not declared: add "${kind}": {} to capabilities in pneuma-space.json (${Object.values(VARS[kind]).join(', ')} not set)`);
   }
   return found;
 }

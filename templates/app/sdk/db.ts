@@ -47,6 +47,6 @@ export function db(): Db {
   const scheme = url.slice(0, url.indexOf(':'));
   if (scheme === 'sqlite') shared = sqlite(decodeURIComponent(new URL(url).pathname));
   else if (scheme === 'postgresql' || scheme === 'postgres') shared = postgres(url);
-  else throw new Error(`PNEUMA_DB_URL scheme "${scheme}" is neither sqlite nor postgresql`);
+  else throw new Error(`PNEUMA_SPACE_DB_URL scheme "${scheme}" is neither sqlite nor postgresql`);
   return shared;
 }

@@ -21,8 +21,8 @@ test('AC-COLLAB-1', { timeout: 60_000 }, async (t) => {
 test('AC-COLLAB-2', { timeout: 60_000 }, async (t) => {
   const app = await deploy(t, { image: images.echo, capabilities: { kv: {} } });
   const env = await appJson(app.name, '/env');
-  assert.ok(env.PNEUMA_KV_URL);
-  assert.ok(env.PNEUMA_KV_PREFIX);
+  assert.ok(env.PNEUMA_SPACE_KV_URL);
+  assert.ok(env.PNEUMA_SPACE_KV_PREFIX);
   assert.equal((await appJson(app.name, '/kv-pubsub')).received, true, 'PUBLISH and SUBSCRIBE within the prefix');
   assert.match((await appJson(app.name, '/kv-foreign')).error ?? '', /^NOPERM/);
 });

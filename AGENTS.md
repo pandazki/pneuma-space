@@ -1,4 +1,4 @@
-Pneuma Space deploys stateful web apps on one trusted host. Read `REQUIREMENTS.md`, `DESIGN.md`, `docs/app-contract.md` and `docs/acceptance.md` before changing runtime behavior. Each fact lives in exactly one of them; link to it instead of restating it.
+PneumaSpace deploys stateful web apps on one trusted host. Read `REQUIREMENTS.md`, `DESIGN.md`, `docs/app-contract.md` and `docs/acceptance.md` before changing runtime behavior. Each fact lives in exactly one of them; link to it instead of restating it.
 
 ## Boundaries that do not move
 
@@ -12,7 +12,7 @@ Pneuma Space deploys stateful web apps on one trusted host. Read `REQUIREMENTS.m
 
 - A new capability is one row in `CAPABILITIES` and one Provider with `ensure`, `inject`, `suspend`, `destroy`, each safe to run twice (`ensure` on a suspended binding is the resume). If a capability needs changes anywhere else, stop and write an ADR first.
 - Every wake goes through `Runtime.acquire`. No Docker call outside `Runtime`. No write to a platform table outside its owning component (`DESIGN.md` section 1.2).
-- Names: `PNEUMA_*` environment variables, `X-Pneuma-*` headers, `_pneuma/` reserved path segment, `pneuma-*` Docker resources. Do not introduce a second prefix.
+- Names: `PNEUMA_SPACE_*` environment variables, `X-Pneuma-Space-*` headers, `_pneuma-space/` reserved path segment, `pneuma-space-*` Docker resources. Do not introduce a second prefix.
 - A deviation from `DESIGN.md` is recorded as a new ADR in `docs/adr/` before the code lands. Never edit a design doc to match code that drifted.
 
 ## Working rules

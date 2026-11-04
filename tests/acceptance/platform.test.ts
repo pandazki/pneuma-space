@@ -41,14 +41,14 @@ test('AC-P-2', { timeout: 60_000 }, async (t) => {
 
 test('AC-P-3', { timeout: 90_000 }, async (t) => {
   const app = await deploy(t, { image: images.echo, capabilities: { kv: {} } });
-  assert.ok((await appJson(app.name, '/env')).PNEUMA_KV_URL);
+  assert.ok((await appJson(app.name, '/env')).PNEUMA_SPACE_KV_URL);
   await appPut(app.name, '/kv/kept', 'before-removal');
   publish(app.name, { image: images.echo, capabilities: {} });
   const without = await appJson(app.name, '/env');
-  assert.equal(without.PNEUMA_KV_URL, undefined);
-  assert.equal(without.PNEUMA_KV_PREFIX, undefined);
+  assert.equal(without.PNEUMA_SPACE_KV_URL, undefined);
+  assert.equal(without.PNEUMA_SPACE_KV_PREFIX, undefined);
   publish(app.name, { image: images.echo, capabilities: { kv: {} } });
-  assert.ok((await appJson(app.name, '/env')).PNEUMA_KV_URL);
+  assert.ok((await appJson(app.name, '/env')).PNEUMA_SPACE_KV_URL);
   assert.equal((await appJson(app.name, '/kv/kept')).value, 'before-removal');
 });
 
@@ -62,10 +62,10 @@ test('AC-P-4', { timeout: 60_000 }, async (t) => {
 });
 
 test('AC-P-5', { timeout: 300_000 }, async (t) => {
-  const checkout = mkdtempSync(join(tmpdir(), 'pneuma-acc-clean-'));
+  const checkout = mkdtempSync(join(tmpdir(), 'pneuma-space-acc-clean-'));
   const repo = fileURLToPath(new URL('../../', import.meta.url));
-  const env = { ...process.env, PNEUMA_NETWORK: 'pneuma-acc-clean', PNEUMA_HTTP_PORT: '18180', PNEUMA_ADMIN_PORT: '18181', PNEUMA_OBJECT_PORT: '19100' };
-  const compose = (...args: string[]) => execFileSync('docker', ['compose', '-p', 'pneuma-acc-clean', ...args], { cwd: checkout, env, stdio: 'pipe' });
+  const env = { ...process.env, PNEUMA_SPACE_NETWORK: 'pneuma-space-acc-clean', PNEUMA_SPACE_HTTP_PORT: '18180', PNEUMA_SPACE_ADMIN_PORT: '18181', PNEUMA_SPACE_OBJECT_PORT: '19100' };
+  const compose = (...args: string[]) => execFileSync('docker', ['compose', '-p', 'pneuma-space-acc-clean', ...args], { cwd: checkout, env, stdio: 'pipe' });
   t.after(() => {
     compose('down', '-v', '--rmi', 'local');
     rmSync(checkout, { recursive: true, force: true });
@@ -116,7 +116,7 @@ test('AC-P-8', { timeout: 900_000 }, async (t) => {
     assert.ok(reply.status < 300, `publish ${name}: ${reply.status} ${JSON.stringify(reply.body)}`);
   });
   await batches(names.slice(0, 20), 5, (name) => appJson(name, '/'));
-  assert.ok(docker('ps', '-q', '--filter', `label=pneuma.network=${stack.network}`).split('\n').length >= 20, '20 apps running');
+  assert.ok(docker('ps', '-q', '--filter', `label=pneuma-space.network=${stack.network}`).split('\n').length >= 20, '20 apps running');
 
   const since = Date.now() / 1000;
   const timings: number[] = [];
@@ -127,7 +127,7 @@ test('AC-P-8', { timeout: 900_000 }, async (t) => {
     timings.push(performance.now() - start);
   }
   const until = Date.now() / 1000 + 1;
-  const events = docker('events', '--since', since.toFixed(3), '--until', until.toFixed(3), '--filter', `label=pneuma.network=${stack.network}`, '--format', '{{.Type}} {{.Action}}');
+  const events = docker('events', '--since', since.toFixed(3), '--until', until.toFixed(3), '--filter', `label=pneuma-space.network=${stack.network}`, '--format', '{{.Type}} {{.Action}}');
   t.diagnostic(`GET /api/apps with ${listed.length} apps: median ${median(timings).toFixed(1)} ms, all ${timings.map((v) => v.toFixed(1)).join(' ')} ms; docker events during listing: ${events.split('\n').filter(Boolean).length}`);
   assert.ok(listed.length >= 500);
   assert.ok(listed.filter((a) => a.instance === 'awake').length >= 20, '20 awake in the listing');
@@ -144,12 +144,12 @@ test('AC-P-9', { timeout: 120_000 }, async (t) => {
 
   assert.ok((await adminClient.remove(app.name)).status < 300);
   assert.equal((await fetch(appUrl(app.name))).status, 404);
-  assert.ok(volumeExists(`pneuma-files-${app.id}`), 'files volume kept');
-  assert.ok(volumeExists(`pneuma-db-${app.id}`), 'database kept');
+  assert.ok(volumeExists(`pneuma-space-files-${app.id}`), 'files volume kept');
+  assert.ok(volumeExists(`pneuma-space-db-${app.id}`), 'database kept');
   assert.ok(await bucketExists(`app-${app.id}`), 'bucket kept');
 
   assert.ok((await adminClient.purge(app.name)).status < 300);
-  await waitFor(() => !volumeExists(`pneuma-files-${app.id}`) && !volumeExists(`pneuma-db-${app.id}`), 30_000, 'volumes deleted by purge');
+  await waitFor(() => !volumeExists(`pneuma-space-files-${app.id}`) && !volumeExists(`pneuma-space-db-${app.id}`), 30_000, 'volumes deleted by purge');
   assert.equal(await bucketExists(`app-${app.id}`), false, 'bucket deleted by purge');
 });
 
@@ -167,7 +167,7 @@ test('AC-P-10', { timeout: 180_000 }, async (t) => {
   const before = [await durable(worker.name), await durable(sleeper.name)];
 
   const token = await serviceToken(uniqueName('svc'));
-  const invoked = await fetch(appUrl(worker.name, '/_pneuma/trigger/slow'), { method: 'POST', headers: { authorization: `Bearer ${token}` } });
+  const invoked = await fetch(appUrl(worker.name, '/_pneuma-space/trigger/slow'), { method: 'POST', headers: { authorization: `Bearer ${token}` } });
   assert.equal(invoked.status, 202);
   const { delivery } = await invoked.json();
   const starts = async () => (await appJson(worker.name, '/deliveries')).filter((d: any) => d.delivery === delivery && d.phase === 'start').length;

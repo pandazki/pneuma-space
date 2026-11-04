@@ -48,8 +48,8 @@ const dockerMustNotRun = stubDocker('echo "docker must not be invoked: $*" >&2; 
 
 function appctl(args: string[], { bin = dockerMustNotRun, cli = join(repo, 'cli/appctl.ts') } = {}) {
   return new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
-    const { PNEUMA_OWNER: _, ...inherited } = process.env;
-    const env = { ...inherited, PNEUMA_ADMIN: admin, PATH: `${bin}:${process.env.PATH}` };
+    const { PNEUMA_SPACE_OWNER: _, ...inherited } = process.env;
+    const env = { ...inherited, PNEUMA_SPACE_ADMIN: admin, PATH: `${bin}:${process.env.PATH}` };
     execFile(process.execPath, [cli, ...args], { env }, (error, stdout, stderr) =>
       resolve({ code: error ? Number(error.code) : 0, stdout, stderr }));
   });
@@ -57,7 +57,7 @@ function appctl(args: string[], { bin = dockerMustNotRun, cli = join(repo, 'cli/
 
 function source(manifest: unknown, files: Record<string, string> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'appctl-src-'));
-  writeFileSync(join(dir, 'pneuma.json'), JSON.stringify(manifest));
+  writeFileSync(join(dir, 'pneuma-space.json'), JSON.stringify(manifest));
   for (const [path, content] of Object.entries(files)) {
     mkdirSync(join(dir, path, '..'), { recursive: true });
     writeFileSync(join(dir, path), content);
@@ -97,7 +97,7 @@ test('publish of a dir that declares db builds the image and releases the built 
   const bin = stubDocker(`echo "$*" > ${log}; echo ${FAKE_IMAGE}`);
   const result = await appctl(['publish', 'board', dir, '--tag', 'v1'], { bin });
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(readFileSync(log, 'utf8').trim(), `build -q -t pneuma-app/board:v1 ${dir}`);
+  assert.equal(readFileSync(log, 'utf8').trim(), `build -q -t pneuma-space-app/board:v1 ${dir}`);
   assert.deepEqual(requests.map((r) => r.url), ['/api/apps/board/release']);
   assert.deepEqual(json(requests[0]), { image: FAKE_IMAGE, manifest: { contract: 1, capabilities: { db: {} } }, bundle: null });
   assert.match(result.stdout, /board\s+\/apps\/board\/\s+release 1/);
@@ -139,14 +139,14 @@ test('init copies the template next to the CLI into a new dir and refuses a non-
   cpSync(join(repo, 'cli/appctl.ts'), join(root, 'cli/appctl.ts'));
   cpSync(join(repo, 'gateway/src/model.ts'), join(root, 'gateway/src/model.ts'));
   mkdirSync(join(root, 'templates/static'), { recursive: true });
-  writeFileSync(join(root, 'templates/static/pneuma.json'), '{"contract":1}');
+  writeFileSync(join(root, 'templates/static/pneuma-space.json'), '{"contract":1}');
   const target = join(root, 'out', 'site');
   const cli = join(root, 'cli/appctl.ts');
 
   assert.equal((await appctl(['init', target, '--static'], { cli })).code, 0);
-  assert.equal(readFileSync(join(target, 'pneuma.json'), 'utf8'), '{"contract":1}');
+  assert.equal(readFileSync(join(target, 'pneuma-space.json'), 'utf8'), '{"contract":1}');
   const again = await appctl(['init', target, '--static'], { cli });
   assert.equal(again.code, 1);
   assert.match(again.stderr, /not empty/);
-  assert.ok(existsSync(join(target, 'pneuma.json')));
+  assert.ok(existsSync(join(target, 'pneuma-space.json')));
 });

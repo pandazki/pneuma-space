@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { IDEMPOTENCY_WINDOW_MS, type AppId, type Delivery, type DeliveryId, type TriggerName } from './model.ts';
 import { SqliteStore } from './store.ts';
 
-const store = new SqliteStore(join(mkdtempSync(join(tmpdir(), 'pneuma-store-')), 'pneuma.sqlite3'));
+const store = new SqliteStore(join(mkdtempSync(join(tmpdir(), 'pneuma-space-store-')), 'pneuma-space.sqlite3'));
 
 function delivery(id: string, fields: Partial<Delivery>): Delivery {
   return {

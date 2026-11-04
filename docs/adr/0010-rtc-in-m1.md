@@ -8,4 +8,4 @@
 
 拒绝：推到 M2（理由是跨 NAT 中继无法在回环主机上验收；这是对的，但它只限制验收范围，不限制提供能力）。
 
-后果：跨 NAT 中继依赖运营者设置 `PNEUMA_RTC_PUBLIC_HOST` 和 UDP 端口范围，M1 不验证，文档写明。若 coturn 集成超出预期，整体移到 M2，不改任何概念。
+后果：跨 NAT 中继依赖运营者设置 `PNEUMA_SPACE_RTC_PUBLIC_HOST` 和 UDP 端口范围，M1 不验证，文档写明。若 coturn 集成超出预期，整体移到 M2，不改任何概念。
