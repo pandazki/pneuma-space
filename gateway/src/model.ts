@@ -103,7 +103,7 @@ export const CAPABILITIES = {
   files:    { class: 'resource', needsImage: true,  providers: ['volume'],             parse: empty },
   db:       { class: 'resource', needsImage: true,  providers: ['sqlite', 'postgres'], parse: empty },
   kv:       { class: 'resource', needsImage: true,  providers: ['redis'],              parse: empty },
-  object:   { class: 'resource', needsImage: true,  providers: ['rustfs'],             parse: empty },
+  object:   { class: 'resource', needsImage: true,  providers: ['s3'],                 parse: empty },
   static:   { class: 'ingress',  needsImage: false, providers: [],                     parse: parseStatic },
   ws:       { class: 'ingress',  needsImage: true,  providers: [],                     parse: empty },
   cron:     { class: 'schedule', needsImage: true,  providers: [],                     parse: parseCron },
@@ -451,7 +451,7 @@ export type Challenge = { readonly status: 303; readonly location: string } | { 
 export type ByteRange = { readonly start: number; readonly end: number };
 
 /** Compose services a provider administers through `Runtime.runJob`. */
-export type InfraService = 'postgres' | 'redis' | 'rustfs';
+export type InfraService = 'postgres' | 'redis';
 export type Job = { readonly service: InfraService; readonly argv: readonly string[]; readonly stdin?: string };
 export type JobResult = { readonly exitCode: number; readonly stdout: string; readonly stderr: string };
 
@@ -581,6 +581,8 @@ export interface Registry {
   detail(name: AppName): AppDetail | null;
   /** Called after every committed change to an app; main wires it to Runtime.retire and Scheduler.reload. */
   onAppChanged(listener: (app: AppId) => void): void;
+  /** Startup: continues interrupted purges and re-runs ensure or suspend on every binding per its state (DESIGN 2.3 重启). */
+  resume(): Promise<void>;
 }
 
 // Protocol constants (docs/app-contract.md)
