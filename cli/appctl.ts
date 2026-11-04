@@ -25,6 +25,7 @@ const USAGE = `usage:
   appctl init <dir> [--static]
   appctl list
   appctl show <name>
+  appctl logs <name> [--tail <lines>]
   appctl remove <name>
   appctl purge <name> [--yes]
   appctl policy [<name>] key=value ...
@@ -35,7 +36,7 @@ admin API: PNEUMA_SPACE_ADMIN (default http://127.0.0.1:${ADMIN_PORT})`;
 const usage = (why: string) => new Failure(EXIT.usage, `${why}\n${USAGE}`);
 const admin = (process.env.PNEUMA_SPACE_ADMIN ?? `http://127.0.0.1:${ADMIN_PORT}`).replace(/\/$/, '');
 
-type Options = { owner?: string; tag?: string; manifest?: string; static?: boolean; yes?: boolean };
+type Options = { owner?: string; tag?: string; manifest?: string; static?: boolean; yes?: boolean; tail?: string };
 
 async function api(method: string, path: string, body?: unknown): Promise<any> {
   const tar = body instanceof ReadableStream;
@@ -56,7 +57,7 @@ async function api(method: string, path: string, body?: unknown): Promise<any> {
     parsed = { error: text };
   }
   if (!response.ok) throw new Failure(EXIT.api, `${method} ${path}: ${response.status} ${parsed?.error ?? text}`);
-  return parsed;
+  return response.headers.get('content-type')?.startsWith('text/plain') ? text : parsed;
 }
 
 function readManifest(file: string): Manifest {
@@ -224,6 +225,10 @@ const COMMANDS: Record<string, (args: string[], options: Options) => unknown> = 
   init,
   list,
   show: async (args) => console.log(JSON.stringify(await api('GET', ADMIN_PATHS.app(one(args, 'show'))), null, 2)),
+  logs: async (args, options) => {
+    const query = options.tail === undefined ? '' : `?tail=${encodeURIComponent(options.tail)}`;
+    process.stdout.write(await api('GET', ADMIN_PATHS.logs(one(args, 'logs')) + query));
+  },
   remove: async (args) => {
     const name = one(args, 'remove');
     await api('POST', ADMIN_PATHS.remove(name));
@@ -247,6 +252,7 @@ async function main(argv: string[]): Promise<void> {
         manifest: { type: 'string' },
         static: { type: 'boolean' },
         yes: { type: 'boolean' },
+        tail: { type: 'string' },
       },
     });
   } catch (error) {

@@ -180,6 +180,11 @@ export class DockerRuntime implements Runtime {
     return this.instances.get(app)?.state ?? 'none';
   }
 
+  async logs(app: AppId, tail: number): Promise<string> {
+    const container = this.instances.get(app)?.container;
+    return container ? this.docker.logs(container, tail) : '';
+  }
+
   async runJob(job: Job): Promise<JobResult> {
     const [container] = await this.docker.list({
       label: [`com.docker.compose.project=${this.project}`, `com.docker.compose.service=${job.service}`], status: ['running'],

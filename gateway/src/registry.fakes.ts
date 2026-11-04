@@ -72,6 +72,7 @@ export class FakeRuntime implements Runtime {
     if (this.reconciled) this.containers.delete(app);
   }
   async reconcile(): Promise<void> { this.reconciled = true; }
+  async logs(app: AppId, tail: number): Promise<string> { return `last ${tail} lines of ${app}\n`; }
   state(): 'none' { return 'none'; }
   async runJob(): Promise<never> { throw new Error('not used'); }
   async resolveImage(reference: string): Promise<ImageId | null> {

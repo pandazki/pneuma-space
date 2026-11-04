@@ -44,7 +44,7 @@ await runtime.reconcile();
 void registry.resume();
 scheduler.resume();
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
-const admin = await startAdmin({ registry, bundles }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const admin = await startAdmin({ registry, bundles, runtime }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const flusher = setInterval(() => ingress.flush(), STATS_FLUSH_MS);
 log('gateway-ready', { network, data });
 

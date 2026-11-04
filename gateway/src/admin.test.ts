@@ -8,14 +8,14 @@ import { world } from './registry.fakes.ts';
 async function admin() {
   const w = world();
   const { registry, store } = await w.open();
-  const server = await startAdmin({ registry, bundles: w.bundles }, { port: 0 });
+  const server = await startAdmin({ registry, bundles: w.bundles, runtime: w.runtime }, { port: 0 });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
     const raw = typeof body === 'string' ? body : body === undefined ? undefined : JSON.stringify(body);
     const response = await fetch(base + path, { method, body: raw });
     return { status: response.status, body: await response.json() };
   };
-  return { w, registry, store, server, call };
+  return { w, registry, store, server, call, base };
 }
 
 const kvApp = { image: 'example:1', manifest: { contract: 1, capabilities: { kv: {} } }, owner: 'user:ann' };
@@ -81,4 +81,13 @@ test('GET /api/apps lists 500 apps in under 100 ms without a Docker call', async
   assert.equal(listed.body.length, 500);
   assert.ok(elapsed < 100, `${elapsed} ms`);
   assert.deepEqual(w.runtime.calls, []);
+});
+
+test('GET /api/apps/<name>/logs answers the container output as text/plain for the requested tail', async (t) => {
+  const { call, server, base, store } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  const response = await fetch(`${base}/api/apps/survey/logs?tail=5`);
+  assert.equal(response.headers.get('content-type'), 'text/plain; charset=utf-8');
+  assert.equal(await response.text(), `last 5 lines of ${store.app(appName('survey'))!.id}\n`);
 });

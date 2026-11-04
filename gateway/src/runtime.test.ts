@@ -11,6 +11,7 @@ import { appName, DEFAULT_POLICY, newAppId, NotFound, type AppId, type ImageId, 
 import { DockerRuntime } from './runtime.ts';
 
 const SERVER = `if (process.env.FIXTURE_EXIT) process.exit(1);
+console.log('fixture ready');
 require('http').createServer((q, s) => s.end(process.env.PNEUMA_SPACE_APP + ' ' + process.env.PNEUMA_SPACE_RELEASE)).listen(8000);
 process.on('SIGTERM', () => process.exit(0));`;
 
@@ -132,6 +133,13 @@ function inner(image: ImageId, network: string): void {
     t.after(() => runtime.close());
     await assert.rejects(runtime.acquire(app, 'request'));
     assert.equal(runtime.state(app), 'asleep');
+  });
+
+  test('logs returns what the app container printed, and nothing for an app without one', async (t) => {
+    const { app, runtime } = fixture(t);
+    runtime.release(await runtime.acquire(app, 'request'));
+    assert.equal(await runtime.logs(app, 10), 'fixture ready\n');
+    assert.equal(await runtime.logs(newAppId(), 10), '');
   });
 
   test('acquire rejects with NotFound when the app has no RunSpec', async (t) => {

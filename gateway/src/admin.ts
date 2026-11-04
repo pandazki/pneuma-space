@@ -4,17 +4,20 @@ import type { AddressInfo } from 'node:net';
 import {
   ADMIN_PATHS, ADMIN_PORT, Conflict, InputError, NotFound,
   appName, bundleId, parseManifest, subject,
-  type BundleStore, type Registry,
+  type BundleStore, type Registry, type Runtime,
 } from './model.ts';
 
 export type AdminDeps = {
   readonly registry: Registry;
   readonly bundles: BundleStore;
+  readonly runtime: Pick<Runtime, 'logs'>;
   readonly consoleFile?: string | URL;
 };
 
 const BODY_LIMIT = 1024 * 1024;
+const MAX_TAIL = 10_000;
 
+/** A string result is sent as text/plain, anything else as JSON. */
 type Handler = (request: IncomingMessage, name: string | undefined) => Promise<unknown> | unknown;
 type Route = { readonly method: string; readonly path: RegExp; readonly handle: Handler };
 
@@ -42,7 +45,14 @@ function optional<T>(value: unknown, field: string, parse: (raw: string) => T): 
   return parse(value);
 }
 
-function routes({ registry, bundles }: AdminDeps): Route[] {
+function tailOf(request: IncomingMessage): number {
+  const raw = new URL(request.url ?? '/', 'http://admin').searchParams.get('tail') ?? '200';
+  const tail = Number(raw);
+  if (!Number.isInteger(tail) || tail < 1 || tail > MAX_TAIL) throw new InputError(`tail must be a whole number of lines from 1 to ${MAX_TAIL}, got "${raw}"`);
+  return tail;
+}
+
+function routes({ registry, bundles, runtime }: AdminDeps): Route[] {
   const app = (name: string | undefined) => appName(name!);
   const found = <T>(value: T | null, name: string | undefined): T => {
     if (value === null) throw new NotFound(`no app named "${name}"`);
@@ -53,6 +63,7 @@ function routes({ registry, bundles }: AdminDeps): Route[] {
     { method: 'GET', path: at(ADMIN_PATHS.health), handle: () => ({ ok: true }) },
     { method: 'GET', path: at(ADMIN_PATHS.apps), handle: () => registry.listing() },
     { method: 'GET', path: at(ADMIN_PATHS.app('<name>')), handle: (_, name) => found(registry.detail(app(name)), name) },
+    { method: 'GET', path: at(ADMIN_PATHS.logs('<name>')), handle: (request, name) => runtime.logs(found(registry.view(app(name)), name).app, tailOf(request)) },
     {
       method: 'PUT', path: at(ADMIN_PATHS.release('<name>')), handle: async (request, name) => {
         const body = await readJson(request);
@@ -112,7 +123,9 @@ export function createAdmin(deps: AdminDeps): Server {
       for (const route of table) {
         const match = route.path.exec(path);
         if (match && route.method === request.method) {
-          return send(response, 200, await route.handle(request, match[1] && decodeURIComponent(match[1])));
+          const result = await route.handle(request, match[1] && decodeURIComponent(match[1]));
+          if (typeof result === 'string') return void response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end(result);
+          return send(response, 200, result);
         }
       }
       send(response, 404, { error: `no endpoint ${request.method} ${path}` });

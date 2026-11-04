@@ -507,6 +507,8 @@ export interface Runtime {
   /** Startup: adopt or remove containers by label, then follow Docker events. */
   reconcile(): Promise<void>;
   state(app: AppId): InstanceState | 'none';
+  /** The last `tail` lines of stdout and stderr of the app's current or last container; empty when it has none. */
+  logs(app: AppId, tail: number): Promise<string>;
   runJob(job: Job): Promise<JobResult>;
   resolveImage(reference: string): Promise<ImageId | null>;
   ensureVolume(name: string): Promise<void>;
@@ -625,6 +627,7 @@ export const ADMIN_PATHS = {
   policy: '/api/policy',
   tokens: '/api/tokens',
   app: (name: string) => `/api/apps/${name}`,
+  logs: (name: string) => `/api/apps/${name}/logs`,
   release: (name: string) => `/api/apps/${name}/release`,
   appPolicy: (name: string) => `/api/apps/${name}/policy`,
   owner: (name: string) => `/api/apps/${name}/owner`,

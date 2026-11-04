@@ -41,16 +41,19 @@ type Reply = { readonly status: number; readonly body: Buffer };
 
 const query = (filters: Filters) => encodeURIComponent(JSON.stringify(filters));
 
-/** Non-TTY attached streams are framed: [stream, 0, 0, 0, size u32 BE] then size bytes; stream 2 is stderr. */
-export function demux(raw: Buffer): { stdout: string; stderr: string } {
+/** Non-TTY attached streams are framed: [stream, 0, 0, 0, size u32 BE] then size bytes; stream 2 is stderr. `both` keeps the order. */
+export function demux(raw: Buffer): { stdout: string; stderr: string; both: string } {
   const out: Buffer[] = [];
   const err: Buffer[] = [];
+  const both: Buffer[] = [];
   for (let i = 0; i + 8 <= raw.length; ) {
     const size = raw.readUInt32BE(i + 4);
-    (raw[i] === 2 ? err : out).push(raw.subarray(i + 8, i + 8 + size));
+    const frame = raw.subarray(i + 8, i + 8 + size);
+    (raw[i] === 2 ? err : out).push(frame);
+    both.push(frame);
     i += 8 + size;
   }
-  return { stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(err).toString() };
+  return { stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(err).toString(), both: Buffer.concat(both).toString() };
 }
 
 export class Docker {
@@ -88,6 +91,14 @@ export class Docker {
   async inspect(idOrName: string): Promise<ContainerInfo | null> {
     const { status, json } = await this.expect<ContainerInfo>('GET', `/containers/${idOrName}/json`, [200, 404]);
     return status === 404 ? null : json;
+  }
+
+  /** The last `tail` lines of stdout and stderr in the order written; empty for a container that is gone. */
+  async logs(id: string, tail: number): Promise<string> {
+    const reply = await this.request('GET', `/containers/${id}/logs?stdout=1&stderr=1&tail=${tail}`);
+    if (reply.status === 404) return '';
+    if (reply.status !== 200) throw new DockerError('GET', `/containers/${id}/logs`, reply.status, reply.body.toString());
+    return demux(reply.body).both;
   }
 
   /** Returns the container id; an existing container of that name counts as created. */
@@ -161,7 +172,8 @@ export class Docker {
       req.end(payload);
     });
     const info = await this.expect<{ ExitCode: number }>('GET', `/exec/${created.json.Id}/json`, [200]);
-    return { exitCode: info.json.ExitCode, ...demux(raw) };
+    const { stdout, stderr } = demux(raw);
+    return { exitCode: info.json.ExitCode, stdout, stderr };
   }
 
   /** Container events from `since` (epoch seconds) on; reconnects after a lost stream and replays from the last event seen. */
