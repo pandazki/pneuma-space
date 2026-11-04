@@ -32,7 +32,7 @@ What an app sees from Pneuma Space, and nothing else. The contract fixes protoco
 | `static` | The platform serves `dir` at your address without starting a container | no |
 | `ws` | WebSocket upgrades and `text/event-stream` responses pass through and keep the app awake | yes |
 | `cron` | Named triggers the platform calls, on a 5-field cron schedule in the platform's `timezone` policy (default UTC) or on demand, at least once | yes |
-| `identity` | The visitor's identity as request headers, set by the platform, never by the browser | yes |
+| `identity` | The visitor's identity as request headers, set by the platform, never by the browser. `{"required": false}` lets anonymous visitors through without headers; the app sends them to `/_pneuma/login?next=<path>` when it needs a login | yes |
 | `rtc` | STUN and TURN configuration for WebRTC; signaling is your own `ws` | yes |
 
 A manifest with only `static` publishes without an image. A manifest with any other capability needs an image.
@@ -69,7 +69,7 @@ Inbound `X-Pneuma-*` headers are always dropped before forwarding.
 | `X-Pneuma-Name` | display name | with `X-Pneuma-Subject` |
 | `X-Pneuma-Owner` | `1` | with `X-Pneuma-Subject`, only when the subject is the app's owner |
 
-With `identity` declared, an unauthenticated browser is redirected to the platform login page before reaching the app; other clients get 401. In M1 the login page asks only for a name, the subject becomes `user:<name>`, and a signed cookie carries it; it identifies, it does not authenticate. Service subjects come from tokens issued with `appctl token create`.
+With `identity` declared (default `required: true`), an unauthenticated browser is redirected to the platform login page before reaching the app; other clients get 401. With `required: false` the request reaches the app anonymously and the headers are absent. In M1 the login page asks only for a name, the subject becomes `user:<name>`, and a signed cookie carries it; it identifies, it does not authenticate. Service subjects come from tokens issued with `appctl token create`.
 
 ## Objects
 

@@ -102,7 +102,7 @@ Compose 服务：`gateway`、`rustfs`（S3 兼容对象服务）、`redis`（AOF
 3. 读 `<name>` 的 RouteView 快照：status、owner、声明的 kind、bundle 索引、Policy override（有效值读时与全局快照合并）。
 4. `<rest>` 以 `_pneuma/` 开头是平台端点，见 D。
 5. bundle 索引命中（含目录的 `index.html`）走 C。静态优先于容器，动态应用的前端资源不唤醒它。
-6. 声明了 `identity` 时调用 `authenticate`。Challenge 直接回给客户端（浏览器 303 到 `/_pneuma/login`，其他 401）。Principal 变成身份头。本地 IdentityProvider 的登录页只要一个名字，设置平台密钥签名的 cookie；服务令牌由 `appctl` 签发，`Authorization: Bearer` 携带。
+6. 声明了 `identity` 时调用 `authenticate`。Challenge 直接回给客户端（浏览器 303 到 `/_pneuma/login`，其他 401）；声明为 `{"required": false}` 时不发 Challenge，未登录的请求以匿名转发、没有身份头，应用需要登录时自己 303 到 `/_pneuma/login?next=`。Principal 变成身份头。本地 IdentityProvider 的登录页只要一个名字，设置平台密钥签名的 cookie；服务令牌由 `appctl` 签发，`Authorization: Bearer` 携带。
 7. 没有镜像的 App 到这里返回 404。
 8. `runtime.acquire(name, REQUEST)`，实例在睡则等待唤醒。
 
