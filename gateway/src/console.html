@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pneuma Space</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #fff; --text: #1d1d1f; --muted: #6b6b70; --line: #e3e3e0;
+  --accent: #2550c8; --danger: #b3261e; --ok: #1b7a3d; --warn: #9a6200;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #161618; --panel: #1f1f22; --text: #ececee; --muted: #9a9aa2; --line: #333338;
+    --accent: #8aa8ff; --danger: #ff8a80; --ok: #6fd28f; --warn: #f0c060; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, sans-serif; }
+header { display: flex; align-items: center; gap: 1.5rem; padding: .75rem 1.25rem; border-bottom: 1px solid var(--line); background: var(--panel); }
+header strong { font-size: 15px; }
+header nav { display: flex; gap: 1rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+main { max-width: 1200px; margin: 0 auto; padding: 1.25rem; }
+h1 { font-size: 20px; margin: 0 0 .25rem; }
+h2 { font-size: 15px; margin: 1.75rem 0 .5rem; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-weight: 600; color: var(--muted); font-size: 12px; }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.pill { display: inline-block; padding: 0 .5rem; border-radius: 99px; border: 1px solid currentColor; font-size: 12px; }
+.registered, .awake, .active, .done { color: var(--ok); }
+.waking, .draining, .stopping, .purging, .due, .delivering { color: var(--warn); }
+.removed, .failed, .suspended, .cancelled { color: var(--danger); }
+.asleep, .none { color: var(--muted); }
+.summary { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; margin-top: .5rem; color: var(--muted); }
+.empty { padding: 1rem .75rem; color: var(--muted); }
+form.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; display: grid; gap: .9rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .9rem; }
+label { display: grid; gap: .25rem; font-weight: 600; font-size: 13px; }
+label small { font-weight: 400; color: var(--muted); }
+input, select, textarea, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: .45rem .6rem; }
+textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; min-height: 18rem; resize: vertical; }
+button { cursor: pointer; background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
+button.secondary { background: transparent; color: var(--text); border-color: var(--line); }
+button.danger { background: transparent; color: var(--danger); border-color: var(--danger); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.message { padding: .6rem .8rem; border-radius: 6px; border: 1px solid var(--danger); color: var(--danger); white-space: pre-wrap; }
+.message.ok { border-color: var(--ok); color: var(--ok); }
+.title { display: flex; flex-wrap: wrap; align-items: baseline; gap: .75rem; }
+</style>
+</head>
+<body>
+<header>
+  <strong>Pneuma Space</strong>
+  <nav><a href="#/">Apps</a><a href="#/publish">Publish</a></nav>
+</header>
+<main id="main"></main>
+<script type="module">
+const main = document.getElementById('main');
+const POLICY_FIELDS = ['idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds'];
+const DB_BACKENDS = ['sqlite', 'postgres'];
+const MANIFEST_EXAMPLE = {
+  contract: 1,
+  capabilities: {
+    files: {}, db: {}, kv: {}, object: {}, static: { dir: 'dist' }, ws: {},
+    cron: { triggers: { 'daily-report': { schedule: '0 8 * * *' }, reindex: {} } },
+    identity: {}, rtc: {},
+  },
+};
+
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value === false || value == null) continue;
+    if (key.startsWith('on')) el.addEventListener(key.slice(2), value);
+    else el.setAttribute(key, value === true ? '' : value);
+  }
+  el.append(...children.flat().filter((c) => c != null && c !== false));
+  return el;
+}
+
+async function api(method, path, body, contentType = 'application/json') {
+  const response = await fetch(path, {
+    method,
+    headers: body === undefined ? {} : { 'content-type': contentType },
+    body: body === undefined || contentType !== 'application/json' ? body : JSON.stringify(body),
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) throw new Error(data?.error ?? `${response.status} ${response.statusText}`);
+  return data;
+}
+
+const pill = (state) => h('span', { class: `pill ${state}` }, state);
+const appPath = (name) => `/api/apps/${encodeURIComponent(name)}`;
+
+function ago(ms) {
+  if (ms == null) return h('span', { class: 'muted' }, 'never');
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  const text = s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)} min ago` : s < 86400 ? `${Math.floor(s / 3600)} h ago` : `${Math.floor(s / 86400)} d ago`;
+  return h('time', { datetime: new Date(ms).toISOString(), title: new Date(ms).toLocaleString() }, text);
+}
+
+const when = (ms) => (ms == null ? h('span', { class: 'muted' }, '-') : h('time', { datetime: new Date(ms).toISOString() }, new Date(ms).toLocaleString()));
+
+function table(columns, rows, emptyText) {
+  if (rows.length === 0) return h('section', {}, h('div', { class: 'empty' }, emptyText));
+  return h('section', {}, h('table', {},
+    h('thead', {}, h('tr', {}, columns.map(([label, cls]) => h('th', { class: cls }, label)))),
+    h('tbody', {}, rows.map((cells) => h('tr', {}, cells.map((cell, i) => h('td', { class: columns[i][1] }, cell)))))));
+}
+
+function message(text, ok = false) {
+  return h('div', { class: ok ? 'message ok' : 'message', role: ok ? 'status' : 'alert' }, text);
+}
+
+function show(...nodes) {
+  main.replaceChildren(...nodes);
+}
+
+async function listView() {
+  const apps = await api('GET', '/api/apps');
+  show(
+    h('div', { class: 'title' }, h('h1', {}, 'Apps'), h('span', { class: 'muted' }, `${apps.length} apps`)),
+    h('p', {}, h('a', { href: '#/publish' }, 'Publish an app')),
+    table(
+      [['Name'], ['Address'], ['Release', 'num'], ['Capabilities'], ['Status'], ['Instance'], ['Last access'], ['Requests', 'num'], ['Errors', 'num']],
+      apps.map((app) => [
+        h('a', { href: `#/apps/${app.name}` }, app.name),
+        app.status === 'registered' ? h('a', { href: app.address, target: '_blank', rel: 'noopener', class: 'mono' }, app.address) : h('span', { class: 'mono muted' }, app.address),
+        app.release == null ? '-' : `#${app.release}`,
+        app.capabilities.join(', ') || h('span', { class: 'muted' }, 'route only'),
+        pill(app.status),
+        pill(app.instance),
+        ago(app.lastAccessAt),
+        String(app.requests),
+        String(app.errors),
+      ]),
+      'No apps yet. Publish one to give it an address.',
+    ),
+  );
+}
+
+async function detailView(name) {
+  const detail = await api('GET', appPath(name));
+  const { app, releases, bindings, policy, instance, stats, deliveries } = detail;
+  const current = releases.find((r) => r.number === app.current);
+  show(
+    h('p', {}, h('a', { href: '#/' }, 'All apps')),
+    h('div', { class: 'title' }, h('h1', {}, app.name), pill(app.status), pill(instance)),
+    h('div', { class: 'summary' },
+      h('span', {}, 'Release ', h('strong', {}, app.current == null ? '-' : `#${app.current}`)),
+      h('span', {}, 'Capabilities ', h('strong', {}, current ? Object.keys(current.manifest.capabilities).join(', ') || 'route only' : '-')),
+      h('span', {}, 'Last access ', ago(stats.lastAccessAt)),
+      h('span', {}, 'Requests ', h('strong', {}, String(stats.requests))),
+      h('span', {}, 'Errors ', h('strong', {}, String(stats.errors)))),
+    h('h2', {}, 'Releases'),
+    table(
+      [['Release', 'num'], ['Image'], ['Capabilities'], ['Bundle'], ['Published']],
+      [...releases].sort((a, b) => b.number - a.number).map((r) => [
+        r.number === app.current ? h('strong', {}, `#${r.number} current`) : `#${r.number}`,
+        h('span', { class: 'mono', title: r.image ?? '' }, r.image ? r.image.slice(0, 19) : 'none'),
+        Object.keys(r.manifest.capabilities).join(', ') || 'route only',
+        h('span', { class: 'mono', title: r.bundle ?? '' }, r.bundle ? r.bundle.slice(0, 12) : 'none'),
+        when(r.publishedAt),
+      ]),
+      'No release.',
+    ),
+    h('h2', {}, 'Capability bindings'),
+    table([['Kind'], ['Provider'], ['State']], bindings.map((b) => [b.kind, b.provider, pill(b.state)]), 'No resource capabilities bound.'),
+    h('h2', {}, 'Policy'),
+    policyForm(app, policy),
+    h('h2', {}, 'Trigger deliveries'),
+    table(
+      [['Delivery'], ['Trigger'], ['State'], ['Attempts', 'num'], ['Scheduled for'], ['Next attempt'], ['Created']],
+      deliveries.map((d) => [
+        h('span', { class: 'mono' }, d.id), d.trigger, pill(d.state), String(d.attempts),
+        d.scheduledFor == null ? h('span', { class: 'muted' }, 'on demand') : when(d.scheduledFor),
+        d.state === 'due' ? when(d.nextAttemptAt) : h('span', { class: 'muted' }, '-'),
+        when(d.createdAt),
+      ]),
+      'No deliveries.',
+    ),
+    h('h2', {}, 'Lifecycle'),
+    lifecycle(app),
+  );
+}
+
+function policyForm(app, effective) {
+  const override = app.policyOverride;
+  const status = h('div');
+  const inputs = Object.fromEntries(POLICY_FIELDS.map((field) => [field,
+    h('input', { type: 'number', min: 1, step: 1, name: field, value: override[field] ?? '', placeholder: String(effective[field]) })]));
+  inputs.db_backend = h('select', { name: 'db_backend' },
+    h('option', { value: '' }, `default (${effective.db_backend})`),
+    DB_BACKENDS.map((b) => h('option', { value: b, selected: override.db_backend === b }, b)));
+  const form = h('form', { class: 'card', onsubmit: async (event) => {
+    event.preventDefault();
+    const patch = {};
+    for (const [field, input] of Object.entries(inputs)) {
+      const value = input.value === '' ? null : field === 'db_backend' ? input.value : Number(input.value);
+      if (value !== (override[field] ?? null)) patch[field] = value;
+    }
+    if (Object.keys(patch).length === 0) return status.replaceChildren(message('Nothing changed.', true));
+    try {
+      await api('PUT', `${appPath(app.name)}/policy`, patch);
+      await detailView(app.name);
+    } catch (error) {
+      status.replaceChildren(message(error.message));
+    }
+  } },
+    h('p', { class: 'muted', style: 'margin:0' }, 'Overrides for this app. An empty field follows the platform value shown in grey. Changing the database provisions the other engine without migrating data.'),
+    h('div', { class: 'grid' },
+      POLICY_FIELDS.map((field) => h('label', {}, field, inputs[field])),
+      h('label', {}, 'db_backend', inputs.db_backend)),
+    h('div', { class: 'actions' }, h('button', { type: 'submit' }, 'Save policy')),
+    status);
+  return form;
+}
+
+function lifecycle(app) {
+  const status = h('div');
+  const act = (verb, prompt) => async () => {
+    if (!confirm(prompt)) return;
+    try {
+      await api('POST', `${appPath(app.name)}/${verb}`);
+      await detailView(app.name);
+    } catch (error) {
+      status.replaceChildren(message(error.message));
+    }
+  };
+  return h('form', { class: 'card', onsubmit: (e) => e.preventDefault() },
+    h('div', { class: 'actions' },
+      h('button', { type: 'button', class: 'secondary', onclick: () => { location.hash = `#/publish/${app.name}`; } }, 'Publish a new release'),
+      h('button', { type: 'button', class: 'danger', disabled: app.status !== 'registered',
+        onclick: act('remove', `Remove ${app.name}? Its address will answer 404. Data is kept and a later publish restores it.`) }, 'Remove'),
+      h('button', { type: 'button', class: 'danger', disabled: app.status !== 'removed',
+        onclick: act('purge', `Purge ${app.name}? This deletes its files, database, key-value data and bucket. It cannot be undone.`) }, 'Purge')),
+    h('p', { class: 'muted', style: 'margin:0' }, 'Remove keeps every volume, database and bucket. Purge deletes them and is only possible after remove.'),
+    status);
+}
+
+async function publishView(prefill) {
+  const apps = await api('GET', '/api/apps');
+  const existing = new Set(apps.map((a) => a.name));
+  const status = h('div');
+  const name = h('input', { name: 'name', required: true, pattern: '[a-z][a-z0-9\\-]{0,39}', value: prefill ?? '', placeholder: 'survey', autocomplete: 'off' });
+  const image = h('input', { name: 'image', placeholder: 'survey:latest', autocomplete: 'off' });
+  const manifest = h('textarea', { name: 'manifest', spellcheck: 'false' });
+  manifest.value = JSON.stringify(MANIFEST_EXAMPLE, null, 2);
+  const bundle = h('input', { name: 'bundle', type: 'file', accept: '.tar,application/x-tar' });
+  const owner = h('input', { name: 'owner', placeholder: 'user:ana', pattern: '(user|service):[A-Za-z0-9._@\\-]{1,64}', autocomplete: 'off' });
+  const ownerField = h('label', { id: 'owner-field' }, 'Owner', owner, h('small', {}, 'First publish only: the subject apps see as their owner.'));
+  const syncOwner = () => {
+    const isNew = !existing.has(name.value);
+    ownerField.hidden = !isNew;
+    owner.required = isNew;
+  };
+  name.addEventListener('input', syncOwner);
+  syncOwner();
+  show(
+    h('h1', {}, prefill ? `Publish ${prefill}` : 'Publish'),
+    h('p', { class: 'muted' }, 'The gateway resolves the image reference to an image id. Leave the image empty for a manifest with only static.'),
+    h('form', { class: 'card', onsubmit: async (event) => {
+      event.preventDefault();
+      status.replaceChildren();
+      let parsed;
+      try {
+        parsed = JSON.parse(manifest.value);
+      } catch (error) {
+        return status.replaceChildren(message(`Manifest is not valid JSON: ${error.message}`));
+      }
+      try {
+        const file = bundle.files[0];
+        const bundleId = file ? (await api('POST', '/api/bundles', file, 'application/x-tar')).bundle : null;
+        const body = { image: image.value.trim() || null, manifest: parsed, bundle: bundleId };
+        if (!existing.has(name.value)) body.owner = owner.value.trim();
+        await api('PUT', `${appPath(name.value)}/release`, body);
+        location.hash = `#/apps/${name.value}`;
+      } catch (error) {
+        status.replaceChildren(message(error.message));
+      }
+    } },
+      h('div', { class: 'grid' },
+        h('label', {}, 'Name', name, h('small', {}, 'Lowercase letters, digits and -; the address is /apps/<name>/.')),
+        h('label', {}, 'Image reference', image),
+        ownerField),
+      h('label', {}, 'Manifest (pneuma.json)', manifest),
+      h('label', {}, 'Static bundle', bundle, h('small', {}, 'Optional tar of the static directory.')),
+      h('div', { class: 'actions' }, h('button', { type: 'submit' }, 'Publish')),
+      status),
+  );
+}
+
+let refresh;
+async function route() {
+  clearInterval(refresh);
+  const [, view, name] = location.hash.split('/');
+  const target = name && decodeURIComponent(name);
+  try {
+    if (view === 'apps' && target) await detailView(target);
+    else if (view === 'publish') await publishView(target);
+    else {
+      await listView();
+      refresh = setInterval(() => listView().catch(() => {}), 5000);
+    }
+  } catch (error) {
+    show(message(error.message), h('p', {}, h('a', { href: '#/' }, 'All apps')));
+  }
+}
+
+addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>
