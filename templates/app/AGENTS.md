@@ -31,7 +31,7 @@ Plain TypeScript in `sdk/`, run by Node 24 with no build step. A helper whose ca
 | Call | File | What it does |
 | --- | --- | --- |
 | `serve(handler, {triggers})` | `serve.ts` | HTTP on `0.0.0.0:8000`. `handler({req, res, url, prefix, identity})`; `url` is relative to your address; `identity` is `{subject, name, owner}` or `null`. `POST /_pneuma/trigger/<name>` calls `triggers[name](delivery)`; return means 2xx, throw means retry. Exits cleanly on `SIGTERM` |
-| `body(req)` | `serve.ts` | The request body as a `Buffer` |
+| `body(req)` | `serve.ts` | The request body as a `Buffer`; a form is `new URLSearchParams((await body(req)).toString())` |
 | `db()` | `db.ts` | `query(sql, params)` returns rows, `exec(sql, params)` returns nothing; `?` placeholders on both engines |
 | `await kv()` | `kv.ts` | `redis` (node-redis client), `key(name)`, `channel(name)`, `publish(channel, text)`, `subscribe(channel, fn)`; the last two add the prefix |
 | `objects()` | `objects.ts` | `presignPut(key, {contentType, expiresSeconds})`, `presignGet(key)`, `publicUrl(key)` for `public/` keys |
@@ -44,7 +44,8 @@ Plain TypeScript in `sdk/`, run by Node 24 with no build step. A helper whose ca
 - Keep state only in `/data`, the database, the KV store or the bucket. Memory and the container filesystem are lost when the app sleeps and on every release.
 - Start every link, redirect, form action, asset and WebSocket URL with `prefix`. Never write `/apps/<name>` yourself.
 - A trigger can arrive twice with the same `delivery.id`. Make it idempotent, for example `INSERT ... ON CONFLICT DO NOTHING` keyed by `delivery.id` or `delivery.scheduledFor`. It gets 600 s and five attempts.
-- SQL subset: write SQL that both SQLite and PostgreSQL accept, which means `TEXT`, `INTEGER` and `REAL` columns, ids made by the app (`crypto.randomUUID()`), timestamps as ISO 8601 `TEXT`, `0`/`1` instead of booleans, `CAST(count(*) AS INTEGER)`, `ON CONFLICT (...) DO UPDATE`, `RETURNING`, and no `AUTOINCREMENT`, `SERIAL` or engine-specific functions.
+- Create tables at startup with `CREATE TABLE IF NOT EXISTS`; there is no migration step.
+- SQL subset: write SQL that both SQLite and PostgreSQL accept, which means `TEXT`, `INTEGER` and `REAL` columns, ids made by the app (`crypto.randomUUID()`), timestamps as ISO 8601 `TEXT`, `0`/`1` instead of booleans, `CAST(count(*) AS INTEGER)`, `ON CONFLICT (...) DO UPDATE SET x = excluded.x`, `RETURNING`, and no `AUTOINCREMENT`, `SERIAL` or engine-specific functions.
 - Use `kv.key()` and `kv.channel()` for every name. Anything outside the prefix fails with `NOPERM`.
 - Upload and download object bytes in the browser with presigned URLs. Do not proxy them through the app.
 - Trust `identity` only because the platform sets it. `owner` is true only for the app's owner. Without `identity` declared it is always `null`.
@@ -61,7 +62,7 @@ curl -H 'X-Pneuma-Subject: user:ann' -H 'X-Pneuma-Name: Ann' -H 'X-Pneuma-Owner:
 curl -X POST -H 'X-Pneuma-Delivery: d1' -H 'X-Pneuma-Attempt: 1' http://127.0.0.1:8000/_pneuma/trigger/tick
 ```
 
-Set only the variables of capabilities you declare. Use `PNEUMA_DB_URL=postgresql://user:pass@host/db` to check the PostgreSQL path, and `docker build .` to check the image.
+Set only the variables of capabilities you declare; without `kv`, skip Redis and `PNEUMA_KV_*`. Locally `identity` is `null` unless you send `X-Pneuma-Subject`; on the platform a declared `identity` guarantees one. For the PostgreSQL path run `docker run -d --name dev-pg -p 127.0.0.1:5432:5432 -e POSTGRES_PASSWORD=pw postgres:16-alpine` and use `PNEUMA_DB_URL=postgresql://postgres:pw@127.0.0.1:5432/postgres`. `docker build .` checks the image.
 
 ## Publish
 
@@ -69,12 +70,12 @@ Set only the variables of capabilities you declare. Use `PNEUMA_DB_URL=postgresq
 
 ## Scenario: company survey (`files`, `db`, `identity`)
 
-1. In `pneuma.json` keep `files`, `db` and `identity`; delete `kv`, `ws` and `cron` and the code that uses them.
+1. In `pneuma.json` keep `files`, `db` and `identity`; delete `kv`, `ws` and `cron`, the room and `tick` code in `src/server.ts`, and `public/app.js`.
 2. In `src/server.ts` create `answer (subject TEXT PRIMARY KEY, q1 TEXT, q2 TEXT, submitted_at TEXT)`.
 3. `GET /` renders the questions, prefilled from `SELECT q1, q2 FROM answer WHERE subject = ?` with `identity.subject`.
-4. `POST /answer` reads the form with `body(req)` and upserts with `ON CONFLICT (subject) DO UPDATE`, so each person has one answer.
+4. `POST /answer` reads the form with `body(req)` and upserts with `ON CONFLICT (subject) DO UPDATE SET q1 = excluded.q1, q2 = excluded.q2`, so each person has one answer.
 5. `GET /results` answers 403 unless `identity.owner`; otherwise it shows `SELECT q1, CAST(count(*) AS INTEGER) AS n FROM answer GROUP BY q1`.
-6. `GET /results.csv` streams the rows for the owner with `content-disposition: attachment`.
+6. `GET /results.csv` returns the rows as CSV for the owner with `content-disposition: attachment`.
 7. Every form action and link uses `prefix`.
 8. Test with curl as two subjects and as the owner, then once with `PNEUMA_DB_URL=postgresql://...`.
 9. `appctl publish survey . --owner user:<you>` and share `/apps/survey/`.
