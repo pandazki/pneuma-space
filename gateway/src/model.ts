@@ -558,7 +558,7 @@ export interface BundleStore {
   put(tar: Readable): Promise<BundleId>;
   index(id: BundleId): Promise<BundleIndex>;
   open(id: BundleId, path: string, range: ByteRange | null): Promise<Readable>;
-  deleteUnreferenced(referenced: ReadonlySet<BundleId>): Promise<void>;
+  delete(id: BundleId): Promise<void>;
 }
 
 export type InvokeRequest = {

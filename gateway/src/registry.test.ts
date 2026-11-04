@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { Ingress } from './ingress.ts';
-import { Conflict, InputError, appName, parseManifest, subject, triggerName, type AppId, type Capabilities } from './model.ts';
+import { Conflict, InputError, appName, parseManifest, subject, triggerName, type AppId, type BundleId, type Capabilities } from './model.ts';
 import type { PlatformRegistry } from './registry.ts';
 import { world } from './registry.fakes.ts';
 import { DeliveryScheduler } from './scheduler.ts';
@@ -147,4 +148,21 @@ test('after purge, a stats flush and a scheduler reload leave no row of the app 
   await registry.purge(survey);
   ingress.flush();
   assert.deepEqual([store.stats(), store.deliveries({ app })], [[], []]);
+});
+
+test('purge deletes the bundles only its releases reference and keeps one shared with another app or not yet published', async () => {
+  const w = world();
+  const { registry } = await w.open();
+  const put = (text: string) => w.bundles.put(Readable.from([Buffer.from(text)]));
+  const site = (name: string, bundle: BundleId) => registry.publish({
+    name: appName(name), image: null, manifest: parseManifest({ contract: 1, capabilities: { static: { dir: 'dist' } } }), bundle, owner: ann,
+  });
+  const [shared, own] = [await put('shared'), await put('own')];
+  await site('survey', shared);
+  await site('survey', own);
+  await site('blog', shared);
+  const pending = await put('pending');
+  await registry.remove(survey);
+  await registry.purge(survey);
+  assert.deepEqual([...w.bundles.stored].sort(), [shared, pending].sort());
 });

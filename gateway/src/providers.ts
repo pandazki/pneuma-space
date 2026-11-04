@@ -350,13 +350,9 @@ export class S3BundleStore implements BundleStore {
     return Readable.fromWeb(res.body as import('node:stream/web').ReadableStream);
   }
 
-  async deleteUnreferenced(referenced: ReadonlySet<BundleId>): Promise<void> {
-    for (const prefix of await listPrefixes(this.#store, BUNDLES)) {
-      const id = prefix.slice(0, -1) as BundleId;
-      if (referenced.has(id)) continue;
-      this.#cache.delete(id);
-      await deleteObjects(this.#store, BUNDLES, prefix);
-    }
+  async delete(id: BundleId): Promise<void> {
+    this.#cache.delete(id);
+    await deleteObjects(this.#store, BUNDLES, `${id}/`);
   }
 }
 
@@ -583,15 +579,3 @@ async function deleteObjects(store: ObjectService, bucket: string, prefix: strin
   }
 }
 
-async function listPrefixes(store: ObjectService, bucket: string): Promise<string[]> {
-  const prefixes: string[] = [];
-  let token: string | undefined;
-  do {
-    const res = await signedFetch(store.root, 'GET', objectUrl(store, bucket, '', listQuery({ delimiter: '/', ...(token ? { 'continuation-token': token } : {}) })));
-    if (res.status === 404) return [];
-    const xml = await (await ok(res, 'list prefixes')).text();
-    prefixes.push(...[...xml.matchAll(/<CommonPrefixes><Prefix>(.*?)<\/Prefix><\/CommonPrefixes>/gs)].map((m) => xmlText(m[1])));
-    token = /<IsTruncated>true<\/IsTruncated>/.test(xml) ? xmlText(/<NextContinuationToken>(.*?)<\/NextContinuationToken>/s.exec(xml)?.[1] ?? '') : undefined;
-  } while (token);
-  return prefixes;
-}

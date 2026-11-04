@@ -197,10 +197,15 @@ export class PlatformRegistry implements Registry {
       await this.#provider(binding.provider).destroy(app.id, binding.resource);
       log('destroy', app.name, { kind: binding.kind, provider: binding.provider });
     }
+    const bundlesOf = (id: AppId) => this.#store.releases(id).flatMap((r) => (r.bundle ? [r.bundle] : []));
+    const elsewhere = new Set(this.#store.apps().filter((a) => a.id !== app.id).flatMap((a) => bundlesOf(a.id)));
+    for (const bundle of new Set(bundlesOf(app.id))) {
+      if (elsewhere.has(bundle)) continue;
+      await this.#bundles.delete(bundle);
+      this.#indexes.delete(bundle);
+    }
     this.#store.deleteApp(app.id);
     this.#views.delete(app.name);
-    const referenced = new Set(this.#store.apps().flatMap((a) => this.#store.releases(a.id).flatMap((r) => (r.bundle ? [r.bundle] : []))));
-    await this.#bundles.deleteUnreferenced(referenced);
     log('purge', app.name);
     this.#emit(app.id);
     this.#names.delete(app.id);

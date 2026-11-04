@@ -315,10 +315,10 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       assert.equal(Buffer.concat(chunks).toString(), 'doctype');
     });
 
-    test('deleteUnreferenced empties unreferenced prefixes and keeps referenced ones', async () => {
+    test('delete empties that bundle and keeps the others', async () => {
       writeFileSync(join(dir, 'app.js'), 'console.log(2)');
       const stale = await bundles.put(Readable.from([pack()]));
-      await bundles.deleteUnreferenced(new Set([id]));
+      await bundles.delete(stale);
       const list = await signedFetch(config.object.root, 'GET', objectUrl(config.object, 'pneuma-space-bundles', '', `?list-type=2&prefix=${stale}/`));
       assert.doesNotMatch(await list.text(), /<Key>/);
       assert.equal((await bundles.index(id)).id, id);

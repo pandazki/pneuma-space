@@ -85,8 +85,8 @@ export class FakeBundles implements BundleStore {
     return { id, files: { 'index.html': { size: 5, etag: '"x"', contentType: 'text/html' } } };
   }
   async open(): Promise<never> { throw new Error('not used'); }
-  async deleteUnreferenced(referenced: ReadonlySet<BundleId>): Promise<void> {
-    for (const id of this.stored) if (!referenced.has(id)) this.stored.delete(id);
+  async delete(id: BundleId): Promise<void> {
+    this.stored.delete(id);
   }
 }
 
