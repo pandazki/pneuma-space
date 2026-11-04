@@ -20,6 +20,7 @@ services:
       PNEUMA_OBJECT_PUBLIC_ENDPOINT: ${PNEUMA_OBJECT_PUBLIC_ENDPOINT:-http://127.0.0.1:${PNEUMA_OBJECT_PORT:-9000}}
       PNEUMA_RTC_SECRET: ${PNEUMA_RTC_SECRET:-pneuma-local-rtc}
       PNEUMA_RTC_PUBLIC_HOST: ${PNEUMA_RTC_PUBLIC_HOST:-127.0.0.1}
+      PNEUMA_REDIS_PASSWORD: ${PNEUMA_REDIS_PASSWORD:-pneuma}
     networks: [pneuma]
 
   rustfs:
@@ -37,7 +38,16 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    # requirepass is ignored once an aclfile is loaded, so the default user's password is rewritten into the file at every start.
+    command:
+      - sh
+      - -c
+      - >-
+        touch /data/users.acl && sed -i "/^user default /d" /data/users.acl &&
+        echo "user default on >$$PNEUMA_REDIS_PASSWORD ~* &* +@all" >> /data/users.acl &&
+        exec redis-server --appendonly yes --aclfile /data/users.acl
+    environment:
+      PNEUMA_REDIS_PASSWORD: ${PNEUMA_REDIS_PASSWORD:-pneuma}
     volumes:
       - redis-data:/data
     networks: [pneuma]
@@ -52,9 +62,8 @@ services:
       - postgres-data:/var/lib/postgresql/data
     networks: [pneuma]
 
-  # Placeholder; unit S2 finalizes the TURN configuration.
   coturn:
-    image: coturn/coturn
+    image: coturn/coturn:4.6
     profiles: [rtc]
     restart: unless-stopped
     command:
@@ -66,6 +75,8 @@ services:
       - --max-port=49200
       - --no-tls
       - --no-dtls
+      - --log-file=stdout
+      - --no-cli
     ports:
       - "127.0.0.1:3478:3478/udp"
       - "127.0.0.1:3478:3478/tcp"
