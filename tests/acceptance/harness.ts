@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +8,9 @@ import { ADMIN_PATHS, LOGIN_PATH } from '../../gateway/src/model.ts';
 import { presign } from './fixtures/echo/server.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
+
+export const scratch = join(root, '.audit', 'tmp');
+mkdirSync(scratch, { recursive: true });
 
 /** Its own project, ports and network, so the suite never touches a developer's stack. */
 export const stack = {
@@ -124,7 +126,7 @@ export function appctl(...args: string[]): string {
 
 /** `appctl publish` with a manifest written for this call; the static dir is copied next to it. */
 export function publish(name: string, { image, capabilities, staticDir, owner = OWNER }: PublishOptions): string {
-  const dir = mkdtempSync(join(tmpdir(), 'pneuma-space-acc-'));
+  const dir = mkdtempSync(join(scratch, 'pneuma-space-acc-'));
   try {
     const caps = staticDir ? { ...capabilities, static: { dir: 'static' } } : capabilities;
     if (staticDir) cpSync(staticDir, join(dir, 'static'), { recursive: true });

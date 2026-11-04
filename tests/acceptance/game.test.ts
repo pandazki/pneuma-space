@@ -2,11 +2,10 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test, type TestContext } from 'node:test';
 import {
-  OWNER, adminClient, appJson, appPut, appUrl, cleanup, compose, deploy, images, setupSuite, teardownSuite, uniqueName, waitFor,
+  OWNER, adminClient, appJson, appPut, appUrl, cleanup, compose, deploy, images, scratch, setupSuite, teardownSuite, uniqueName, waitFor,
 } from './harness.ts';
 
 before(setupSuite);
@@ -33,7 +32,7 @@ test('AC-GAME-1', { timeout: 120_000 }, async (t) => {
 type Page = { evaluate(expression: string): Promise<unknown> };
 
 async function chrome(t: TestContext): Promise<(url: string) => Promise<Page>> {
-  const profile = mkdtempSync(join(tmpdir(), 'pneuma-space-acc-chrome-'));
+  const profile = mkdtempSync(join(scratch, 'pneuma-space-acc-chrome-'));
   const browser = spawn(CHROME, [
     '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run',
     '--disable-features=WebRtcHideLocalIpsWithMdns', 'about:blank',

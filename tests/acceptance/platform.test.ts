@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   OWNER, adminClient, adminUrl, appJson, appPut, appUrl, bucketExists, cleanup, containerIp, deploy, docker, images, inNetwork,
-  median, publish, restartGateway, runningContainerFor, serviceToken, setIdle, setupSuite, stack, summary, teardownSuite,
+  median, publish, restartGateway, runningContainerFor, scratch, serviceToken, setIdle, setupSuite, stack, summary, teardownSuite,
   uniqueName, volumeExists, waitFor, waitInstance,
 } from './harness.ts';
 
@@ -62,7 +61,7 @@ test('AC-P-4', { timeout: 60_000 }, async (t) => {
 });
 
 test('AC-P-5', { timeout: 300_000 }, async (t) => {
-  const checkout = mkdtempSync(join(tmpdir(), 'pneuma-space-acc-clean-'));
+  const checkout = mkdtempSync(join(scratch, 'pneuma-space-acc-clean-'));
   const repo = fileURLToPath(new URL('../../', import.meta.url));
   const env = { ...process.env, PNEUMA_SPACE_NETWORK: 'pneuma-space-acc-clean', PNEUMA_SPACE_HTTP_PORT: '18180', PNEUMA_SPACE_ADMIN_PORT: '18181', PNEUMA_SPACE_OBJECT_PORT: '19100' };
   const compose = (...args: string[]) => execFileSync('docker', ['compose', '-p', 'pneuma-space-acc-clean', ...args], { cwd: checkout, env, stdio: 'pipe' });
