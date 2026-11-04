@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
-import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,7 +8,7 @@ import { Readable } from 'node:stream';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Conflict, ENV_BY_KIND, newAppId, type BundleId, type CapabilityKind, type Injection, type JobResult } from './model.ts';
-import { createProviders, objectUrl, presign, providerConfig, S3BundleStore, signedFetch } from './providers.ts';
+import { createProviders, objectUrl, providerConfig, S3BundleStore, signedFetch } from './providers.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const project = 'pneuma-space-u6';
@@ -208,6 +208,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       assert.equal(s3.inject(app, resource).env.PNEUMA_SPACE_OBJECT_BUCKET, `app-${app}`);
       assert.equal((await signedFetch(key(), 'PUT', url(resource.bucket, 'private/a.txt'), 'secret')).status, 200);
       assert.equal(await (await signedFetch(key(), 'GET', url(resource.bucket, 'private/a.txt'))).text(), 'secret');
+      assert.equal((await signedFetch(key(), 'PUT', url(resource.bucket, 'public/clip.bin'), 'clip')).status, 200);
     });
 
     test("the key cannot list or read another app's bucket", async () => {
@@ -216,16 +217,6 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       assert.equal((await signedFetch(key(), 'GET', url(theirs.bucket, '', '?list-type=2'))).status, 403);
       assert.equal((await signedFetch(key(), 'GET', url(theirs.bucket, 'private/b.txt'))).status, 403);
       await s3.destroy(other, theirs);
-    });
-
-    test('a presigned PUT from fetch stores 5 MB and an anonymous public Range GET returns 206', async () => {
-      const data = randomBytes(5 * 1024 * 1024);
-      const put = await fetch(presign(key(), 'PUT', url(resource.bucket, 'public/clip.bin'), 300), { method: 'PUT', body: data });
-      assert.equal(put.status, 200);
-      const ranged = await anon('public/clip.bin', { range: 'bytes=1000-1999' });
-      assert.equal(ranged.status, 206);
-      assert.ok(Buffer.from(await ranged.arrayBuffer()).equals(data.subarray(1000, 2000)));
-      assert.equal((await anon('private/a.txt')).status, 403);
     });
 
     test('CORS lets any origin PUT', async () => {

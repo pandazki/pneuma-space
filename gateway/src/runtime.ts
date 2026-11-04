@@ -3,8 +3,8 @@ import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Docker, DockerError, type ContainerSpec, type DockerEvent } from './docker.ts';
 import {
-  APP_PORT, canonicalHash, Conflict, NotFound,
-  type AppId, type ImageId, type InstanceState, type Job, type JobResult, type Lease, type Runtime, type RunSpec,
+  APP_PORT, canonicalHash, Conflict, NotFound, RUNTIME_ENV,
+  type AppId, type ImageId, type InstanceState, type Job, type JobResult, type Lease, type LeaseKind, type Runtime, type RunSpec,
 } from './model.ts';
 
 const LABEL = { app: 'pneuma-space.app', release: 'pneuma-space.release', spec: 'pneuma-space.spec', network: 'pneuma-space.network' } as const;
@@ -18,14 +18,16 @@ type Instance = {
   spec: RunSpec;
   container: string | null;
   address: string;
-  /** Value is the channel's onRetire; null for request and trigger leases. */
-  readonly leases: Map<Lease, (() => void) | null>;
+  readonly leases: Map<Lease, LeaseRecord>;
   lastReleaseAt: number;
   /** Epoch ms just before the last docker start; an older die event is a replay and is ignored. */
   startedAt: number;
   wake: Promise<void>;
   changed: PromiseWithResolvers<void>;
 };
+
+/** `onRetire` is set only for a channel. */
+type LeaseRecord = { readonly kind: LeaseKind; readonly onRetire: (() => void) | null };
 
 export type RuntimeOptions = {
   readonly docker: Docker;
@@ -80,7 +82,7 @@ export class DockerRuntime implements Runtime {
     this.log = options.log ?? console.log;
   }
 
-  async acquire(app: AppId, _kind: 'request' | 'trigger'): Promise<Lease> {
+  async acquire(app: AppId, kind: 'request' | 'trigger'): Promise<Lease> {
     for (;;) {
       const spec = this.specFor(app);
       if (!spec) throw new NotFound(`app ${app} has no registered release with an image`);
@@ -92,7 +94,7 @@ export class DockerRuntime implements Runtime {
       switch (inst.state) {
         case 'awake': {
           const lease: Lease = { app, address: inst.address };
-          inst.leases.set(lease, null);
+          inst.leases.set(lease, { kind, onRetire: null });
           return lease;
         }
         case 'asleep':
@@ -121,7 +123,7 @@ export class DockerRuntime implements Runtime {
   channel(lease: Lease, onRetire: () => void): void {
     const inst = this.instances.get(lease.app);
     if (!inst?.leases.has(lease)) return;
-    inst.leases.set(lease, onRetire);
+    inst.leases.set(lease, { kind: 'channel', onRetire });
     if (inst.state === 'draining') onRetire();
   }
 
@@ -251,7 +253,7 @@ export class DockerRuntime implements Runtime {
   private create(spec: RunSpec): Promise<string> {
     const container: ContainerSpec = {
       image: spec.image,
-      env: { ...spec.injection.env, PNEUMA_SPACE_APP: spec.name, PNEUMA_SPACE_RELEASE: String(spec.release) },
+      env: { ...spec.injection.env, [RUNTIME_ENV.app]: spec.name, [RUNTIME_ENV.release]: String(spec.release) },
       labels: {
         [LABEL.app]: spec.app, [LABEL.release]: String(spec.release), [LABEL.spec]: specHash(spec), [LABEL.network]: this.network,
       },
@@ -263,7 +265,7 @@ export class DockerRuntime implements Runtime {
 
   private async drain(inst: Instance): Promise<void> {
     this.transition(inst, 'draining');
-    for (const onRetire of inst.leases.values()) {
+    for (const { onRetire } of inst.leases.values()) {
       try {
         onRetire?.();
       } catch (error) {

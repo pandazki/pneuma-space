@@ -5,9 +5,9 @@ import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import {
   DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS, NotFound,
-  type App, type AppId, type CronExpr, type Delivery, type DeliveryFilter, type Lease, type Subject, type TriggerName,
+  type App, type AppId, type CronExpr, type Delivery, type DeliveryFilter, type Lease, type SchedulerView, type Subject, type TriggerName,
 } from './model.ts';
-import { DeliveryScheduler, latestSlot, nextSlot, type SchedulerDeps, type SchedulerView } from './scheduler.ts';
+import { DeliveryScheduler, latestSlot, nextSlot, type SchedulerDeps } from './scheduler.ts';
 
 type Received = { headers: IncomingMessage['headers']; body: string };
 let handle: (req: IncomingMessage, res: ServerResponse, received: Received) => void = (_req, res) => res.end();

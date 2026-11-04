@@ -413,7 +413,6 @@ function* tarFiles(tar: Buffer): Generator<TarFile> {
 // S3 and the MinIO-compatible admin API over SigV4, node:crypto only (spike S1).
 
 const REGION = 'us-east-1';
-const UNSIGNED = 'UNSIGNED-PAYLOAD';
 
 const sha256 = (data: string | Uint8Array) => createHash('sha256').update(data).digest('hex');
 const hmac = (key: string | Buffer, data: string) => createHmac('sha256', key).update(data).digest();
@@ -471,19 +470,6 @@ export async function signedFetch(
   return fetch(url, { method, headers, body: method === 'GET' || method === 'HEAD' ? undefined : body });
 }
 
-export function presign(cred: Credential, method: string, url: URL, expiresSeconds: number): string {
-  const { stamp, day } = amzDate(new Date());
-  const scope = `${day}/${REGION}/s3/aws4_request`;
-  const signed = new URL(url);
-  signed.searchParams.set('X-Amz-Algorithm', 'AWS4-HMAC-SHA256');
-  signed.searchParams.set('X-Amz-Credential', `${cred.accessKey}/${scope}`);
-  signed.searchParams.set('X-Amz-Date', stamp);
-  signed.searchParams.set('X-Amz-Expires', String(expiresSeconds));
-  signed.searchParams.set('X-Amz-SignedHeaders', 'host');
-  const req = canonicalRequest(method, signed, { host: signed.host }, UNSIGNED);
-  signed.searchParams.set('X-Amz-Signature', signature(cred, day, ['AWS4-HMAC-SHA256', stamp, scope, sha256(req.text)].join('\n')));
-  return signed.toString();
-}
 
 async function ok(res: Response, what: string): Promise<Response> {
   if (!res.ok) throw new Error(`object service ${what}: ${res.status} ${await res.text()}`);

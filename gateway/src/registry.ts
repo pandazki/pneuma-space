@@ -1,15 +1,15 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   APPS_PATH, CAPABILITIES, Conflict, InputError, NotFound,
-  declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider, subject,
+  declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider,
   type App, type AppDetail, type AppId, type AppName, type AppSummary, type Binding, type BindingState,
   type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type CapabilityProvider, type ImageId,
   type Injection, type Manifest, type Policy, type PolicyOverride, type PolicyPatch, type ProviderName,
   type PublishRequest, type Registry, type Release, type ReleaseNumber, type ResourceKind, type RouteView,
-  type RunSpec, type Runtime, type Stats, type Store, type Subject, type Trigger, type TriggerName,
+  type RunSpec, type Runtime, type SchedulerView, type Stats, type Store, type Subject, type Trigger, type TriggerName,
 } from './model.ts';
-import type { SchedulerView } from './scheduler.ts';
+import { issueToken } from './identity.ts';
 
 export type RegistryDeps = {
   readonly store: Store;
@@ -259,12 +259,10 @@ export class PlatformRegistry implements Registry {
   }
 
   issueToken(name: string): { readonly token: string; readonly subject: Subject } {
-    const tokenSubject = subject(`service:${name}`);
-    const token = randomBytes(32).toString('base64url');
-    const hash = createHash('sha256').update(token).digest('hex');
-    this.#store.putToken({ id: randomBytes(8).toString('hex'), subject: tokenSubject, hash, createdAt: Date.now() });
-    log('token', null, { subject: tokenSubject });
-    return { token, subject: tokenSubject };
+    const { token, hash, subject } = issueToken(name);
+    this.#store.putToken({ id: randomBytes(8).toString('hex'), subject, hash, createdAt: Date.now() });
+    log('token', null, { subject });
+    return { token, subject };
   }
 
   view(name: AppName): RouteView | null {

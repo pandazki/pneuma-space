@@ -1,28 +1,4 @@
 // Shared contract of the gateway. Every component codes against these types; DESIGN.md is the source.
-//
-// Usage the types are derived from (DESIGN.md 2.2 to 2.4):
-//
-// publish (admin.ts, PUT /api/apps/<name>/release):
-//   const manifest = parseManifest(body.manifest);                  // ManifestError -> 400
-//   const release = await registry.publish({ name: appName(raw), image: body.image, manifest,
-//     bundle: body.bundle && bundleId(body.bundle), owner: body.owner && subject(body.owner) });
-//   // inside: runtime.resolveImage -> provider.ensure per resource kind -> store.transaction(...)
-//   //         -> provider.suspend for undeclared kinds -> RouteView rebuilt -> AppChanged listeners
-//
-// ingress (8080, /apps/<name>/<rest>):
-//   const view = registry.view(name);                               // null or removed -> 404
-//   if (rest starts with RESERVED_SEGMENT) scheduler.invoke({ app: view.app, trigger, caller, ... });
-//   else if (view.bundle?.files[path]) bundles.open(view.bundle.id, path, range);
-//   else { const who = await identity.authenticate(req);            // when view.kinds has 'identity'
-//          const lease = await runtime.acquire(view.app, 'request');
-//          proxy to lease.address; on 101 or text/event-stream runtime.channel(lease, close1001);
-//          runtime.release(lease); }
-//
-// scheduler worker:
-//   const [d] = store.deliveries({ state: 'due', dueBefore: now, limit: 1 });
-//   const lease = await runtime.acquire(d.app, 'trigger');
-//   POST lease.address + TRIGGER_PATH + d.trigger with HEADERS.delivery, attempt, scheduledFor;
-//   runtime.release(lease); store.updateDelivery({ ...d, state: 'done' | 'due' | 'failed' });
 
 import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -135,7 +111,7 @@ export const ENV_BY_KIND = {
 } as const satisfies Record<CapabilityKind, readonly string[]>;
 
 /** Set by the Runtime on every app container, declared or not. */
-export const RUNTIME_ENV = ['PNEUMA_SPACE_APP', 'PNEUMA_SPACE_RELEASE'] as const;
+export const RUNTIME_ENV = { app: 'PNEUMA_SPACE_APP', release: 'PNEUMA_SPACE_RELEASE' } as const;
 
 function assertCoversKinds(label: string, table: object): void {
   const has = Object.keys(table).sort().join(',');
@@ -581,6 +557,16 @@ export interface Scheduler {
   resume(): void;
 }
 
+/** What the Scheduler reads about one app. */
+export type SchedulerView = {
+  readonly status: AppStatus;
+  /** The later of the current Release's publishedAt and the app's registeredAt: no slot at or before it is materialized. */
+  readonly publishedAt: number;
+  readonly triggers: readonly Trigger[];
+  /** Effective policy (global merged with the app's override). */
+  readonly policy: Policy;
+};
+
 /** Hides the platform rows behind commands; the only writer of everything but Delivery and Stats. */
 export interface Registry {
   publish(request: PublishRequest): Promise<Release>;
@@ -595,6 +581,8 @@ export interface Registry {
   /** The global snapshot; merge with a RouteView's override via effectivePolicy. */
   policy(): Policy;
   runSpec(app: AppId): RunSpec | null;
+  /** Null once the app is purged. */
+  schedule(app: AppId): SchedulerView | null;
   listing(): AppSummary[];
   detail(name: AppName): AppDetail | null;
   /** Called after every committed change to an app, the end of purge included; main wires it to Runtime.retire, Scheduler.reload and Ingress.forget. */

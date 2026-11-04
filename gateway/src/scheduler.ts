@@ -2,19 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { request } from 'node:http';
 import {
   HEADERS, MAX_ATTEMPTS, NotFound, TRIGGER_PATH,
-  type AppId, type AppStatus, type CronExpr, type Delivery, type DeliveryId, type InvokeRequest, type Lease,
-  type Policy, type Runtime, type Scheduler, type Store, type Trigger, type TriggerName,
+  type AppId, type CronExpr, type Delivery, type DeliveryId, type InvokeRequest, type Lease,
+  type Runtime, type Scheduler, type SchedulerView, type Store, type TriggerName,
 } from './model.ts';
-
-/** What the Scheduler reads about one app; the Registry provides it. */
-export type SchedulerView = {
-  readonly status: AppStatus;
-  /** The later of the current Release's publishedAt and the app's registeredAt: no slot at or before it is materialized. */
-  readonly publishedAt: number;
-  readonly triggers: readonly Trigger[];
-  /** Effective policy (global merged with the app's override). */
-  readonly policy: Policy;
-};
 
 export type SchedulerDeps = {
   readonly store: Pick<Store, 'apps' | 'insertDelivery' | 'updateDelivery' | 'deliveries' | 'lastScheduledFor' | 'deleteDeliveries'>;
