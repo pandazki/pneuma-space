@@ -166,3 +166,18 @@ test('purge deletes the bundles only its releases reference and keeps one shared
   await registry.purge(survey);
   assert.deepEqual([...w.bundles.stored].sort(), [shared, pending].sort());
 });
+
+test('a purge interrupted while the app had a live container finishes when reconcile runs before resume', async () => {
+  const w = world();
+  const { registry } = await w.open();
+  const { app } = await publish(registry, { files: {} });
+  await registry.remove(survey);
+  w.runtime.containers.add(app);
+  w.runtime.reconciled = false;
+  await assert.rejects(registry.purge(survey), Conflict);
+
+  const restarted = await w.open();
+  await w.runtime.reconcile();
+  await restarted.registry.resume();
+  assert.equal(restarted.store.app(survey), null);
+});

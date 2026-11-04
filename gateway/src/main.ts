@@ -37,8 +37,9 @@ registry.onAppChanged((app) => {
   if (registry.schedule(app) === null) ingress.forget(app);
 });
 
-await registry.resume();
+// Reconcile first so a resumed purge retires the containers it finds; Providers converge in the background (DESIGN 2.3).
 await runtime.reconcile();
+void registry.resume();
 scheduler.resume();
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
 const admin = await startAdmin({ registry, bundles }, { port: ADMIN_PORT, host: '0.0.0.0' });

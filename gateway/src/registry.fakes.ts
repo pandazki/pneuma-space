@@ -6,24 +6,26 @@ import type { Readable } from 'node:stream';
 import { PlatformRegistry } from './registry.ts';
 import { SqliteStore } from './store.ts';
 import {
-  CAPABILITIES, NotFound,
+  CAPABILITIES, Conflict, NotFound,
   type AppId, type BundleId, type BundleIndex, type BundleStore, type CapabilityProvider, type ImageId,
   type ProviderName, type Resource, type ResourceKind, type Runtime,
 } from './model.ts';
 
 export type Call = readonly [verb: 'ensure' | 'suspend' | 'destroy', provider: ProviderName, app: AppId];
 
-/** Records every provider call; `fail` makes the named verb throw once. */
+/** Records every provider call; `fail` makes the named verb throw once; destroy refuses while `inUse` holds the app, like a volume a container mounts. */
 export class FakeProvider implements CapabilityProvider {
   readonly kind: ResourceKind;
   readonly name: ProviderName;
   readonly calls: Call[];
+  readonly inUse: ReadonlySet<AppId>;
   fail: Call[0] | null = null;
 
-  constructor(kind: ResourceKind, name: ProviderName, calls: Call[]) {
+  constructor(kind: ResourceKind, name: ProviderName, calls: Call[], inUse: ReadonlySet<AppId>) {
     this.kind = kind;
     this.name = name;
     this.calls = calls;
+    this.inUse = inUse;
   }
 
   #record(verb: Call[0], app: AppId): void {
@@ -49,18 +51,27 @@ export class FakeProvider implements CapabilityProvider {
 
   async destroy(app: AppId): Promise<void> {
     this.#record('destroy', app);
+    if (this.inUse.has(app)) throw new Conflict(`${this.name} of ${app} is still used by a container`);
   }
 }
 
-/** Images are resolved from a fixed table; counts every call so tests can prove listing makes none besides `state`. */
+/**
+ * Images are resolved from a fixed table; counts every call so tests can prove listing makes none besides `state`.
+ * `containers` are the apps with a container; until `reconcile` after a restart, retire does not know them.
+ */
 export class FakeRuntime implements Runtime {
   readonly images = new Map<string, ImageId>([['example:1', 'sha256:one' as ImageId], ['example:2', 'sha256:two' as ImageId]]);
   readonly calls: string[] = [];
+  readonly containers = new Set<AppId>();
+  reconciled = true;
   async acquire(): Promise<never> { throw new Error('not used'); }
   release(): void {}
   channel(): void {}
-  async retire(app: AppId): Promise<void> { this.calls.push(`retire ${app}`); }
-  async reconcile(): Promise<void> {}
+  async retire(app: AppId): Promise<void> {
+    this.calls.push(`retire ${app}`);
+    if (this.reconciled) this.containers.delete(app);
+  }
+  async reconcile(): Promise<void> { this.reconciled = true; }
   state(): 'none' { return 'none'; }
   async runJob(): Promise<never> { throw new Error('not used'); }
   async resolveImage(reference: string): Promise<ImageId | null> {
@@ -107,11 +118,11 @@ export function world(): World {
   const dir = mkdtempSync(join(tmpdir(), 'pneuma-space-registry-'));
   temporary.push(dir);
   const calls: Call[] = [];
+  const runtime = new FakeRuntime();
   const providers = new Map<ProviderName, FakeProvider>();
   for (const [kind, spec] of Object.entries(CAPABILITIES)) {
-    for (const name of spec.providers) providers.set(name, new FakeProvider(kind as ResourceKind, name, calls));
+    for (const name of spec.providers) providers.set(name, new FakeProvider(kind as ResourceKind, name, calls, runtime.containers));
   }
-  const runtime = new FakeRuntime();
   const bundles = new FakeBundles();
   return {
     dir, calls, providers, runtime, bundles,
