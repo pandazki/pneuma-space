@@ -1,0 +1,14 @@
+services:
+  rustfs:
+    image: rustfs/rustfs:latest
+    environment:
+      RUSTFS_ACCESS_KEY: pneumaroot
+      RUSTFS_SECRET_KEY: pneumaroot-secret
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ENABLE: "false"
+    ports:
+      - 127.0.0.1:9100:9000
+    volumes:
+      - rustfs-data:/data
+volumes:
+  rustfs-data:
