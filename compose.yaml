@@ -6,7 +6,13 @@ services:
   gateway:
     build: ./gateway
     restart: unless-stopped
-    depends_on: [rustfs, redis]
+    depends_on:
+      rustfs: { condition: service_healthy }
+      redis: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/api/health"]
+      interval: 2s
+      retries: 30
     ports:
       - "127.0.0.1:${PNEUMA_HTTP_PORT:-8080}:8080"
       - "127.0.0.1:${PNEUMA_ADMIN_PORT:-8081}:8081"
@@ -33,6 +39,10 @@ services:
     environment:
       RUSTFS_ACCESS_KEY: ${PNEUMA_OBJECT_ROOT_USER:-pneuma-local}
       RUSTFS_SECRET_KEY: ${PNEUMA_OBJECT_ROOT_PASSWORD:-pneuma-local-secret}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9000/health"]
+      interval: 2s
+      retries: 30
     networks: [pneuma]
 
   redis:

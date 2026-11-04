@@ -9,6 +9,7 @@ import {
   type PublishRequest, type Registry, type Release, type ReleaseNumber, type ResourceKind, type RouteView,
   type RunSpec, type Runtime, type Stats, type Store, type Subject, type Trigger, type TriggerName,
 } from './model.ts';
+import type { SchedulerView } from './scheduler.ts';
 
 export type RegistryDeps = {
   readonly store: Store;
@@ -283,6 +284,19 @@ export class PlatformRegistry implements Registry {
         mounts: injections.flatMap((i) => i.mounts),
       },
       policy,
+    };
+  }
+
+  schedule(id: AppId): SchedulerView | null {
+    const name = this.#names.get(id);
+    const view = name === undefined ? undefined : this.#views.get(name);
+    const release = view?.release == null ? null : this.#store.release(id, view.release);
+    if (!view || !release) return null;
+    return {
+      status: view.status,
+      publishedAt: release.publishedAt,
+      triggers: triggersOf(id, release.manifest),
+      policy: effectivePolicy(this.#policy, view.policyOverride),
     };
   }
 
