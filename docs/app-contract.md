@@ -106,7 +106,7 @@ Loopback port 8081, JSON. The console renders projects only (list, publish with 
 ```
 GET  /api/apps                        list: name, address, release, capabilities, status (registered|removed|purging), instance (none|asleep|waking|awake|draining|stopping), last access, requests, errors
 GET  /api/apps/<name>                 releases, bindings, policy, state, stats, deliveries
-PUT  /api/apps/<name>/release         {"image": reference|null, "manifest": {...}, "bundle": id|null, "owner": subject}  the gateway resolves the reference to an image id; owner required on first publish, ignored after
+PUT  /api/apps/<name>/release         {"image": reference|null, "manifest": {...}, "bundle": id|null, "owner": subject} -> the release {"number": n, "image": id|null, "bundle": id|null, ...}; the gateway resolves the reference to an image id; owner required on first publish, ignored after
 POST /api/bundles                     tar body -> {"bundle": id}
 PUT  /api/policy                      global policy fields
 PUT  /api/apps/<name>/policy          per-app overrides
