@@ -1,7 +1,9 @@
 # Acceptance suite
 
-Runs `docs/acceptance.md` against the real stack started with Docker Compose, never a mock.
+Runs `docs/acceptance.md` against the real stack started with Docker Compose, never a mock. One test per row, named by its ID; `TH-*` tests measure the thresholds without an ID of their own.
 
-    node --test 'tests/acceptance/**/*.test.ts'
+    node --test tests/acceptance
 
-Suites call `composeUp()` from `harness.ts`, which starts project `pneuma-acc` on network `pneuma-acc` and loopback ports 18080, 18081 and 19000 (override with `PNEUMA_ACC_HTTP_PORT`, `PNEUMA_ACC_ADMIN_PORT`, `PNEUMA_ACC_OBJECT_PORT`), so a developer's `pneuma` stack keeps running untouched. `composeDown()` keeps volumes.
+`package.json` here points Node at `suite.ts`, so every family file runs in one process, one test at a time: rows restart the gateway, stop coturn and change global policy, which would break tests running beside them.
+
+`setupSuite()` in `harness.ts` starts project `pneuma-acc` with the `postgres` and `rtc` profiles on network `pneuma-acc` and loopback ports 18080, 18081 and 19000 (override with `PNEUMA_ACC_HTTP_PORT`, `PNEUMA_ACC_ADMIN_PORT`, `PNEUMA_ACC_OBJECT_PORT`), so a developer's `pneuma` stack keeps running untouched, and builds the fixture images. Every test removes and purges its apps; the suite removes the fixture images. `composeDown()` keeps volumes. AC-GAME-2 drives Chrome (`CHROME`, default the macOS install path).
