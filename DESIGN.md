@@ -150,7 +150,7 @@ appctl publish <name> <dir | image>          Registry.publish
 
 | 决定 | 内容 | ADR |
 | --- | --- | --- |
-| (a) RTC | 进 M1，在 Compose `rtc` profile 后面，实现顺序排最后；若集成超出预期就整体移到 M2，不改任何概念。coturn 用 `static-auth-secret`，Provider 注入 STUN/TURN 地址和 HMAC 密钥，示例 SDK 铸造限时凭据，信令走应用自己的 `ws`。跨 NAT 中继依赖 `PNEUMA_RTC_EXTERNAL_IP`，M1 只验证单机能建立 datachannel。 | 0010 |
+| (a) RTC | 进 M1，在 Compose `rtc` profile 后面，实现顺序排最后；若集成超出预期就整体移到 M2，不改任何概念。coturn 用 `static-auth-secret`，Provider 注入 STUN/TURN 地址和 HMAC 密钥，示例 SDK 铸造限时凭据，信令走应用自己的 `ws`。跨 NAT 中继依赖 `PNEUMA_RTC_PUBLIC_HOST`，M1 只验证单机能建立 datachannel。 | 0010 |
 | (b) 发布输入 | 预构建镜像 id 加 `pneuma.json` 加可选静态 bundle。`appctl` 在宿主机构建。没有构建服务。静态站点是 `image = None` 的 Release。 | 0011 |
 | (c) 数据库 | 默认 SQLite 卷；把 App 的 `db_backend` 改为 `postgres` 时 Registry 对 PostgreSQL Provider 执行 `ensure`，得到同一 kind 的第二条 Binding，注入切到它并退役实例。旧 Binding 保留到 purge。不迁移数据。 | 0005 |
 | (d) 键值 | 一个 Redis，每 App 一个 ACL 用户，键和频道都限 `<id>:` 前缀。库编号不隔离 pub/sub。 | 0005 |
