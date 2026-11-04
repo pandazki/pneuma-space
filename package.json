@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "engines": { "node": ">=24" },
+  "bin": { "appctl": "cli/appctl.ts" },
   "scripts": {
     "test": "node --test 'gateway/src/**/*.test.ts'",
     "test:acceptance": "node --test 'tests/acceptance/**/*.test.ts'"
