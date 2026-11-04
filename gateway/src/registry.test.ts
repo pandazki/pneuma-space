@@ -181,3 +181,13 @@ test('a purge interrupted while the app had a live container finishes when recon
   await restarted.registry.resume();
   assert.equal(restarted.store.app(survey), null);
 });
+
+test('a second remove retries a suspend that failed during the first', async () => {
+  const w = world();
+  const { registry } = await w.open();
+  const { app } = await publish(registry, { kv: {} });
+  w.providers.get('redis')!.fail = 'suspend';
+  await registry.remove(survey);
+  await registry.remove(survey);
+  assert.deepEqual(w.calls.filter(([verb]) => verb === 'suspend'), [['suspend', 'redis', app], ['suspend', 'redis', app]]);
+});

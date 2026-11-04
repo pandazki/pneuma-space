@@ -166,7 +166,7 @@ export class PlatformRegistry implements Registry {
   remove(name: AppName): Promise<void> {
     return this.#exclusive(name, async () => {
       const app = this.#mustApp(name);
-      if (app.status === 'removed') return;
+      if (app.status === 'removed') return this.#converge(name);
       if (app.status === 'purging') throw new Conflict(`app "${name}" is being purged`);
       const suspended = this.#store.transaction(() => {
         const next: App = { ...this.#store.app(name)!, status: 'removed' };
@@ -387,7 +387,7 @@ export class PlatformRegistry implements Registry {
     return suspended;
   }
 
-  /** After a commit: backends follow the rows, then readers see the new view. A failed suspend is redone by `resume`. */
+  /** After a commit: backends follow the rows, then readers see the new view. A failed suspend is redone by `resume` or another remove. */
   async #settled(name: AppName, suspended: readonly Binding[], changed = true): Promise<void> {
     for (const binding of suspended) {
       await this.#provider(binding.provider).suspend(binding.app, binding.resource)
