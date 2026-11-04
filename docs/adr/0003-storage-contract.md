@@ -1,6 +1,7 @@
 # ADR 0003：两种数据库与有界关系型接口
 
-状态：**原型实现及指定业务场景已验证**；通用数据库平台和部署隔离方案未决定。
+状态：**数据库供给部分已被 ADR 0005 取代**。可移植 SQL 子集、切换不迁移数据、schema 不是安全边界这三条仍有效，写在 `docs/app-contract.md` 和 `REQUIREMENTS.md`。
+
 
 决定：SQLite 与 PostgreSQL 同时支持两种接口：`RecordStore` 提供 JSON 记录 CRUD 和修订号；`RelationalDatabase` 以相同的参数化 SQL 调用及事务上下文支持多记录操作。订单示例在同一业务代码中执行库存与订单事务、服务端过滤、连接和聚合。切换配置不会迁移数据。
 

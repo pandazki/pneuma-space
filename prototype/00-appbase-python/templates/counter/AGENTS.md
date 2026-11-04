@@ -1,6 +1,6 @@
 # Stateful HTTP app template
 
-This directory is a working example for an agent or developer. Start from the root README and SCOPE.md. The app listens on port 8000, is published beneath `/apps/<name>/`, and stores SQLite and the optional PostgreSQL password file in `/data`. Respect `X-Forwarded-Prefix` in links and redirects. Treat the gateway and deployed code as trusted local development only.
+This directory is a working example for an agent or developer. Start from the root README and REQUIREMENTS.md. The app listens on port 8000, is published beneath `/apps/<name>/`, and stores SQLite and the optional PostgreSQL password file in `/data`. Respect `X-Forwarded-Prefix` in links and redirects. Treat the gateway and deployed code as trusted local development only.
 
 ## Start a separate app
 

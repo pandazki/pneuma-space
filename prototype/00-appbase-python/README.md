@@ -1,6 +1,6 @@
 # Pneuma Space: local stateful app prototype
 
-A small local runtime for trusted HTTP app images. Publish an image under a stable URL; the gateway starts it on demand, stops it after inactivity, and keeps its `/data` volume. People and agents use the same CLI. This is an early prototype, not a production or multi-tenant service; read [SCOPE.md](SCOPE.md) first.
+A small local runtime for trusted HTTP app images. Publish an image under a stable URL; the gateway starts it on demand, stops it after inactivity, and keeps its `/data` volume. People and agents use the same CLI. This is the earlier prototype, kept as evidence; the M1 design starts at [REQUIREMENTS.md](REQUIREMENTS.md).
 
 ## 项目入口与设计记录
 
@@ -92,7 +92,7 @@ with db.transaction(write=False) as tx:
 - Apps must be ready within 15 seconds after the container starts and tolerate idle stops. Active HTTP requests prevent idle stops, but background jobs do not. There is no built-in scheduler or durable trigger delivery; a cron job inside an idle-stopped app will not run. Use an external trusted scheduler only if its delivery and retry semantics suit the application. The gateway supports buffered HTTP requests and responses up to 8 MiB, not WebSockets or streaming. Requests are not replayed after connecting to an app.
 - The sample includes a JSON record interface, a small relational transaction adapter, and a counter example for SQLite or PostgreSQL. Neither interface provides general SQL portability. SQLite has one writer at a time and requires a suitable local filesystem; it is not a multi-node database. PostgreSQL roles, provisioning, and migrations remain operator responsibilities.
 
-The publish command accepts only the documented non-secret database settings via repeated `--env NAME=VALUE` flags; publishing replaces all settings for that app. The control API (`GET /apps`, `POST /apps/publish`, `POST /apps/remove` on localhost:8081) accepts JSON and powers `appctl.py`. It is not authenticated. Host and browser-origin checks reduce accidental cross-site requests, but are not a security boundary against local processes or containers. See [SCOPE.md](SCOPE.md) for the complete trust model and non-goals.
+The publish command accepts only the documented non-secret database settings via repeated `--env NAME=VALUE` flags; publishing replaces all settings for that app. The control API (`GET /apps`, `POST /apps/publish`, `POST /apps/remove` on localhost:8081) accepts JSON and powers `appctl.py`. It is not authenticated. Host and browser-origin checks reduce accidental cross-site requests, but are not a security boundary against local processes or containers. See the trust boundary in [REQUIREMENTS.md](REQUIREMENTS.md).
 
 ## Verify
 

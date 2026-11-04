@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 
-spec = importlib.util.spec_from_file_location('business_probe', os.path.join(os.path.dirname(__file__), '..', 'prototype', '02-storage', 'business_probe.py'))
+spec = importlib.util.spec_from_file_location('business_probe', os.path.join(os.path.dirname(__file__), '..', '..', '02-storage', 'business_probe.py'))
 business_probe = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(business_probe)
 

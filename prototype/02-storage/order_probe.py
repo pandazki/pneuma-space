@@ -4,7 +4,7 @@ import os
 import sys
 
 HERE = os.path.dirname(__file__)
-TEMPLATE = os.path.abspath(os.path.join(HERE, '..', '..', 'templates', 'counter'))
+TEMPLATE = os.path.abspath(os.path.join(HERE, '..', '00-appbase-python', 'templates', 'counter'))
 for path in (HERE, TEMPLATE):
     if os.path.isdir(path):
         sys.path.insert(0, path)

@@ -7,7 +7,7 @@ import os
 import sqlite3
 import sys
 
-TEMPLATE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'templates', 'counter'))
+TEMPLATE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '00-appbase-python', 'templates', 'counter'))
 if os.path.isdir(TEMPLATE):
     sys.path.insert(0, TEMPLATE)
 from records import RecordStore
