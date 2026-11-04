@@ -59,6 +59,7 @@ function harness(triggers: Record<string, string | null> = { run: null }) {
     updateDelivery: (d) => void rows.splice(rows.findIndex((r) => r.id === d.id), 1, d),
     deliveries: (f: DeliveryFilter) => rows.filter((r) => (f.app === undefined || r.app === f.app) &&
       (f.state === undefined || r.state === f.state) && (f.dueBefore === undefined || r.nextAttemptAt <= f.dueBefore)),
+    deleteDeliveries: (app) => void rows.splice(0, rows.length, ...rows.filter((r) => r.app !== app)),
     lastScheduledFor: (app, trigger) => {
       const slots = rows.filter((r) => r.app === app && r.trigger === trigger && r.scheduledFor !== null).map((r) => r.scheduledFor!);
       return slots.length ? Math.max(...slots) : null;

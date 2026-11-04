@@ -102,6 +102,7 @@ before(async () => {
     },
     stats: [],
     flushStats: (stats) => void flushed.push(stats),
+    deleteStats() {},
   });
   port = await ingress.listen(0, '127.0.0.1');
 });

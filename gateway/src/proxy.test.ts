@@ -28,6 +28,7 @@ async function serveIngress(upstreamPort: number): Promise<void> {
     scheduler: { invoke: () => { throw new Error('unused'); } },
     stats: [],
     flushStats() {},
+    deleteStats() {},
   });
   const port = await ingress.listen(0, '127.0.0.1');
   process.send!({ port });

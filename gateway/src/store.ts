@@ -148,7 +148,7 @@ export class SqliteStore implements Store {
 
   deleteApp(app: AppId): void {
     this.transaction(() => {
-      for (const table of ['release', 'trigger', 'binding', 'delivery', 'stats']) this.#run(`DELETE FROM ${table} WHERE app = ?`, app);
+      for (const table of ['release', 'trigger', 'binding']) this.#run(`DELETE FROM ${table} WHERE app = ?`, app);
       this.#run('DELETE FROM app WHERE id = ?', app);
     });
   }
@@ -256,6 +256,10 @@ export class SqliteStore implements Store {
     return (row?.last as number | null) ?? null;
   }
 
+  deleteDeliveries(app: AppId): void {
+    this.#run('DELETE FROM delivery WHERE app = ?', app);
+  }
+
   stats(): Stats[] {
     return this.#all('SELECT * FROM stats').map(toStats);
   }
@@ -270,5 +274,9 @@ export class SqliteStore implements Store {
         );
       }
     });
+  }
+
+  deleteStats(app: AppId): void {
+    this.#run('DELETE FROM stats WHERE app = ?', app);
   }
 }

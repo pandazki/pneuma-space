@@ -199,10 +199,11 @@ export class PlatformRegistry implements Registry {
     }
     this.#store.deleteApp(app.id);
     this.#views.delete(app.name);
-    this.#names.delete(app.id);
     const referenced = new Set(this.#store.apps().flatMap((a) => this.#store.releases(a.id).flatMap((r) => (r.bundle ? [r.bundle] : []))));
     await this.#bundles.deleteUnreferenced(referenced);
     log('purge', app.name);
+    this.#emit(app.id);
+    this.#names.delete(app.id);
   }
 
   setGlobalPolicy(patch: Partial<Policy>): Policy {

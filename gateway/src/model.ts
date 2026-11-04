@@ -486,7 +486,7 @@ export interface Store {
   app(name: AppName): App | null;
   apps(): App[];
   putApp(app: App): void;
-  /** Deletes the app and every row keyed by it; the end of purge. */
+  /** Deletes the app and its Registry rows (release, trigger, binding); the end of purge. */
   deleteApp(app: AppId): void;
 
   release(app: AppId, number: ReleaseNumber): Release | null;
@@ -510,9 +510,11 @@ export interface Store {
   updateDelivery(delivery: Delivery): void;
   deliveries(filter: DeliveryFilter): Delivery[];
   lastScheduledFor(app: AppId, trigger: TriggerName): number | null;
+  deleteDeliveries(app: AppId): void;
 
   stats(): Stats[];
   putStats(stats: readonly Stats[]): void;
+  deleteStats(app: AppId): void;
 }
 
 /** Hides Docker: instances, leases, the reaper and container lifecycle. The M2 multi-node seam. */
@@ -571,7 +573,7 @@ export type InvokeRequest = {
 export interface Scheduler {
   /** Throws NotFound when the app's current release does not declare the trigger. */
   invoke(request: InvokeRequest): DeliveryId;
-  /** Re-reads the app's triggers; cancels deliveries of undeclared triggers and of removed apps. */
+  /** Re-reads the app's triggers; cancels deliveries of undeclared triggers and of removed apps, and deletes those of purged apps. */
   reload(app: AppId): void;
   /** Startup: delivering rows return to due, then the loop and worker start. */
   resume(): void;
@@ -593,7 +595,7 @@ export interface Registry {
   runSpec(app: AppId): RunSpec | null;
   listing(): AppSummary[];
   detail(name: AppName): AppDetail | null;
-  /** Called after every committed change to an app; main wires it to Runtime.retire and Scheduler.reload. */
+  /** Called after every committed change to an app, the end of purge included; main wires it to Runtime.retire, Scheduler.reload and Ingress.forget. */
   onAppChanged(listener: (app: AppId) => void): void;
   /** Startup: continues interrupted purges and re-runs ensure or suspend on every binding per its state (DESIGN 2.3 重启). */
   resume(): Promise<void>;

@@ -28,12 +28,13 @@ const registry = await PlatformRegistry.open({
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app) });
 const identity = new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), (hash) => store.token(hash));
 const ingress = new Ingress({
-  registry, runtime, identity, bundles, scheduler, stats: store.stats(), flushStats: (stats) => store.putStats(stats),
+  registry, runtime, identity, bundles, scheduler, stats: store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
 });
 
 registry.onAppChanged((app) => {
   runtime.retire(app).catch((error: Error) => log('retire-failed', { app, error: error.message }));
   scheduler.reload(app);
+  if (registry.schedule(app) === null) ingress.forget(app);
 });
 
 await registry.resume();

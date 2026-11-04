@@ -20,6 +20,7 @@ export type IngressDeps = {
   /** The last snapshot, loaded at startup (INV-7). */
   readonly stats: readonly Stats[];
   readonly flushStats: (stats: Stats[]) => void;
+  readonly deleteStats: (app: AppId) => void;
 };
 
 type Reply = { readonly status: number; readonly headers?: OutgoingHttpHeaders; readonly error?: string };
@@ -133,6 +134,12 @@ export class Ingress {
 
   flush(): void {
     this.#deps.flushStats(this.snapshot());
+  }
+
+  /** For a purged app: its counter and row go, so no later flush brings the row back. */
+  forget(app: AppId): void {
+    this.#stats.delete(app);
+    this.#deps.deleteStats(app);
   }
 
   #count(app: AppId, status: number): void {

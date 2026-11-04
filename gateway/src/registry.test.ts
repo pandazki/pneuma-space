@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Conflict, InputError, appName, parseManifest, subject, type AppId, type Capabilities } from './model.ts';
+import { Ingress } from './ingress.ts';
+import { Conflict, InputError, appName, parseManifest, subject, triggerName, type AppId, type Capabilities } from './model.ts';
 import type { PlatformRegistry } from './registry.ts';
 import { world } from './registry.fakes.ts';
+import { DeliveryScheduler } from './scheduler.ts';
 
 const survey = appName('survey');
 const ann = subject('user:ann');
@@ -122,4 +124,27 @@ test('owner is ignored after the first publish and changed by setOwner', async (
   assert.equal(registry.view(survey)?.owner, ann);
   registry.setOwner(survey, subject('user:bob'));
   assert.equal(registry.view(survey)?.owner, 'user:bob');
+});
+
+test('after purge, a stats flush and a scheduler reload leave no row of the app behind', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  const { app } = await publish(registry, { cron: { triggers: { nightly: {} } } });
+  const scheduler = new DeliveryScheduler({ store, runtime: w.runtime, view: (id) => registry.schedule(id), log: () => {} });
+  scheduler.invoke({ app, trigger: triggerName('nightly'), caller: ann, idempotencyKey: null, body: new Uint8Array() });
+  const ingress = new Ingress({
+    registry, runtime: w.runtime, bundles: w.bundles, scheduler,
+    identity: { authenticate: async () => ({ status: 401 }), serve: async () => {} },
+    stats: [{ app, requests: 3, errors: 0, lastAccessAt: 1 }],
+    flushStats: (stats) => store.putStats(stats),
+    deleteStats: (id) => store.deleteStats(id),
+  });
+  registry.onAppChanged((id) => {
+    scheduler.reload(id);
+    if (registry.schedule(id) === null) ingress.forget(id);
+  });
+  await registry.remove(survey);
+  await registry.purge(survey);
+  ingress.flush();
+  assert.deepEqual([store.stats(), store.deliveries({ app })], [[], []]);
 });

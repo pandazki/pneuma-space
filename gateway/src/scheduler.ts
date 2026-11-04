@@ -17,7 +17,7 @@ export type SchedulerView = {
 };
 
 export type SchedulerDeps = {
-  readonly store: Pick<Store, 'apps' | 'insertDelivery' | 'updateDelivery' | 'deliveries' | 'lastScheduledFor'>;
+  readonly store: Pick<Store, 'apps' | 'insertDelivery' | 'updateDelivery' | 'deliveries' | 'lastScheduledFor' | 'deleteDeliveries'>;
   readonly runtime: Pick<Runtime, 'acquire' | 'release'>;
   readonly view: (app: AppId) => SchedulerView | null;
   readonly now?: () => number;
@@ -58,6 +58,7 @@ export class DeliveryScheduler implements Scheduler {
 
   reload(app: AppId): void {
     const view = this.#view(app);
+    if (view === null) return this.#store.deleteDeliveries(app);
     for (const d of this.#store.deliveries({ app, state: 'due' })) {
       if (!declares(view, d.trigger)) this.#write({ ...d, state: 'cancelled' }, 'trigger not declared or app not registered');
     }
