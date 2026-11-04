@@ -1,0 +1,10 @@
+{
+  "name": "pneuma-space",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --test 'gateway/src/**/*.test.ts'",
+    "test:acceptance": "node --test 'tests/acceptance/**/*.test.ts'"
+  }
+}

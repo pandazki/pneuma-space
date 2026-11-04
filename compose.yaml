@@ -1,0 +1,83 @@
+# Every default credential below is for a single trusted machine only; override it in .env for anything else.
+# Host ports and the network name are variables so a second stack (the acceptance suite) can run beside this one.
+name: pneuma
+
+services:
+  gateway:
+    build: ./gateway
+    restart: unless-stopped
+    depends_on: [rustfs, redis]
+    ports:
+      - "127.0.0.1:${PNEUMA_HTTP_PORT:-8080}:8080"
+      - "127.0.0.1:${PNEUMA_ADMIN_PORT:-8081}:8081"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gateway-data:/data
+    environment:
+      PNEUMA_NETWORK: ${PNEUMA_NETWORK:-pneuma}
+      PNEUMA_OBJECT_ROOT_USER: ${PNEUMA_OBJECT_ROOT_USER:-pneuma-local}
+      PNEUMA_OBJECT_ROOT_PASSWORD: ${PNEUMA_OBJECT_ROOT_PASSWORD:-pneuma-local-secret}
+      PNEUMA_OBJECT_PUBLIC_ENDPOINT: ${PNEUMA_OBJECT_PUBLIC_ENDPOINT:-http://127.0.0.1:${PNEUMA_OBJECT_PORT:-9000}}
+      PNEUMA_RTC_SECRET: ${PNEUMA_RTC_SECRET:-pneuma-local-rtc}
+      PNEUMA_RTC_PUBLIC_HOST: ${PNEUMA_RTC_PUBLIC_HOST:-127.0.0.1}
+    networks: [pneuma]
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PNEUMA_OBJECT_PORT:-9000}:9000"
+    volumes:
+      - rustfs-data:/data
+    environment:
+      RUSTFS_ACCESS_KEY: ${PNEUMA_OBJECT_ROOT_USER:-pneuma-local}
+      RUSTFS_SECRET_KEY: ${PNEUMA_OBJECT_ROOT_PASSWORD:-pneuma-local-secret}
+    networks: [pneuma]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks: [pneuma]
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: [postgres]
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${PNEUMA_POSTGRES_PASSWORD:-pneuma-local}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [pneuma]
+
+  # Placeholder; unit S2 finalizes the TURN configuration.
+  coturn:
+    image: coturn/coturn
+    profiles: [rtc]
+    restart: unless-stopped
+    command:
+      - --use-auth-secret
+      - --static-auth-secret=${PNEUMA_RTC_SECRET:-pneuma-local-rtc}
+      - --realm=pneuma
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --no-tls
+      - --no-dtls
+    ports:
+      - "127.0.0.1:3478:3478/udp"
+      - "127.0.0.1:3478:3478/tcp"
+      - "127.0.0.1:49160-49200:49160-49200/udp"
+    networks: [pneuma]
+
+networks:
+  pneuma:
+    name: ${PNEUMA_NETWORK:-pneuma}
+
+volumes:
+  gateway-data:
+  rustfs-data:
+  redis-data:
+  postgres-data:
