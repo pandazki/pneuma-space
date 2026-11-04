@@ -2,10 +2,14 @@
   "name": "pneuma-space",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
-  "bin": { "appctl": "cli/appctl.ts" },
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "appctl": "cli/appctl.ts"
+  },
   "scripts": {
-    "test": "node --test 'gateway/src/**/*.test.ts'",
+    "test": "node --test 'gateway/src/**/*.test.ts' 'cli/*.test.ts'",
     "test:acceptance": "node --test 'tests/acceptance/**/*.test.ts'"
   }
 }
