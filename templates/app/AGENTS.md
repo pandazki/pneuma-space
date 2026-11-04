@@ -2,6 +2,10 @@
 
 You are building a web app for PneumaSpace. The app is one container behind the address `/apps/<name>/`. The platform starts it on the first request, stops it when idle, and provides the infrastructure the app declares in `pneuma-space.json`. This file, `src/server.ts` and `sdk/` are all you need. The full contract is `docs/app-contract.md` in the PneumaSpace repository.
 
+## Start
+
+`appctl init <dir>` copies this template into `<dir>` (`--static` copies the static-site template instead). `appctl` is `node <repo>/cli/appctl.ts`; it talks to the admin API at `PNEUMA_SPACE_ADMIN` (default `http://127.0.0.1:8081`), and apps answer at the ingress, by default `http://127.0.0.1:8080/apps/<name>/`. The operator may remap both ports.
+
 ## What the platform gives
 
 | Declare | You get |
@@ -13,7 +17,7 @@ You are building a web app for PneumaSpace. The app is one container behind the 
 | `static` | `{"dir": "public"}`: the platform serves that directory at your address without starting the container |
 | `ws` | WebSocket and `text/event-stream` pass through and keep the app awake |
 | `cron` | Named triggers called on a 5-field cron schedule (UTC unless the operator changes it) or on demand, at least once |
-| `identity` | The visitor as headers; browsers without a session are sent to the platform login first. `{"required": false}` lets anonymous visitors through with `identity` null; send them to `/_pneuma-space/login?next=<path>` when a page needs a login |
+| `identity` | The visitor as headers; a browser (a `GET` whose `Accept` includes `text/html`) without a session is sent to the platform login first, any other client gets 401. `{"required": false}` lets anonymous visitors through with `identity` null; send them to `/_pneuma-space/login?next=<path>` when a page needs a login |
 | `rtc` | STUN and TURN servers for WebRTC; signaling goes over your own `ws` |
 
 ## Manifest
@@ -22,7 +26,7 @@ You are building a web app for PneumaSpace. The app is one container behind the 
 {"contract": 1, "capabilities": {"files": {}, "db": {}, "cron": {"triggers": {"tick": {"schedule": "0 3 * * *"}, "rebuild": {}}}}}
 ```
 
-Unknown keys are errors and `route` is implicit. A trigger without `schedule` runs only on demand. A manifest with only `static` publishes without an image. The app name is chosen at publish and matches `^[a-z][a-z0-9-]{0,39}$`.
+Unknown keys are errors and `route` is implicit. A trigger without `schedule` runs only on demand; trigger names follow the app-name pattern below. A manifest with only `static` publishes without an image. The app name is chosen at publish and matches `^[a-z][a-z0-9-]{0,39}$`.
 
 ## SDK
 
@@ -30,14 +34,14 @@ Plain TypeScript in `sdk/`, run by Node 24 with no build step. A helper whose ca
 
 | Call | File | What it does |
 | --- | --- | --- |
-| `serve(handler, {triggers})` | `serve.ts` | HTTP on `0.0.0.0:8000`. `handler({req, res, url, prefix, identity})`; `url` is relative to your address; `identity` is `{subject, name, owner}` or `null`. `POST /_pneuma-space/trigger/<name>` calls `triggers[name](delivery)`; return means 2xx, throw means retry. Exits cleanly on `SIGTERM` |
+| `serve(handler, {triggers})` | `serve.ts` | HTTP on `0.0.0.0:8000`. `handler({req, res, url, prefix, identity})`; `url` is relative to your address; `identity` is `{subject, name, owner}` or `null`. `POST /_pneuma-space/trigger/<name>` calls `triggers[name](delivery)`; return means success (the app answers 2xx; an external caller of the trigger sees 202 from the platform), throw means retry. Exits cleanly on `SIGTERM` |
 | `body(req)` | `serve.ts` | The request body as a `Buffer`; a form is `new URLSearchParams((await body(req)).toString())` |
 | `db()` | `db.ts` | `query(sql, params)` returns rows, `exec(sql, params)` returns nothing; `?` placeholders on both engines |
 | `await kv()` | `kv.ts` | `redis` (node-redis client), `key(name)`, `channel(name)`, `publish(channel, text)`, `subscribe(channel, fn)`; the last two add the prefix |
 | `objects()` | `objects.ts` | `presignPut(key, {contentType, expiresSeconds})`, `presignGet(key)`, `publicUrl(key)` for `public/` keys |
 | `ws(server, fn)` | `ws.ts` | `fn(socket)` per WebSocket; `socket` has `url`, `prefix`, `identity`, `send`, `close`, `onmessage`, `onclose` |
 | `iceServers(userId, ttlSeconds)` | `rtc.ts` | `RTCPeerConnection` `iceServers` with a short-lived TURN credential |
-| `env()`, `need(kind)` | `env.ts` | The `PNEUMA_SPACE_*` variables as a typed object |
+| `env()`, `need(kind)` | `env.ts` | The `PNEUMA_SPACE_*` variables as a typed object; `need('files').dir` is the `/data` path, so a file a trigger wrote there is served by reading it from that directory |
 
 ## Rules
 
@@ -66,19 +70,28 @@ Set only the variables of capabilities you declare; without `kv`, skip Redis and
 
 ## Publish
 
-`appctl publish <name> . --owner user:<you>` builds this directory and publishes it at `http://127.0.0.1:8080/apps/<name>/`. The owner is needed on the first publish only, or set `PNEUMA_SPACE_OWNER`. Publishing again under the same name keeps all data. External programs call a trigger with `POST /apps/<name>/_pneuma-space/trigger/<trigger>` and `Authorization: Bearer <token>`, where the token comes from `appctl token create <name>`.
+`appctl publish <name> . --owner user:<you>` builds this directory (`npm ci` in the Dockerfile needs `package-lock.json` to match `package.json`; unused `pg` or `redis` entries may stay) and publishes it at the ingress. The owner is needed on the first publish only, or set `PNEUMA_SPACE_OWNER`. Publishing again under the same name keeps all data. External programs call a trigger with `POST /apps/<name>/_pneuma-space/trigger/<trigger>` and `Authorization: Bearer <token>`. `appctl token create <service>` issues a token for a service, not for one app; its subject is `service:<service>` and the last line of the output is the secret, shown once.
 
-## Scenario: company survey (`files`, `db`, `identity`)
+Testing on the platform with curl, for an app that declares `identity`:
 
-1. In `pneuma-space.json` keep `files`, `db` and `identity`; delete `kv`, `ws` and `cron`, the room and `tick` code in `src/server.ts`, and `public/app.js`.
-2. In `src/server.ts` create `answer (subject TEXT PRIMARY KEY, q1 TEXT, q2 TEXT, submitted_at TEXT)`.
-3. `GET /` renders the questions, prefilled from `SELECT q1, q2 FROM answer WHERE subject = ?` with `identity.subject`.
-4. `POST /answer` reads the form with `body(req)` and upserts with `ON CONFLICT (subject) DO UPDATE SET q1 = excluded.q1, q2 = excluded.q2`, so each person has one answer.
-5. `GET /results` answers 403 unless `identity.owner`; otherwise it shows `SELECT q1, CAST(count(*) AS INTEGER) AS n FROM answer GROUP BY q1`.
-6. `GET /results.csv` returns the rows as CSV for the owner with `content-disposition: attachment`.
+```sh
+ORIGIN=http://127.0.0.1:8080
+curl -c alice.jar -d name=alice -d next=/apps/<name>/ $ORIGIN/_pneuma-space/login   # sets the pneuma_space_session cookie; names match [a-z0-9_-]{1,32}
+curl -b alice.jar $ORIGIN/apps/<name>/
+```
+
+
+## Scenario: company survey (`files`, `db`, `identity`, `cron`)
+
+1. In `pneuma-space.json` keep `files`, `db`, `identity` and `cron` with one trigger `{"export": {"schedule": "0 2 * * *"}}`; delete `kv` and `ws`, the room code in `src/server.ts`, and `public/app.js`. Replace the `form`/`input` rules in `public/style.css`, which are laid out for one text field.
+2. In `src/server.ts` create `answer (subject TEXT PRIMARY KEY, q1 TEXT, q2 TEXT, q3 TEXT, submitted_at TEXT)`, one column per question.
+3. `GET /` renders the questions, prefilled from `SELECT q1, q2, q3 FROM answer WHERE subject = ?` with `identity.subject`.
+4. `POST /answer` reads the form with `body(req)` and upserts with `ON CONFLICT (subject) DO UPDATE SET q1 = excluded.q1, q2 = excluded.q2, q3 = excluded.q3`, so each person has one answer and can edit it.
+5. `GET /results` answers 403 unless `identity.owner`; otherwise it shows `SELECT q1, CAST(count(*) AS INTEGER) AS n FROM answer GROUP BY q1` for each question.
+6. Trigger `export` writes every row as CSV to `need('files').dir + '/export.csv'` (quote fields; prefix a leading `=`, `+`, `-` or `@` with `'` so spreadsheets do not run it); `GET /export.csv` streams that file to the owner with `content-disposition: attachment`, 404 before the first export.
 7. Every form action and link uses `prefix`.
-8. Test with curl as two subjects and as the owner, then once with `PNEUMA_SPACE_DB_URL=postgresql://...`.
-9. `appctl publish survey . --owner user:<you>` and share `/apps/survey/`.
+8. Test with curl as two subjects and as the owner (see Publish), then once with `PNEUMA_SPACE_DB_URL=postgresql://...` when Docker is available to you.
+9. `appctl publish survey . --owner user:<you>` and share `/apps/survey/`; run the export now with `appctl token create exporter` and a `POST .../_pneuma-space/trigger/export`.
 
 ## Scenario: two-player board game (`kv`, `ws`, `identity`, optional `rtc`)
 
