@@ -67,7 +67,11 @@ export type Reply = { status: number; body: any };
 const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body), headers: { 'content-type': 'application/json' } });
 
 async function call(method: string, path: string, init: RequestInit = {}): Promise<Reply> {
-  const response = await fetch(adminUrl + path, { method, ...init });
+  // A kept-alive socket the server closed while a compose command ran surfaces as UND_ERR_SOCKET on reuse; one retry on a fresh socket.
+  const response = await fetch(adminUrl + path, { method, ...init }).catch(async (error: Error) => {
+    if ((error.cause as { code?: string } | undefined)?.code !== 'UND_ERR_SOCKET') throw error;
+    return fetch(adminUrl + path, { method, ...init });
+  });
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : null };
 }
