@@ -7,7 +7,7 @@ import {
   DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS, NotFound,
   type App, type AppId, type CronExpr, type Delivery, type DeliveryFilter, type Lease, type Subject, type TriggerName,
 } from './model.ts';
-import { DeliveryScheduler, nextSlot, type SchedulerDeps, type SchedulerView } from './scheduler.ts';
+import { DeliveryScheduler, latestSlot, nextSlot, type SchedulerDeps, type SchedulerView } from './scheduler.ts';
 
 type Received = { headers: IncomingMessage['headers']; body: string };
 let handle: (req: IncomingMessage, res: ServerResponse, received: Received) => void = (_req, res) => res.end();
@@ -208,4 +208,11 @@ test('nextSlot follows the America/New_York wall clock across the 2026 DST chang
   // 2026-11-01 02:00 EDT falls back to 01:00 EST: 01:30 occurs twice.
   assert.equal(next('30 1 * * *', '2026-11-01T05:00:00Z'), '2026-11-01T05:30:00.000Z');
   assert.equal(next('30 1 * * *', '2026-11-01T05:30:00Z'), '2026-11-01T06:30:00.000Z');
+});
+
+test('catching up a per-minute trigger after 30 days down finds the latest slot without walking every missed one', () => {
+  const now = Date.parse('2026-06-01T12:00:30Z');
+  const started = performance.now();
+  assert.equal(latestSlot('* * * * *' as CronExpr, now - 30 * 86_400_000, now, 'UTC'), Date.parse('2026-06-01T12:00:00Z'));
+  assert.ok(performance.now() - started < 100, `took ${performance.now() - started} ms`);
 });

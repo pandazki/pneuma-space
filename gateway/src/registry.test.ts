@@ -208,3 +208,14 @@ test('runSpec, which every acquire reads, makes no store read', async () => {
   for (let i = 0; i < 3; i++) assert.equal(registry.runSpec(app)?.release, 1);
   assert.equal(reads, 0);
 });
+
+test('republishing a removed app starts its schedules at the republish, not at the reused release', async () => {
+  const { registry } = await world().open();
+  const { app } = await publish(registry, { cron: { triggers: { nightly: { schedule: '0 3 * * *' } } } });
+  await registry.remove(survey);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const republishedAt = Date.now();
+  const again = await publish(registry, { cron: { triggers: { nightly: { schedule: '0 3 * * *' } } } });
+  assert.equal(again.number, 1);
+  assert.ok(registry.schedule(app)!.publishedAt >= republishedAt);
+});

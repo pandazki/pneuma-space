@@ -290,6 +290,8 @@ export type App = {
   /** Null between the first publish's App insert and its commit; the address answers 404 meanwhile. */
   readonly current: ReleaseNumber | null;
   readonly policyOverride: PolicyOverride;
+  /** When the status last became registered; a republish after remove starts schedules here. */
+  readonly registeredAt: number;
 };
 
 export type Release = {

@@ -135,7 +135,7 @@ export class PlatformRegistry implements Registry {
 
     if (!app) {
       if (owner === null) throw new InputError(`owner is required on the first publish of "${name}"; pass user:<name> or service:<name>`);
-      app = { name, id: newAppId(), owner, status: 'registered', current: null, policyOverride: pinned };
+      app = { name, id: newAppId(), owner, status: 'registered', current: null, policyOverride: pinned, registeredAt: Date.now() };
       this.#store.putApp(app);
       this.#refresh(name);
       log('app-created', name, { id: app.id });
@@ -155,7 +155,8 @@ export class PlatformRegistry implements Registry {
       };
       if (!reused) this.#store.putRelease(release);
       this.#store.replaceTriggers(fresh.id, triggersOf(fresh.id, manifest));
-      const next: App = { ...fresh, status: 'registered', current: release.number };
+      const registeredAt = fresh.status === 'registered' ? fresh.registeredAt : Date.now();
+      const next: App = { ...fresh, status: 'registered', current: release.number, registeredAt };
       this.#store.putApp(next);
       return { release, suspended: this.#settle(next, manifest) };
     });
@@ -280,14 +281,14 @@ export class PlatformRegistry implements Registry {
 
   schedule(id: AppId): SchedulerView | null {
     const name = this.#names.get(id);
-    const view = name === undefined ? undefined : this.#views.get(name);
-    const release = view?.release == null ? null : this.#store.release(id, view.release);
-    if (!view || !release) return null;
+    const app = name === undefined ? null : this.#store.app(name);
+    const release = app && this.#currentRelease(app);
+    if (!app || !release) return null;
     return {
-      status: view.status,
-      publishedAt: release.publishedAt,
+      status: app.status,
+      publishedAt: Math.max(release.publishedAt, app.registeredAt),
       triggers: triggersOf(id, release.manifest),
-      policy: effectivePolicy(this.#policy, view.policyOverride),
+      policy: effectivePolicy(this.#policy, app.policyOverride),
     };
   }
 

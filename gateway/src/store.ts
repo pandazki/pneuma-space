@@ -26,6 +26,7 @@ const MIGRATIONS = [
    CREATE INDEX delivery_due ON delivery (state, next_attempt_at);
    CREATE INDEX delivery_key ON delivery (app, trigger, idempotency_key);
    CREATE TABLE stats (app TEXT PRIMARY KEY, requests INTEGER NOT NULL, errors INTEGER NOT NULL, last_access_at INTEGER);`,
+  'ALTER TABLE app ADD COLUMN registered_at INTEGER NOT NULL DEFAULT 0',
 ];
 
 type Row = Record<string, SQLInputValue>;
@@ -37,6 +38,7 @@ const toApp = (r: Row): App => ({
   status: r.status as App['status'],
   current: r.current as ReleaseNumber | null,
   policyOverride: JSON.parse(r.policy_override as string),
+  registeredAt: r.registered_at as number,
 });
 
 const toRelease = (r: Row): Release => ({
@@ -139,10 +141,10 @@ export class SqliteStore implements Store {
 
   putApp(app: App): void {
     this.#run(
-      `INSERT INTO app (name, id, owner, status, current, policy_override) VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO app (name, id, owner, status, current, policy_override, registered_at) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (name) DO UPDATE SET id = excluded.id, owner = excluded.owner, status = excluded.status,
-         current = excluded.current, policy_override = excluded.policy_override`,
-      app.name, app.id, app.owner, app.status, app.current, JSON.stringify(app.policyOverride),
+         current = excluded.current, policy_override = excluded.policy_override, registered_at = excluded.registered_at`,
+      app.name, app.id, app.owner, app.status, app.current, JSON.stringify(app.policyOverride), app.registeredAt,
     );
   }
 

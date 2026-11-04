@@ -9,7 +9,7 @@ import {
 /** What the Scheduler reads about one app; the Registry provides it. */
 export type SchedulerView = {
   readonly status: AppStatus;
-  /** The current Release's publishedAt: no slot at or before it is materialized. */
+  /** The later of the current Release's publishedAt and the app's registeredAt: no slot at or before it is materialized. */
   readonly publishedAt: number;
   readonly triggers: readonly Trigger[];
   /** Effective policy (global merged with the app's override). */
@@ -302,6 +302,15 @@ function earliestOnDay(cron: Cron, day: number, after: number, tz: string): numb
 
 /** The latest slot in (after, until]: at most one slot is caught up however many were missed (INV-4). */
 export function latestSlot(expr: CronExpr, after: number, until: number, tz: string): number | null {
+  const first = nextSlot(expr, after, tz);
+  if (first === null || first > until) return null;
+  const second = nextSlot(expr, first, tz);
+  if (second === null || second > until) return first;
+  // Scanning only the last two periods keeps a long outage cheap; an irregular schedule may need the full scan.
+  return lastIn(expr, Math.max(after, until - 2 * (second - first)), until, tz) ?? lastIn(expr, after, until, tz);
+}
+
+function lastIn(expr: CronExpr, after: number, until: number, tz: string): number | null {
   let latest: number | null = null;
   for (let t = nextSlot(expr, after, tz); t !== null && t <= until; t = nextSlot(expr, t, tz)) latest = t;
   return latest;
