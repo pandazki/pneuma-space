@@ -20,7 +20,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - gateway-data:/data
     environment:
-      PNEUMA_SPACE_NETWORK: ${PNEUMA_SPACE_NETWORK:-pneuma}
+      PNEUMA_SPACE_NETWORK: ${PNEUMA_SPACE_NETWORK:-pneuma-space}
       PNEUMA_SPACE_OBJECT_ROOT_USER: ${PNEUMA_SPACE_OBJECT_ROOT_USER:-pneuma-local}
       PNEUMA_SPACE_OBJECT_ROOT_PASSWORD: ${PNEUMA_SPACE_OBJECT_ROOT_PASSWORD:-pneuma-local-secret}
       PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT: ${PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT:-http://127.0.0.1:${PNEUMA_SPACE_OBJECT_PORT:-9000}}
@@ -95,7 +95,7 @@ services:
 
 networks:
   pneuma-space:
-    name: ${PNEUMA_SPACE_NETWORK:-pneuma}
+    name: ${PNEUMA_SPACE_NETWORK:-pneuma-space}
 
 volumes:
   gateway-data:
