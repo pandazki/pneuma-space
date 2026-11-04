@@ -3,14 +3,14 @@ Pneuma Space deploys stateful web apps on one trusted host. Read `REQUIREMENTS.m
 ## Boundaries that do not move
 
 - The platform model has no agent, LLM, template chooser or host integration. Those words appear only under `templates/` and in docs that describe examples.
-- The gateway is Node.js LTS with built-in modules only and no runtime dependencies, written in TypeScript that Node runs directly (ADR 0012). The `db` and `kv` providers provision through `Runtime.run_job` inside the infrastructure containers; the `object` provider and the bundle store speak S3 and its admin API over SigV4-signed HTTP from the gateway (ADR 0013). No database driver in the gateway. Example apps may use any runtime and packages.
+- The gateway is Node.js LTS with built-in modules only and no runtime dependencies, written in TypeScript that Node runs directly (ADR 0012). The `db` and `kv` providers provision through `Runtime.runJob` inside the infrastructure containers; the `object` provider and the bundle store speak S3 and its admin API over SigV4-signed HTTP from the gateway (ADR 0013). No database driver in the gateway. Example apps may use any runtime and packages.
 - App state lives in `/data` volumes and platform-provided services, never in the container filesystem. Publish and remove keep every volume, database, key prefix and bucket. Only purge deletes, and only from `removed`.
 - One trusted host. Never describe loopback binding, shared networks, per-app roles or ACLs as tenant isolation or as a security boundary.
 - Object bytes never pass through an app container or the gateway. Static bytes pass through the gateway only.
 
 ## Structure rules
 
-- A new capability is one row in `CAPABILITIES` and one Provider with `ensure`, `inject`, `suspend`, `resume`, `destroy`, each safe to run twice. If a capability needs changes anywhere else, stop and write an ADR first.
+- A new capability is one row in `CAPABILITIES` and one Provider with `ensure`, `inject`, `suspend`, `destroy`, each safe to run twice (`ensure` on a suspended binding is the resume). If a capability needs changes anywhere else, stop and write an ADR first.
 - Every wake goes through `Runtime.acquire`. No Docker call outside `Runtime`. No write to a platform table outside its owning component (`DESIGN.md` section 1.2).
 - Names: `PNEUMA_*` environment variables, `X-Pneuma-*` headers, `_pneuma/` reserved path segment, `pneuma-*` Docker resources. Do not introduce a second prefix.
 - A deviation from `DESIGN.md` is recorded as a new ADR in `docs/adr/` before the code lands. Never edit a design doc to match code that drifted.
