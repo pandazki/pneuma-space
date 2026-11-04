@@ -106,7 +106,7 @@ export class Docker {
     return existing.Id;
   }
 
-  /** False when the container no longer exists; already running counts as started. */
+  /** False when the container or its network no longer exists; already running counts as started. */
   async start(id: string): Promise<boolean> {
     return (await this.expect('POST', `/containers/${id}/start`, [204, 304, 404])).status !== 404;
   }

@@ -221,6 +221,8 @@ export class DockerRuntime implements Runtime {
       inst.spec = spec;
       inst.container ??= await this.create(spec);
       if (!(await this.docker.start(inst.container))) {
+        // 404 also means the container outlived its network (compose down recreates it); a same-name create would return it again.
+        await this.docker.remove(inst.container);
         inst.container = await this.create(spec);
         await this.docker.start(inst.container);
       }
