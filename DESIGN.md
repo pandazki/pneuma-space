@@ -124,7 +124,7 @@ Compose 服务：`gateway`、`rustfs`（S3 兼容对象服务）、`redis`（AOF
 
 退役（Registry 在发布、改变 Injection 的 policy 变更、remove 之后调用）：`awake` 时置 `draining`，调用每个 `channel` 的 `on_retire`（WebSocket 发 close 1001，SSE 直接关闭连接），等待 Lease 清空至多 `drain_timeout_seconds`，`docker stop` 并 `docker rm`；`asleep` 时直接 `docker rm`。下一次 `acquire` 为当前 Release 建新容器。`purge` 先退役，再销毁每条 Binding 的资源和该 App 的 bundle，所以卷不会被容器占用。
 
-重启：开平台库，续跑 `purging`，`delivering` 回 `due`。一次 `docker ps` 按标签 `pneuma-space.app` 列出容器：App 不存在、`pneuma-space.release` 不等于 `current`、或 `pneuma-space.spec` 不等于当前推导的 Injection 哈希的移除，其余运行中的采纳为 `awake`（`last_release_at = now`），停止的为 `asleep`。订阅 Docker 事件流，`die` 事件把实例置 `asleep`。Provider 在后台对每条 Binding 按其 `state` 重跑 `ensure` 或 `suspend`，收敛后端可能丢失或与行不一致的状态（例如重建的 Redis 容器，或 ensure 和提交之间的崩溃）。
+重启：开平台库，`delivering` 回 `due`。先核对容器，再续跑 `purging`（续跑要退役该 App 可能还活着的容器，所以核对在前）。一次 `docker ps` 按标签 `pneuma-space.app` 列出容器：App 不存在、`pneuma-space.release` 不等于 `current`、或 `pneuma-space.spec` 不等于当前推导的 Injection 哈希的移除，其余运行中的采纳为 `awake`（`last_release_at = now`），停止的为 `asleep`。订阅 Docker 事件流，`die` 事件把实例置 `asleep`。Provider 在后台对每条 Binding 按其 `state` 重跑 `ensure` 或 `suspend`，收敛后端可能丢失或与行不一致的状态（例如重建的 Redis 容器，或 ensure 和提交之间的崩溃）。
 
 ### 2.4 发布
 

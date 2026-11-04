@@ -240,17 +240,25 @@ export class DockerRuntime implements Runtime {
       if (!ip) throw new Error(`container of app ${spec.app} has no IP on network ${this.network}`);
       inst.address = `${ip}:${APP_PORT}`;
       const deadline = Date.now() + spec.policy.ready_timeout_seconds * 1000;
+      // A container that exited frees its IP for the next one started, so the TCP poll alone can reach the wrong container.
+      const stillRunning = async () => {
+        const state = await this.docker.inspect(inst.container!);
+        if (!state?.State.Running || state.NetworkSettings.Networks[this.network]?.IPAddress !== ip) {
+          throw new Error(`container of app ${spec.app} exited before it was ready`);
+        }
+      };
+      let checkedAt = Date.now();
       while (!(await canConnect(ip, APP_PORT))) {
         if (Date.now() >= deadline) {
           throw new Error(`app ${spec.app} did not accept TCP on port ${APP_PORT} within ready_timeout_seconds=${spec.policy.ready_timeout_seconds}`);
         }
+        if (Date.now() - checkedAt >= 1000) {
+          await stillRunning();
+          checkedAt = Date.now();
+        }
         await sleep(READY_POLL_MS);
       }
-      // A container that exited frees its IP for the next one started; the poll above may have reached that one.
-      const after = await this.docker.inspect(inst.container);
-      if (!after?.State.Running || after.NetworkSettings.Networks[this.network]?.IPAddress !== ip) {
-        throw new Error(`container of app ${spec.app} exited before it was ready`);
-      }
+      await stillRunning();
       inst.lastReleaseAt = Date.now();
       this.transition(inst, 'awake', { ms: Math.round(performance.now() - started) });
     } catch (error) {

@@ -224,7 +224,7 @@ export class Ingress {
     } catch (error) {
       if (error instanceof NotFound) return { status: 404, error: 'no app at this address' };
       log('wake-failed', view.app, { error: String(error) });
-      return { status: 502, error: 'the app did not start; see the gateway log' };
+      return { status: 502, error: `the app did not start; run appctl logs ${view.name}` };
     }
   }
 
