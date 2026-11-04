@@ -241,6 +241,11 @@ export class DockerRuntime implements Runtime {
         }
         await sleep(READY_POLL_MS);
       }
+      // A container that exited frees its IP for the next one started; the poll above may have reached that one.
+      const after = await this.docker.inspect(inst.container);
+      if (!after?.State.Running || after.NetworkSettings.Networks[this.network]?.IPAddress !== ip) {
+        throw new Error(`container of app ${spec.app} exited before it was ready`);
+      }
       inst.lastReleaseAt = Date.now();
       this.transition(inst, 'awake', { ms: Math.round(performance.now() - started) });
     } catch (error) {
@@ -338,7 +343,9 @@ export class DockerRuntime implements Runtime {
 
   private onDie(event: DockerEvent): void {
     const inst = this.instances.get(event.labels[LABEL.app] as AppId);
-    if (inst?.state === 'awake' && inst.container === event.id && event.time >= inst.startedAt) this.transition(inst, 'asleep', { external: true });
+    if (inst?.state !== 'awake' || inst.container !== event.id || event.time < inst.startedAt) return;
+    inst.address = '';
+    this.transition(inst, 'asleep', { external: true });
   }
 
   private transition(inst: Instance, state: InstanceState, extra: Record<string, unknown> = {}): void {

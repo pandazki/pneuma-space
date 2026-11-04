@@ -6,11 +6,12 @@ import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { demux, Docker } from './docker.ts';
+import { demux, Docker, type ContainerInfo } from './docker.ts';
 import { appName, DEFAULT_POLICY, newAppId, NotFound, type AppId, type ImageId, type Lease, type Policy, type ReleaseNumber, type RunSpec } from './model.ts';
 import { DockerRuntime } from './runtime.ts';
 
-const SERVER = `require('http').createServer((q, s) => s.end(process.env.PNEUMA_SPACE_APP + ' ' + process.env.PNEUMA_SPACE_RELEASE)).listen(8000);
+const SERVER = `if (process.env.FIXTURE_EXIT) process.exit(1);
+require('http').createServer((q, s) => s.end(process.env.PNEUMA_SPACE_APP + ' ' + process.env.PNEUMA_SPACE_RELEASE)).listen(8000);
 process.on('SIGTERM', () => process.exit(0));`;
 
 if (process.env.PNEUMA_SPACE_TEST_IMAGE) inner(process.env.PNEUMA_SPACE_TEST_IMAGE as ImageId, process.env.PNEUMA_SPACE_NETWORK!);
@@ -92,7 +93,7 @@ function inner(image: ImageId, network: string): void {
         for (const container of await raw.list({ label: [`pneuma-space.app=${id}`] })) await raw.remove(container.Id);
       }
     });
-    return { app, publish, start, ...start() };
+    return { app, publish, start, specFor: (id: AppId) => specs.get(id) ?? null, ...start() };
   }
 
   const answer = async (address: string) => (await fetch(`http://${address}/`)).text();
@@ -109,6 +110,28 @@ function inner(image: ImageId, network: string): void {
     assert.equal(docker.starts, 1);
     assert.equal(a.address, b.address);
     assert.equal(await answer(a.address), 'fixture 1');
+  });
+
+  test('a container that exits at once fails the wake even when another container answers on its old IP', async (t) => {
+    const { app, publish, start, specFor } = fixture(t, { ready_timeout_seconds: 3 });
+    const other = newAppId();
+    publish(1, {}, other);
+    const { runtime: healthy } = start();
+    const live = await healthy.acquire(other, 'request');
+    class ReusedAddress extends Docker {
+      async inspect(id: string): Promise<ContainerInfo | null> {
+        const info = await super.inspect(id);
+        if (!info || this.reused) return info;
+        this.reused = true;
+        return { ...info, NetworkSettings: { Networks: { [network]: { IPAddress: live.address.split(':')[0] } } } };
+      }
+      reused = false;
+    }
+    publish(1, { FIXTURE_EXIT: '1' });
+    const runtime = new DockerRuntime({ docker: new ReusedAddress(), network, project: network, specFor, log: () => {} });
+    t.after(() => runtime.close());
+    await assert.rejects(runtime.acquire(app, 'request'));
+    assert.equal(runtime.state(app), 'asleep');
   });
 
   test('acquire rejects with NotFound when the app has no RunSpec', async (t) => {
