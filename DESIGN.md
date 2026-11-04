@@ -45,7 +45,7 @@ Pneuma Space 把有状态的 web 应用部署到一台可信机器上。应用�
 | `identity` | ingress | IdentityProvider | | | | |
 | `rtc` | resource | 无每 App 资源；TURN 共享密钥是 Compose 环境变量 `PNEUMA_RTC_SECRET`，coturn 和网关都读它 | 检查 `coturn` 服务名在 Compose 网络上可解析（profile 未开时不可解析，发布 409） | `stun:<host>:3478` 和 `turn:<host>:3478?transport=udp`，`<host>` 取 Compose 环境变量 `PNEUMA_RTC_PUBLIC_HOST`（默认 `127.0.0.1`），加该密钥 | 无 | 无 |
 
-每个操作可重复执行。`ensure` 对已存在的 Binding 也会执行，收敛后端漂移并把 `suspended` 置回 `active`；没有单独的 resume。Provider 通过 `Runtime.run_job` 在对应的基础设施容器里执行 `psql`、`redis-cli` 和对象服务的管理命令，网关自身不带任何数据库或存储驱动。平台库和平台密钥在命名卷 `gateway-data`（挂载为网关的 `/data`）；后端数据在 `rustfs-data`、`redis-data`（AOF）、`postgres-data`，以及每 App 的 `pneuma-files-<id>`、`pneuma-db-<id>`；这些卷在平台重启和 `docker compose down` 后都保留。`<id>` 是 `App.id`。
+每个操作可重复执行。`ensure` 对已存在的 Binding 也会执行，收敛后端漂移并把 `suspended` 置回 `active`；没有单独的 resume。`db` 和 `kv` 的 Provider 通过 `Runtime.run_job` 在对应的基础设施容器里执行 `psql` 和 `redis-cli`；`object` Provider 和 BundleStore 用 `node:crypto` 签名的 HTTP 直接调用对象服务的 S3 和管理接口（ADR 0013）。网关自身不带数据库驱动。平台库和平台密钥在命名卷 `gateway-data`（挂载为网关的 `/data`）；后端数据在 `rustfs-data`、`redis-data`（AOF）、`postgres-data`，以及每 App 的 `pneuma-files-<id>`、`pneuma-db-<id>`；这些卷在平台重启和 `docker compose down` 后都保留。`<id>` 是 `App.id`。
 
 ### 1.4 状态机
 
@@ -154,7 +154,7 @@ appctl publish <name> <dir | image>          Registry.publish
 | (b) 发布输入 | 预构建镜像 id 加 `pneuma.json` 加可选静态 bundle。`appctl` 在宿主机构建。没有构建服务。静态站点是 `image = None` 的 Release。 | 0011 |
 | (c) 数据库 | 默认 SQLite 卷；把 App 的 `db_backend` 改为 `postgres` 时 Registry 对 PostgreSQL Provider 执行 `ensure`，得到同一 kind 的第二条 Binding，注入切到它并退役实例。旧 Binding 保留到 purge。不迁移数据。 | 0005 |
 | (d) 键值 | 一个 Redis，每 App 一个 ACL 用户，键和频道都限 `<id>:` 前缀。库编号不隔离 pub/sub。 | 0005 |
-| (e) 字节 | 对象由对象服务在自己的端点提供，上传直传，`public/` 前缀匿名读；网关只服务静态 bundle，因为它们必须在应用地址上。 | 0007 |
+| (e) 字节 | 对象由对象服务在自己的端点提供，上传直传，`public/` 前缀匿名读；网关只服务静态 bundle，因为它们必须在应用地址上。对象服务的管理走签名 HTTP。 | 0007, 0013 |
 
 ## 3 M2 和 M3 的接缝
 
