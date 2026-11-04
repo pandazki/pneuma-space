@@ -219,10 +219,10 @@ function policyForm(app, effective) {
 
 function lifecycle(app) {
   const status = h('div');
-  const act = (verb, prompt) => async () => {
+  const act = (path, prompt) => async () => {
     if (!confirm(prompt)) return;
     try {
-      await api('POST', `${appPath(app.name)}/${verb}`);
+      await api('POST', path);
       await detailView(app.name);
     } catch (error) {
       status.replaceChildren(message(error.message));
@@ -232,9 +232,9 @@ function lifecycle(app) {
     h('div', { class: 'actions' },
       h('button', { type: 'button', class: 'secondary', onclick: () => { location.hash = `#/publish/${app.name}`; } }, 'Publish a new release'),
       h('button', { type: 'button', class: 'danger', disabled: app.status !== 'registered',
-        onclick: act('remove', `Remove ${app.name}? Its address will answer 404. Data is kept and a later publish restores it.`) }, 'Remove'),
+        onclick: act(`${appPath(app.name)}/remove`, `Remove ${app.name}? Its address will answer 404. Data is kept and a later publish restores it.`) }, 'Remove'),
       h('button', { type: 'button', class: 'danger', disabled: app.status !== 'removed',
-        onclick: act('purge', `Purge ${app.name}? This deletes its files, database, key-value data and bucket. It cannot be undone.`) }, 'Purge')),
+        onclick: act(`${appPath(app.name)}/purge`, `Purge ${app.name}? This deletes its files, database, key-value data and bucket. It cannot be undone.`) }, 'Purge')),
     h('p', { class: 'muted', style: 'margin:0' }, 'Remove keeps every volume, database and bucket. Purge deletes them and is only possible after remove.'),
     status);
 }
