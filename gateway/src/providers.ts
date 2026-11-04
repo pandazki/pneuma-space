@@ -322,8 +322,8 @@ export class S3BundleStore implements BundleStore {
     const files: Record<string, BundleFile> = {};
     for (const { path, body } of tarFiles(bytes)) {
       const type = contentType(path);
-      const res = await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, `${id}/${path}`), body, { 'content-type': type }), `put ${path}`);
-      files[path] = { size: body.length, etag: res.headers.get('etag') ?? '', contentType: type };
+      await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, `${id}/${path}`), body, { 'content-type': type }), `put ${path}`);
+      files[path] = { size: body.length, etag: createHash('md5').update(body).digest('hex'), contentType: type };
     }
     const index: BundleIndex = { id, files };
     await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, indexKey(id)), JSON.stringify(index), { 'content-type': 'application/json' }), 'put bundle index');
