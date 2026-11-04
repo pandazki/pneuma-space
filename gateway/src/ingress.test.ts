@@ -295,6 +295,15 @@ test('a missing trailing slash redirects with 308 and an unknown app is 404', as
   assert.equal((await request('/apps/nobody/')).status, 404);
 });
 
+test('dot segments resolve before routing, so none reaches the app under _pneuma-space/ or above its root', async () => {
+  reset();
+  for (const path of ['/apps/plain/a/../_pneuma-space/trigger/report', '/apps/plain/a/%2e%2E/_pneuma-space/trigger/report', '/apps/plain/a\\..\\_pneuma-space/trigger/report']) {
+    assert.equal((await request(path, { method: 'POST' })).status, 401, path);
+  }
+  assert.equal((await request('/apps/plain/a/../../plain/echo')).status, 400);
+  assert.deepEqual(events, []);
+});
+
 test('a trigger call without a service subject or the owner is 403', async () => {
   reset();
   const got = await request('/apps/plain/_pneuma-space/trigger/report', { method: 'POST', headers: { authorization: 'Bearer bob' } });

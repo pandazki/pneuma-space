@@ -75,6 +75,21 @@ function sendRaw(socket: net.Socket, { status, headers, error }: Reply): void {
   socket.end(`${lines.join('\r\n')}\r\n\r\n${body}`);
 }
 
+/**
+ * The path an app's URL parser will see: `%2e` decoded, `\` read as `/` (WHATWG URL does both), `//` collapsed and
+ * dot segments resolved. Null when it climbs above the app root.
+ */
+function normalize(rest: string): string | null {
+  const segments = rest.replace(/%2e/gi, '.').replaceAll('\\', '/').split('/').slice(1);
+  const out: string[] = [];
+  for (const [i, segment] of segments.entries()) {
+    if (segment === '..' && out.pop() === undefined) return null;
+    if (segment !== '' && segment !== '.' && segment !== '..') out.push(segment);
+    else if (i === segments.length - 1) out.push('');
+  }
+  return `/${out.join('/')}`;
+}
+
 async function readBody(req: IncomingMessage, limit: number): Promise<Uint8Array | null> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -149,8 +164,9 @@ export class Ingress {
     const match = /^\/apps\/([^/]+)(\/.*)?$/.exec(pathname);
     const view = match && this.#view(match[1]);
     if (!match || !view) return reply(null, 404, 'no app at this address');
-    const rest = match[2];
-    if (rest === undefined) return reply(view.app, 308, undefined, { location: `${APPS_PATH}/${view.name}/${search}` });
+    if (match[2] === undefined) return reply(view.app, 308, undefined, { location: `${APPS_PATH}/${view.name}/${search}` });
+    const rest = normalize(match[2]);
+    if (rest === null) return reply(view.app, 400, 'the path climbs above the app root');
 
     if (rest === `/${RESERVED_SEGMENT}` || rest.startsWith(`/${RESERVED_SEGMENT}/`)) {
       const trigger = /^\/_pneuma-space\/trigger\/([^/]+)$/.exec(rest);
