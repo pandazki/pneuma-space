@@ -1,0 +1,3 @@
+sqlite: gateway, 12 concurrent orders, server-side filtering/aggregation, duplicate and cancellation passed
+postgres: gateway, 12 concurrent orders, server-side filtering/aggregation, duplicate and cancellation passed
+PASS: same order API, SQLite/PostgreSQL, independent persistent data and database/app restart

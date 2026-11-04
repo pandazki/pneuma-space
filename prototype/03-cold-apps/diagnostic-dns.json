@@ -1,0 +1,9 @@
+{
+  "stopped_dns": {
+    "dns_ms": 4001.55,
+    "resolved": false,
+    "error": "gaierror"
+  },
+  "external_stop_recovery_ms": 4294.96,
+  "gateway_timing": "acquire=0.01;lock=0.00;docker=0.00;connect=4292.60;upstream=0.59;total=4293.21"
+}

@@ -1,0 +1,31 @@
+services:
+  gateway:
+    build: ./gateway
+    environment:
+      APP_NETWORK: appbase-local
+      IDLE_SECONDS: ${IDLE_SECONDS:-60}
+      APPBASE_TRACE: ${APPBASE_TRACE:-0}
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gateway-data:/data
+    networks:
+      - app-network
+    restart: unless-stopped
+  postgres:
+    image: postgres:16-alpine
+    profiles: [postgres]
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - app-network
+networks:
+  app-network:
+    name: appbase-local
+volumes:
+  gateway-data:
+  postgres-data:

@@ -1,0 +1,12 @@
+2026-11-04 · local prototype validation
+
+Independent coding agent, isolated HTTP handler + temporary SQLite:
+  python3 -m unittest discover -s prototype/01-agent-app -p 'test_*.py' -v
+  Ran 3 tests: OK
+
+Parent integration, Docker gateway + unique disposable application and volume:
+  python3 prototype/01-agent-app/smoke.py
+  Waiting for the test app to stop after the configured idle timeout...
+  PASS: questionnaire creation, answer, stale conflict, idle-stop wake and persisted answer
+
+The independent agent originally could not access the Docker socket or bind local ports in its sandbox. The later gateway test was performed separately after approval, and did not verify PostgreSQL for this app.

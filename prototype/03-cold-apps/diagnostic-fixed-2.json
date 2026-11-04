@@ -1,0 +1,1119 @@
+{
+  "limits": {
+    "registered_cold": 24,
+    "max_active_test_apps": 3,
+    "concurrent_requests": 9,
+    "observed_memory_threshold_mib": {
+      "gateway": 128,
+      "per_app": 64
+    },
+    "observed_seconds": 120
+  },
+  "cold": [
+    {
+      "at_ms": 2166.02,
+      "client_ms": 329.24,
+      "acquire": 113.87,
+      "lock": 0.0,
+      "docker": 113.87,
+      "connect": 210.73,
+      "upstream": 0.62,
+      "total": 325.24
+    },
+    {
+      "at_ms": 2166.4,
+      "client_ms": 380.11,
+      "acquire": 162.33,
+      "lock": 0.0,
+      "docker": 162.33,
+      "connect": 213.77,
+      "upstream": 0.77,
+      "total": 376.9
+    },
+    {
+      "at_ms": 2166.61,
+      "client_ms": 361.9,
+      "acquire": 142.07,
+      "lock": 0.0,
+      "docker": 142.07,
+      "connect": 213.41,
+      "upstream": 1.06,
+      "total": 356.58
+    }
+  ],
+  "same_app_cold": [
+    {
+      "at_ms": 3754.78,
+      "client_ms": 4543.7,
+      "acquire": 0.01,
+      "lock": 0.0,
+      "docker": 0.0,
+      "connect": 4458.53,
+      "upstream": 1.37,
+      "total": 4459.92
+    },
+    {
+      "at_ms": 3755.15,
+      "client_ms": 4543.29,
+      "acquire": 0.0,
+      "lock": 0.0,
+      "docker": 0.0,
+      "connect": 4458.45,
+      "upstream": 0.74,
+      "total": 4459.19
+    },
+    {
+      "at_ms": 3755.44,
+      "client_ms": 4542.95,
+      "acquire": 0.01,
+      "lock": 0.0,
+      "docker": 0.0,
+      "connect": 4458.73,
+      "upstream": 1.41,
+      "total": 4460.16
+    }
+  ],
+  "direct_ms": {
+    "appbase-trace314c681b-0-41b77876fe3d": [
+      1.7,
+      0.6,
+      0.65,
+      0.53,
+      0.43,
+      0.37,
+      0.46,
+      0.31,
+      0.32,
+      0.28
+    ],
+    "appbase-trace314c681b-1-7125298b0355": [
+      0.55,
+      0.63,
+      2.48,
+      0.47,
+      0.33,
+      0.39,
+      1.62,
+      0.74,
+      0.38,
+      0.41
+    ],
+    "appbase-trace314c681b-2-2ef9604336bb": [
+      0.84,
+      0.97,
+      0.43,
+      0.55,
+      0.4,
+      0.36,
+      0.45,
+      0.41,
+      0.36,
+      0.42
+    ]
+  },
+  "waves": [
+    {
+      "wave": 1,
+      "before": [
+        {
+          "at_ms": 8568.6,
+          "client_ms": 97.31,
+          "acquire": 0.02,
+          "lock": 0.0,
+          "docker": 0.01,
+          "connect": 0.3,
+          "upstream": 1.22,
+          "total": 1.55
+        },
+        {
+          "at_ms": 8665.95,
+          "client_ms": 123.43,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.01,
+          "connect": 0.46,
+          "upstream": 0.47,
+          "total": 0.97
+        },
+        {
+          "at_ms": 8789.4,
+          "client_ms": 86.08,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.48,
+          "upstream": 0.4,
+          "total": 0.92
+        },
+        {
+          "at_ms": 8875.5,
+          "client_ms": 139.84,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.32,
+          "upstream": 0.56,
+          "total": 0.9
+        },
+        {
+          "at_ms": 9015.35,
+          "client_ms": 52.69,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.01,
+          "connect": 0.4,
+          "upstream": 2.99,
+          "total": 3.41
+        },
+        {
+          "at_ms": 9068.05,
+          "client_ms": 117.31,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.32,
+          "upstream": 0.66,
+          "total": 1.0
+        },
+        {
+          "at_ms": 9185.38,
+          "client_ms": 62.02,
+          "acquire": 0.02,
+          "lock": 0.01,
+          "docker": 0.01,
+          "connect": 0.35,
+          "upstream": 0.79,
+          "total": 1.21
+        },
+        {
+          "at_ms": 9247.42,
+          "client_ms": 125.15,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.01,
+          "connect": 5.44,
+          "upstream": 0.73,
+          "total": 6.2
+        },
+        {
+          "at_ms": 9372.58,
+          "client_ms": 123.7,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.01,
+          "connect": 0.33,
+          "upstream": 0.94,
+          "total": 1.31
+        }
+      ],
+      "held": [
+        {
+          "at_ms": 9497.01,
+          "client_ms": 1797.16,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.99,
+          "upstream": 1503.24,
+          "total": 1504.24
+        },
+        {
+          "at_ms": 9498.18,
+          "client_ms": 1806.64,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 1.2,
+          "upstream": 1501.01,
+          "total": 1502.23
+        },
+        {
+          "at_ms": 9498.64,
+          "client_ms": 1806.15,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 1.29,
+          "upstream": 1503.19,
+          "total": 1504.5
+        },
+        {
+          "at_ms": 9498.99,
+          "client_ms": 1795.25,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 1.47,
+          "upstream": 1503.16,
+          "total": 1504.65
+        },
+        {
+          "at_ms": 9499.26,
+          "client_ms": 1805.39,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.01,
+          "connect": 1.16,
+          "upstream": 1503.15,
+          "total": 1504.35
+        },
+        {
+          "at_ms": 9499.64,
+          "client_ms": 1794.97,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.32,
+          "upstream": 1503.9,
+          "total": 1504.24
+        },
+        {
+          "at_ms": 9499.99,
+          "client_ms": 2742.77,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.54,
+          "upstream": 1501.59,
+          "total": 1502.15
+        },
+        {
+          "at_ms": 9500.2,
+          "client_ms": 2742.26,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.79,
+          "upstream": 1501.56,
+          "total": 1502.36
+        },
+        {
+          "at_ms": 9500.57,
+          "client_ms": 2742.26,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 1.18,
+          "upstream": 1502.09,
+          "total": 1503.29
+        }
+      ],
+      "after": [
+        {
+          "at_ms": 12243.25,
+          "client_ms": 2.16,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.34,
+          "upstream": 0.42,
+          "total": 0.79
+        },
+        {
+          "at_ms": 12245.42,
+          "client_ms": 3.11,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.28,
+          "upstream": 0.72,
+          "total": 1.02
+        },
+        {
+          "at_ms": 12248.54,
+          "client_ms": 6.07,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.29,
+          "upstream": 0.37,
+          "total": 0.68
+        },
+        {
+          "at_ms": 12254.63,
+          "client_ms": 2.25,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.25,
+          "upstream": 0.47,
+          "total": 0.75
+        },
+        {
+          "at_ms": 12256.89,
+          "client_ms": 3.12,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.25,
+          "upstream": 0.46,
+          "total": 0.73
+        },
+        {
+          "at_ms": 12260.02,
+          "client_ms": 2.22,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.26,
+          "upstream": 0.57,
+          "total": 0.84
+        },
+        {
+          "at_ms": 12262.25,
+          "client_ms": 1.82,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.24,
+          "upstream": 0.33,
+          "total": 0.59
+        },
+        {
+          "at_ms": 12264.08,
+          "client_ms": 2.98,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.21,
+          "upstream": 0.45,
+          "total": 0.68
+        },
+        {
+          "at_ms": 12267.07,
+          "client_ms": 4.81,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.27,
+          "upstream": 0.5,
+          "total": 0.8
+        },
+        {
+          "at_ms": 12271.89,
+          "client_ms": 2.48,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.35,
+          "upstream": 0.4,
+          "total": 0.77
+        },
+        {
+          "at_ms": 12274.39,
+          "client_ms": 2.96,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.26,
+          "upstream": 0.59,
+          "total": 0.87
+        },
+        {
+          "at_ms": 12277.36,
+          "client_ms": 2.05,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.3,
+          "upstream": 0.61,
+          "total": 0.92
+        }
+      ],
+      "resources": {
+        "at_ms": 13954.25,
+        "containers": [
+          {
+            "name": "task-gateway-1",
+            "cpu": "0.01%",
+            "memory": "15.88MiB / 31.29GiB"
+          },
+          {
+            "name": "appbase-trace314c681b-0-41b77876fe3d",
+            "cpu": "0.01%",
+            "memory": "9.719MiB / 31.29GiB"
+          },
+          {
+            "name": "appbase-trace314c681b-1-7125298b0355",
+            "cpu": "0.01%",
+            "memory": "13.84MiB / 31.29GiB"
+          },
+          {
+            "name": "appbase-trace314c681b-2-2ef9604336bb",
+            "cpu": "0.01%",
+            "memory": "13.86MiB / 31.29GiB"
+          }
+        ]
+      }
+    },
+    {
+      "wave": 2,
+      "before": [
+        {
+          "at_ms": 13954.29,
+          "client_ms": 2.72,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.33,
+          "upstream": 0.47,
+          "total": 0.82
+        },
+        {
+          "at_ms": 13957.02,
+          "client_ms": 5.8,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.45,
+          "upstream": 0.81,
+          "total": 1.28
+        },
+        {
+          "at_ms": 13962.9,
+          "client_ms": 2.51,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.39,
+          "upstream": 0.5,
+          "total": 0.91
+        },
+        {
+          "at_ms": 13965.42,
+          "client_ms": 4.47,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.51,
+          "upstream": 0.67,
+          "total": 1.21
+        },
+        {
+          "at_ms": 13969.9,
+          "client_ms": 3.61,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.32,
+          "upstream": 0.66,
+          "total": 1.01
+        },
+        {
+          "at_ms": 13973.52,
+          "client_ms": 4.53,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.35,
+          "upstream": 0.57,
+          "total": 0.95
+        },
+        {
+          "at_ms": 13978.07,
+          "client_ms": 2.46,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.26,
+          "upstream": 0.56,
+          "total": 0.84
+        },
+        {
+          "at_ms": 13980.54,
+          "client_ms": 2.17,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.24,
+          "upstream": 0.45,
+          "total": 0.71
+        },
+        {
+          "at_ms": 13982.72,
+          "client_ms": 1.5,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.22,
+          "upstream": 0.45,
+          "total": 0.68
+        }
+      ],
+      "held": [
+        {
+          "at_ms": 13984.43,
+          "client_ms": 1503.93,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.53,
+          "upstream": 1500.61,
+          "total": 1501.16
+        },
+        {
+          "at_ms": 13984.6,
+          "client_ms": 1504.65,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.55,
+          "upstream": 1501.37,
+          "total": 1501.94
+        },
+        {
+          "at_ms": 13984.75,
+          "client_ms": 1503.68,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.64,
+          "upstream": 1501.51,
+          "total": 1502.18
+        },
+        {
+          "at_ms": 13984.86,
+          "client_ms": 1504.43,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.37,
+          "upstream": 1501.56,
+          "total": 1501.94
+        },
+        {
+          "at_ms": 13985.14,
+          "client_ms": 1505.33,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 1.35,
+          "upstream": 1501.03,
+          "total": 1502.39
+        },
+        {
+          "at_ms": 13985.42,
+          "client_ms": 1504.81,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.6,
+          "upstream": 1500.95,
+          "total": 1501.57
+        },
+        {
+          "at_ms": 13985.68,
+          "client_ms": 1505.55,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.01,
+          "connect": 0.57,
+          "upstream": 1502.22,
+          "total": 1502.82
+        },
+        {
+          "at_ms": 13985.91,
+          "client_ms": 1505.03,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.37,
+          "upstream": 1500.94,
+          "total": 1501.32
+        },
+        {
+          "at_ms": 13986.34,
+          "client_ms": 1505.31,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.35,
+          "upstream": 1501.7,
+          "total": 1502.06
+        }
+      ],
+      "after": [
+        {
+          "at_ms": 15491.92,
+          "client_ms": 2.78,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.54,
+          "upstream": 0.43,
+          "total": 1.02
+        },
+        {
+          "at_ms": 15494.72,
+          "client_ms": 2.66,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.27,
+          "upstream": 0.64,
+          "total": 0.93
+        },
+        {
+          "at_ms": 15497.41,
+          "client_ms": 2.91,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.24,
+          "upstream": 0.55,
+          "total": 0.81
+        },
+        {
+          "at_ms": 15500.33,
+          "client_ms": 1.82,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.22,
+          "upstream": 0.48,
+          "total": 0.71
+        },
+        {
+          "at_ms": 15502.16,
+          "client_ms": 1.75,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.26,
+          "upstream": 0.41,
+          "total": 0.69
+        },
+        {
+          "at_ms": 15503.93,
+          "client_ms": 1.92,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.27,
+          "upstream": 0.5,
+          "total": 0.79
+        },
+        {
+          "at_ms": 15505.85,
+          "client_ms": 2.01,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.23,
+          "upstream": 0.41,
+          "total": 0.65
+        },
+        {
+          "at_ms": 15507.88,
+          "client_ms": 2.78,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.26,
+          "upstream": 0.47,
+          "total": 0.75
+        },
+        {
+          "at_ms": 15510.67,
+          "client_ms": 2.25,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.24,
+          "upstream": 0.34,
+          "total": 0.6
+        },
+        {
+          "at_ms": 15512.93,
+          "client_ms": 3.14,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.29,
+          "upstream": 0.44,
+          "total": 0.75
+        },
+        {
+          "at_ms": 15516.08,
+          "client_ms": 1.89,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.29,
+          "upstream": 0.43,
+          "total": 0.75
+        },
+        {
+          "at_ms": 15517.98,
+          "client_ms": 2.07,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.28,
+          "upstream": 0.51,
+          "total": 0.8
+        }
+      ],
+      "resources": {
+        "at_ms": 17554.3,
+        "containers": [
+          {
+            "name": "task-gateway-1",
+            "cpu": "0.01%",
+            "memory": "15.89MiB / 31.29GiB"
+          },
+          {
+            "name": "appbase-trace314c681b-0-41b77876fe3d",
+            "cpu": "0.01%",
+            "memory": "9.719MiB / 31.29GiB"
+          },
+          {
+            "name": "appbase-trace314c681b-1-7125298b0355",
+            "cpu": "0.01%",
+            "memory": "13.84MiB / 31.29GiB"
+          },
+          {
+            "name": "appbase-trace314c681b-2-2ef9604336bb",
+            "cpu": "0.01%",
+            "memory": "13.85MiB / 31.29GiB"
+          }
+        ]
+      }
+    },
+    {
+      "wave": 3,
+      "before": [
+        {
+          "at_ms": 17554.34,
+          "client_ms": 2.24,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.33,
+          "upstream": 0.47,
+          "total": 0.82
+        },
+        {
+          "at_ms": 17556.59,
+          "client_ms": 5.08,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.28,
+          "upstream": 0.33,
+          "total": 0.63
+        },
+        {
+          "at_ms": 17561.69,
+          "client_ms": 1.83,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.33,
+          "upstream": 0.44,
+          "total": 0.79
+        },
+        {
+          "at_ms": 17563.53,
+          "client_ms": 1.49,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.18,
+          "upstream": 0.36,
+          "total": 0.56
+        },
+        {
+          "at_ms": 17565.02,
+          "client_ms": 1.76,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.28,
+          "upstream": 0.42,
+          "total": 0.72
+        },
+        {
+          "at_ms": 17566.79,
+          "client_ms": 2.25,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.26,
+          "upstream": 0.49,
+          "total": 0.76
+        },
+        {
+          "at_ms": 17569.05,
+          "client_ms": 1.94,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.32,
+          "upstream": 0.37,
+          "total": 0.7
+        },
+        {
+          "at_ms": 17570.99,
+          "client_ms": 1.85,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.24,
+          "upstream": 0.35,
+          "total": 0.61
+        },
+        {
+          "at_ms": 17572.85,
+          "client_ms": 4.52,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.24,
+          "upstream": 0.39,
+          "total": 0.64
+        }
+      ],
+      "held": [
+        {
+          "at_ms": 17577.58,
+          "client_ms": 1502.89,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.54,
+          "upstream": 1500.74,
+          "total": 1501.3
+        },
+        {
+          "at_ms": 17577.77,
+          "client_ms": 1504.57,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 1.22,
+          "upstream": 1501.62,
+          "total": 1502.85
+        },
+        {
+          "at_ms": 17577.94,
+          "client_ms": 1504.72,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 1.69,
+          "upstream": 1501.11,
+          "total": 1502.82
+        },
+        {
+          "at_ms": 17578.1,
+          "client_ms": 1506.21,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 1.15,
+          "upstream": 1501.42,
+          "total": 1502.58
+        },
+        {
+          "at_ms": 17578.35,
+          "client_ms": 1506.68,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.76,
+          "upstream": 1502.52,
+          "total": 1503.3
+        },
+        {
+          "at_ms": 17578.53,
+          "client_ms": 1505.97,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 1.4,
+          "upstream": 1502.86,
+          "total": 1504.27
+        },
+        {
+          "at_ms": 17578.78,
+          "client_ms": 1505.75,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.86,
+          "upstream": 1501.49,
+          "total": 1502.36
+        },
+        {
+          "at_ms": 17579.05,
+          "client_ms": 1505.22,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.65,
+          "upstream": 1501.86,
+          "total": 1502.53
+        },
+        {
+          "at_ms": 17579.24,
+          "client_ms": 1504.84,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.25,
+          "upstream": 1501.42,
+          "total": 1501.68
+        }
+      ],
+      "after": [
+        {
+          "at_ms": 19085.37,
+          "client_ms": 3.03,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.64,
+          "upstream": 0.58,
+          "total": 1.24
+        },
+        {
+          "at_ms": 19088.41,
+          "client_ms": 1.89,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.23,
+          "upstream": 0.54,
+          "total": 0.78
+        },
+        {
+          "at_ms": 19090.31,
+          "client_ms": 2.99,
+          "acquire": 0.02,
+          "lock": 0.0,
+          "docker": 0.01,
+          "connect": 0.29,
+          "upstream": 0.45,
+          "total": 0.77
+        },
+        {
+          "at_ms": 19093.31,
+          "client_ms": 2.51,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.25,
+          "upstream": 0.4,
+          "total": 0.67
+        },
+        {
+          "at_ms": 19095.84,
+          "client_ms": 2.05,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.21,
+          "upstream": 0.36,
+          "total": 0.58
+        },
+        {
+          "at_ms": 19097.9,
+          "client_ms": 2.39,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.24,
+          "upstream": 0.43,
+          "total": 0.68
+        },
+        {
+          "at_ms": 19100.31,
+          "client_ms": 1.75,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.24,
+          "upstream": 0.46,
+          "total": 0.71
+        },
+        {
+          "at_ms": 19102.09,
+          "client_ms": 1.7,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.2,
+          "upstream": 0.32,
+          "total": 0.54
+        },
+        {
+          "at_ms": 19103.81,
+          "client_ms": 8.39,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.18,
+          "upstream": 0.36,
+          "total": 0.56
+        },
+        {
+          "at_ms": 19112.23,
+          "client_ms": 3.08,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.48,
+          "upstream": 0.68,
+          "total": 1.19
+        },
+        {
+          "at_ms": 19115.33,
+          "client_ms": 2.19,
+          "acquire": 0.01,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.27,
+          "upstream": 0.55,
+          "total": 0.84
+        },
+        {
+          "at_ms": 19117.53,
+          "client_ms": 2.37,
+          "acquire": 0.0,
+          "lock": 0.0,
+          "docker": 0.0,
+          "connect": 0.25,
+          "upstream": 0.39,
+          "total": 0.66
+        }
+      ],
+      "resources": {
+        "at_ms": 21182.54,
+        "containers": [
+          {
+            "name": "task-gateway-1",
+            "cpu": "0.01%",
+            "memory": "15.9MiB / 31.29GiB"
+          },
+          {
+            "name": "appbase-trace314c681b-0-41b77876fe3d",
+            "cpu": "0.01%",
+            "memory": "9.719MiB / 31.29GiB"
+          },
+          {
+            "name": "appbase-trace314c681b-1-7125298b0355",
+            "cpu": "0.01%",
+            "memory": "13.84MiB / 31.29GiB"
+          },
+          {
+            "name": "appbase-trace314c681b-2-2ef9604336bb",
+            "cpu": "0.01%",
+            "memory": "13.85MiB / 31.29GiB"
+          }
+        ]
+      }
+    }
+  ],
+  "elapsed_ms": 21182.6
+}

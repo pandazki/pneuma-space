@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Appbase local administration</title>
+<style>body{font:16px system-ui;max-width:900px;margin:2rem auto;padding:0 1rem;color:#1b2632}h1{margin-bottom:.3rem}p{line-height:1.5}input,textarea,button{font:inherit;padding:.5rem}input,textarea{width:100%;box-sizing:border-box}label{display:block;margin-top:.8rem}button{cursor:pointer}table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{text-align:left;border-bottom:1px solid #ddd;padding:.6rem;overflow-wrap:anywhere}small{color:#52616f}.notice{background:#fff4d8;padding:1rem}.error{color:#9a2017}</style>
+<h1>Appbase</h1><p>Local application administration</p>
+<p class="notice">Trusted images and operators only. This page and the gateway do not provide authentication or tenant isolation.</p>
+<h2>Applications</h2><button id="refresh">Refresh status</button><p id="status" aria-live="polite"></p>
+<table><thead><tr><th>Name</th><th>Image</th><th>State</th><th>Actions</th></tr></thead><tbody id="apps"></tbody></table>
+<h2>Publish an image</h2><p><small>Build the image locally first. Republishing preserves the app data volume. Only non-secret database settings are accepted.</small></p>
+<form id="publish"><label>App name <input name="name" required pattern="[a-z][a-z0-9-]{0,39}" placeholder="my-app"></label>
+<label>Local image <input name="image" required placeholder="my-app:local"></label>
+<label>Database settings as JSON <textarea name="env" rows="3">{}</textarea></label>
+<p><button type="submit">Publish</button></p></form>
+<script>
+const status = document.querySelector('#status'), tbody = document.querySelector('#apps');
+async function call(path, data) {
+  const response = await fetch(path, data ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)} : {});
+  const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Request failed'); return result;
+}
+async function refresh() {
+  try {
+    const apps = await call('/apps'); tbody.replaceChildren();
+    for (const app of apps) {
+      const row = document.createElement('tr');
+      for (const text of [app.name, app.image, app.running ? 'Running' : 'Stopped']) {const cell=document.createElement('td');cell.textContent=text;row.append(cell)}
+      const actions=document.createElement('td'), link=document.createElement('a'), remove=document.createElement('button');
+      link.href='http://'+location.hostname+':8080'+app.url; link.textContent='Open'; actions.append(link, ' ');
+      remove.textContent='Remove'; remove.onclick=async()=>{if (!confirm('Remove '+app.name+'? Its data volume will be kept.')) return;try{await call('/apps/remove',{name:app.name});await refresh()}catch(e){status.textContent=e.message;status.className='error'}};actions.append(remove);row.append(actions);tbody.append(row);
+    }
+    status.textContent=apps.length ? 'Status updated ' + new Date().toLocaleTimeString() : 'No applications published.'; status.className='';
+  } catch(e) {status.textContent=e.message;status.className='error'}
+}
+document.querySelector('#refresh').onclick=refresh;
+document.querySelector('#publish').onsubmit=async e=>{e.preventDefault(); const f=new FormData(e.target);try{const env=JSON.parse(f.get('env'));await call('/apps/publish',{name:f.get('name'),image:f.get('image'),env});await refresh()}catch(err){status.textContent=err.message;status.className='error'}};
+refresh();setInterval(refresh,10000);
+</script></html>

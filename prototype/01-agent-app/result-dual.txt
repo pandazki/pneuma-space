@@ -1,0 +1,11 @@
+2026-11-04 · follow-up cross-backend gateway integration after fixing the Dockerfile
+
+Command (from repository root):
+  python3 prototype/01-agent-app/dual_backend_smoke.py
+
+Output (exit 0):
+  sqlite: 10 concurrent responses, one save, nine conflicts, repeat rejected
+  postgres: 10 concurrent responses, one save, nine conflicts, repeat rejected
+  PASS: survey app image, real SQLite/PostgreSQL, independent data, database/app restart, back-and-forth config switching
+
+The test builds the current prototype/01-agent-app/Dockerfile. The independent agent's initial Dockerfile did not contain psycopg; it is retained as Dockerfile.initial. PostgreSQL ran in an isolated Compose service with disposable test-only credentials; resources were cleaned after the run.

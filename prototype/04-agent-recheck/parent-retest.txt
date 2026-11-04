@@ -1,0 +1,320 @@
+
+## 经授权的隔离 Docker smoke test
+
+资源后缀：91360f34b74e432b
+
+$ docker network inspect taskcheck91360f34b74e432b-net
+[]
+Error response from daemon: network taskcheck91360f34b74e432b-net not found
+[exit 1]
+
+$ docker volume inspect taskcheck91360f34b74e432b-gateway-data
+[]
+Error response from daemon: get taskcheck91360f34b74e432b-gateway-data: no such volume
+[exit 1]
+
+$ docker volume inspect appbase-data-taskcheck91360f34b74e432b
+[]
+Error response from daemon: get appbase-data-taskcheck91360f34b74e432b: no such volume
+[exit 1]
+
+$ docker container inspect taskcheck91360f34b74e432b-gateway
+[]
+Error response from daemon: No such container: taskcheck91360f34b74e432b-gateway
+[exit 1]
+
+$ docker image inspect taskcheck91360f34b74e432b:local
+[]
+Error response from daemon: No such image: taskcheck91360f34b74e432b:local
+[exit 1]
+
+$ docker image inspect taskcheck91360f34b74e432b-gateway:local
+[]
+Error response from daemon: No such image: taskcheck91360f34b74e432b-gateway:local
+[exit 1]
+
+$ docker ps -a --filter label=appbase.name=taskcheck91360f34b74e432b --format {{.ID}}
+
+[exit 0]
+PASS: no existing app containers with the test label
+
+$ docker network create taskcheck91360f34b74e432b-net
+91e298f450df87b13b2dceec25c5d71a1f290e23462d55ea87f61de50de0f5e7
+[exit 0]
+
+$ docker volume create taskcheck91360f34b74e432b-gateway-data
+taskcheck91360f34b74e432b-gateway-data
+[exit 0]
+
+$ docker build -t taskcheck91360f34b74e432b:local ./prototype/04-agent-recheck
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 211B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.12.12-slim
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [1/4] FROM docker.io/library/python:3.12.12-slim
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 86B done
+#5 DONE 0.0s
+
+#6 [2/4] WORKDIR /app
+#6 CACHED
+
+#7 [3/4] RUN pip install --no-cache-dir 'psycopg[binary]==3.2.13'
+#7 CACHED
+
+#8 [4/4] COPY app.py store.py records.py .
+#8 CACHED
+
+#9 exporting to image
+#9 exporting layers done
+#9 writing image sha256:ac3d7834dbc51bff044d45625c5c414ac53ff0b56afe3f384785cef6ccb40dc9 done
+#9 naming to docker.io/library/taskcheck91360f34b74e432b:local done
+#9 DONE 0.0s
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/z0urc17euaj83fpmxcm6tfw3k
+[exit 0]
+
+$ docker build -t taskcheck91360f34b74e432b-gateway:local ./gateway
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 145B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.12.12-slim
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [1/3] FROM docker.io/library/python:3.12.12-slim
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 61B done
+#5 DONE 0.0s
+
+#6 [2/3] WORKDIR /opt/gateway
+#6 CACHED
+
+#7 [3/3] COPY server.py admin.html .
+#7 CACHED
+
+#8 exporting to image
+#8 exporting layers done
+#8 writing image sha256:f36d51e792fadc05793de785ec556a3f1994b631c21127fa3ce0acb5dd58c671 done
+#8 naming to docker.io/library/taskcheck91360f34b74e432b-gateway:local done
+#8 DONE 0.0s
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/il6tr0bimbyu9mzwsot12o5xp
+[exit 0]
+
+$ docker run -d --name taskcheck91360f34b74e432b-gateway --network taskcheck91360f34b74e432b-net -e APP_NETWORK=taskcheck91360f34b74e432b-net -e IDLE_SECONDS=2 -p 127.0.0.1::8080 -p 127.0.0.1::8081 -v /var/run/docker.sock:/var/run/docker.sock -v taskcheck91360f34b74e432b-gateway-data:/data taskcheck91360f34b74e432b-gateway:local
+7f216d06a11a6e9d30b16021192c5791d968227e7cd181317e85479cc25b2b4a
+[exit 0]
+
+$ docker port taskcheck91360f34b74e432b-gateway 8080/tcp
+127.0.0.1:53074
+[exit 0]
+
+$ docker port taskcheck91360f34b74e432b-gateway 8081/tcp
+127.0.0.1:53075
+[exit 0]
+HTTP GET /apps -> 200 []
+HTTP POST /apps/publish -> 200 {"ok": true}
+PASS: published the task app
+HTTP GET /apps/taskcheck91360f34b74e432b/ -> 200 <!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width'><title>Task list</title><style>body{font:16px system-ui;max-width:42rem;margin:3rem auto;padding:0 1rem}li{display:flex;gap:.5rem;align-items:center;margin:1rem 0}li span{flex:1}input{padding:.5rem}button{padding:.5rem}</style><main><h1>Task list</h1><p>Keep track of work on this local host.</p><form method='post' action='/apps/taskcheck91360f34b74e432b/add'><label>New task <input name='title'
+PASS: app wakes through gateway
+HTTP POST /apps/taskcheck91360f34b74e432b/add -> 303
+PASS: task added with prefix-aware redirect
+HTTP GET /apps/taskcheck91360f34b74e432b/ -> 200 <!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width'><title>Task list</title><style>body{font:16px system-ui;max-width:42rem;margin:3rem auto;padding:0 1rem}li{display:flex;gap:.5rem;align-items:center;margin:1rem 0}li span{flex:1}input{padding:.5rem}button{padding:.5rem}</style><main><h1>Task list</h1><p>Keep track of work on this local host.</p><form method='post' action='/apps/taskcheck91360f34b74e432b/add'><label>New task <input name='title'
+PASS: added task appears
+PASS: task form contains key and revision
+HTTP POST /apps/taskcheck91360f34b74e432b/toggle -> 303
+PASS: task completed
+HTTP GET /apps/taskcheck91360f34b74e432b/ -> 200 <!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width'><title>Task list</title><style>body{font:16px system-ui;max-width:42rem;margin:3rem auto;padding:0 1rem}li{display:flex;gap:.5rem;align-items:center;margin:1rem 0}li span{flex:1}input{padding:.5rem}button{padding:.5rem}</style><main><h1>Task list</h1><p>Keep track of work on this local host.</p><form method='post' action='/apps/taskcheck91360f34b74e432b/add'><label>New task <input name='title'
+PASS: completion appears before idle stop
+HTTP GET /apps -> 200 [{"name": "taskcheck91360f34b74e432b", "image": "taskcheck91360f34b74e432b:local", "running": true, "url": "/apps/taskcheck91360f34b74e432b/"}]
+HTTP GET /apps -> 200 [{"name": "taskcheck91360f34b74e432b", "image": "taskcheck91360f34b74e432b:local", "running": true, "url": "/apps/taskcheck91360f34b74e432b/"}]
+HTTP GET /apps -> 200 [{"name": "taskcheck91360f34b74e432b", "image": "taskcheck91360f34b74e432b:local", "running": true, "url": "/apps/taskcheck91360f34b74e432b/"}]
+HTTP GET /apps -> 200 [{"name": "taskcheck91360f34b74e432b", "image": "taskcheck91360f34b74e432b:local", "running": false, "url": "/apps/taskcheck91360f34b74e432b/"}]
+PASS: gateway stopped idle app
+HTTP GET /apps/taskcheck91360f34b74e432b/ -> 200 <!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width'><title>Task list</title><style>body{font:16px system-ui;max-width:42rem;margin:3rem auto;padding:0 1rem}li{display:flex;gap:.5rem;align-items:center;margin:1rem 0}li span{flex:1}input{padding:.5rem}button{padding:.5rem}</style><main><h1>Task list</h1><p>Keep track of work on this local host.</p><form method='post' action='/apps/taskcheck91360f34b74e432b/add'><label>New task <input name='title'
+PASS: completed task survived stop and wake
+
+### 清理本次创建的资源
+HTTP POST /apps/remove -> 200 {"ok": true}
+
+$ docker ps -a --filter label=appbase.name=taskcheck91360f34b74e432b --format {{.ID}}
+
+[exit 0]
+
+$ docker rm -f taskcheck91360f34b74e432b-gateway
+taskcheck91360f34b74e432b-gateway
+[exit 0]
+
+$ docker volume inspect appbase-data-taskcheck91360f34b74e432b
+[
+    {
+        "CreatedAt": "2026-11-04T09:43:05Z",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/appbase-data-taskcheck91360f34b74e432b/_data",
+        "Name": "appbase-data-taskcheck91360f34b74e432b",
+        "Options": null,
+        "Scope": "local"
+    }
+]
+[exit 0]
+
+$ docker volume rm appbase-data-taskcheck91360f34b74e432b
+appbase-data-taskcheck91360f34b74e432b
+[exit 0]
+
+$ docker volume rm taskcheck91360f34b74e432b-gateway-data
+taskcheck91360f34b74e432b-gateway-data
+[exit 0]
+
+$ docker network rm taskcheck91360f34b74e432b-net
+taskcheck91360f34b74e432b-net
+[exit 0]
+
+$ docker image inspect taskcheck91360f34b74e432b:local
+[
+    {
+        "Id": "sha256:ac3d7834dbc51bff044d45625c5c414ac53ff0b56afe3f384785cef6ccb40dc9",
+        "RepoTags": [
+            "taskcheck91360f34b74e432b:local"
+        ],
+        "RepoDigests": [],
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-11-04T09:30:53.300543505Z",
+        "Config": {
+            "ExposedPorts": {
+                "8000/tcp": {}
+            },
+            "Env": [
+                "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "LANG=C.UTF-8",
+                "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+                "PYTHON_VERSION=3.12.12",
+                "PYTHON_SHA256=fb85a13414b028c49ba18bbd523c2d055a30b56b18b92ce454ea2c51edc656c4"
+            ],
+            "Cmd": [
+                "python",
+                "-u",
+                "app.py"
+            ],
+            "WorkingDir": "/app",
+            "ArgsEscaped": true
+        },
+        "Architecture": "arm64",
+        "Os": "linux",
+        "Size": 167772922,
+        "GraphDriver": {
+            "Data": {
+                "LowerDir": "/var/lib/docker/overlay2/4dd022fhg0ywt4j7ghm859jld/diff:/var/lib/docker/overlay2/xiuvxfw160gbjcd34ugf3unmi/diff:/var/lib/docker/overlay2/d82cd3c9a5bb33b7a1422a7c633d74daa9b036ae0ad0de9140c6d0ac58397713/diff:/var/lib/docker/overlay2/860fd2512780146b02a93b624fcce86785d921061e40c073c6ff9335d25cb8c2/diff:/var/lib/docker/overlay2/8c2c49c1bbed54eaca572207a4ae810c3c684884f85cdc9ae538785329627193/diff:/var/lib/docker/overlay2/fc8c28b95fd353820231530de1e8c01acf6afb77bb783c2a1ef5fd1bde85d79c/diff",
+                "MergedDir": "/var/lib/docker/overlay2/wzpap3mivmnawkhu642x7uqi6/merged",
+                "UpperDir": "/var/lib/docker/overlay2/wzpap3mivmnawkhu642x7uqi6/diff",
+                "WorkDir": "/var/lib/docker/overlay2/wzpap3mivmnawkhu642x7uqi6/work"
+            },
+            "Name": "overlay2"
+        },
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:92c4615992c3683ccd14763ed9c3820e97913e6bd7c6a1842df46225103a52ac",
+                "sha256:d8aa2ee9edb4249ae9098bb8463e03235a5eda74e9b8114b258d607be11ebb33",
+                "sha256:3e054e22efbae2875febb385cb918a3da447ef2d87797e5344639a8cb8007b75",
+                "sha256:d7fe50e9b72a98f69c3ed6be088cfa259e0ab7944da2afae13d3491d9ad4510a",
+                "sha256:bd174e9e959a58b0288a1aa1d8aa546589d76b5411a579458ef3a54581c14344",
+                "sha256:2b878a6534f71c8642b335859c47a51a12efea067a0e87ed9a0f0ebbaba74e16",
+                "sha256:34451964d9636f5969f366c0c88803216ac92e8d95e40f2b88a49d667d111642"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "2026-11-04T09:43:04.997344677Z"
+        }
+    }
+]
+[exit 0]
+
+$ docker image rm taskcheck91360f34b74e432b:local
+Untagged: taskcheck91360f34b74e432b:local
+Deleted: sha256:ac3d7834dbc51bff044d45625c5c414ac53ff0b56afe3f384785cef6ccb40dc9
+[exit 0]
+
+$ docker image inspect taskcheck91360f34b74e432b-gateway:local
+[
+    {
+        "Id": "sha256:f36d51e792fadc05793de785ec556a3f1994b631c21127fa3ce0acb5dd58c671",
+        "RepoTags": [
+            "taskcheck91360f34b74e432b-gateway:local"
+        ],
+        "RepoDigests": [],
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-11-04T09:34:34.946718427Z",
+        "Config": {
+            "Env": [
+                "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "LANG=C.UTF-8",
+                "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+                "PYTHON_VERSION=3.12.12",
+                "PYTHON_SHA256=fb85a13414b028c49ba18bbd523c2d055a30b56b18b92ce454ea2c51edc656c4"
+            ],
+            "Cmd": [
+                "python",
+                "-u",
+                "server.py"
+            ],
+            "WorkingDir": "/opt/gateway",
+            "ArgsEscaped": true
+        },
+        "Architecture": "arm64",
+        "Os": "linux",
+        "Size": 144403478,
+        "GraphDriver": {
+            "Data": {
+                "LowerDir": "/var/lib/docker/overlay2/kfnhupdwj68rxkb6bee4129vw/diff:/var/lib/docker/overlay2/d82cd3c9a5bb33b7a1422a7c633d74daa9b036ae0ad0de9140c6d0ac58397713/diff:/var/lib/docker/overlay2/860fd2512780146b02a93b624fcce86785d921061e40c073c6ff9335d25cb8c2/diff:/var/lib/docker/overlay2/8c2c49c1bbed54eaca572207a4ae810c3c684884f85cdc9ae538785329627193/diff:/var/lib/docker/overlay2/fc8c28b95fd353820231530de1e8c01acf6afb77bb783c2a1ef5fd1bde85d79c/diff",
+                "MergedDir": "/var/lib/docker/overlay2/bql60gteiovx3fndjijfmmlfg/merged",
+                "UpperDir": "/var/lib/docker/overlay2/bql60gteiovx3fndjijfmmlfg/diff",
+                "WorkDir": "/var/lib/docker/overlay2/bql60gteiovx3fndjijfmmlfg/work"
+            },
+            "Name": "overlay2"
+        },
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:92c4615992c3683ccd14763ed9c3820e97913e6bd7c6a1842df46225103a52ac",
+                "sha256:d8aa2ee9edb4249ae9098bb8463e03235a5eda74e9b8114b258d607be11ebb33",
+                "sha256:3e054e22efbae2875febb385cb918a3da447ef2d87797e5344639a8cb8007b75",
+                "sha256:d7fe50e9b72a98f69c3ed6be088cfa259e0ab7944da2afae13d3491d9ad4510a",
+                "sha256:218db408d9be4affbbd2e9d24b57c82cfc552c1d28858eda1bc0567dbf024be0",
+                "sha256:5e462089127db07372e39dcdcb7aec253c96172379ca9c3d4100cde8dacf8a46"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "2026-11-04T09:43:05.168826719Z"
+        }
+    }
+]
+[exit 0]
+
+$ docker image rm taskcheck91360f34b74e432b-gateway:local
+Untagged: taskcheck91360f34b74e432b-gateway:local
+Deleted: sha256:f36d51e792fadc05793de785ec556a3f1994b631c21127fa3ce0acb5dd58c671
+[exit 0]
+Cleanup errors: none
+Smoke test result: PASSED

@@ -1,0 +1,40 @@
+# Python and local development
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.coverage
+htmlcov/
+
+# Build outputs and local data
+build/
+dist/
+*.egg-info/
+node_modules/
+.DS_Store
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-*
+*.sqlite3-*
+*.db-*
+
+# Local credentials and configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.pgpass
+
+# Local historical diagnostics, including unsuccessful runs and unredacted traces.
+docs/verification-previous.md
+prototype/01-agent-app/offline-recheck.txt
+prototype/01-agent-app/result-derived.txt
+prototype/04-agent-recheck/TRACE.md
+prototype/04-agent-recheck/TRACE.shareable.md
+prototype/04-agent-recheck/run_logged.py

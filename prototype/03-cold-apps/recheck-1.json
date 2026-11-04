@@ -1,0 +1,120 @@
+{
+  "limits": {
+    "cold_apps": 24,
+    "max_active_apps": 3,
+    "concurrent_requests": 9,
+    "observed_gateway_stop_mib": 128,
+    "observed_app_stop_mib": 64,
+    "max_seconds_checked": 180
+  },
+  "baseline": {
+    "gateway": {
+      "task-gateway-1": {
+        "memory_mib": 11.23,
+        "cpu": "0.01%"
+      }
+    },
+    "connections": {
+      "fds": 5,
+      "tcp_states_hex": {
+        "0A": 2,
+        "06": 41
+      }
+    }
+  },
+  "after_cold_registration": {
+    "gateway": {
+      "task-gateway-1": {
+        "memory_mib": 11.29,
+        "cpu": "0.02%"
+      }
+    },
+    "connections": {
+      "fds": 5,
+      "tcp_states_hex": {
+        "0A": 2,
+        "06": 66
+      }
+    },
+    "list_ms": 58.9
+  },
+  "active_stats": {
+    "task-gateway-1": {
+      "memory_mib": 11.3,
+      "cpu": "0.01%"
+    },
+    "appbase-load7d0031ba-0-5430c8914665": {
+      "memory_mib": 9.64,
+      "cpu": "0.01%"
+    },
+    "appbase-load7d0031ba-1-acb2593a99af": {
+      "memory_mib": 13.79,
+      "cpu": "0.00%"
+    },
+    "appbase-load7d0031ba-2-411f6c789b13": {
+      "memory_mib": 13.79,
+      "cpu": "0.01%"
+    }
+  },
+  "publish_ms": [
+    21.7,
+    22.3,
+    16.6,
+    19.5,
+    19.6,
+    20.9,
+    17.6,
+    15.8,
+    27.2,
+    21.2,
+    37.0,
+    22.8,
+    15.7,
+    17.8,
+    18.2,
+    14.7,
+    15.5,
+    17.5,
+    21.8,
+    31.2,
+    24.9,
+    18.0,
+    19.5,
+    27.3
+  ],
+  "cold_parallel_ms": [
+    302.9,
+    299.9,
+    288.0
+  ],
+  "same_app_cold_ms": [
+    358.7,
+    380.5,
+    382.0
+  ],
+  "warm_sequential_ms": [
+    9.6,
+    12.1,
+    9.9
+  ],
+  "held_request_ms": [
+    2140.6,
+    2246.0,
+    2245.7,
+    1551.2,
+    1550.7,
+    1550.1,
+    1550.1,
+    1550.1,
+    1549.9
+  ],
+  "during_held_requests": {
+    "fds": 23,
+    "tcp_states_hex": {
+      "0A": 2,
+      "01": 9,
+      "06": 72
+    }
+  },
+  "elapsed_seconds": 12.3
+}

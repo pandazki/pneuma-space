@@ -1,0 +1,809 @@
+{
+  "limits": {
+    "max_apps": 1,
+    "max_concurrent_requests": 9,
+    "waves": 3,
+    "warm_samples_per_side": 10,
+    "memory_observation_threshold_mib": {
+      "gateway": 128,
+      "app": 64
+    },
+    "checked_elapsed_seconds": 90
+  },
+  "cold": {
+    "at_ms": 359.83,
+    "client_ms": 280.72,
+    "acquire": 76.53,
+    "connect": 201.76,
+    "upstream": 0.49,
+    "total": 278.92
+  },
+  "direct_from_gateway_ms": [
+    1.32,
+    0.46,
+    0.42,
+    0.38,
+    0.36,
+    0.35,
+    0.33,
+    0.33,
+    0.35,
+    0.36,
+    0.4,
+    0.34,
+    0.34,
+    0.35,
+    0.32
+  ],
+  "waves": [
+    {
+      "wave": 1,
+      "before": [
+        {
+          "at_ms": 735.33,
+          "client_ms": 9.64,
+          "acquire": 7.53,
+          "connect": 0.3,
+          "upstream": 0.41,
+          "total": 8.27
+        },
+        {
+          "at_ms": 744.98,
+          "client_ms": 12.53,
+          "acquire": 10.74,
+          "connect": 0.3,
+          "upstream": 0.37,
+          "total": 11.43
+        },
+        {
+          "at_ms": 757.51,
+          "client_ms": 9.4,
+          "acquire": 7.18,
+          "connect": 0.27,
+          "upstream": 0.45,
+          "total": 7.92
+        },
+        {
+          "at_ms": 766.92,
+          "client_ms": 7.98,
+          "acquire": 6.32,
+          "connect": 0.24,
+          "upstream": 0.4,
+          "total": 6.97
+        },
+        {
+          "at_ms": 774.91,
+          "client_ms": 10.7,
+          "acquire": 7.35,
+          "connect": 0.27,
+          "upstream": 0.35,
+          "total": 7.98
+        },
+        {
+          "at_ms": 785.61,
+          "client_ms": 8.37,
+          "acquire": 6.43,
+          "connect": 0.27,
+          "upstream": 0.42,
+          "total": 7.14
+        },
+        {
+          "at_ms": 793.99,
+          "client_ms": 8.41,
+          "acquire": 6.27,
+          "connect": 0.25,
+          "upstream": 0.33,
+          "total": 6.87
+        },
+        {
+          "at_ms": 802.4,
+          "client_ms": 9.02,
+          "acquire": 6.82,
+          "connect": 0.26,
+          "upstream": 0.35,
+          "total": 7.45
+        },
+        {
+          "at_ms": 811.43,
+          "client_ms": 7.94,
+          "acquire": 5.74,
+          "connect": 0.24,
+          "upstream": 0.33,
+          "total": 6.33
+        },
+        {
+          "at_ms": 819.4,
+          "client_ms": 8.62,
+          "acquire": 6.74,
+          "connect": 0.27,
+          "upstream": 0.41,
+          "total": 7.44
+        }
+      ],
+      "held": [
+        {
+          "at_ms": 834.52,
+          "client_ms": 1515.5,
+          "acquire": 10.45,
+          "connect": 0.22,
+          "upstream": 1501.25,
+          "total": 1511.95
+        },
+        {
+          "at_ms": 834.8,
+          "client_ms": 1513.07,
+          "acquire": 8.9,
+          "connect": 0.39,
+          "upstream": 1501.77,
+          "total": 1511.08
+        },
+        {
+          "at_ms": 834.94,
+          "client_ms": 1510.87,
+          "acquire": 6.34,
+          "connect": 0.38,
+          "upstream": 1501.68,
+          "total": 1508.42
+        },
+        {
+          "at_ms": 835.04,
+          "client_ms": 1510.97,
+          "acquire": 7.19,
+          "connect": 0.4,
+          "upstream": 1501.6,
+          "total": 1509.21
+        },
+        {
+          "at_ms": 835.27,
+          "client_ms": 1511.09,
+          "acquire": 7.17,
+          "connect": 0.2,
+          "upstream": 1501.86,
+          "total": 1509.24
+        },
+        {
+          "at_ms": 835.42,
+          "client_ms": 1511.01,
+          "acquire": 7.46,
+          "connect": 0.29,
+          "upstream": 1500.92,
+          "total": 1508.69
+        },
+        {
+          "at_ms": 835.69,
+          "client_ms": 1513.22,
+          "acquire": 7.16,
+          "connect": 0.53,
+          "upstream": 1501.77,
+          "total": 1509.47
+        },
+        {
+          "at_ms": 835.87,
+          "client_ms": 1511.77,
+          "acquire": 6.36,
+          "connect": 0.49,
+          "upstream": 1501.36,
+          "total": 1508.21
+        },
+        {
+          "at_ms": 836.08,
+          "client_ms": 1513.3,
+          "acquire": 6.54,
+          "connect": 1.08,
+          "upstream": 1501.66,
+          "total": 1509.3
+        }
+      ],
+      "after": [
+        {
+          "at_ms": 2350.58,
+          "client_ms": 11.2,
+          "acquire": 8.86,
+          "connect": 0.31,
+          "upstream": 0.37,
+          "total": 9.56
+        },
+        {
+          "at_ms": 2361.78,
+          "client_ms": 10.53,
+          "acquire": 7.42,
+          "connect": 0.36,
+          "upstream": 0.4,
+          "total": 8.19
+        },
+        {
+          "at_ms": 2372.31,
+          "client_ms": 9.89,
+          "acquire": 7.27,
+          "connect": 0.29,
+          "upstream": 0.36,
+          "total": 7.94
+        },
+        {
+          "at_ms": 2382.21,
+          "client_ms": 9.95,
+          "acquire": 7.6,
+          "connect": 0.28,
+          "upstream": 0.34,
+          "total": 8.24
+        },
+        {
+          "at_ms": 2392.17,
+          "client_ms": 10.96,
+          "acquire": 8.48,
+          "connect": 0.25,
+          "upstream": 0.41,
+          "total": 9.15
+        },
+        {
+          "at_ms": 2403.13,
+          "client_ms": 13.93,
+          "acquire": 6.56,
+          "connect": 0.27,
+          "upstream": 0.41,
+          "total": 7.25
+        },
+        {
+          "at_ms": 2417.06,
+          "client_ms": 10.1,
+          "acquire": 8.04,
+          "connect": 0.29,
+          "upstream": 0.41,
+          "total": 8.76
+        },
+        {
+          "at_ms": 2427.16,
+          "client_ms": 8.43,
+          "acquire": 6.43,
+          "connect": 0.27,
+          "upstream": 0.36,
+          "total": 7.08
+        },
+        {
+          "at_ms": 2435.6,
+          "client_ms": 9.76,
+          "acquire": 7.59,
+          "connect": 0.32,
+          "upstream": 0.42,
+          "total": 8.35
+        },
+        {
+          "at_ms": 2445.37,
+          "client_ms": 10.22,
+          "acquire": 7.6,
+          "connect": 0.26,
+          "upstream": 0.37,
+          "total": 8.24
+        }
+      ],
+      "resource_snapshot": {
+        "at_ms": 3596.27,
+        "containers": [
+          {
+            "Name": "task-gateway-1",
+            "CPUPerc": "0.02%",
+            "MemUsage": "15.8MiB / 31.29GiB"
+          },
+          {
+            "Name": "appbase-latencyb99b8327e9-558008f2f731",
+            "CPUPerc": "0.02%",
+            "MemUsage": "13.98MiB / 31.29GiB"
+          }
+        ]
+      }
+    },
+    {
+      "wave": 2,
+      "before": [
+        {
+          "at_ms": 3596.32,
+          "client_ms": 11.24,
+          "acquire": 8.2,
+          "connect": 0.33,
+          "upstream": 0.44,
+          "total": 8.99
+        },
+        {
+          "at_ms": 3607.56,
+          "client_ms": 8.97,
+          "acquire": 6.57,
+          "connect": 0.32,
+          "upstream": 0.41,
+          "total": 7.33
+        },
+        {
+          "at_ms": 3616.54,
+          "client_ms": 8.91,
+          "acquire": 6.45,
+          "connect": 0.24,
+          "upstream": 0.37,
+          "total": 7.07
+        },
+        {
+          "at_ms": 3625.45,
+          "client_ms": 8.97,
+          "acquire": 6.98,
+          "connect": 0.3,
+          "upstream": 0.4,
+          "total": 7.7
+        },
+        {
+          "at_ms": 3634.43,
+          "client_ms": 9.7,
+          "acquire": 7.34,
+          "connect": 0.28,
+          "upstream": 0.37,
+          "total": 8.01
+        },
+        {
+          "at_ms": 3644.13,
+          "client_ms": 9.32,
+          "acquire": 6.55,
+          "connect": 0.27,
+          "upstream": 0.43,
+          "total": 7.26
+        },
+        {
+          "at_ms": 3653.46,
+          "client_ms": 10.33,
+          "acquire": 7.39,
+          "connect": 0.32,
+          "upstream": 0.46,
+          "total": 8.19
+        },
+        {
+          "at_ms": 3663.79,
+          "client_ms": 10.79,
+          "acquire": 7.88,
+          "connect": 0.3,
+          "upstream": 0.39,
+          "total": 8.59
+        },
+        {
+          "at_ms": 3674.58,
+          "client_ms": 8.34,
+          "acquire": 6.52,
+          "connect": 0.24,
+          "upstream": 0.41,
+          "total": 7.18
+        },
+        {
+          "at_ms": 3682.93,
+          "client_ms": 9.02,
+          "acquire": 6.18,
+          "connect": 0.3,
+          "upstream": 0.45,
+          "total": 6.93
+        }
+      ],
+      "held": [
+        {
+          "at_ms": 3692.29,
+          "client_ms": 1519.41,
+          "acquire": 10.23,
+          "connect": 0.27,
+          "upstream": 1505.83,
+          "total": 1516.34
+        },
+        {
+          "at_ms": 3692.58,
+          "client_ms": 1519.67,
+          "acquire": 8.26,
+          "connect": 0.37,
+          "upstream": 1506.91,
+          "total": 1515.57
+        },
+        {
+          "at_ms": 3692.77,
+          "client_ms": 1519.32,
+          "acquire": 6.8,
+          "connect": 0.51,
+          "upstream": 1508.83,
+          "total": 1516.16
+        },
+        {
+          "at_ms": 3693.05,
+          "client_ms": 1518.46,
+          "acquire": 7.28,
+          "connect": 0.73,
+          "upstream": 1508.58,
+          "total": 1516.61
+        },
+        {
+          "at_ms": 3693.49,
+          "client_ms": 1518.25,
+          "acquire": 6.67,
+          "connect": 0.69,
+          "upstream": 1507.4,
+          "total": 1514.77
+        },
+        {
+          "at_ms": 3693.76,
+          "client_ms": 1517.38,
+          "acquire": 6.99,
+          "connect": 0.37,
+          "upstream": 1505.13,
+          "total": 1512.51
+        },
+        {
+          "at_ms": 3693.98,
+          "client_ms": 1516.8,
+          "acquire": 8.49,
+          "connect": 0.24,
+          "upstream": 1503.36,
+          "total": 1512.1
+        },
+        {
+          "at_ms": 3694.16,
+          "client_ms": 1517.66,
+          "acquire": 7.65,
+          "connect": 0.29,
+          "upstream": 1507.64,
+          "total": 1515.58
+        },
+        {
+          "at_ms": 3694.51,
+          "client_ms": 1517.71,
+          "acquire": 7.58,
+          "connect": 0.29,
+          "upstream": 1506.94,
+          "total": 1514.83
+        }
+      ],
+      "after": [
+        {
+          "at_ms": 5212.65,
+          "client_ms": 11.62,
+          "acquire": 8.24,
+          "connect": 0.31,
+          "upstream": 0.39,
+          "total": 8.95
+        },
+        {
+          "at_ms": 5224.27,
+          "client_ms": 9.56,
+          "acquire": 7.73,
+          "connect": 0.28,
+          "upstream": 0.4,
+          "total": 8.43
+        },
+        {
+          "at_ms": 5233.84,
+          "client_ms": 19.03,
+          "acquire": 11.18,
+          "connect": 0.39,
+          "upstream": 0.56,
+          "total": 12.16
+        },
+        {
+          "at_ms": 5253.33,
+          "client_ms": 12.09,
+          "acquire": 9.45,
+          "connect": 0.33,
+          "upstream": 0.46,
+          "total": 10.27
+        },
+        {
+          "at_ms": 5265.42,
+          "client_ms": 9.79,
+          "acquire": 7.83,
+          "connect": 0.27,
+          "upstream": 0.44,
+          "total": 8.56
+        },
+        {
+          "at_ms": 5275.21,
+          "client_ms": 11.87,
+          "acquire": 7.47,
+          "connect": 0.28,
+          "upstream": 0.4,
+          "total": 8.18
+        },
+        {
+          "at_ms": 5287.11,
+          "client_ms": 11.17,
+          "acquire": 7.52,
+          "connect": 0.39,
+          "upstream": 0.39,
+          "total": 8.32
+        },
+        {
+          "at_ms": 5298.28,
+          "client_ms": 11.92,
+          "acquire": 9.1,
+          "connect": 0.43,
+          "upstream": 0.64,
+          "total": 10.19
+        },
+        {
+          "at_ms": 5310.2,
+          "client_ms": 9.87,
+          "acquire": 7.26,
+          "connect": 0.26,
+          "upstream": 0.37,
+          "total": 7.9
+        },
+        {
+          "at_ms": 5320.08,
+          "client_ms": 9.3,
+          "acquire": 7.14,
+          "connect": 0.44,
+          "upstream": 0.34,
+          "total": 7.94
+        }
+      ],
+      "resource_snapshot": {
+        "at_ms": 7367.52,
+        "containers": [
+          {
+            "Name": "task-gateway-1",
+            "CPUPerc": "0.02%",
+            "MemUsage": "15.8MiB / 31.29GiB"
+          },
+          {
+            "Name": "appbase-latencyb99b8327e9-558008f2f731",
+            "CPUPerc": "0.06%",
+            "MemUsage": "13.97MiB / 31.29GiB"
+          }
+        ]
+      }
+    },
+    {
+      "wave": 3,
+      "before": [
+        {
+          "at_ms": 7367.54,
+          "client_ms": 16.18,
+          "acquire": 9.81,
+          "connect": 0.3,
+          "upstream": 0.39,
+          "total": 10.51
+        },
+        {
+          "at_ms": 7383.73,
+          "client_ms": 12.88,
+          "acquire": 9.82,
+          "connect": 0.36,
+          "upstream": 0.65,
+          "total": 10.85
+        },
+        {
+          "at_ms": 7396.62,
+          "client_ms": 9.55,
+          "acquire": 7.56,
+          "connect": 0.3,
+          "upstream": 0.38,
+          "total": 8.25
+        },
+        {
+          "at_ms": 7406.17,
+          "client_ms": 8.9,
+          "acquire": 6.77,
+          "connect": 0.33,
+          "upstream": 0.45,
+          "total": 7.57
+        },
+        {
+          "at_ms": 7415.08,
+          "client_ms": 8.43,
+          "acquire": 6.41,
+          "connect": 0.31,
+          "upstream": 0.35,
+          "total": 7.09
+        },
+        {
+          "at_ms": 7423.51,
+          "client_ms": 8.37,
+          "acquire": 6.36,
+          "connect": 0.23,
+          "upstream": 0.36,
+          "total": 6.97
+        },
+        {
+          "at_ms": 7431.89,
+          "client_ms": 15.84,
+          "acquire": 11.1,
+          "connect": 0.26,
+          "upstream": 0.37,
+          "total": 11.75
+        },
+        {
+          "at_ms": 7447.73,
+          "client_ms": 16.51,
+          "acquire": 10.3,
+          "connect": 0.33,
+          "upstream": 0.5,
+          "total": 11.15
+        },
+        {
+          "at_ms": 7464.25,
+          "client_ms": 10.15,
+          "acquire": 7.59,
+          "connect": 0.27,
+          "upstream": 0.34,
+          "total": 8.21
+        },
+        {
+          "at_ms": 7474.41,
+          "client_ms": 8.16,
+          "acquire": 5.93,
+          "connect": 0.29,
+          "upstream": 0.38,
+          "total": 6.61
+        }
+      ],
+      "held": [
+        {
+          "at_ms": 7482.88,
+          "client_ms": 1515.28,
+          "acquire": 9.64,
+          "connect": 0.6,
+          "upstream": 1501.72,
+          "total": 1511.98
+        },
+        {
+          "at_ms": 7483.06,
+          "client_ms": 1514.25,
+          "acquire": 6.59,
+          "connect": 0.28,
+          "upstream": 1502.0,
+          "total": 1508.89
+        },
+        {
+          "at_ms": 7483.18,
+          "client_ms": 1515.19,
+          "acquire": 7.62,
+          "connect": 0.44,
+          "upstream": 1502.11,
+          "total": 1510.18
+        },
+        {
+          "at_ms": 7483.45,
+          "client_ms": 1515.12,
+          "acquire": 6.7,
+          "connect": 0.81,
+          "upstream": 1502.24,
+          "total": 1509.76
+        },
+        {
+          "at_ms": 7483.59,
+          "client_ms": 1510.62,
+          "acquire": 6.31,
+          "connect": 0.65,
+          "upstream": 1500.85,
+          "total": 1507.83
+        },
+        {
+          "at_ms": 7483.79,
+          "client_ms": 1514.71,
+          "acquire": 7.72,
+          "connect": 0.56,
+          "upstream": 1501.29,
+          "total": 1509.59
+        },
+        {
+          "at_ms": 7483.93,
+          "client_ms": 1513.82,
+          "acquire": 7.79,
+          "connect": 0.17,
+          "upstream": 1501.43,
+          "total": 1509.4
+        },
+        {
+          "at_ms": 7484.05,
+          "client_ms": 1513.87,
+          "acquire": 7.45,
+          "connect": 0.65,
+          "upstream": 1501.2,
+          "total": 1509.31
+        },
+        {
+          "at_ms": 7484.22,
+          "client_ms": 1514.39,
+          "acquire": 7.23,
+          "connect": 0.7,
+          "upstream": 1501.8,
+          "total": 1509.74
+        }
+      ],
+      "after": [
+        {
+          "at_ms": 8998.77,
+          "client_ms": 9.54,
+          "acquire": 7.63,
+          "connect": 0.3,
+          "upstream": 0.37,
+          "total": 8.31
+        },
+        {
+          "at_ms": 9008.32,
+          "client_ms": 10.69,
+          "acquire": 6.56,
+          "connect": 0.25,
+          "upstream": 0.49,
+          "total": 7.32
+        },
+        {
+          "at_ms": 9019.02,
+          "client_ms": 9.21,
+          "acquire": 6.51,
+          "connect": 0.25,
+          "upstream": 0.37,
+          "total": 7.14
+        },
+        {
+          "at_ms": 9028.24,
+          "client_ms": 9.22,
+          "acquire": 6.47,
+          "connect": 0.28,
+          "upstream": 0.36,
+          "total": 7.12
+        },
+        {
+          "at_ms": 9037.46,
+          "client_ms": 8.99,
+          "acquire": 6.91,
+          "connect": 0.25,
+          "upstream": 0.34,
+          "total": 7.52
+        },
+        {
+          "at_ms": 9046.45,
+          "client_ms": 9.72,
+          "acquire": 7.36,
+          "connect": 0.24,
+          "upstream": 0.34,
+          "total": 7.95
+        },
+        {
+          "at_ms": 9056.17,
+          "client_ms": 14.08,
+          "acquire": 6.92,
+          "connect": 0.32,
+          "upstream": 0.44,
+          "total": 7.69
+        },
+        {
+          "at_ms": 9070.26,
+          "client_ms": 13.15,
+          "acquire": 10.86,
+          "connect": 0.38,
+          "upstream": 0.42,
+          "total": 11.68
+        },
+        {
+          "at_ms": 9083.41,
+          "client_ms": 8.58,
+          "acquire": 6.59,
+          "connect": 0.26,
+          "upstream": 0.41,
+          "total": 7.27
+        },
+        {
+          "at_ms": 9092.0,
+          "client_ms": 8.1,
+          "acquire": 6.12,
+          "connect": 0.26,
+          "upstream": 0.41,
+          "total": 6.81
+        }
+      ],
+      "resource_snapshot": {
+        "at_ms": 11129.3,
+        "containers": [
+          {
+            "Name": "task-gateway-1",
+            "CPUPerc": "0.02%",
+            "MemUsage": "15.8MiB / 31.29GiB"
+          },
+          {
+            "Name": "appbase-latencyb99b8327e9-558008f2f731",
+            "CPUPerc": "0.01%",
+            "MemUsage": "13.98MiB / 31.29GiB"
+          }
+        ]
+      }
+    }
+  ],
+  "elapsed_ms": 11129.34
+}
