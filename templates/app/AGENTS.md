@@ -13,7 +13,7 @@ You are building a web app for Pneuma Space. The app is one container behind the
 | `static` | `{"dir": "public"}`: the platform serves that directory at your address without starting the container |
 | `ws` | WebSocket and `text/event-stream` pass through and keep the app awake |
 | `cron` | Named triggers called on a 5-field cron schedule (UTC unless the operator changes it) or on demand, at least once |
-| `identity` | The visitor as headers; browsers without a session are sent to the platform login first |
+| `identity` | The visitor as headers; browsers without a session are sent to the platform login first. `{"required": false}` lets anonymous visitors through with `identity` null; send them to `/_pneuma/login?next=<path>` when a page needs a login |
 | `rtc` | STUN and TURN servers for WebRTC; signaling goes over your own `ws` |
 
 ## Manifest
@@ -62,7 +62,7 @@ curl -H 'X-Pneuma-Subject: user:ann' -H 'X-Pneuma-Name: Ann' -H 'X-Pneuma-Owner:
 curl -X POST -H 'X-Pneuma-Delivery: d1' -H 'X-Pneuma-Attempt: 1' http://127.0.0.1:8000/_pneuma/trigger/tick
 ```
 
-Set only the variables of capabilities you declare; without `kv`, skip Redis and `PNEUMA_KV_*`. Locally `identity` is `null` unless you send `X-Pneuma-Subject`; on the platform a declared `identity` guarantees one. For the PostgreSQL path run `docker run -d --name dev-pg -p 127.0.0.1:5432:5432 -e POSTGRES_PASSWORD=pw postgres:16-alpine` and use `PNEUMA_DB_URL=postgresql://postgres:pw@127.0.0.1:5432/postgres`. `docker build .` checks the image.
+Set only the variables of capabilities you declare; without `kv`, skip Redis and `PNEUMA_KV_*`. Locally `identity` is `null` unless you send `X-Pneuma-Subject`; on the platform a declared `identity` guarantees one unless it says `"required": false`. For the PostgreSQL path run `docker run -d --name dev-pg -p 127.0.0.1:5432:5432 -e POSTGRES_PASSWORD=pw postgres:16-alpine` and use `PNEUMA_DB_URL=postgresql://postgres:pw@127.0.0.1:5432/postgres`. `docker build .` checks the image.
 
 ## Publish
 
@@ -92,9 +92,9 @@ Set only the variables of capabilities you declare; without `kv`, skip Redis and
 8. For voice or a direct data channel, add `rtc`, serve `GET /ice` with `iceServers(identity.subject, 3600)`, and relay offer, answer and candidates over the same WebSocket.
 9. Test with two browsers or two curl subjects, then publish.
 
-## Scenario: personal dashboard widget (`cron`, `db`, `static`)
+## Scenario: personal dashboard widget (`cron`, `db`, `static`, `identity`)
 
-1. In `pneuma.json` declare `db`, `static` with `{"dir": "public"}` and `cron` with `{"refresh": {"schedule": "0 * * * *"}}`; no `identity`, so the card is public.
+1. In `pneuma.json` declare `db`, `static` with `{"dir": "public"}`, `cron` with `{"refresh": {"schedule": "0 * * * *"}}` and `identity` with `{"required": false}`, so the card is public and the owner still gets `identity.owner`.
 2. Delete the asset handler in `src/server.ts`; the platform now serves `public/` without waking the app.
 3. `public/card.html` and `public/card.js` render the card; `card.js` fetches `${prefix}/api/card`. Do not add `public/index.html` if `GET /` is dynamic.
 4. Create `reading (slot TEXT PRIMARY KEY, value TEXT, fetched_at TEXT)`.

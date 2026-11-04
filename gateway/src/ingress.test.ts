@@ -18,13 +18,14 @@ function view(name: string, kinds: CapabilityKind[], extra: Partial<RouteView> =
   return {
     app: `id-${name}` as AppId, name: name as AppName, status: 'registered', owner: 'user:alice' as Subject,
     release: 1 as ReleaseNumber, image: 'sha256:x' as ImageId, kinds: new Set(['route', ...kinds]), bundle: null,
-    policyOverride: {}, ...extra,
+    identity: kinds.includes('identity') ? {} : null, policyOverride: {}, ...extra,
   };
 }
 
 const VIEWS = new Map([
   view('plain', []),
   view('who', ['identity']),
+  view('guest', ['identity'], { identity: { required: false } }),
   view('chat', ['ws']),
   view('mixed', ['static'], { bundle: { id: 'b'.repeat(64) as BundleId, files: { 'app.js': { size: APP_JS.length, etag: 'e1', contentType: 'text/javascript' } } } }),
   view('gone', [], { status: 'removed' }),
@@ -172,6 +173,22 @@ test('an unauthenticated caller of an identity app gets the provider\'s challeng
   reset();
   assert.equal((await request('/apps/who/echo')).status, 401);
   assert.deepEqual(events, []);
+});
+
+test('an anonymous visitor of an app with identity required false reaches it with no identity headers', async () => {
+  reset();
+  const got = await request('/apps/guest/echo', { headers: { 'x-pneuma-subject': 'user:alice' } });
+  assert.equal(got.status, 200);
+  const { headers } = JSON.parse(got.body);
+  assert.equal(headers['x-pneuma-subject'], undefined);
+  assert.equal(headers['x-pneuma-name'], undefined);
+  assert.equal(headers['x-pneuma-owner'], undefined);
+});
+
+test('a signed-in visitor of an app with identity required false still gets the identity headers', async () => {
+  const { headers } = JSON.parse((await request('/apps/guest/echo', { headers: { authorization: 'Bearer alice' } })).body);
+  assert.equal(headers['x-pneuma-subject'], 'user:alice');
+  assert.equal(headers['x-pneuma-owner'], '1');
 });
 
 test('Range reaches the app unchanged and its 206 comes back unchanged', async () => {

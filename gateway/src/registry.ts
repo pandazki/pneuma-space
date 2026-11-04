@@ -413,6 +413,7 @@ export class PlatformRegistry implements Registry {
       image: release?.image ?? null,
       kinds: new Set(release ? declaredKinds(release.manifest) : []),
       bundle: (release?.bundle && this.#indexes.get(release.bundle)) || null,
+      identity: release?.manifest.capabilities.identity ?? null,
       policyOverride: Object.freeze({ ...app.policyOverride }),
     });
     this.#views.set(name, view);

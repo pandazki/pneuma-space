@@ -163,10 +163,10 @@ export class Ingress {
     if (upgrade && !view.kinds.has('ws')) return reply(view.app, 426, 'this app does not declare the "ws" capability');
 
     let who: Principal | null = null;
-    if (view.kinds.has('identity')) {
+    if (view.identity) {
       const result = await this.#deps.identity.authenticate(req);
-      if (!('subject' in result)) return { to: 'reply', app: view.app, reply: challenge(result) };
-      who = result;
+      if ('subject' in result) who = result;
+      else if (view.identity.required !== false) return { to: 'reply', app: view.app, reply: challenge(result) };
     }
     if (view.image === null) return reply(view.app, 404, 'no file at this path');
     return { to: 'app', view, path: rest + search, headers: forwardedHeaders(req, view, who) };

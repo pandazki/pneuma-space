@@ -88,6 +88,8 @@ export type KindClass = 'resource' | 'ingress' | 'schedule';
 export type EmptyDeclaration = Record<string, never>;
 export type StaticDeclaration = { readonly dir: string };
 export type CronDeclaration = { readonly triggers: Readonly<Record<TriggerName, { readonly schedule?: CronExpr }>> };
+/** `required` absent means true. */
+export type IdentityDeclaration = { readonly required?: boolean };
 
 type CapabilitySpec = {
   readonly class: KindClass;
@@ -107,7 +109,7 @@ export const CAPABILITIES = {
   static:   { class: 'ingress',  needsImage: false, providers: [],                     parse: parseStatic },
   ws:       { class: 'ingress',  needsImage: true,  providers: [],                     parse: empty },
   cron:     { class: 'schedule', needsImage: true,  providers: [],                     parse: parseCron },
-  identity: { class: 'ingress',  needsImage: true,  providers: [],                     parse: empty },
+  identity: { class: 'ingress',  needsImage: true,  providers: [],                     parse: parseIdentity },
   rtc:      { class: 'resource', needsImage: true,  providers: ['coturn'],             parse: empty },
 } as const satisfies Record<CapabilityKind, CapabilitySpec>;
 
@@ -180,6 +182,15 @@ function implicit(_raw: unknown, where: string): never {
 function empty(raw: unknown, where: string): EmptyDeclaration {
   onlyKeys(asObject(raw, where), [], where);
   return {};
+}
+
+function parseIdentity(raw: unknown, where: string): IdentityDeclaration {
+  const declaration = asObject(raw, where);
+  onlyKeys(declaration, ['required'], where);
+  if (declaration.required !== undefined && typeof declaration.required !== 'boolean') {
+    throw new ManifestError(`${where}.required must be true or false`);
+  }
+  return declaration.required === undefined ? {} : { required: declaration.required };
 }
 
 function parseStatic(raw: unknown, where: string): StaticDeclaration {
@@ -409,6 +420,8 @@ export type RouteView = {
   readonly image: ImageId | null;
   readonly kinds: ReadonlySet<CapabilityKind>;
   readonly bundle: BundleIndex | null;
+  /** Null when the release does not declare identity. */
+  readonly identity: IdentityDeclaration | null;
   readonly policyOverride: PolicyOverride;
 };
 

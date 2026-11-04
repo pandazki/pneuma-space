@@ -18,7 +18,7 @@ async function serveIngress(upstreamPort: number): Promise<void> {
     registry: {
       view: (name) => ({
         app, name, status: 'registered', owner: 'user:o' as Subject, release: 1 as ReleaseNumber, image: 'sha256:x' as ImageId,
-        kinds: new Set(['route']), bundle: null, policyOverride: {},
+        kinds: new Set(['route']), bundle: null, identity: null, policyOverride: {},
       }),
       policy: () => DEFAULT_POLICY,
     },
