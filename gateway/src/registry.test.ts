@@ -3,7 +3,7 @@ import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { Ingress } from './ingress.ts';
 import { Conflict, InputError, appName, parseManifest, subject, triggerName, type AppId, type BundleId, type Capabilities } from './model.ts';
-import type { PlatformRegistry } from './registry.ts';
+import { PlatformRegistry } from './registry.ts';
 import { world } from './registry.fakes.ts';
 import { DeliveryScheduler } from './scheduler.ts';
 
@@ -190,4 +190,21 @@ test('a second remove retries a suspend that failed during the first', async () 
   await registry.remove(survey);
   await registry.remove(survey);
   assert.deepEqual(w.calls.filter(([verb]) => verb === 'suspend'), [['suspend', 'redis', app], ['suspend', 'redis', app]]);
+});
+
+test('runSpec, which every acquire reads, makes no store read', async () => {
+  const w = world();
+  const { store } = await w.open();
+  let reads = 0;
+  const counting = new Proxy(store, {
+    get(target, key) {
+      const value = Reflect.get(target, key);
+      return typeof value === 'function' ? (...args: unknown[]) => (reads++, value.apply(target, args)) : value;
+    },
+  });
+  const registry = await PlatformRegistry.open({ store: counting, runtime: w.runtime, bundles: w.bundles, providers: [...w.providers.values()] });
+  const { app } = await publish(registry, { kv: {} });
+  reads = 0;
+  for (let i = 0; i < 3; i++) assert.equal(registry.runSpec(app)?.release, 1);
+  assert.equal(reads, 0);
 });

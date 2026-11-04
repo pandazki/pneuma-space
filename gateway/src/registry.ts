@@ -79,6 +79,7 @@ export class PlatformRegistry implements Registry {
   readonly #stats: () => Stats[];
   readonly #changed = new EventEmitter();
   readonly #views = new Map<AppName, RouteView>();
+  readonly #specs = new Map<AppId, RunSpec>();
   readonly #names = new Map<AppId, AppName>();
   readonly #indexes = new Map<BundleId, BundleIndex>();
   readonly #locks = new Map<AppName, Promise<unknown>>();
@@ -206,6 +207,7 @@ export class PlatformRegistry implements Registry {
     }
     this.#store.deleteApp(app.id);
     this.#views.delete(app.name);
+    this.#specs.delete(app.id);
     log('purge', app.name);
     this.#emit(app.id);
     this.#names.delete(app.id);
@@ -215,6 +217,7 @@ export class PlatformRegistry implements Registry {
     const next = { ...this.#policy, ...parsePolicyPatch(patch, 'global') } as Policy;
     this.#store.putPolicy(next);
     this.#policy = next;
+    for (const name of this.#views.keys()) this.#refresh(name);
     log('policy', null, { policy: next });
     return next;
   }
@@ -272,25 +275,7 @@ export class PlatformRegistry implements Registry {
   }
 
   runSpec(id: AppId): RunSpec | null {
-    const name = this.#names.get(id);
-    const app = name && this.#store.app(name);
-    const release = app && app.status === 'registered' ? this.#currentRelease(app) : null;
-    if (!app || !release?.image) return null;
-    const policy = effectivePolicy(this.#policy, app.policyOverride);
-    const injections: Injection[] = this.#store.bindings(id)
-      .filter((b) => b.state === 'active' && desiredState(app, release.manifest, policy, b) === 'active')
-      .map((b) => this.#provider(b.provider).inject(id, b.resource));
-    return {
-      app: id,
-      name: app.name,
-      release: release.number,
-      image: release.image,
-      injection: {
-        env: Object.assign({}, ...injections.map((i) => i.env)),
-        mounts: injections.flatMap((i) => i.mounts),
-      },
-      policy,
-    };
+    return this.#specs.get(id) ?? null;
   }
 
   schedule(id: AppId): SchedulerView | null {
@@ -365,6 +350,7 @@ export class PlatformRegistry implements Registry {
         await provider.suspend(app.id, binding.resource);
       }
     }
+    this.#refresh(name);
   }
 
   /** Writes the binding row right after the provider returns, so a crash before commit leaves a row the next publish adopts. */
@@ -424,7 +410,28 @@ export class PlatformRegistry implements Registry {
     });
     this.#views.set(name, view);
     this.#names.set(app.id, name);
+    const spec = release?.image && app.status === 'registered' ? this.#spec(app, release.image, release) : null;
+    if (spec) this.#specs.set(app.id, spec);
+    else this.#specs.delete(app.id);
     return view;
+  }
+
+  #spec(app: App, image: ImageId, release: Release): RunSpec {
+    const policy = effectivePolicy(this.#policy, app.policyOverride);
+    const injections: Injection[] = this.#store.bindings(app.id)
+      .filter((b) => b.state === 'active' && desiredState(app, release.manifest, policy, b) === 'active')
+      .map((b) => this.#provider(b.provider).inject(app.id, b.resource));
+    return {
+      app: app.id,
+      name: app.name,
+      release: release.number,
+      image,
+      injection: {
+        env: Object.assign({}, ...injections.map((i) => i.env)),
+        mounts: injections.flatMap((i) => i.mounts),
+      },
+      policy,
+    };
   }
 
   #currentRelease(app: App): Release | null {
