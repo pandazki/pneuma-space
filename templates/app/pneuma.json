@@ -1,0 +1,11 @@
+{
+  "contract": 1,
+  "capabilities": {
+    "files": {},
+    "db": {},
+    "kv": {},
+    "ws": {},
+    "cron": { "triggers": { "tick": { "schedule": "0 3 * * *" } } },
+    "identity": {}
+  }
+}
