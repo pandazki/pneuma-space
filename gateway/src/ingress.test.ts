@@ -154,6 +154,12 @@ test('forged X-Pneuma-Space headers never reach the app (AC-FORM-2)', async () =
   assert.equal(headers['x-forwarded-prefix'], '/apps/plain');
 });
 
+test('forged headers spelled with underscores never reach the app (INV-5)', async () => {
+  const got = await request('/apps/guest/echo', { headers: { X_Pneuma_Space_Subject: 'user:alice', 'x-pneuma_space-owner': '1' } });
+  const forged = Object.keys(JSON.parse(got.body).headers).filter((name) => name.replaceAll('_', '-').startsWith('x-pneuma-space-'));
+  assert.deepEqual(forged, []);
+});
+
 test('the identity provider\'s subject reaches the app in place of a forged one (AC-FORM-2)', async () => {
   const got = await request('/apps/who/echo?q=1', { headers: { authorization: 'Bearer bob', 'x-pneuma-space-subject': 'user:alice' } });
   const { url, headers } = JSON.parse(got.body);

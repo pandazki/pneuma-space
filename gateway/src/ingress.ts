@@ -51,7 +51,8 @@ function forwardedHeaders(req: IncomingMessage, view: RouteView, who: Principal 
   const out: string[] = [];
   const raw = req.rawHeaders;
   for (let i = 0; i < raw.length; i += 2) {
-    const name = raw[i].toLowerCase();
+    // CGI-style servers read X_Pneuma_Space_Subject as X-Pneuma-Space-Subject.
+    const name = raw[i].toLowerCase().replaceAll('_', '-');
     if (!name.startsWith(RESERVED_HEADER_PREFIX) && name !== HEADERS.prefix) out.push(raw[i], raw[i + 1]);
   }
   out.push(HEADERS.prefix, `${APPS_PATH}/${view.name}`);
