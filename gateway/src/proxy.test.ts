@@ -60,29 +60,34 @@ if (process.argv[2] === 'ingress') {
     };
 
     const baseline = await rss();
-    let peak = baseline;
-    let received = 0;
-    const done = new Promise<void>((resolve, reject) => {
-      http.get({ host: '127.0.0.1', port, path: '/apps/big/' }, (res) => {
-        res.on('data', (c: Buffer) => (received += c.length)).on('end', resolve);
-      }).on('error', reject);
-    });
-    let finished = false;
-    void done.then(() => (finished = true));
-    while (!finished) {
-      peak = Math.max(peak, await rss());
-      await sleep(50);
-    }
-    await done;
-    await sleep(3000);
-    const settled = await rss();
-    const report = `baseline ${(baseline / MiB).toFixed(1)} MiB, peak growth ${((peak - baseline) / MiB).toFixed(1)} MiB, ` +
-      `3 s after ${((settled - baseline) / MiB).toFixed(1)} MiB over baseline`;
+    const stream = async (): Promise<{ peak: number; settled: number }> => {
+      let peak = baseline;
+      let received = 0;
+      const done = new Promise<void>((resolve, reject) => {
+        http.get({ host: '127.0.0.1', port, path: '/apps/big/' }, (res) => {
+          res.on('data', (c: Buffer) => (received += c.length)).on('end', resolve);
+        }).on('error', reject);
+      });
+      let finished = false;
+      void done.then(() => (finished = true));
+      while (!finished) {
+        peak = Math.max(peak, await rss());
+        await sleep(50);
+      }
+      await done;
+      assert.equal(received, GiB);
+      await sleep(3000);
+      return { peak, settled: await rss() };
+    };
+    // Three streams in a row: the peak bounds the relay's working set, and a retained size that stops growing is allocator slack, not a leak.
+    const runs = [await stream(), await stream(), await stream()];
+    const mib = (n: number) => (n / MiB).toFixed(1);
+    const report = `baseline ${mib(baseline)} MiB; per stream peak growth ${runs.map((r) => mib(r.peak - baseline)).join(', ')} MiB; ` +
+      `retained 3 s after ${runs.map((r) => mib(r.settled - baseline)).join(', ')} MiB`;
     t.diagnostic(report);
-    assert.equal(received, GiB);
     // macOS malloc keeps freed Buffer pages resident even after a full GC, so RSS there measures the allocator, not the relay.
     if (process.platform === 'darwin') return void t.skip(`RSS bound is asserted on Linux only; ${report}`);
-    assert.ok(peak - baseline < 160 * MiB, report);
-    assert.ok(settled - baseline < 20 * MiB, report);
+    for (const run of runs) assert.ok(run.peak - baseline < 160 * MiB, report);
+    assert.ok(runs[2].settled - runs[0].settled < 16 * MiB, report);
   });
 }

@@ -48,7 +48,7 @@ A manifest with only `static` publishes without an image. A manifest with any ot
 
 ## Environment
 
-Only the declared capabilities' variables exist. `PNEUMA_APP` and `PNEUMA_RELEASE` always exist.
+Only the declared capabilities' variables exist. `PNEUMA_APP` (the app name) and `PNEUMA_RELEASE` (the release number) always exist.
 
 | Capability | Variables |
 | --- | --- |
