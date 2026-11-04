@@ -31,6 +31,8 @@ const ingress = new Ingress({
   registry, runtime, identity, bundles, scheduler, stats: store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
 });
 
+process.on('unhandledRejection', (error) => log('unhandled-rejection', { error: String(error) }));
+
 registry.onAppChanged((app) => {
   runtime.retire(app).catch((error: Error) => log('retire-failed', { app, error: error.message }));
   scheduler.reload(app);

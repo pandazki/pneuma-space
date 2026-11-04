@@ -6,7 +6,7 @@ import { pipeline } from 'node:stream';
 export type Hold = {
   /** Reclassifies the lease as a channel; `onRetire` ends the stream when the instance drains. */
   readonly channel: (onRetire: () => void) => void;
-  /** Called exactly once, when the upstream exchange has ended. */
+  /** Called exactly once, when the upstream exchange has ended and the response is finished or the client gone. */
   readonly release: () => void;
   /** A channel with no bytes for this long is closed. */
   readonly idleMs: number;
@@ -63,7 +63,10 @@ export function forward(
     ur.pipe(res);
     ur.on('error', () => res.destroy());
   });
-  up.once('close', hold.release);
+  let open = 2;
+  const done = () => --open === 0 && hold.release();
+  up.once('close', done);
+  res.once('close', done);
   up.on('error', () => {
     if (!res.headersSent && !res.destroyed) res.writeHead(502, { 'content-type': 'application/json' }).end('{"error":"the app closed the connection"}');
     else res.destroy();

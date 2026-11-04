@@ -21,6 +21,8 @@ type Instance = {
   /** Value is the channel's onRetire; null for request and trigger leases. */
   readonly leases: Map<Lease, (() => void) | null>;
   lastReleaseAt: number;
+  /** Epoch ms just before the last docker start; an older die event is a replay and is ignored. */
+  startedAt: number;
   wake: Promise<void>;
   changed: PromiseWithResolvers<void>;
 };
@@ -84,7 +86,7 @@ export class DockerRuntime implements Runtime {
       if (!spec) throw new NotFound(`app ${app} has no registered release with an image`);
       let inst = this.instances.get(app);
       if (!inst) {
-        inst = { app, state: 'asleep', spec, container: null, address: '', leases: new Map(), lastReleaseAt: 0, wake: Promise.resolve(), changed: Promise.withResolvers() };
+        inst = { app, state: 'asleep', spec, container: null, address: '', leases: new Map(), lastReleaseAt: 0, startedAt: 0, wake: Promise.resolve(), changed: Promise.withResolvers() };
         this.instances.set(app, inst);
       }
       switch (inst.state) {
@@ -161,7 +163,7 @@ export class DockerRuntime implements Runtime {
       const running = container.State === 'running' && Boolean(ip);
       const inst: Instance = {
         app, state: 'asleep', spec, container: container.Id, address: running ? `${ip}:${APP_PORT}` : '',
-        leases: new Map(), lastReleaseAt: Date.now(), wake: Promise.resolve(), changed: Promise.withResolvers(),
+        leases: new Map(), lastReleaseAt: Date.now(), startedAt: 0, wake: Promise.resolve(), changed: Promise.withResolvers(),
       };
       this.instances.set(app, inst);
       this.transition(inst, running ? 'awake' : 'asleep', { adopted: true });
@@ -220,6 +222,7 @@ export class DockerRuntime implements Runtime {
       }
       inst.spec = spec;
       inst.container ??= await this.create(spec);
+      inst.startedAt = Date.now();
       if (!(await this.docker.start(inst.container))) {
         // 404 also means the container outlived its network (compose down recreates it); a same-name create would return it again.
         await this.docker.remove(inst.container);
@@ -333,7 +336,7 @@ export class DockerRuntime implements Runtime {
 
   private onDie(event: DockerEvent): void {
     const inst = this.instances.get(event.labels[LABEL.app] as AppId);
-    if (inst?.state === 'awake' && inst.container === event.id) this.transition(inst, 'asleep', { external: true });
+    if (inst?.state === 'awake' && inst.container === event.id && event.time >= inst.startedAt) this.transition(inst, 'asleep', { external: true });
   }
 
   private transition(inst: Instance, state: InstanceState, extra: Record<string, unknown> = {}): void {

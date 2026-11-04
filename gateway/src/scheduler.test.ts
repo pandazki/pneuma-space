@@ -45,7 +45,7 @@ function harness(triggers: Record<string, string | null> = { run: null }) {
     triggers: Object.entries(triggers).map(([name, schedule]) => ({ app: APP, name: name as TriggerName, schedule: schedule as CronExpr | null })),
     policy: DEFAULT_POLICY,
   };
-  const state = { view: view as SchedulerView | null, acquired: 0, released: 0, refuse: false };
+  const state = { view: view as SchedulerView | null, acquired: 0, released: 0, refuse: false, failWrite: false };
   const store: SchedulerDeps['store'] = {
     apps: () => [{ id: APP, status: 'registered' } as App],
     insertDelivery: (d) => {
@@ -56,7 +56,10 @@ function harness(triggers: Record<string, string | null> = { run: null }) {
       rows.push(d);
       return d;
     },
-    updateDelivery: (d) => void rows.splice(rows.findIndex((r) => r.id === d.id), 1, d),
+    updateDelivery: (d) => {
+      if (state.failWrite) throw new Error('database is locked');
+      rows.splice(rows.findIndex((r) => r.id === d.id), 1, d);
+    },
     deliveries: (f: DeliveryFilter) => rows.filter((r) => (f.app === undefined || r.app === f.app) &&
       (f.state === undefined || r.state === f.state) && (f.dueBefore === undefined || r.nextAttemptAt <= f.dueBefore)),
     deleteDeliveries: (app) => void rows.splice(0, rows.length, ...rows.filter((r) => r.app !== app)),
@@ -215,4 +218,11 @@ test('catching up a per-minute trigger after 30 days down finds the latest slot 
   const started = performance.now();
   assert.equal(latestSlot('* * * * *' as CronExpr, now - 30 * 86_400_000, now, 'UTC'), Date.parse('2026-06-01T12:00:00Z'));
   assert.ok(performance.now() - started < 100, `took ${performance.now() - started} ms`);
+});
+
+test('a store error during a tick is logged and does not reject the tick', async () => {
+  const { scheduler, state, invoke } = harness();
+  invoke();
+  state.failWrite = true;
+  await assert.doesNotReject(scheduler.tick());
 });

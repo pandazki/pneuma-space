@@ -34,6 +34,7 @@ export type ContainerSpec = {
   readonly mounts: readonly Mount[];
   readonly network: string;
 };
+/** `time` is epoch milliseconds. */
 export type DockerEvent = { readonly action: string; readonly id: string; readonly labels: Labels; readonly time: number };
 
 type Reply = { readonly status: number; readonly body: Buffer };
@@ -176,7 +177,7 @@ export class Docker {
             const event = JSON.parse(buffer.slice(0, nl));
             buffer = buffer.slice(nl + 1);
             from = event.time;
-            yield { action: event.Action, id: event.Actor.ID, labels: event.Actor.Attributes ?? {}, time: event.time };
+            yield { action: event.Action, id: event.Actor.ID, labels: event.Actor.Attributes ?? {}, time: Math.floor(event.timeNano / 1e6) };
           }
         }
       } catch {

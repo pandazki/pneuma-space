@@ -76,19 +76,23 @@ export class DeliveryScheduler implements Scheduler {
     this.#timer = null;
   }
 
-  /** Materializes due cron slots, then starts at most one delivery per app; resolves when the started ones settle. */
-  tick(): Promise<void> {
-    const now = this.#now();
-    this.#materialize(now);
-    const started: Promise<void>[] = [];
-    const due = this.#store.deliveries({ state: 'due', dueBefore: now })
-      .sort((a, b) => a.nextAttemptAt - b.nextAttemptAt || a.createdAt - b.createdAt);
-    for (const d of due) {
-      if (this.#inFlight.has(d.app)) continue;
-      this.#inFlight.add(d.app);
-      started.push(this.#deliver(d).finally(() => this.#inFlight.delete(d.app)));
+  /** Materializes due cron slots, then starts at most one delivery per app; resolves when the started ones settle. Never rejects. */
+  async tick(): Promise<void> {
+    try {
+      const now = this.#now();
+      this.#materialize(now);
+      const started: Promise<void>[] = [];
+      const due = this.#store.deliveries({ state: 'due', dueBefore: now })
+        .sort((a, b) => a.nextAttemptAt - b.nextAttemptAt || a.createdAt - b.createdAt);
+      for (const d of due) {
+        if (this.#inFlight.has(d.app)) continue;
+        this.#inFlight.add(d.app);
+        started.push(this.#deliver(d).finally(() => this.#inFlight.delete(d.app)));
+      }
+      await Promise.all(started);
+    } catch (error) {
+      this.#log(JSON.stringify({ t: this.#now(), ev: 'tick-failed', app: null, error: String(error) }));
     }
-    return Promise.all(started).then(() => undefined);
   }
 
   #materialize(now: number): void {
