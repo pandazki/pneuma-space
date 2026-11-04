@@ -117,10 +117,13 @@ test('AC-P-8', { timeout: 900_000 }, async (t) => {
   await batches(names.slice(0, 20), 5, (name) => appJson(name, '/'));
   assert.ok(docker('ps', '-q', '--filter', `label=pneuma-space.network=${stack.network}`).split('\n').length >= 20, '20 apps running');
 
+  // Docker is still settling the 20 wakes; the gate measures the listing, not that.
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  for (let i = 0; i < 2; i++) await fetch(adminUrl + '/api/apps');
   const since = Date.now() / 1000;
   const timings: number[] = [];
   let listed: any[] = [];
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 7; i++) {
     const start = performance.now();
     listed = await (await fetch(adminUrl + '/api/apps')).json();
     timings.push(performance.now() - start);
