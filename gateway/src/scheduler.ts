@@ -155,7 +155,7 @@ export class DeliveryScheduler implements Scheduler {
 
   #emit(d: Delivery, reason?: string): void {
     this.#log(JSON.stringify({
-      t: new Date(this.#now()).toISOString(), ev: `delivery.${d.state}`, app: d.app, trigger: d.trigger,
+      t: this.#now(), ev: `delivery.${d.state}`, app: d.app, trigger: d.trigger,
       delivery: d.id, attempt: d.attempts, reason,
     }));
   }
