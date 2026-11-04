@@ -82,7 +82,7 @@ function inner(image: ImageId, network: string): void {
     const runtimes: DockerRuntime[] = [];
     const start = () => {
       const docker = new CountingDocker();
-      const runtime = new DockerRuntime({ docker, network, specFor: (id) => specs.get(id) ?? null, log: () => {} });
+      const runtime = new DockerRuntime({ docker, network, project: network, specFor: (id) => specs.get(id) ?? null, log: () => {} });
       runtimes.push(runtime);
       return { docker, runtime };
     };
@@ -207,17 +207,25 @@ function inner(image: ImageId, network: string): void {
     assert.equal(await answer(lease.address), `${app} 1`);
   });
 
-  test('runJob runs in the service container and returns its output', async (t) => {
-    const { runtime } = fixture(t);
+  async function helper(t: TestContext): Promise<void> {
     const helper = await raw.request('POST', `/containers/create?name=pneuma-u3-helper-${randomBytes(4).toString('hex')}`, {
-      Image: image, Labels: { 'pneuma.test': '1', 'com.docker.compose.service': 'redis' }, HostConfig: { NetworkMode: network },
+      Image: image, Labels: { 'pneuma.test': '1', 'com.docker.compose.project': network, 'com.docker.compose.service': 'redis' }, HostConfig: { NetworkMode: network },
     });
     const { Id } = JSON.parse(helper.body.toString());
     t.after(() => raw.remove(Id));
     await raw.start(Id);
-    const result = await runtime.runJob({ service: 'redis', argv: ['echo', 'hi'] });
-    assert.deepEqual(result, { exitCode: 0, stdout: 'hi\n', stderr: '' });
-    assert.equal((await runtime.runJob({ service: 'redis', argv: ['cat'], stdin: 'from stdin' })).stdout, 'from stdin');
+  }
+
+  test('runJob runs in the compose service container and returns its output', async (t) => {
+    const { runtime } = fixture(t);
+    await helper(t);
+    assert.deepEqual(await runtime.runJob({ service: 'redis', argv: ['echo', 'hi'] }), { exitCode: 0, stdout: 'hi\n', stderr: '' });
+  });
+
+  test('runJob feeds stdin to the job', async (t) => {
+    const { runtime } = fixture(t);
+    await helper(t);
+    assert.deepEqual(await runtime.runJob({ service: 'redis', argv: ['sh'], stdin: 'echo hi' }), { exitCode: 0, stdout: 'hi\n', stderr: '' });
   });
 
   test('resolveImage returns the id of an existing image and null for a missing one', async (t) => {

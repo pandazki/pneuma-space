@@ -1,4 +1,5 @@
 import { connect } from 'node:net';
+import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Docker, DockerError, type ContainerSpec, type DockerEvent } from './docker.ts';
 import {
@@ -30,11 +31,20 @@ export type RuntimeOptions = {
   readonly network: string;
   /** The Registry's runSpec; re-read on every wake and reaper tick so policy changes apply without a publish. */
   readonly specFor: (app: AppId) => RunSpec | null;
+  /** Compose project whose service containers run jobs; see composeProject. */
+  readonly project: string;
   readonly log?: (line: string) => void;
 };
 
 const specHash = (spec: RunSpec): string => canonicalHash(spec.injection);
 const sameRun = (a: RunSpec, b: RunSpec): boolean => a.release === b.release && a.image === b.image && specHash(a) === specHash(b);
+
+/** PNEUMA_COMPOSE_PROJECT, else the compose project label of the container this process runs in, else `pneuma`. */
+export async function composeProject(docker: Docker): Promise<string> {
+  return process.env.PNEUMA_COMPOSE_PROJECT
+    ?? (await docker.inspect(hostname()))?.Config.Labels['com.docker.compose.project']
+    ?? 'pneuma';
+}
 
 function canConnect(host: string, port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -51,6 +61,7 @@ export class DockerRuntime implements Runtime {
   private readonly docker: Docker;
   private readonly network: string;
   private readonly specFor: (app: AppId) => RunSpec | null;
+  private readonly project: string;
   private readonly log: (line: string) => void;
   private readonly instances = new Map<AppId, Instance>();
   private readonly awake = new Set<Instance>();
@@ -63,6 +74,7 @@ export class DockerRuntime implements Runtime {
     this.docker = options.docker;
     this.network = options.network;
     this.specFor = options.specFor;
+    this.project = options.project;
     this.log = options.log ?? console.log;
   }
 
@@ -166,10 +178,10 @@ export class DockerRuntime implements Runtime {
 
   async runJob(job: Job): Promise<JobResult> {
     const [container] = await this.docker.list({
-      label: [`com.docker.compose.service=${job.service}`], network: [this.network], status: ['running'],
+      label: [`com.docker.compose.project=${this.project}`, `com.docker.compose.service=${job.service}`], status: ['running'],
     });
     if (!container) {
-      throw new Conflict(`service ${job.service} is not running on network ${this.network}; start it with docker compose (it may sit behind a profile)`);
+      throw new Conflict(`service ${job.service} of compose project ${this.project} is not running; start it with docker compose (it may sit behind a profile)`);
     }
     return this.docker.exec(container.Id, job.argv, job.stdin);
   }
