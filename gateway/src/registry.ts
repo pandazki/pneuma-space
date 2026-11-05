@@ -336,6 +336,7 @@ export class PlatformRegistry implements Registry {
         sleepsAt: this.#runtime.sleepsAt(view.app),
         runtime: this.#runtimes.get(view.app) ?? null,
         quarantine: this.#guard.quarantine(view.app),
+        dbBackend: view.kinds.has('db') ? effectivePolicy(this.#policy, view.policyOverride).db_backend : null,
         lastAccessAt: s?.lastAccessAt ?? null,
         requests: s?.requests ?? 0,
         errors: s?.errors ?? 0,

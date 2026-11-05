@@ -481,6 +481,8 @@ export type AppSummary = {
   readonly sleepsAt: number | null;
   readonly runtime: RuntimeKind | null;
   readonly quarantine: Quarantine | null;
+  /** The engine a declared `db` uses under the app's effective policy; null without `db`. */
+  readonly dbBackend: Policy['db_backend'] | null;
   readonly lastAccessAt: number | null;
   readonly requests: number;
   readonly errors: number;
