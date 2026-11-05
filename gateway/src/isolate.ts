@@ -210,7 +210,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     }
     for (const event of page.events) {
       this.#after = Math.max(this.#after, event.seq);
-      if (event.ev === 'ready') continue;
+      if (event.ev === 'ready' || event.ev === 'forged') continue;
       const app = this.#live.get(event.worker);
       if (!app) {
         this.#unclaimed.set(event.worker, event);

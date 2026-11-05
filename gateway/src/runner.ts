@@ -27,9 +27,15 @@ export type Listed = {
   readonly state: 'starting' | 'listening' | 'ending'; readonly port: number | null; readonly since: number;
 };
 export type RunnerEvent = {
-  readonly seq: number; readonly t: number; readonly ev: 'ready' | 'exit' | 'hung' | 'oom';
+  readonly seq: number; readonly t: number; readonly ev: 'ready' | 'exit' | 'hung' | 'oom' | 'forged';
   readonly app: string; readonly release: number; readonly worker: string; readonly code?: number; readonly reason?: string; readonly port?: number;
 };
+/** What a worker's shim posts on its port; the app runs in the same thread, so the runner checks every message's shape. */
+export type WorkerMessage =
+  | { readonly type: 'pong'; readonly seq: number; readonly external: number }
+  | { readonly type: 'listening'; readonly port: number }
+  | { readonly type: 'log'; readonly lines: readonly string[] }
+  | { readonly type: 'dropped'; readonly count: number };
 /** `seq` is the newest event's; `after=latest` answers it with no events, for a cursor that starts now. */
 export type EventPage = { readonly startedAt: number; readonly seq: number; readonly events: readonly RunnerEvent[] };
 
@@ -49,6 +55,9 @@ const LOG_BYTES = 256 * 2 ** 10;
 const LOG_LINES = 1000;
 /** Counted per line on top of its bytes, so empty lines are bounded too. */
 const LINE_OVERHEAD = 64;
+/** The shim cuts a line at 4 KiB of UTF-8, which decodes to at most as many UTF-16 units. */
+const LINE_UNITS = 4 * 2 ** 10;
+const FORGED_LIMIT = 3;
 const SHIM = new URL('./isolate-shim.ts', import.meta.url);
 const SEGMENT = /^[a-z0-9][a-z0-9-]{0,80}$/;
 
@@ -65,6 +74,7 @@ type Instance = {
   ended: boolean;
   stopping: boolean;
   error: string | null;
+  forged: number;
   readonly exited: Promise<void>;
   terminating: Promise<void> | null;
 };
@@ -79,6 +89,8 @@ let seq = 0;
 let workers = 0;
 let pings = 0;
 let stuck = 0;
+let forged = 0;
+let internal = 0;
 
 const log = (ev: string, extra: Record<string, unknown> = {}) => console.log(JSON.stringify({ t: Date.now(), ev, ...extra }));
 
@@ -143,6 +155,27 @@ const appDir = (app: string) => join(DATA, 'apps', app);
 const storageDir = (app: string, id: string) => join(appDir(app), 'storage', id);
 const isRelease = (name: string) => /^\d+$/.test(name);
 
+function parse(raw: unknown): WorkerMessage | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const m = raw as Record<string, unknown>;
+  const valid =
+    m.type === 'pong' ? typeof m.seq === 'number' && typeof m.external === 'number'
+    : m.type === 'listening' ? Number.isInteger(m.port) && (m.port as number) > 0 && (m.port as number) < 65536
+    : m.type === 'log' ? Array.isArray(m.lines) && m.lines.every((line) => typeof line === 'string' && line.length <= LINE_UNITS)
+    : m.type === 'dropped' ? Number.isInteger(m.count)
+    : false;
+  return valid ? (m as WorkerMessage) : null;
+}
+
+/** A message the shim would not send came from app code that reached the port; a worker that keeps sending them is ended. */
+function reject(inst: Instance): void {
+  forged++;
+  record(inst, 'forged');
+  if (++inst.forged < FORGED_LIMIT) return;
+  end(inst, 'exit', { reason: 'forged' });
+  void terminate(inst);
+}
+
 /** The release's code, downloaded and unpacked once; other releases of the app are dropped. */
 async function code(app: string, release: number, url: string, deadline: number): Promise<string> {
   const dir = join(appDir(app), String(release));
@@ -196,14 +229,18 @@ async function start(app: string, request: StartRequest): Promise<Started> {
   const exited = Promise.withResolvers<void>();
   const inst: Instance = {
     app, release: request.release, spec: request.spec, worker: `${startedAt}:${++workers}`, thread, since: Date.now(),
-    port: null, ping: null, ended: false, stopping: false, error: null, exited: exited.promise, terminating: null,
+    port: null, ping: null, ended: false, stopping: false, error: null, forged: 0, exited: exited.promise, terminating: null,
   };
   instances.set(app, inst);
   dropNative(app, thread.stdout);
   dropNative(app, thread.stderr);
   const ready = Promise.withResolvers<number>();
-  thread.on('message', (message: { type: 'listening'; port: number } | { type: 'pong'; seq: number; external: number } | { type: 'log'; lines: string[] }) => {
+  thread.on('message', (raw: unknown) => {
+    if (inst.ended) return;
+    const message = parse(raw);
+    if (message === null || (message.type === 'listening' && inst.port !== null)) return reject(inst);
     if (message.type === 'log') for (const line of message.lines) append(app, line);
+    else if (message.type === 'dropped') append(app, `dropped ${message.count} lines`);
     else if (message.type === 'listening') {
       inst.port = message.port;
       // The hang clock starts here: a ping unanswered during startup belongs to the ready timeout.
@@ -288,7 +325,7 @@ function segment(raw: string | undefined): string {
 async function route(request: IncomingMessage, url: URL): Promise<unknown> {
   const [resource, a, b] = url.pathname.split('/').filter(Boolean);
   const method = request.method;
-  if (method === 'GET' && resource === 'health') return { ok: true, startedAt, stuck, workers: instances.size };
+  if (method === 'GET' && resource === 'health') return { ok: true, startedAt, stuck, forged, internal, workers: instances.size };
   if (method === 'GET' && resource === 'instances' && !a) {
     return [...instances.values()].map((i): Listed => ({
       app: i.app, release: i.release, spec: i.spec, worker: i.worker, port: i.port, since: i.since,
@@ -342,6 +379,14 @@ const server = createServer((request: IncomingMessage, response: ServerResponse)
     },
   );
 });
+
+// No message, and no fault in Node's own handling of one, may take every app down with the runner.
+const fault = (error: unknown) => {
+  internal++;
+  log('runner-internal', { message: String((error as Error)?.message ?? error), stack: String((error as Error)?.stack ?? '').split('\n').slice(0, 5).join('\n') });
+};
+process.on('uncaughtException', fault);
+process.on('unhandledRejection', fault);
 
 process.once('SIGTERM', async () => {
   server.close();

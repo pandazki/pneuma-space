@@ -2,13 +2,25 @@
 import dc from 'node:diagnostics_channel';
 import module, { syncBuiltinESMExports } from 'node:module';
 import { createServer, type AddressInfo, type ListenOptions, type Server } from 'node:net';
+import { Readable, Writable } from 'node:stream';
 import v8 from 'node:v8';
 import threads, { parentPort, workerData } from 'node:worker_threads';
+import type { WorkerMessage } from './runner.ts';
 
-const port = parentPort!;
-// Messages the app could post on it would reach the runner's main thread unbudgeted, and could forge listening or pong.
-threads.parentPort = null;
 const memoryUsage = process.memoryUsage.bind(process);
+const port = parentPort!;
+// Node dispatches every incoming message through `this[kHybridDispatch]`, so an app that patched EventTarget.prototype, or MessagePort's, would be handed this port.
+const chain: object[] = [];
+for (let proto = Object.getPrototypeOf(port); proto !== Object.prototype; proto = Object.getPrototypeOf(proto)) chain.push(proto);
+Object.setPrototypeOf(port, chain.reduceRight((parent, proto) => Object.create(parent, Object.getOwnPropertyDescriptors(proto)), Object.prototype));
+const post: (message: WorkerMessage) => void = port.postMessage.bind(port);
+port.on('message', (message: { type: 'ping'; seq: number } | { type: 'drain' }) => {
+  if (message.type === 'ping') post({ type: 'pong', seq: message.seq, external: memoryUsage().external });
+  // Signals never reach a worker, so the app's SIGTERM handler is the one shutdown path in both runtimes.
+  else process.emit('SIGTERM');
+});
+port.unref();
+threads.parentPort = null;
 
 // From a worker, process.kill(process.pid) ends the whole runner (spike S4).
 for (const name of ['kill', 'abort', '_kill']) Object.defineProperty(process, name, { value: undefined });
@@ -34,29 +46,37 @@ const LINE_BYTES = 4 * 2 ** 10;
 const LOG_BUDGET = 64 * 2 ** 10;
 const LINE_COST = 64;
 const budget = { at: performance.now(), spent: 0, dropped: 0, notice: false };
+const EMPTY = Buffer.alloc(0);
+/** The start of a line whose newline is not written yet, already cut to LINE_BYTES. */
+let held = EMPTY;
 
-function refill(): string[] {
+function refill(): void {
   const now = performance.now();
-  if (now - budget.at < 1000) return [];
-  const lines = budget.dropped ? [`dropped ${budget.dropped} lines`] : [];
+  if (now - budget.at < 1000) return;
+  if (budget.dropped) post({ type: 'dropped', count: budget.dropped });
   Object.assign(budget, { at: now, spent: 0, dropped: 0 });
-  return lines;
 }
 
 function logged(bytes: Buffer): void {
-  const lines = refill();
+  refill();
+  const lines: string[] = [];
   // A loop over bytes, not indexOf per line: 64 MiB of newlines takes about 50 ms here instead of a second.
   for (let start = 0, i = 0; i <= bytes.length; i++) {
     if (i < bytes.length && bytes[i] !== 10) continue;
-    if (i === bytes.length && start === i) break;
-    const length = Math.min(i - start, LINE_BYTES);
+    const end = Math.min(i, start + LINE_BYTES - held.length);
+    if (i === bytes.length) {
+      if (end > start) held = Buffer.concat([held, bytes.subarray(start, end)]);
+      break;
+    }
+    const length = held.length + end - start;
     if (budget.spent + length + LINE_COST <= LOG_BUDGET) {
       budget.spent += length + LINE_COST;
-      lines.push(bytes.toString('utf8', start, start + length));
+      lines.push(held.length ? Buffer.concat([held, bytes.subarray(start, end)]).toString('utf8') : bytes.toString('utf8', start, end));
     } else budget.dropped++;
+    held = EMPTY;
     start = i + 1;
   }
-  if (lines.length) port.postMessage({ type: 'log', lines });
+  if (lines.length) post({ type: 'log', lines });
   if (budget.dropped) noticeLater();
 }
 
@@ -66,37 +86,20 @@ function noticeLater(): void {
   budget.notice = true;
   setTimeout(() => {
     budget.notice = false;
-    const notice = refill();
-    if (notice.length) port.postMessage({ type: 'log', lines: notice });
-    else if (budget.dropped) noticeLater();
+    refill();
+    if (budget.dropped) noticeLater();
   }, Math.max(0, budget.at + 1000 - performance.now())).unref();
 }
 
-type Done = (error?: Error | null) => void;
-// One tick per synchronous run of writes, with consecutive equal callbacks counted, as Node's Writable does: console.log passes the same one every time.
-const pending: { done: Done; count: number }[] = [];
-const flush = () => {
-  for (const { done, count } of pending.splice(0)) for (let i = 0; i < count; i++) done();
-};
-
-for (const stream of [process.stdout, process.stderr]) {
-  stream.write = ((chunk: string | Uint8Array, encoding?: BufferEncoding | Done, callback?: Done) => {
-    logged(typeof chunk === 'string' ? Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8') : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
-    const done = typeof encoding === 'function' ? encoding : callback;
-    if (!done) return true;
-    if (pending.length === 0) process.nextTick(flush);
-    if (pending.at(-1)?.done === done) pending.at(-1)!.count++;
-    else pending.push({ done, count: 1 });
-    return true;
-  }) as typeof stream.write;
-}
-
-port.on('message', (message: { type: 'ping'; seq: number } | { type: 'drain' }) => {
-  if (message.type === 'ping') port.postMessage({ type: 'pong', seq: message.seq, external: memoryUsage().external });
-  // Signals never reach a worker, so the app's SIGTERM handler is the one shutdown path in both runtimes.
-  else process.emit('SIGTERM');
-});
-port.unref();
+// Node's own stdio streams each hold an internal port whose unknown messages fail an assertion on the runner's main thread.
+// Node's worker bootstrap calls this on process.stdout and process.stderr, by name, whenever the runner reads their native stream.
+const wantsMore = Object.getOwnPropertySymbols(Object.getPrototypeOf(process.stdout)).find((key) => key.description === 'kStdioWantsMoreDataCallback')!;
+const sink = () => Object.assign(new Writable({ write(chunk: Buffer, _encoding, done) { logged(chunk); done(); } }), { [wantsMore]: () => {} });
+const [stdout, stderr] = [sink(), sink()];
+const stdin = new Readable({ read() { this.push(null); } });
+for (const [name, value] of Object.entries({ stdout, stderr, stdin })) Object.defineProperty(process, name, { value, enumerable: true });
+// The global console keeps the streams it first wrote to.
+Object.assign(console, { _stdout: stdout, _stderr: stderr });
 
 // A port fixed before the app runs tells its server from any other it listens with.
 const appPort = await new Promise<number>((resolve, reject) => {
@@ -118,7 +121,7 @@ dc.tracingChannel('net.server.listen').subscribe({
     const { server } = message as { server: Server };
     if (listening || !asked.has(server)) return;
     listening = true;
-    port.postMessage({ type: 'listening', port: appPort });
+    post({ type: 'listening', port: appPort });
   },
 });
 
