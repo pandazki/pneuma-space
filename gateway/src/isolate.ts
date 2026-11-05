@@ -1,7 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { Emit } from './events.ts';
-import { Lifecycle, specHash, type Adopted, type Driver, type Failure, type Gone, type Slot } from './lifecycle.ts';
+import { emit, type Emit } from './events.ts';
+import { Lifecycle, specHash, type Adopted, type Driver, type Ending, type Gone, type Slot } from './lifecycle.ts';
 import { RUNTIME_ENV, type AppId, type BundleId, type HealthCheck, type RunSpec } from './model.ts';
 import type { EventPage, Listed, RunnerEvent, Started, StartRequest } from './runner.ts';
 import { Unavailable } from './runtimes.ts';
@@ -14,6 +14,8 @@ const CALL_MS = 10_000;
 /** The same grace `docker stop` gives a container. */
 const STOP_MS = 10_000;
 const UNCLAIMED = 100;
+/** Consecutive failed polls after which awake isolate instances are marked asleep as unavailable. */
+const UNREACHABLE_POLLS = 3;
 
 type IsolateRun = RunSpec & { readonly runtime: Extract<RunSpec['runtime'], { kind: 'isolate' }> };
 
@@ -23,15 +25,17 @@ export type IsolateOptions = {
   /** A credential-free GET URL for a code bundle's tar; the gateway never streams the bytes. */
   readonly bundleUrl: (bundle: BundleId) => string;
   readonly specFor: (app: AppId) => RunSpec | null;
+  /** Whether any release of the app ran on this runtime, so purge must reach the runner to delete its storage. */
+  readonly hasRun: (app: AppId) => Promise<boolean>;
   readonly log?: Emit;
 };
 
 class RunnerError extends Error {}
 
-const failure = (event: RunnerEvent): Failure => {
+const ending = (event: RunnerEvent): Ending => {
   if (event.ev === 'hung') return { ev: 'hung', reason: event.reason ?? 'hung' };
   if (event.ev === 'oom') return { ev: 'crashed', reason: `worker exceeded its ${event.reason ?? 'heap'} memory limit` };
-  if (event.reason === 'stopped') return null;
+  if (event.reason === 'stopped') return { ev: 'stopped' };
   return { ev: 'crashed', reason: event.reason ?? `worker exited with code ${event.code}` };
 };
 
@@ -41,6 +45,8 @@ class IsolateDriver implements Driver<IsolateRun, string> {
   readonly handleKey = 'worker';
   readonly #runner: URL;
   readonly #bundleUrl: (bundle: BundleId) => string;
+  readonly #hasRun: (app: AppId) => Promise<boolean>;
+  readonly #log: Emit;
   /** Workers this gateway started or adopted that have not ended; events are polled only while there are any. */
   readonly #live = new Map<string, AppId>();
   /** Terminal events of workers not yet known: a start whose worker ended before its POST answered fails. */
@@ -48,9 +54,11 @@ class IsolateDriver implements Driver<IsolateRun, string> {
   #startedAt: number | null = null;
   #after = 0;
 
-  constructor(runner: string, bundleUrl: (bundle: BundleId) => string) {
-    this.#runner = new URL(runner);
-    this.#bundleUrl = bundleUrl;
+  constructor(options: IsolateOptions) {
+    this.#runner = new URL(options.runner);
+    this.#bundleUrl = options.bundleUrl;
+    this.#hasRun = options.hasRun;
+    this.#log = options.log ?? emit;
   }
 
   accepts(spec: RunSpec): spec is IsolateRun {
@@ -69,10 +77,10 @@ class IsolateDriver implements Driver<IsolateRun, string> {
       storage: spec.injection.storage.map(({ id, env }) => ({ id, env })),
       readyMs,
     };
-    const { address } = await lookup(this.#runner.hostname).catch(() => { throw new Unavailable('isolate'); });
+    const address = await this.#resolve();
     const started = await this.#call<Started>('POST', `/instances/${spec.app}`, request, readyMs + CALL_MS);
     const ended = this.#unclaimed.get(started.worker);
-    if (ended) throw new RunnerError(`worker of app ${spec.app} ended as soon as it listened: ${failure(ended)?.reason ?? ended.ev}`);
+    if (ended) throw new RunnerError(`worker of app ${spec.app} ended as soon as it listened: ${ended.reason ?? ended.ev}`);
     slot.handle = started.worker;
     this.#live.set(started.worker, spec.app);
     return `${address}:${started.port}`;
@@ -89,23 +97,41 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     this.#live.delete(worker);
   }
 
+  /** A runner that is off or does not answer holds nothing to adopt; the gateway starts without it. */
   async adopt(): Promise<readonly Adopted<string>[]> {
-    const { address } = await lookup(this.#runner.hostname).catch(() => ({ address: null }));
+    const address = await lookup(this.#runner.hostname).then(({ address }) => address, () => null);
     if (address === null) return [];
-    const { startedAt } = await this.#call<{ startedAt: number }>('GET', '/health');
-    const page = await this.#call<EventPage>('GET', `/events?after=${Number.MAX_SAFE_INTEGER}`);
-    this.#startedAt = startedAt;
-    this.#after = Math.max(0, ...page.events.map((e) => e.seq));
-    const listed = await this.#call<Listed[]>('GET', '/instances');
+    let listed: Listed[];
+    try {
+      const page = await this.#call<EventPage>('GET', '/events?after=latest');
+      this.#startedAt = page.startedAt;
+      this.#after = page.seq;
+      listed = await this.#call<Listed[]>('GET', '/instances');
+    } catch (error) {
+      this.#log('runner-unreachable', null, { error: String(error) });
+      return [];
+    }
     for (const { worker, app } of listed) this.#live.set(worker, app as AppId);
     return listed.map(({ app, worker, release, spec, port }) => ({ app: app as AppId, handle: worker, release: String(release), spec, address: `${address}:${port}` }));
   }
 
   follow(gone: Gone<string>, signal: AbortSignal): void {
     void (async () => {
+      let failed = 0;
       while (!signal.aborted) {
         await sleep(POLL_MS, undefined, { ref: false });
-        if (this.#live.size > 0) await this.#poll(gone).catch(() => {});
+        if (this.#live.size === 0) continue;
+        try {
+          await this.#poll(gone);
+          failed = 0;
+        } catch (error) {
+          if (++failed < UNREACHABLE_POLLS) continue;
+          failed = 0;
+          this.#log('runner-unreachable', null, { error: String(error), instances: this.#live.size });
+          // The next wake starts again through the runner, which answers with the worker if it is still running.
+          for (const [worker, app] of this.#live) gone(app, worker, { ev: 'unavailable' });
+          this.#live.clear();
+        }
       }
     })();
   }
@@ -117,7 +143,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
       for (const [worker, app] of this.#live) {
         if (worker.startsWith(`${page.startedAt}:`)) continue;
         this.#live.delete(worker);
-        gone(app, worker, null);
+        gone(app, worker, { ev: 'stopped' });
       }
       this.#startedAt = page.startedAt;
       this.#after = 0;
@@ -133,7 +159,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
         continue;
       }
       this.#live.delete(event.worker);
-      gone(app, event.worker, failure(event));
+      gone(app, event.worker, ending(event));
     }
   }
 
@@ -145,19 +171,32 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     return ['exit', 'ready', 'hang', 'memory'];
   }
 
+  /** Purge waits for the runner: a stopped one still holds the directory in its volume. */
   async destroyStorage(app: AppId, id: string): Promise<void> {
-    // Without the runner on the network the isolate profile never ran, so nothing was realized there.
-    if (!(await lookup(this.#runner.hostname).then(() => true, () => false))) return;
+    if (!(await this.#hasRun(app))) return;
+    await this.#resolve();
     await this.#call('DELETE', `/storage/${app}/${id}`);
   }
 
+  /** A stopped compose service has no name on the platform network. */
+  async #resolve(): Promise<string> {
+    return (await lookup(this.#runner.hostname).catch(() => { throw new Unavailable('isolate'); })).address;
+  }
+
+  /** Throws Unavailable when the runner cannot be reached or does not answer in time, RunnerError when it answers with an error. */
   async #call<T>(method: string, path: string, body?: unknown, timeoutMs = CALL_MS): Promise<T> {
-    const response = await fetch(new URL(path, this.#runner), {
-      method,
-      signal: AbortSignal.timeout(timeoutMs),
-      ...(body !== undefined && { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }),
-    });
-    const text = await response.text();
+    let response: Response;
+    let text: string;
+    try {
+      response = await fetch(new URL(path, this.#runner), {
+        method,
+        signal: AbortSignal.timeout(timeoutMs),
+        ...(body !== undefined && { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }),
+      });
+      text = await response.text();
+    } catch {
+      throw new Unavailable('isolate');
+    }
     if (!response.ok) throw new RunnerError(`runner ${method} ${path}: ${response.status} ${text}`);
     if (response.status === 204) return undefined as T;
     return (response.headers.get('content-type')?.startsWith('application/json') ? JSON.parse(text) : text) as T;
@@ -166,6 +205,6 @@ class IsolateDriver implements Driver<IsolateRun, string> {
 
 export class IsolateRuntime extends Lifecycle<IsolateRun, string> {
   constructor(options: IsolateOptions) {
-    super(new IsolateDriver(options.runner, options.bundleUrl), options);
+    super(new IsolateDriver(options), options);
   }
 }

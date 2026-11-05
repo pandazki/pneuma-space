@@ -3,7 +3,6 @@
 import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
@@ -27,7 +26,8 @@ export type RunnerEvent = {
   readonly seq: number; readonly t: number; readonly ev: 'ready' | 'exit' | 'hung' | 'oom';
   readonly app: string; readonly release: number; readonly worker: string; readonly code?: number; readonly reason?: string; readonly port?: number;
 };
-export type EventPage = { readonly startedAt: number; readonly events: readonly RunnerEvent[] };
+/** `seq` is the newest event's; `after=latest` answers it with no events, for a cursor that starts now. */
+export type EventPage = { readonly startedAt: number; readonly seq: number; readonly events: readonly RunnerEvent[] };
 
 const env = process.env;
 const DATA = env.PNEUMA_SPACE_DATA ?? '/data';
@@ -41,7 +41,8 @@ const TERMINATE_MS = 5000;
 // Inside compose's 10 s stop grace, with room for a terminate.
 const SHUTDOWN_DRAIN_MS = 3000;
 const EVENT_RING = 1000;
-const LOG_RING = 1000;
+const LINE_BYTES = 4 * 2 ** 10;
+const LOG_BYTES = 256 * 2 ** 10;
 const SHIM = new URL('./isolate-shim.ts', import.meta.url);
 const SEGMENT = /^[a-z0-9][a-z0-9-]{0,80}$/;
 
@@ -59,12 +60,15 @@ type Instance = {
   stopping: boolean;
   error: string | null;
   readonly exited: Promise<void>;
+  terminating: Promise<void> | null;
 };
 
 const startedAt = Date.now();
 const instances = new Map<string, Instance>();
 const ring: RunnerEvent[] = [];
-const logs = new Map<string, string[]>();
+const logs = new Map<string, { readonly lines: Buffer[]; bytes: number }>();
+/** One start or stop at a time per app, so a retried start joins the one in flight instead of racing its rename. */
+const queues = new Map<string, Promise<unknown>>();
 let seq = 0;
 let workers = 0;
 let pings = 0;
@@ -86,8 +90,15 @@ function end(inst: Instance, ev: 'exit' | 'hung' | 'oom', extra: { code?: number
   record(inst, ev, extra);
 }
 
-/** terminate() cannot interrupt a blocking native call; such a worker is abandoned as stuck rather than taking the runner down. */
-async function terminate(inst: Instance): Promise<void> {
+/**
+ * terminate() cannot interrupt a blocking native call; such a worker is abandoned as stuck rather than taking the runner down.
+ * Every caller after the first joins the first, so a worker counts toward the stuck limit once.
+ */
+function terminate(inst: Instance): Promise<void> {
+  return (inst.terminating ??= abandonIfStuck(inst));
+}
+
+async function abandonIfStuck(inst: Instance): Promise<void> {
   const done = inst.thread.terminate().then(() => true);
   if (await Promise.race([done, sleep(TERMINATE_MS, false)])) return;
   stuck++;
@@ -107,13 +118,31 @@ async function stop(inst: Instance, drainMs: number): Promise<void> {
   if (!(await Promise.race([inst.exited.then(() => true), sleep(drainMs, false)]))) await terminate(inst);
 }
 
+function append(app: string, line: Buffer): void {
+  let log = logs.get(app);
+  if (!log) logs.set(app, (log = { lines: [], bytes: 0 }));
+  const kept = Buffer.from(line.subarray(0, LINE_BYTES));
+  log.lines.push(kept);
+  log.bytes += kept.length;
+  while (log.bytes > LOG_BYTES) log.bytes -= log.lines.shift()!.length;
+}
+
+/** A line longer than LINE_BYTES is cut there; output with no newline is kept only up to that length. */
 function capture(app: string, stream: NodeJS.ReadableStream): void {
-  createInterface({ input: stream, crlfDelay: Infinity }).on('line', (line) => {
-    let lines = logs.get(app);
-    if (!lines) logs.set(app, (lines = []));
-    lines.push(line);
-    if (lines.length > LOG_RING) lines.shift();
+  let partial = Buffer.alloc(0);
+  stream.on('data', (chunk: Buffer) => {
+    let rest = partial.length ? Buffer.concat([partial, chunk]) : chunk;
+    for (let at = rest.indexOf(10); at !== -1; at = rest.indexOf(10)) {
+      append(app, rest.subarray(0, at));
+      rest = rest.subarray(at + 1);
+    }
+    if (rest.length > LINE_BYTES) {
+      append(app, rest);
+      rest = Buffer.alloc(0);
+    }
+    partial = Buffer.from(rest);
   });
+  stream.once('end', () => { if (partial.length) append(app, partial); });
 }
 
 const appDir = (app: string) => join(DATA, 'apps', app);
@@ -121,20 +150,31 @@ const storageDir = (app: string, id: string) => join(appDir(app), 'storage', id)
 const isRelease = (name: string) => /^\d+$/.test(name);
 
 /** The release's code, downloaded and unpacked once; other releases of the app are dropped. */
-async function code(app: string, release: number, url: string): Promise<string> {
+async function code(app: string, release: number, url: string, deadline: number): Promise<string> {
   const dir = join(appDir(app), String(release));
   const entries = await readdir(appDir(app)).catch(() => [] as string[]);
   for (const name of entries) if (isRelease(name) && name !== String(release)) await rm(join(appDir(app), name), { recursive: true, force: true });
   if (entries.includes(String(release))) return dir;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`bundle download answered ${response.status}`);
+  const signal = AbortSignal.timeout(Math.max(0, deadline - Date.now()));
+  const tar = await (async () => {
+    const response = await fetch(url, { signal });
+    if (!response.ok) throw new Error(`bundle download answered ${response.status}`);
+    return Buffer.from(await response.arrayBuffer());
+  })().catch((error: Error) => {
+    throw signal.aborted ? new Error('bundle download did not finish within the ready timeout') : error;
+  });
   const tmp = join(appDir(app), `.tmp-${process.pid}-${Date.now()}`);
-  for (const { path, body } of tarFiles(Buffer.from(await response.arrayBuffer()))) {
-    await mkdir(dirname(join(tmp, path)), { recursive: true });
-    await writeFile(join(tmp, path), body);
+  try {
+    for (const { path, body } of tarFiles(tar)) {
+      await mkdir(dirname(join(tmp, path)), { recursive: true });
+      await writeFile(join(tmp, path), body);
+    }
+    await mkdir(tmp, { recursive: true });
+    await rename(tmp, dir);
+  } catch (error) {
+    await rm(tmp, { recursive: true, force: true });
+    throw error;
   }
-  await mkdir(tmp, { recursive: true });
-  await rename(tmp, dir);
   return dir;
 }
 
@@ -143,7 +183,7 @@ async function start(app: string, request: StartRequest): Promise<Started> {
   if (current?.port && current.release === request.release && current.spec === request.spec) return { worker: current.worker, port: current.port };
   if (current) await stop(current, 0);
   const deadline = Date.now() + request.readyMs;
-  const dir = await code(app, request.release, request.bundleUrl);
+  const dir = await code(app, request.release, request.bundleUrl, deadline);
   const storage: Record<string, string> = {};
   for (const binding of request.storage) {
     if (!SEGMENT.test(binding.id)) throw new Error(`storage id ${binding.id} is not a path segment`);
@@ -162,7 +202,7 @@ async function start(app: string, request: StartRequest): Promise<Started> {
   const exited = Promise.withResolvers<void>();
   const inst: Instance = {
     app, release: request.release, spec: request.spec, worker: `${startedAt}:${++workers}`, thread, since: Date.now(),
-    port: null, ping: null, ended: false, stopping: false, error: null, exited: exited.promise,
+    port: null, ping: null, ended: false, stopping: false, error: null, exited: exited.promise, terminating: null,
   };
   instances.set(app, inst);
   capture(app, thread.stdout);
@@ -194,7 +234,7 @@ async function start(app: string, request: StartRequest): Promise<Started> {
   const port = await Promise.race([ready.promise, timeout]).finally(() => timer.abort());
   if (port === null) {
     await stop(inst, 0);
-    throw new Error(`worker did not listen within ${request.readyMs} ms`);
+    throw new Error(`worker did not listen on ${RUNTIME_ENV.port} within ${request.readyMs} ms`);
   }
   record(inst, 'ready', { port });
   return { worker: inst.worker, port };
@@ -203,7 +243,8 @@ async function start(app: string, request: StartRequest): Promise<Started> {
 setInterval(() => {
   const now = performance.now();
   for (const inst of instances.values()) {
-    if (inst.ended || inst.stopping) continue;
+    // Startup belongs to the ready timeout: a long synchronous module evaluation is not a hang.
+    if (inst.ended || inst.stopping || inst.port === null) continue;
     if (inst.ping && now - inst.ping.sentAt >= SILENCE_MS) {
       end(inst, 'hung', { reason: `no answer to the watchdog for ${SILENCE_MS} ms` });
       void terminate(inst);
@@ -228,6 +269,13 @@ async function body(request: IncomingMessage): Promise<StartRequest> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as StartRequest;
 }
 
+function serial<T>(app: string, work: () => Promise<T>): Promise<T> {
+  const run = (queues.get(app) ?? Promise.resolve()).catch(() => {}).then(work);
+  queues.set(app, run);
+  void run.catch(() => {}).finally(() => { if (queues.get(app) === run) queues.delete(app); });
+  return run;
+}
+
 function segment(raw: string | undefined): string {
   if (!raw || !SEGMENT.test(raw)) throw new HttpError(404, `no such path segment ${raw}`);
   return raw;
@@ -242,28 +290,34 @@ async function route(request: IncomingMessage, url: URL): Promise<unknown> {
   }
   if (method === 'POST' && resource === 'instances') {
     const app = segment(a);
-    return start(app, await body(request)).catch((error: Error) => { throw new HttpError(502, error.message); });
+    const parsed = await body(request);
+    return serial(app, () => start(app, parsed)).catch((error: Error) => { throw new HttpError(502, error.message); });
   }
   if (method === 'DELETE' && resource === 'instances') {
     const app = segment(a);
-    const inst = instances.get(app);
-    if (inst) await stop(inst, Number(url.searchParams.get('drain') ?? 0));
-    if (url.searchParams.get('retire') === '1') {
+    await serial(app, async () => {
+      const inst = instances.get(app);
+      if (inst) await stop(inst, Number(url.searchParams.get('drain') ?? 0));
+      if (url.searchParams.get('retire') !== '1') return;
+      logs.delete(app);
       for (const name of await readdir(appDir(app)).catch(() => [] as string[])) if (isRelease(name)) await rm(join(appDir(app), name), { recursive: true, force: true });
-    }
+    });
     return null;
   }
   if (method === 'GET' && resource === 'events') {
-    const after = Number(url.searchParams.get('after') ?? 0);
-    return { startedAt, events: ring.filter((e) => e.seq > after) } satisfies EventPage;
+    const raw = url.searchParams.get('after');
+    const after = raw === 'latest' ? seq : Number(raw ?? 0);
+    return { startedAt, seq, events: ring.filter((e) => e.seq > after) } satisfies EventPage;
   }
   if (method === 'DELETE' && resource === 'storage') {
-    await rm(storageDir(segment(a), segment(b)), { recursive: true, force: true });
+    const app = segment(a);
+    logs.delete(app);
+    await rm(storageDir(app, segment(b)), { recursive: true, force: true });
     return null;
   }
   if (method === 'GET' && resource === 'logs') {
     const tail = Number(url.searchParams.get('tail') ?? 200);
-    return (logs.get(segment(a)) ?? []).slice(-tail).join('\n');
+    return (logs.get(segment(a))?.lines ?? []).slice(-tail).join('\n');
   }
   throw new HttpError(404, `no route ${method} ${url.pathname}`);
 }
@@ -289,4 +343,8 @@ process.once('SIGTERM', async () => {
   process.exit(0);
 });
 
+// A runner killed mid-extraction leaves its temporary directory behind.
+for (const app of await readdir(join(DATA, 'apps')).catch(() => [] as string[])) {
+  for (const name of await readdir(appDir(app))) if (name.startsWith('.tmp-')) await rm(join(appDir(app), name), { recursive: true, force: true });
+}
 server.listen(PORT, '0.0.0.0', () => log('runner-ready', { port: (server.address() as { port: number }).port, startedAt, data: DATA }));

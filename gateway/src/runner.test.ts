@@ -133,7 +133,7 @@ test('a worker blocked before it listens fails its start at the ready timeout an
   const runner = await startRunner(t, HEALTHY);
   const request: StartRequest = { release: 1, spec: 's', bundleUrl: await serveBundle(t), entry: 'app.mjs', env: { START_FIFO: fifo(runner) }, storage: [], readyMs: 6000 };
   const response = await fetch(`${runner.url}/instances/blocked`, { method: 'POST', body: JSON.stringify(request) });
-  assert.deepEqual([response.status, (await response.json()).error], [502, 'worker did not listen within 6000 ms']);
+  assert.deepEqual([response.status, (await response.json()).error], [502, 'worker did not listen on PNEUMA_SPACE_PORT within 6000 ms']);
   await sleep(6500);
   const page = await call<EventPage>(runner, 'GET', '/events?after=0');
   assert.deepEqual(page.events.map((e) => [e.ev, e.reason]), [['exit', 'stuck']]);
