@@ -14,6 +14,7 @@ export type AdminDeps = {
   readonly bundles: BundleStore;
   readonly runtime: Pick<Runtime, 'logs'>;
   readonly metrics: Pick<Metrics, 'snapshot'>;
+  readonly ingressPort: number;
   readonly consoleFile?: string | URL;
 };
 
@@ -55,7 +56,7 @@ function tailOf(request: IncomingMessage): number {
   return tail;
 }
 
-function routes({ registry, bundles, runtime, metrics }: AdminDeps): Route[] {
+function routes({ registry, bundles, runtime, metrics, ingressPort }: AdminDeps): Route[] {
   const app = (name: string | undefined) => appName(name!);
   const found = <T>(value: T | null, name: string | undefined): T => {
     if (value === null) throw new NotFound(`no app named "${name}"`);
@@ -63,7 +64,7 @@ function routes({ registry, bundles, runtime, metrics }: AdminDeps): Route[] {
   };
   const at = (path: string) => new RegExp(`^${path.replace('<name>', '([^/]+)')}$`);
   return [
-    { method: 'GET', path: at(ADMIN_PATHS.health), handle: () => ({ ok: true }) },
+    { method: 'GET', path: at(ADMIN_PATHS.health), handle: () => ({ ok: true, ingressPort }) },
     { method: 'GET', path: at(ADMIN_PATHS.apps), handle: () => registry.listing() },
     { method: 'GET', path: at(ADMIN_PATHS.metrics), handle: () => metrics.snapshot() },
     { method: 'GET', path: at(ADMIN_PATHS.app('<name>')), handle: async (_, name) => found(await registry.detail(app(name)), name) },

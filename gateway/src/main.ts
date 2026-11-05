@@ -18,6 +18,8 @@ const log = (ev: string, extra: Record<string, unknown> = {}) => emit(ev, null, 
 
 const data = process.env.PNEUMA_SPACE_DATA ?? '/data';
 const network = process.env.PNEUMA_SPACE_NETWORK ?? 'pneuma-space';
+// The host port compose publishes the ingress on; the console links to apps through it.
+const ingressPort = Number(process.env.PNEUMA_SPACE_HTTP_PORT ?? INGRESS_PORT);
 const config = providerConfig(process.env);
 
 const store = new SqliteStore(join(data, 'pneuma-space.sqlite3'));
@@ -61,7 +63,7 @@ await runtime.reconcile();
 void registry.resume();
 await scheduler.resume();
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
-const admin = await startAdmin({ registry, bundles, runtime, metrics }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const admin = await startAdmin({ registry, bundles, runtime, metrics, ingressPort }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {
   ingress.flush().catch((error: Error) => log('flush-failed', { error: error.message }));

@@ -19,7 +19,7 @@ async function admin() {
     probes: { redis: async () => 'up' },
     host: async () => ({ cpus: 1, load: [0, 0, 0], memory: { totalBytes: 1, freeBytes: 1 }, data: null }),
   });
-  const server = await startAdmin({ registry, bundles: w.bundles, runtime: w.runtime, metrics }, { port: 0 });
+  const server = await startAdmin({ registry, bundles: w.bundles, runtime: w.runtime, metrics, ingressPort: 18080 }, { port: 0 });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
     const raw = typeof body === 'string' ? body : body === undefined ? undefined : JSON.stringify(body);
@@ -34,7 +34,7 @@ const kvApp = { image: 'example:1', manifest: { contract: 1, capabilities: { kv:
 test('every contract endpoint answers 200 on valid input', async (t) => {
   const { call, server } = await admin();
   t.after(() => server.close());
-  assert.deepEqual(await call('GET', '/api/health'), { status: 200, body: { ok: true } });
+  assert.deepEqual(await call('GET', '/api/health'), { status: 200, body: { ok: true, ingressPort: 18080 } });
 
   const bundle = await call('POST', '/api/bundles', 'tar bytes');
   assert.equal(bundle.status, 200);

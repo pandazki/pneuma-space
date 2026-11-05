@@ -90,6 +90,8 @@ npm test                                          # unit tests; the runtime and 
 npm run test:acceptance                           # docs/acceptance.md against a real stack on its own ports (project pneuma-space-acc)
 ```
 
+Run the two one after the other: the provider suite inside `npm test` and the acceptance stack both bind the TURN port 3478.
+
 ## License
 
 MIT, see `LICENSE`.

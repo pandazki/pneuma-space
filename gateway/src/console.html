@@ -1560,7 +1560,7 @@ function stateStrip(events, name) {
 }
 
 async function detail(name) {
-  const [d, apps, m] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), api('GET', '/api/metrics')]);
+  const [d, apps, m, health] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), api('GET', '/api/metrics'), api('GET', '/api/health')]);
   const { app, releases, bindings, policy, stats, deliveries } = d;
   d.address = `/apps/${app.name}/`;
   const reload = () => route();
@@ -1573,7 +1573,7 @@ async function detail(name) {
       h('h1', { class: 'mono', style: 'margin-top:12px' }, app.name),
       h('div', { class: 'meta' },
         status(app.status),
-        app.status === 'registered' ? h('a', { href: ingressOrigin() + d.address, target: '_blank', rel: 'noopener', class: 'mono', title: t('d.open', { address: d.address }) }, d.address) : h('span', { class: 'mono muted' }, d.address),
+        app.status === 'registered' ? h('a', { href: ingressOrigin(health.ingressPort) + d.address, target: '_blank', rel: 'noopener', class: 'mono', title: t('d.open', { address: d.address }) }, d.address) : h('span', { class: 'mono muted' }, d.address),
         h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(s.instance), s.since != null ? h('span', { class: 'muted' }, t('d.since', { ago: ago(s.since).textContent })) : null, leaseChips(s.leases)),
         h('span', { class: 'muted' }, t('d.owner', { owner: app.owner }))),
       stateStrip(events, app.name));
@@ -1635,8 +1635,7 @@ async function detail(name) {
   };
 }
 
-// The admin API cannot know the host port of the ingress; compose publishes the two side by side (8080 and 8081 by default).
-const ingressOrigin = () => `${location.protocol}//${location.hostname}:${Number(location.port || 80) - 1}`;
+const ingressOrigin = (port) => `${location.protocol}//${location.hostname}:${port}`;
 
 const FIELD_OF = [[/^app name/, 'name'], [/^subject/, 'owner'], [/^image|image "/, 'image'], [/^bundle|static is declared/, 'bundle']];
 
