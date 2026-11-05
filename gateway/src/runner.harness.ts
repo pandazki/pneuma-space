@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -12,12 +12,28 @@ const SRC = import.meta.dirname;
 const NET = process.allowedNodeEnvironmentFlags.has('--allow-net') ? ['--allow-net'] : [];
 
 /** Every route the runner and IsolateRuntime tests drive; plain JS so a worker starts without type stripping. */
-export const APP = `import { createServer } from 'node:http';
+export const APP = `import { createHook, executionAsyncResource } from 'node:async_hooks';
+import { createServer } from 'node:http';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { register } from 'node:module';
 import v8 from 'node:v8';
 import { MessageChannel, parentPort, Worker } from 'node:worker_threads';
 const env = process.env;
+// The route an app has to the shim's port and Node's internal one (ADR 0017): a MessagePort is the async resource of the message it dispatches.
+const reached = env.REACH && new Promise((ok) => {
+  const ports = {};
+  const alive = setInterval(() => {}, 1000);
+  const hook = createHook({ before() {
+    const port = executionAsyncResource();
+    if (port?.constructor?.name !== 'MessagePort') return;
+    ports[Object.getOwnPropertySymbols(port).some((key) => key.description === 'kWaitingStreams') ? 'internal' : 'shim'] = port;
+    if (!ports.internal || !ports.shim) return;
+    hook.disable();
+    clearInterval(alive);
+    ok(ports);
+  } }).enable();
+});
+if (env.HIJACK) (await reached).shim.postMessage({ type: 'listening', port: Number(env.HIJACK) });
 if (env.START_FIFO) readFileSync(env.START_FIFO);
 for (const end = Date.now() + Number(env.START_BUSY_MS ?? 0); Date.now() < end;);
 if (env.START_BUFFERS) {
@@ -79,8 +95,17 @@ const routes = {
   '/stdio': () => JSON.stringify([process.stdin, process.stdout, process.stderr, console._stdout, console._stderr].flatMap((s) => Object.getOwnPropertySymbols(s).map(String)).filter((k) => k === 'Symbol(kPort)')),
   '/partial': () => { process.stdout.write('par'); process.stdout.write('tial\\n'); return 'written'; },
   '/chatter': () => { for (const end = Date.now() + 1500; Date.now() < end;) console.log('chatter'); return 'printed'; },
-  '/forge': () => { globalThis.reached.shim.postMessage({ type: 'log', lines: 1 }); return 'posted'; },
-  '/bogus': () => { globalThis.reached.stdio.postMessage({ type: 'bogus' }); return 'posted'; },
+  '/forge': async () => { (await reached).shim.postMessage({ type: 'log', lines: 1 }); return 'posted'; },
+  '/sparse': async () => { (await reached).shim.postMessage({ type: 'log', lines: [, 'hole'] }); return 'posted'; },
+  '/bogus': async () => { (await reached).internal.postMessage({ type: 'bogus' }); return 'posted'; },
+  '/oom': async () => {
+    const error = Buffer.concat([Buffer.from([1]), v8.serialize({ code: 'ERR_WORKER_OUT_OF_MEMORY' })]);
+    const { internal } = await reached;
+    setTimeout(() => internal.postMessage({ type: 'errorMessage', error }), 100);
+    return 'posting';
+  },
+  '/undefined': () => { setTimeout(() => { throw undefined; }); return 'thrown'; },
+  '/tail': () => { process.stdout.write('tail'); setTimeout(() => process.exit(0), 100); return 'written'; },
   '/blank': () => { for (let i = 0; i < 1e5; i++) console.log(''); return 'printed'; },
   '/burst': () => { process.stdout.write(Buffer.alloc(64 * 2 ** 20, 10)); return 'written'; },
   '/exit': () => process.exit(3),
@@ -89,12 +114,6 @@ const routes = {
 console.log('fixture ready');
 createServer(async (q, s) => s.end(String(await routes[q.url]()))).listen(Number(env.PNEUMA_SPACE_PORT), '0.0.0.0');
 process.on('SIGTERM', () => process.exit(0));
-`;
-
-/** Runs in each worker before the shim: what an app would hold had it reached the shim's port and Node's stdio port anyway. */
-export const REACHED = `import { parentPort } from 'node:worker_threads';
-const kPort = Object.getOwnPropertySymbols(process.stdout).find((key) => key.description === 'kPort');
-globalThis.reached = { shim: parentPort, stdio: process.stdout[kPort] };
 `;
 
 export const tempDir = (t: TestContext, prefix: string): string => {
@@ -120,18 +139,11 @@ export async function serveBundle(t: TestContext, files: Record<string, string> 
 /** `exited` resolves with the signal that ended the runner, or its exit code. */
 export type RunnerProcess = { readonly url: string; readonly data: string; readonly pid: number; readonly exited: Promise<string | number | null>; stop(): Promise<void> };
 
-/** The runner as compose runs it, with the permission flags, on an ephemeral port and a scratch /data; `preamble` runs in each worker before the shim. */
-export async function startRunner(t: TestContext, env: Record<string, string> = {}, data = tempDir(t, 'pneuma-space-runner-'), preamble?: string): Promise<RunnerProcess> {
-  let src = SRC;
-  if (preamble !== undefined) {
-    src = tempDir(t, 'pneuma-space-src-');
-    cpSync(SRC, src, { recursive: true });
-    renameSync(join(src, 'isolate-shim.ts'), join(src, 'isolate-shim.next.ts'));
-    writeFileSync(join(src, 'isolate-shim.ts'), `${preamble}await import('./isolate-shim.next.ts');\n`);
-  }
+/** The runner as compose runs it, with the permission flags, on an ephemeral port and a scratch /data. */
+export async function startRunner(t: TestContext, env: Record<string, string> = {}, data = tempDir(t, 'pneuma-space-runner-')): Promise<RunnerProcess> {
   const child = spawn(process.execPath, [
     '--disable-warning=ExperimentalWarning', '--disable-warning=SecurityWarning',
-    '--permission', `--allow-fs-read=${data}`, `--allow-fs-read=${src}`, `--allow-fs-write=${data}`, '--allow-worker', ...NET, join(src, 'runner.ts'),
+    '--permission', `--allow-fs-read=${data}`, `--allow-fs-read=${SRC}`, `--allow-fs-write=${data}`, '--allow-worker', ...NET, join(SRC, 'runner.ts'),
   ], { env: { ...process.env, PNEUMA_SPACE_DATA: data, PNEUMA_SPACE_RUNNER_PORT: '0', ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
   const exited = new Promise<string | number | null>((ok) => child.once('exit', (code, signal) => ok(signal ?? code)));
   const stop = async () => {

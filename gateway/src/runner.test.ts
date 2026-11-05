@@ -8,7 +8,10 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { EventPage, Listed, RunnerEvent, Started, StartRequest } from './runner.ts';
-import { REACHED, serveBundle, startRunner, witness, type RunnerProcess } from './runner.harness.ts';
+import { serveBundle, startRunner, witness, type RunnerProcess } from './runner.harness.ts';
+
+/** The fixture reaches the shim's port and Node's internal one through async_hooks, as any app can. */
+const reach = (app: string, extra: Record<string, string> = {}) => ({ env: { PNEUMA_SPACE_APP: app, PNEUMA_SPACE_RELEASE: '1', REACH: '1', ...extra } });
 
 const HEALTHY = { PNEUMA_SPACE_RUNNER_WORKER_HEAP_MB: '64', PNEUMA_SPACE_RUNNER_WORKER_OFFHEAP_MB: '128' };
 
@@ -361,21 +364,21 @@ test('a line written in several writes is one log entry', async (t) => {
   assert.ok(logs.split('\n').includes('partial'), JSON.stringify(logs));
 });
 
-test('an app that patches every MessagePort prototype method is never handed the shim\'s port', async (t) => {
+test('an app that patches every MessagePort prototype method is not handed the shim\'s port through them', async (t) => {
   const runner = await startRunner(t, HEALTHY);
   const app = await start(runner, await serveBundle(t), 'patched');
   assert.equal(await app.get('/patched'), 'false');
 });
 
-test('process.stdin, stdout, stderr and the console\'s streams hold no port', async (t) => {
+test('process.stdin, stdout, stderr and the console\'s streams have no kPort property', async (t) => {
   const runner = await startRunner(t, HEALTHY);
   const app = await start(runner, await serveBundle(t), 'stdio');
   assert.equal(await app.get('/stdio'), '[]');
 });
 
 test('a forged message from a worker is ignored and counted', async (t) => {
-  const runner = await startRunner(t, HEALTHY, undefined, REACHED);
-  const app = await start(runner, await serveBundle(t), 'forger');
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'forger', reach('forger'));
   assert.equal(await app.get('/forge'), 'posted');
   assert.equal((await nextEvent(runner, app.worker, 2000)).event.ev, 'forged');
   assert.equal((await call<{ forged: number }>(runner, 'GET', '/health')).forged, 1);
@@ -383,8 +386,8 @@ test('a forged message from a worker is ignored and counted', async (t) => {
 });
 
 test('a worker that sends three forged messages is ended as forged', async (t) => {
-  const runner = await startRunner(t, HEALTHY, undefined, REACHED);
-  const app = await start(runner, await serveBundle(t), 'forger');
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'forger', reach('forger'));
   for (let i = 0; i < 3; i++) await app.get('/forge').catch(() => {});
   let ends: (string | undefined)[][] = [];
   for (const end = performance.now() + 3000; !ends.some(([ev]) => ev === 'exit'); await sleep(50)) {
@@ -395,13 +398,60 @@ test('a worker that sends three forged messages is ended as forged', async (t) =
 });
 
 test('a bogus message on a worker\'s stdio port leaves the runner and the other workers running', async (t) => {
-  const runner = await startRunner(t, HEALTHY, undefined, REACHED);
+  const runner = await startRunner(t, HEALTHY);
   const bundleUrl = await serveBundle(t);
   const other = await start(runner, bundleUrl, 'other');
-  const app = await start(runner, bundleUrl, 'bogus');
+  const app = await start(runner, bundleUrl, 'bogus', reach('bogus'));
   assert.equal(await app.get('/bogus'), 'posted');
   for (const end = performance.now() + 2000; (await call<{ internal: number }>(runner, 'GET', '/health')).internal === 0; await sleep(50)) {
     assert.ok(performance.now() < end, 'the fault was counted');
   }
   assert.equal(await other.get('/'), 'other 1');
+});
+
+test('a forged listening with another app\'s port is counted and the forger\'s route answers the forger', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const bundleUrl = await serveBundle(t);
+  const victim = await start(runner, bundleUrl, 'victim');
+  const forger = await start(runner, bundleUrl, 'forger', reach('forger', { HIJACK: String(victim.port) }));
+  assert.equal(await forger.get('/'), 'forger 1');
+  const page = await call<EventPage>(runner, 'GET', '/events?after=0');
+  assert.deepEqual(page.events.filter((e) => e.worker === forger.worker && e.ev !== 'ready').map((e) => e.ev), ['forged']);
+});
+
+test('a forged worker error on Node\'s internal port ends the worker while the other workers keep answering', async (t) => {
+  const { runner, bundleUrl, stopWitness } = await drill(t);
+  const app = await start(runner, bundleUrl, 'forger', reach('forger'));
+  assert.equal(await app.get('/oom'), 'posting');
+  assert.ok(await closed(app.port, 3000), 'the worker is terminated');
+  for (const end = performance.now() + 3000; ; await sleep(50)) {
+    if ((await call<Listed[]>(runner, 'GET', '/instances')).every((i) => i.app === 'witness')) break;
+    assert.ok(performance.now() < end, 'the instance exited');
+  }
+  assert.equal(await stopWitness(), 0);
+});
+
+test('an app that throws undefined ends as crashed with that text, not as a runner fault', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'thrower');
+  assert.equal(await app.get('/undefined'), 'thrown');
+  const { event } = await nextEvent(runner, app.worker, 3000);
+  assert.deepEqual([event.ev, event.reason], ['exit', 'undefined']);
+  assert.equal((await call<{ internal: number }>(runner, 'GET', '/health')).internal, 0);
+});
+
+test('a sparse log array is counted as forged and nothing of it lands in the log', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'sparse', reach('sparse'));
+  assert.equal(await app.get('/sparse'), 'posted');
+  assert.equal((await nextEvent(runner, app.worker, 3000)).event.ev, 'forged');
+  assert.equal(await call<string>(runner, 'GET', '/logs/sparse'), 'fixture ready');
+});
+
+test('a final line with no newline is logged when the worker exits', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'tail');
+  assert.equal(await app.get('/tail'), 'written');
+  await nextEvent(runner, app.worker, 3000);
+  assert.deepEqual((await call<string>(runner, 'GET', '/logs/tail')).split('\n'), ['fixture ready', 'tail']);
 });
