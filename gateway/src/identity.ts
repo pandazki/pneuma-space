@@ -39,15 +39,15 @@ function sha256(text: string): string {
 /** M1 stub: the login name is self-reported, so a user subject identifies and does not authenticate (ADR 0008). */
 export class LocalIdentity implements IdentityProvider {
   readonly #secret: Buffer;
-  readonly #tokenByHash: (hash: string) => Token | null;
+  readonly #tokenByHash: (hash: string) => Promise<Token | null>;
 
-  constructor(secret: Buffer, tokenByHash: (hash: string) => Token | null) {
+  constructor(secret: Buffer, tokenByHash: (hash: string) => Promise<Token | null>) {
     this.#secret = secret;
     this.#tokenByHash = tokenByHash;
   }
 
   async authenticate(request: IncomingMessage): Promise<Principal | Challenge> {
-    return this.#principal(request) ?? challenge(request);
+    return (await this.#principal(request)) ?? challenge(request);
   }
 
   async serve(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -63,11 +63,11 @@ export class LocalIdentity implements IdentityProvider {
     }
   }
 
-  #principal(request: IncomingMessage): Principal | null {
+  async #principal(request: IncomingMessage): Promise<Principal | null> {
     const authorization = request.headers.authorization;
     if (authorization !== undefined) {
       const token = /^Bearer (\S+)$/i.exec(authorization)?.[1];
-      const row = token === undefined ? null : this.#tokenByHash(sha256(token));
+      const row = token === undefined ? null : await this.#tokenByHash(sha256(token));
       return row && { subject: row.subject, name: row.subject.slice(row.subject.indexOf(':') + 1) };
     }
     return this.#session(request.headers.cookie);

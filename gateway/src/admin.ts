@@ -62,7 +62,7 @@ function routes({ registry, bundles, runtime }: AdminDeps): Route[] {
   return [
     { method: 'GET', path: at(ADMIN_PATHS.health), handle: () => ({ ok: true }) },
     { method: 'GET', path: at(ADMIN_PATHS.apps), handle: () => registry.listing() },
-    { method: 'GET', path: at(ADMIN_PATHS.app('<name>')), handle: (_, name) => found(registry.detail(app(name)), name) },
+    { method: 'GET', path: at(ADMIN_PATHS.app('<name>')), handle: async (_, name) => found(await registry.detail(app(name)), name) },
     { method: 'GET', path: at(ADMIN_PATHS.logs('<name>')), handle: (request, name) => runtime.logs(found(registry.view(app(name)), name).app, tailOf(request)) },
     {
       method: 'PUT', path: at(ADMIN_PATHS.release('<name>')), handle: async (request, name) => {
@@ -82,7 +82,7 @@ function routes({ registry, bundles, runtime }: AdminDeps): Route[] {
     {
       method: 'PUT', path: at(ADMIN_PATHS.owner('<name>')), handle: async (request, name) => {
         const owner = subject(String((await readJson(request)).owner));
-        registry.setOwner(app(name), owner);
+        await registry.setOwner(app(name), owner);
         return { owner };
       },
     },
