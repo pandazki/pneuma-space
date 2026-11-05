@@ -638,6 +638,7 @@ export const ADMIN_PATHS = {
   health: '/api/health',
   apps: '/api/apps',
   metrics: '/api/metrics',
+  requests: '/api/requests',
   bundles: '/api/bundles',
   policy: '/api/policy',
   tokens: '/api/tokens',
