@@ -1,0 +1,9 @@
+{
+  "contract": 1,
+  "capabilities": {
+    "db": {},
+    "cron": { "triggers": { "refresh": { "schedule": "* * * * *" } } },
+    "identity": { "required": false },
+    "static": { "dir": "public" }
+  }
+}
