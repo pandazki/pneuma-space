@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PneumaSpace</title>
+<script>
+try { var theme = localStorage.getItem('pneuma-space-theme'), lang = localStorage.getItem('pneuma-space-lang'); } catch (e) {}
+document.documentElement.dataset.theme = theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+document.documentElement.lang = lang || (/^zh/i.test(navigator.language) ? 'zh' : 'en');
+</script>
+<link rel="stylesheet" href="./ui.css">
+</head>
+<body data-page="aboutTitle">
+<div class="frame">
+<header class="top">
+<h1 data-t="site"></h1>
+<nav><a href="./index.html" data-t="home"></a><a href="./guide.html" data-t="guide"></a><a href="./about.html" aria-current="page" data-t="about"></a></nav>
+<div class="controls">
+<div class="seg" role="group"><button type="button" data-lang="zh">中</button><button type="button" data-lang="en">EN</button></div>
+<div class="seg" role="group"><button type="button" data-theme-set="light" data-t-label="light"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></svg></button><button type="button" data-theme-set="dark" data-t-label="dark"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"/></svg></button></div>
+</div>
+</header>
+<main>
+<section>
+<header><h2 data-t="aboutSiteTitle"></h2><p data-t="aboutSiteIntro"></p></header>
+<p class="note" data-t="aboutText"></p>
+</section>
+<section>
+<header><h2 data-t="filesTitle"></h2><p data-t="filesIntro"></p></header>
+<table>
+<thead><tr><th data-t="file"></th><th data-t="role"></th></tr></thead>
+<tbody>
+<tr><td><code>index.html</code></td><td data-t="fIndex"></td></tr>
+<tr><td><code>guide.html</code></td><td data-t="fGuide"></td></tr>
+<tr><td><code>about.html</code></td><td data-t="fAbout"></td></tr>
+<tr><td><code>ui.css</code></td><td data-t="fCss"></td></tr>
+<tr><td><code>ui.js</code></td><td data-t="fJs"></td></tr>
+</tbody>
+</table>
+</section>
+</main>
+<footer data-t="footer"></footer>
+</div>
+<div class="badge">pneuma-space-example-site</div>
+<script src="./ui.js"></script>
+</body>
+</html>

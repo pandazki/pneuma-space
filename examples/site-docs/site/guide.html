@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PneumaSpace</title>
+<script>
+try { var theme = localStorage.getItem('pneuma-space-theme'), lang = localStorage.getItem('pneuma-space-lang'); } catch (e) {}
+document.documentElement.dataset.theme = theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+document.documentElement.lang = lang || (/^zh/i.test(navigator.language) ? 'zh' : 'en');
+</script>
+<link rel="stylesheet" href="./ui.css">
+</head>
+<body data-page="guideTitle">
+<div class="frame">
+<header class="top">
+<h1 data-t="site"></h1>
+<nav><a href="./index.html" data-t="home"></a><a href="./guide.html" aria-current="page" data-t="guide"></a><a href="./about.html" data-t="about"></a></nav>
+<div class="controls">
+<div class="seg" role="group"><button type="button" data-lang="zh">中</button><button type="button" data-lang="en">EN</button></div>
+<div class="seg" role="group"><button type="button" data-theme-set="light" data-t-label="light"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></svg></button><button type="button" data-theme-set="dark" data-t-label="dark"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"/></svg></button></div>
+</div>
+</header>
+<main>
+<section>
+<header><h2 data-t="publishTitle"></h2><p data-t="publishIntro"></p></header>
+<pre class="inset">node cli/appctl.ts init mysite --static
+node cli/appctl.ts publish mysite mysite <span class="nowrap">--owner user:me</span></pre>
+</section>
+<section>
+<header><h2 data-t="rulesTitle"></h2><p data-t="rulesIntro"></p></header>
+<table>
+<thead><tr><th data-t="rule"></th><th data-t="reason"></th></tr></thead>
+<tbody>
+<tr><td data-t="r1"></td><td data-t="r1why"></td></tr>
+<tr><td data-t="r2"></td><td data-t="r2why"></td></tr>
+<tr><td data-t="r3"></td><td data-t="r3why"></td></tr>
+<tr><td data-t="r4"></td><td data-t="r4why"></td></tr>
+</tbody>
+</table>
+</section>
+<section>
+<header><h2 data-t="whenTitle"></h2><p data-t="whenIntro"></p></header>
+<table>
+<thead><tr><th data-t="need"></th><th data-t="cap"></th></tr></thead>
+<tbody>
+<tr><td data-t="n1"></td><td><span class="chip">db</span></td></tr>
+<tr><td data-t="n2"></td><td><span class="chip">kv</span></td></tr>
+<tr><td data-t="n3"></td><td><span class="chip">cron</span></td></tr>
+<tr><td data-t="n4"></td><td><span class="chip">ws</span></td></tr>
+<tr><td data-t="n5"></td><td><span class="chip">identity</span></td></tr>
+<tr><td data-t="n6"></td><td class="nowrap"><span class="chip">files</span> <span class="chip">object</span></td></tr>
+</tbody>
+</table>
+<p class="note" data-t="whenNote"></p>
+</section>
+</main>
+<footer data-t="footer"></footer>
+</div>
+<div class="badge">pneuma-space-example-site</div>
+<script src="./ui.js"></script>
+</body>
+</html>
