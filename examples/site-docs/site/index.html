@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PneumaSpace</title>
+<script>
+try { var theme = localStorage.getItem('pneuma-space-theme'), lang = localStorage.getItem('pneuma-space-lang'); } catch (e) {}
+document.documentElement.dataset.theme = theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+document.documentElement.lang = lang || (/^zh/i.test(navigator.language) ? 'zh' : 'en');
+</script>
+<link rel="stylesheet" href="./ui.css">
+</head>
+<body data-page="homeTitle">
+<div class="frame">
+<header class="top">
+<h1 data-t="site"></h1>
+<nav><a href="./index.html" aria-current="page" data-t="home"></a><a href="./guide.html" data-t="guide"></a><a href="./about.html" data-t="about"></a></nav>
+<div class="controls">
+<div class="seg" role="group"><button type="button" data-lang="zh">中</button><button type="button" data-lang="en">EN</button></div>
+<div class="seg" role="group"><button type="button" data-theme-set="light" data-t-label="light"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></svg></button><button type="button" data-theme-set="dark" data-t-label="dark"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"/></svg></button></div>
+</div>
+</header>
+<main>
+<section>
+<header><h2 data-t="serveTitle"></h2><p data-t="serveIntro"></p></header>
+<div class="grid">
+<div class="card"><span class="chip">static</span><h3 data-t="noContainer"></h3><p data-t="noContainerText"></p></div>
+<div class="card"><span class="chip">&lt; 50 ms</span><h3 data-t="noCold"></h3><p data-t="noColdText"></p></div>
+<div class="card"><span class="chip">./</span><h3 data-t="relative"></h3><p data-t="relativeText"></p></div>
+<div class="card"><span class="chip">404</span><h3 data-t="noFallback"></h3><p data-t="noFallbackText"></p></div>
+</div>
+</section>
+<section>
+<header><h2 data-t="proofTitle"></h2><p data-t="proofIntro"></p></header>
+<span class="status" id="first-byte"></span>
+<p class="note"><a href="./no-such-page.html" data-t="missing"></a></p>
+<p class="note" data-t="missingText"></p>
+</section>
+</main>
+<footer data-t="footer"></footer>
+</div>
+<div class="badge">pneuma-space-example-site</div>
+<script src="./ui.js"></script>
+</body>
+</html>
