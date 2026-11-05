@@ -420,6 +420,9 @@ export type AppSummary = {
   readonly capabilities: readonly CapabilityKind[];
   readonly status: AppStatus;
   readonly instance: InstanceState | 'none';
+  /** Epoch ms the instance entered its state; null when none. */
+  readonly since: number | null;
+  readonly leases: Readonly<Record<LeaseKind, number>>;
   readonly lastAccessAt: number | null;
   readonly requests: number;
   readonly errors: number;
@@ -485,6 +488,7 @@ export interface StoreOps {
   insertDelivery(delivery: Delivery): Promise<Delivery>;
   updateDelivery(delivery: Delivery): Promise<void>;
   deliveries(filter: DeliveryFilter): Promise<Delivery[]>;
+  deliveryCounts(): Promise<Record<DeliveryState, number>>;
   lastScheduledFor(app: AppId, trigger: TriggerName): Promise<number | null>;
   deleteDeliveries(app: AppId): Promise<void>;
 
@@ -511,6 +515,9 @@ export interface Runtime {
   /** Startup: adopt or remove containers by label, then follow Docker events. */
   reconcile(): Promise<void>;
   state(app: AppId): InstanceState | 'none';
+  /** Epoch ms of the instance's last state change; null when none. */
+  since(app: AppId): number | null;
+  leases(app: AppId): Readonly<Record<LeaseKind, number>>;
   /** The last `tail` lines of stdout and stderr of the app's current or last container; empty when it has none. */
   logs(app: AppId, tail: number): Promise<string>;
   runJob(job: Job): Promise<JobResult>;
@@ -627,6 +634,7 @@ export const HEADERS = {
 export const ADMIN_PATHS = {
   health: '/api/health',
   apps: '/api/apps',
+  metrics: '/api/metrics',
   bundles: '/api/bundles',
   policy: '/api/policy',
   tokens: '/api/tokens',

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { request } from 'node:http';
+import { emit, type Emit } from './events.ts';
 import {
   HEADERS, MAX_ATTEMPTS, NotFound, TRIGGER_PATH,
   type AppId, type CronExpr, type Delivery, type DeliveryId, type InvokeRequest, type Lease,
@@ -11,7 +12,7 @@ export type SchedulerDeps = {
   readonly runtime: Pick<Runtime, 'acquire' | 'release'>;
   readonly view: (app: AppId) => SchedulerView | null;
   readonly now?: () => number;
-  readonly log?: (line: string) => void;
+  readonly log?: Emit;
 };
 
 const TICK_MS = 1000;
@@ -24,7 +25,7 @@ export class DeliveryScheduler implements Scheduler {
   readonly #runtime: SchedulerDeps['runtime'];
   readonly #view: SchedulerDeps['view'];
   readonly #now: () => number;
-  readonly #log: (line: string) => void;
+  readonly #log: Emit;
   readonly #inFlight = new Set<AppId>();
   #timer: ReturnType<typeof setInterval> | null = null;
 
@@ -33,7 +34,7 @@ export class DeliveryScheduler implements Scheduler {
     this.#runtime = deps.runtime;
     this.#view = deps.view;
     this.#now = deps.now ?? Date.now;
-    this.#log = deps.log ?? ((line) => process.stdout.write(`${line}\n`));
+    this.#log = deps.log ?? emit;
   }
 
   async invoke(req: InvokeRequest): Promise<DeliveryId> {
@@ -81,7 +82,7 @@ export class DeliveryScheduler implements Scheduler {
       }
       await Promise.all(started);
     } catch (error) {
-      this.#log(JSON.stringify({ t: this.#now(), ev: 'tick-failed', app: null, error: String(error) }));
+      this.#log('tick-failed', null, { error: String(error) });
     }
   }
 
@@ -148,10 +149,7 @@ export class DeliveryScheduler implements Scheduler {
   }
 
   #emit(d: Delivery, reason?: string): void {
-    this.#log(JSON.stringify({
-      t: this.#now(), ev: `delivery.${d.state}`, app: d.app, trigger: d.trigger,
-      delivery: d.id, attempt: d.attempts, reason,
-    }));
+    this.#log(`delivery.${d.state}`, d.app, { trigger: d.trigger, delivery: d.id, attempt: d.attempts, reason });
   }
 }
 

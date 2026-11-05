@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
 import {
   DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS,
-  type App, type AppId, type AppName, type Binding, type Delivery, type DeliveryFilter, type Policy,
+  type App, type AppId, type AppName, type Binding, type Delivery, type DeliveryFilter, type DeliveryState, type Policy,
   type Release, type ReleaseNumber, type Stats, type Store, type StoreOps, type Token, type Trigger, type TriggerName,
 } from './model.ts';
 
@@ -247,6 +247,12 @@ class Statements implements Sync<StoreOps> {
     return this.#all(`SELECT * FROM delivery ${where} ORDER BY ${order} LIMIT ?`, ...params, filter.limit ?? -1).map(toDelivery);
   }
 
+  deliveryCounts(): Record<DeliveryState, number> {
+    const counts = { due: 0, delivering: 0, done: 0, failed: 0, cancelled: 0 };
+    for (const row of this.#all('SELECT state, count(*) AS n FROM delivery GROUP BY state')) counts[row.state as DeliveryState] = row.n as number;
+    return counts;
+  }
+
   lastScheduledFor(app: AppId, trigger: TriggerName): number | null {
     const row = this.#get('SELECT max(scheduled_for) AS last FROM delivery WHERE app = ? AND trigger = ?', app, trigger);
     return (row?.last as number | null) ?? null;
@@ -298,6 +304,7 @@ abstract class Ops implements StoreOps {
   insertDelivery(delivery: Delivery) { return this.run((s) => s.insertDelivery(delivery)); }
   updateDelivery(delivery: Delivery) { return this.run((s) => s.updateDelivery(delivery)); }
   deliveries(filter: DeliveryFilter) { return this.run((s) => s.deliveries(filter)); }
+  deliveryCounts() { return this.run((s) => s.deliveryCounts()); }
   lastScheduledFor(app: AppId, trigger: TriggerName) { return this.run((s) => s.lastScheduledFor(app, trigger)); }
   deleteDeliveries(app: AppId) { return this.run((s) => s.deleteDeliveries(app)); }
   stats() { return this.run((s) => s.stats()); }

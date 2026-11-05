@@ -142,6 +142,14 @@ function inner(image: ImageId, network: string): void {
     assert.equal(await runtime.logs(newAppId(), 10), '');
   });
 
+  test('leases counts the held leases by kind after acquire and channel', async (t) => {
+    const { app, runtime } = fixture(t);
+    const held = await Promise.all([runtime.acquire(app, 'request'), runtime.acquire(app, 'request'), runtime.acquire(app, 'trigger')]);
+    runtime.channel(held[0], () => {});
+    assert.deepEqual(runtime.leases(app), { request: 1, channel: 1, trigger: 1 });
+    for (const lease of held) runtime.release(lease);
+  });
+
   test('acquire rejects with NotFound when the app has no RunSpec', async (t) => {
     const { runtime } = fixture(t);
     await assert.rejects(runtime.acquire(newAppId(), 'request'), NotFound);

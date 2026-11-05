@@ -4,68 +4,409 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PneumaSpace</title>
+<script>
+(() => {
+  const root = document.documentElement;
+  const stored = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
+  const media = matchMedia('(prefers-color-scheme: dark)');
+  const apply = () => { root.dataset.theme = stored('pneuma-space-theme') ?? (media.matches ? 'dark' : 'light'); };
+  apply();
+  media.addEventListener('change', apply);
+  const lang = stored('pneuma-space-lang') ?? navigator.language;
+  root.lang = lang.startsWith('zh') ? 'zh' : 'en';
+})();
+</script>
 <style>
 :root {
-  --bg: #f7f7f5; --panel: #fff; --text: #1d1d1f; --muted: #6b6b70; --line: #e3e3e0;
-  --accent: #2550c8; --danger: #b3261e; --ok: #1b7a3d; --warn: #9a6200;
-  color-scheme: light dark;
+  --page: oklch(98.5% .001 286.376);
+  --canvas: oklch(96.1% .002 247.84);
+  --surface: oklch(100% 0 0);
+  --inset: oklch(97.9% .002 247.839);
+  --hover: oklch(97% .002 247.839);
+  --hover-2: oklch(93.3% .003 247.86);
+  --ink: oklch(24.7% .006 258.361);
+  --ink-2: oklch(50.6% .01 264.477);
+  --ink-3: oklch(69.5% .009 264.505);
+  --line: oklch(94.6% .003 264.542);
+  --line-strong: oklch(91.2% .005 258.326);
+  --line-soft: oklch(96.6% .002 264.542);
+  --field: oklch(96.1% .001 286.375);
+  --stripe: oklch(40.5% 0 0 / .075);
+  --stripe-bg: oklch(97% 0 0);
+  --accent: oklch(62.6% .205 254.947);
+  --accent-ink: oklch(55.6% .187 255.617);
+  --accent-tint: oklch(96% .019 252.878);
+  --green: oklch(60.3% .155 150.883);
+  --green-tint: oklch(95.8% .017 159.118);
+  --orange: oklch(68.9% .179 49.902);
+  --orange-tint: oklch(96.4% .021 67.581);
+  --red: oklch(62.1% .192 23.042);
+  --red-tint: oklch(95.6% .017 17.462);
+  --tip-bg: oklch(27.2% .008 264.435);
+  --tip-fg: oklch(97.6% .002 247.839);
+  --shadow-xs: 0 1px 2px oklch(0% 0 0 / .05);
+  --shadow-sm: 0 1px 2px oklch(0% 0 0 / .06), 0 2px 6px oklch(0% 0 0 / .04);
+  --shadow-card: 0 0 0 1px var(--line), var(--shadow-sm);
+  --shadow-btn: 0 0 0 1px var(--line-strong), var(--shadow-xs);
+  --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root { --bg: #161618; --panel: #1f1f22; --text: #ececee; --muted: #9a9aa2; --line: #333338;
-    --accent: #8aa8ff; --danger: #ff8a80; --ok: #6fd28f; --warn: #f0c060; }
+:root[data-theme="dark"] {
+  --page: oklch(20.9% .004 264.477);
+  --canvas: oklch(23.1% .004 264.487);
+  --surface: oklch(26% .006 271.191);
+  --inset: oklch(24.3% .004 264.492);
+  --hover: oklch(28.9% .006 271.22);
+  --hover-2: oklch(31.8% .007 274.747);
+  --ink: oklch(96.4% .002 247.839);
+  --ink-2: oklch(73.1% .008 260.731);
+  --ink-3: oklch(54.1% .01 264.484);
+  --line: oklch(30.8% .006 258.354);
+  --line-strong: oklch(35.6% .007 264.474);
+  --line-soft: oklch(27.8% .006 258.354);
+  --field: oklch(29.3% .006 271.223);
+  --stripe: oklch(100% 0 0 / .055);
+  --stripe-bg: oklch(22.6% .004 264.485);
+  --accent: oklch(68% .173 253.301);
+  --accent-ink: oklch(78.8% .113 248.33);
+  --accent-tint: oklch(68% .173 253.301 / .16);
+  --green: oklch(70.5% .154 153.814);
+  --green-tint: oklch(70.5% .154 153.814 / .14);
+  --orange: oklch(74.6% .156 55.642);
+  --orange-tint: oklch(74.6% .156 55.642 / .14);
+  --red: oklch(66.6% .18 21.433);
+  --red-tint: oklch(66.6% .18 21.433 / .14);
+  --tip-bg: oklch(96.4% .002 247.839);
+  --tip-fg: oklch(24.7% .006 258.361);
+  --shadow-btn: 0 0 0 1px oklch(100% 0 0 / .1), 0 1px 2px oklch(0% 0 0 / .3);
+  --shadow-card: 0 0 0 1px oklch(100% 0 0 / .11), 0 1px 2px oklch(0% 0 0 / .2), 0 2px 6px oklch(0% 0 0 / .2);
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, sans-serif; }
-header { display: flex; align-items: center; gap: 1.5rem; padding: .75rem 1.25rem; border-bottom: 1px solid var(--line); background: var(--panel); }
-header strong { font-size: 15px; }
-header nav { display: flex; gap: 1rem; }
-a { color: var(--accent); text-decoration: none; }
+body {
+  margin: 0; min-height: 100vh; color: var(--ink);
+  font: 14px/21px var(--font); letter-spacing: -0.01em; -webkit-font-smoothing: antialiased;
+  background: repeating-linear-gradient(-45deg, transparent 0 7px, var(--stripe) 7px 8px) var(--stripe-bg);
+}
+a { color: var(--accent-ink); text-decoration: none; }
 a:hover { text-decoration: underline; }
-main { max-width: 1200px; margin: 0 auto; padding: 1.25rem; }
-h1 { font-size: 20px; margin: 0 0 .25rem; }
-h2 { font-size: 15px; margin: 1.75rem 0 .5rem; }
-section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; }
+button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+.frame { display: grid; grid-template-columns: 288px minmax(0, 1fr); max-width: 1568px; min-height: 100vh; margin: 0 auto; background: var(--page); box-shadow: var(--shadow-card); }
+aside { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 28px; padding: 72px 28px 28px; border-right: 1px dashed var(--line); }
+.controls { position: absolute; top: 20px; right: 20px; display: flex; gap: 6px; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand b { display: block; font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
+.brand small { display: block; font-size: 12.5px; color: var(--ink-3); }
+nav { display: grid; gap: 2px; }
+nav .group { font-size: 11.5px; color: var(--ink-3); padding: 0 8px 6px; }
+nav a { font-size: 12.5px; color: var(--ink-2); padding: 5px 8px; border-radius: 7px; }
+nav a:hover { background: var(--hover); text-decoration: none; }
+nav a[aria-current] { color: var(--ink); font-weight: 500; background: var(--hover); }
+.aside-foot { margin-top: auto; font-size: 12px; color: var(--ink-3); }
+main { min-width: 0; }
+.head { padding: 56px 32px 32px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 24px; }
+.head .grow { flex: 1; min-width: 0; }
+h1 { margin: 0; font-size: 21px; line-height: 28px; font-weight: 600; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.sub { margin: 4px 0 0; font-size: 12.5px; color: var(--ink-3); }
+section { padding: 40px 32px; border-top: 1px dashed var(--line); }
+.sh { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px; margin-bottom: 16px; }
+.sh .idx { font: 11px/18px var(--mono); color: var(--ink-3); }
+.sh h2 { margin: 0; font-size: 13px; line-height: 18px; font-weight: 600; }
+.sh p { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-3); }
+.sh .end { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.card { background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-card); padding: 16px; }
+.inset { background: var(--canvas); border-radius: 14px; box-shadow: 0 0 0 1px var(--line); padding: 12px; }
+.mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--ink-3); }
+.seg { display: inline-flex; padding: 2px; border-radius: 999px; background: var(--field); }
+.seg button { border: 0; background: none; cursor: pointer; font-size: 11.5px; font-weight: 500; line-height: 18px; padding: 2px 8px; border-radius: 999px; color: var(--ink-3); display: inline-flex; align-items: center; }
+.seg button[aria-pressed="true"] { background: var(--surface); box-shadow: var(--shadow-btn); color: var(--ink); }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 27px; padding: 0 12px; border: 0; border-radius: 999px; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; text-decoration: none; background: var(--hover-2); color: var(--ink); }
+.btn:hover { background: var(--line-strong); text-decoration: none; }
+.btn.primary { background: var(--accent); color: white; }
+.btn.primary:hover { background: var(--accent-ink); }
+.btn.danger { background: var(--red-tint); color: var(--red); }
+.btn.danger:hover { box-shadow: 0 0 0 1px var(--red); }
+.btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+input, select, textarea { background: var(--field); border: 0; border-radius: 8px; box-shadow: 0 0 0 1px var(--line-strong); font-size: 13px; height: 30px; padding: 0 10px; outline: none; min-width: 0; }
+textarea { height: auto; padding: 8px 10px; font: 12px/18px var(--mono); resize: vertical; }
+input[type="file"] { padding: 4px 6px; font-size: 12.5px; }
+input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 2px var(--accent-tint), 0 0 0 1px var(--accent); }
+[aria-invalid="true"] { box-shadow: 0 0 0 1px var(--red); }
+.chip { display: inline-flex; align-items: center; height: 22px; padding: 0 7px; border-radius: 6px; background: var(--inset); box-shadow: 0 0 0 1px var(--line); font: 11.5px var(--mono); color: var(--ink-2); white-space: nowrap; }
+.chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+td .chips { flex-wrap: nowrap; }
+.st { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.st::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); flex: none; }
+.st.green::before { background: var(--green); }
+.st.orange::before { background: var(--orange); }
+.st.red::before { background: var(--red); }
+.st.red { color: var(--red); }
+.table { padding: 0; overflow-x: auto; }
+.table.scroll { max-height: 528px; overflow-y: auto; }
+.table.scroll th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
 table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
-th { font-weight: 600; color: var(--muted); font-size: 12px; }
-tr:last-child td { border-bottom: 0; }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-.muted { color: var(--muted); }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-.pill { display: inline-block; padding: 0 .5rem; border-radius: 99px; border: 1px solid currentColor; font-size: 12px; }
-.registered, .awake, .active, .done { color: var(--ok); }
-.waking, .draining, .stopping, .purging, .due, .delivering { color: var(--warn); }
-.removed, .failed, .suspended, .cancelled { color: var(--danger); }
-.asleep, .none { color: var(--muted); }
-.summary { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; margin-top: .5rem; color: var(--muted); }
-.empty { padding: 1rem .75rem; color: var(--muted); }
-form.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; display: grid; gap: .9rem; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .9rem; }
-label { display: grid; gap: .25rem; font-weight: 600; font-size: 13px; }
-label small { font-weight: 400; color: var(--muted); }
-input, select, textarea, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: .45rem .6rem; }
-textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; min-height: 18rem; resize: vertical; }
-button { cursor: pointer; background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
-button.secondary { background: transparent; color: var(--text); border-color: var(--line); }
-button.danger { background: transparent; color: var(--danger); border-color: var(--danger); }
-button:disabled { opacity: .4; cursor: not-allowed; }
-.actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
-.message { padding: .6rem .8rem; border-radius: 6px; border: 1px solid var(--danger); color: var(--danger); white-space: pre-wrap; }
-.message.ok { border-color: var(--ok); color: var(--ok); }
-.title { display: flex; flex-wrap: wrap; align-items: baseline; gap: .75rem; }
+th { font-size: 12px; font-weight: 500; color: var(--ink-3); text-align: left; padding: 10px 12px; white-space: nowrap; border-bottom: 1px solid var(--line); }
+td { height: 44px; padding: 6px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; font-size: 13px; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover { background: var(--hover); }
+tr[data-href] { cursor: pointer; }
+th.r, td.r { text-align: right; }
+td.mono, td.num { font-size: 12px; }
+td.wrap { white-space: normal; min-width: 240px; max-width: 520px; overflow-wrap: anywhere; font-size: 12px; color: var(--ink-2); }
+.empty { padding: 32px 16px; text-align: center; font-size: 12.5px; color: var(--ink-3); }
+.strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0; padding: 0; }
+.strip > div { padding: 14px 16px; border-left: 1px dashed var(--line); min-width: 0; }
+.strip > div:first-child { border-left: 0; }
+.strip .v { font: 600 13px/20px var(--mono); margin-top: 4px; }
+.strip .s { font: 11px/16px var(--mono); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.tiles.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1180px) { .tiles, .tiles.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .tiles, .tiles.four { grid-template-columns: minmax(0, 1fr); } }
+.tile .l { font-size: 12px; color: var(--ink-2); }
+.tile .v { font: 600 24px/32px var(--mono); font-variant-numeric: tabular-nums; margin-top: 6px; }
+.tile .v small { font-size: 12px; font-weight: 400; color: var(--ink-3); margin-left: 4px; }
+.tile .s { font-size: 12px; color: var(--ink-3); margin-top: 6px; }
+.bar { height: 4px; border-radius: 2px; background: var(--inset); box-shadow: 0 0 0 1px var(--line); margin-top: 10px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); }
+.bar i.hot { background: var(--orange); }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.chart { position: relative; }
+.chart header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 2px 4px 8px; }
+.chart header b { font-size: 12.5px; font-weight: 600; }
+.legend { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-3); }
+.legend i { width: 8px; height: 8px; border-radius: 2px; }
+.chart svg { display: block; width: 100%; height: 150px; overflow: visible; }
+.chart text { font: 11px var(--mono); fill: var(--ink-3); }
+.tip { position: absolute; pointer-events: none; z-index: 5; background: var(--tip-bg); color: var(--tip-fg); font-size: 12px; line-height: 17px; border-radius: 6px; padding: 4px 8px; white-space: nowrap; }
+.tip .mono { font-size: 11.5px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.toolbar input { width: 240px; }
+.form { display: grid; gap: 16px; }
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
+.field { display: grid; gap: 6px; align-content: start; }
+.field > span { font-size: 12.5px; font-weight: 500; }
+.field small { font-size: 12px; color: var(--ink-3); }
+.field small.err, .msg.err { color: var(--red); }
+.msg { font-size: 12.5px; color: var(--green); white-space: pre-wrap; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 10px; font-size: 12.5px; color: var(--ink-2); }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
+.picks { display: grid; gap: 2px; max-height: 520px; overflow: auto; margin: 8px -8px 0; }
+.picks a { display: flex; justify-content: space-between; gap: 8px; padding: 6px 8px; border-radius: 7px; font: 12px var(--mono); color: var(--ink-2); }
+.picks a:hover { background: var(--hover); text-decoration: none; }
+pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); }
+.back { font-size: 12.5px; color: var(--ink-3); }
+dialog { border: 0; padding: 20px; border-radius: 12px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-card); width: min(420px, calc(100vw - 32px)); }
+dialog::backdrop { background: oklch(0% 0 0 / .3); }
+dialog h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+dialog p { margin: 0 0 20px; font-size: 13px; color: var(--ink-2); }
+dialog .actions { justify-content: flex-end; }
+@media (max-width: 900px) {
+  .frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; box-shadow: none; }
+  aside { position: relative; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 16px 20px; border-right: 0; border-bottom: 1px dashed var(--line); }
+  .controls { position: static; order: 2; margin-left: auto; }
+  nav { order: 3; width: 100%; display: flex; gap: 4px; }
+  nav .group, .aside-foot { display: none; }
+  .head { padding: 32px 20px 24px; }
+  section { padding: 24px 20px; }
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .toolbar input { width: 100%; }
+}
 </style>
 </head>
 <body>
-<header>
-  <strong>PneumaSpace</strong>
-  <nav><a href="#/">Apps</a><a href="#/publish">Publish</a></nav>
-</header>
+<div class="frame">
+<aside>
+  <div class="controls"></div>
+  <a class="brand" href="#/" style="color:inherit;text-decoration:none">
+    <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true"><rect x=".5" y=".5" width="25" height="25" rx="7" style="fill:var(--surface);stroke:var(--line-strong)"/><circle cx="13" cy="13" r="5" stroke-width="2" style="stroke:var(--accent)"/><circle cx="13" cy="13" r="1.6" style="fill:var(--accent)"/></svg>
+    <span><b>PneumaSpace</b><small id="brand-sub"></small></span>
+  </a>
+  <nav></nav>
+  <div class="aside-foot" id="foot"></div>
+</aside>
 <main id="main"></main>
-<script type="module">
-const main = document.getElementById('main');
+</div>
+<script>
+const I18N = {
+  zh: {
+    'brand.sub': '控制台', 'nav.group': '平台', 'nav.overview': '总览', 'nav.apps': '项目', 'nav.publish': '发布',
+    'theme.light': '浅色', 'theme.dark': '深色', 'aside.since': '自 {time} 起采样，网关重启后清零。',
+    'ov.title': '总览', 'ov.sub': '最近采样：{ago}', 'ov.waiting': '等待第一次采样',
+    'sec.services': '平台服务', 'sec.servicesDesc': '网关每 10 秒探测一次可达性。',
+    'svc.gateway': '网关', 'svc.redis': 'Redis', 'svc.object': '对象存储', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn',
+    'svc.gatewaySub': '已运行 · 内存 {rss}', 'svc.off': '未启用 profile', 'svc.down': '不可达',
+    'sec.fleet': '应用与负载', 'sec.fleetDesc': '实时数量，对照 M1 的门槛。',
+    'k.apps': '已注册应用', 'k.appsSub': '已移除 {removed} · 清除中 {purging} · 24 小时内访问 {active}',
+    'k.awake': '运行中', 'k.awakeSub': '唤醒中 {waking} · 排空中 {draining} · 停止中 {stopping}',
+    'k.requests': '请求（1 小时）', 'k.requestsSub': '错误 {errors} · 错误率 {ratio}',
+    'k.wakes': '唤醒（1 小时）', 'k.wakesSub': '失败 {failures} · p50 {p50} · p95 {p95}，门槛 3 秒',
+    'k.deliveries': '待投递', 'k.deliveriesSub': '投递中 {delivering} · 累计失败 {failed}',
+    'k.host': '主机负载', 'k.cores': '/ {n} 核', 'k.hostSub': '内存 {used} / {total} · 数据盘剩余 {free}',
+    'sec.activity': '活动', 'sec.activityDesc': '网关内存中的每分钟计数。',
+    'win.60': '1 小时', 'win.360': '6 小时', 'win.1440': '24 小时',
+    'ch.traffic': '流量', 'ch.wakes': '唤醒', 'ch.deliveries': '投递',
+    's.requests': '请求', 's.errors': '错误', 's.wakes': '唤醒', 's.wakeFailures': '失败', 's.wakeP50Ms': 'p50 耗时',
+    's.deliveriesDone': '完成', 's.deliveriesFailed': '失败', 's.deliveriesRetried': '重试',
+    'sec.awake': '运行中的实例', 'sec.awakeDesc': '每个实例为什么醒着：它持有的 Lease。',
+    'sec.attention': '需要关注', 'sec.attentionDesc': '失败的投递和平台错误，最新在前。',
+    'sec.events': '最近事件', 'sec.eventsDesc': '最近 100 条生命周期事件，最新在前。', 'ev.filter': '筛选事件',
+    'col.name': '名称', 'col.state': '状态', 'col.since': '进入时间', 'col.leases': 'Lease', 'col.requests': '请求', 'col.errors': '错误',
+    'col.time': '时间', 'col.app': '应用', 'col.event': '事件', 'col.detail': '详情', 'col.what': '类型', 'col.status': '状态',
+    'col.instance': '实例', 'col.release': '版本', 'col.capabilities': '能力', 'col.lastAccess': '最近访问', 'col.image': '镜像',
+    'col.bundle': '静态包', 'col.published': '发布时间', 'col.kind': '能力', 'col.provider': 'Provider', 'col.trigger': '触发器',
+    'col.attempts': '尝试次数', 'col.scheduledFor': '计划时间', 'col.created': '创建时间', 'col.nextAttempt': '下次尝试', 'col.fields': '字段',
+    'empty.awake': '没有运行中的实例。', 'empty.attention': '没有需要关注的事项。', 'empty.events': '还没有事件。', 'empty.filtered': '没有匹配的记录。',
+    'att.delivery': '投递失败', 'att.error': '错误', 'att.deliveryDetail': '{trigger} · 尝试 {attempts} 次',
+    'apps.title': '项目', 'apps.count': '{n} 个应用', 'apps.filter': '按名称筛选', 'apps.allStates': '全部状态',
+    'apps.empty': '还没有应用。发布一个即可获得地址。', 'apps.publish': '发布应用',
+    'never': '从未', 'routeOnly': '仅路由',
+    'st.registered': '已注册', 'st.removed': '已移除', 'st.purging': '清除中', 'st.none': '无实例', 'st.asleep': '休眠',
+    'st.waking': '唤醒中', 'st.awake': '运行中', 'st.draining': '排空中', 'st.stopping': '停止中', 'st.active': '启用',
+    'st.suspended': '已暂停', 'st.due': '待投递', 'st.delivering': '投递中', 'st.done': '完成', 'st.failed': '失败',
+    'st.cancelled': '已取消', 'st.up': '在线', 'st.down': '不可达', 'st.off': '未启用',
+    'd.back': '所有项目', 'd.open': '打开 {address}', 'd.since': '{ago}进入', 'd.owner': '所有者 {owner}',
+    'd.publish': '发布新版本', 'd.remove': '移除', 'd.purge': '清除', 'cancel': '取消',
+    'd.removeTitle': '移除 {name}？', 'd.removeBody': '地址将返回 404。卷、数据库、键前缀和 bucket 全部保留，再次发布即可恢复。',
+    'd.purgeTitle': '清除 {name}？', 'd.purgeBody': '这会删除它的文件、数据库、键值数据和 bucket，无法撤销。',
+    'd.purgeHint': '移除后才能清除。', 'd.requests': '请求', 'd.errors': '错误', 'd.lastAccess': '最近访问', 'd.release': '当前版本',
+    'sec.policy': '策略', 'sec.policyDesc': '只对这个应用生效的覆盖值。留空则沿用平台值。',
+    'p.effective': '生效值 {v}', 'p.default': '平台默认（{v}）', 'p.save': '保存策略', 'p.saved': '策略已保存。', 'p.nothing': '没有改动。',
+    'p.dbNote': '切换数据库会开通另一种引擎，不迁移数据。',
+    'p.idle_seconds': '闲置多久后休眠（秒）', 'p.ready_timeout_seconds': '就绪超时（秒）', 'p.drain_timeout_seconds': '排空超时（秒）',
+    'p.connection_idle_seconds': '连接闲置上限（秒）', 'p.trigger_timeout_seconds': '触发超时（秒）', 'p.db_backend': '数据库引擎',
+    'sec.releases': '版本', 'sec.releasesDesc': '每一次发布，最新在前。', 'r.current': '当前',
+    'sec.bindings': '能力绑定', 'sec.bindingsDesc': '平台为这个应用持有的资源。', 'empty.bindings': '没有资源类能力的绑定。',
+    'sec.deliveries': '触发投递', 'sec.deliveriesDesc': '最近 50 条。', 'empty.deliveries': '没有投递记录。', 'd.onDemand': '按需',
+    'sec.logs': '日志', 'sec.logsDesc': '当前或上一个容器最近的 stdout 和 stderr。', 'logs.refresh': '刷新', 'empty.logs': '没有输出。',
+    'pub.title': '发布', 'pub.titleFor': '发布 {name}', 'pub.sub': '网关会把镜像引用解析为镜像 id。只声明 static 的清单可以不填镜像。',
+    'f.name': '名称', 'f.nameHint': '小写字母、数字和 -，地址是 /apps/<name>/。', 'f.image': '镜像引用',
+    'f.owner': '所有者', 'f.ownerHint': '仅首次发布需要：应用看到的所有者主体。', 'f.manifest': '清单（pneuma-space.json）',
+    'f.bundle': '静态包', 'f.bundleHint': '可选，static 目录打成的 tar。', 'f.submit': '发布', 'f.busy': '发布中…', 'f.badJson': '不是合法的 JSON：{msg}',
+    'pub.existing': '已有应用', 'pub.existingDesc': '选一个来发布新版本。', 'pub.none': '还没有应用。',
+    'err.load': '加载失败：{msg}',
+    'dur.d': '{n} 天', 'dur.h': '{n} 小时', 'dur.m': '{n} 分', 'dur.s': '{n} 秒',
+  },
+  en: {
+    'brand.sub': 'Console', 'nav.group': 'Platform', 'nav.overview': 'Overview', 'nav.apps': 'Projects', 'nav.publish': 'Publish',
+    'theme.light': 'Light', 'theme.dark': 'Dark', 'aside.since': 'Sampling since {time}; a gateway restart clears it.',
+    'ov.title': 'Overview', 'ov.sub': 'Last sample {ago}', 'ov.waiting': 'Waiting for the first sample',
+    'sec.services': 'Services', 'sec.servicesDesc': 'Reachability from the gateway, probed every 10 s.',
+    'svc.gateway': 'Gateway', 'svc.redis': 'Redis', 'svc.object': 'Object store', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn',
+    'svc.gatewaySub': 'up · RSS {rss}', 'svc.off': 'profile not running', 'svc.down': 'not reachable',
+    'sec.fleet': 'Fleet and load', 'sec.fleetDesc': 'Live counts against the M1 gates.',
+    'k.apps': 'Registered apps', 'k.appsSub': 'removed {removed} · purging {purging} · accessed in 24 h {active}',
+    'k.awake': 'Awake now', 'k.awakeSub': 'waking {waking} · draining {draining} · stopping {stopping}',
+    'k.requests': 'Requests, 1 h', 'k.requestsSub': 'errors {errors} · error ratio {ratio}',
+    'k.wakes': 'Wakes, 1 h', 'k.wakesSub': 'failed {failures} · p50 {p50} · p95 {p95} against 3 s',
+    'k.deliveries': 'Deliveries due', 'k.deliveriesSub': 'delivering {delivering} · failed {failed} in total',
+    'k.host': 'Host load', 'k.cores': '/ {n} cores', 'k.hostSub': 'memory {used} of {total} · data free {free}',
+    'sec.activity': 'Activity', 'sec.activityDesc': 'Per-minute counts from gateway memory.',
+    'win.60': '1 h', 'win.360': '6 h', 'win.1440': '24 h',
+    'ch.traffic': 'Traffic', 'ch.wakes': 'Wakes', 'ch.deliveries': 'Deliveries',
+    's.requests': 'requests', 's.errors': 'errors', 's.wakes': 'wakes', 's.wakeFailures': 'failures', 's.wakeP50Ms': 'p50 latency',
+    's.deliveriesDone': 'done', 's.deliveriesFailed': 'failed', 's.deliveriesRetried': 'retried',
+    'sec.awake': 'Awake instances', 'sec.awakeDesc': 'Why each one is awake: the leases it holds.',
+    'sec.attention': 'Attention', 'sec.attentionDesc': 'Failed deliveries and platform errors, newest first.',
+    'sec.events': 'Recent events', 'sec.eventsDesc': 'The last 100 lifecycle events, newest first.', 'ev.filter': 'Filter events',
+    'col.name': 'Name', 'col.state': 'State', 'col.since': 'Since', 'col.leases': 'Leases', 'col.requests': 'Requests', 'col.errors': 'Errors',
+    'col.time': 'Time', 'col.app': 'App', 'col.event': 'Event', 'col.detail': 'Detail', 'col.what': 'What', 'col.status': 'Status',
+    'col.instance': 'Instance', 'col.release': 'Release', 'col.capabilities': 'Capabilities', 'col.lastAccess': 'Last access', 'col.image': 'Image',
+    'col.bundle': 'Bundle', 'col.published': 'Published', 'col.kind': 'Kind', 'col.provider': 'Provider', 'col.trigger': 'Trigger',
+    'col.attempts': 'Attempts', 'col.scheduledFor': 'Scheduled for', 'col.created': 'Created', 'col.nextAttempt': 'Next attempt', 'col.fields': 'Fields',
+    'empty.awake': 'No instance is awake.', 'empty.attention': 'Nothing needs attention.', 'empty.events': 'No events yet.', 'empty.filtered': 'Nothing matches.',
+    'att.delivery': 'Delivery failed', 'att.error': 'Error', 'att.deliveryDetail': '{trigger} · {attempts} attempts',
+    'apps.title': 'Projects', 'apps.count': '{n} apps', 'apps.filter': 'Filter by name', 'apps.allStates': 'All states',
+    'apps.empty': 'No apps yet. Publish one to give it an address.', 'apps.publish': 'Publish an app',
+    'never': 'never', 'routeOnly': 'route only',
+    'st.registered': 'registered', 'st.removed': 'removed', 'st.purging': 'purging', 'st.none': 'none', 'st.asleep': 'asleep',
+    'st.waking': 'waking', 'st.awake': 'awake', 'st.draining': 'draining', 'st.stopping': 'stopping', 'st.active': 'active',
+    'st.suspended': 'suspended', 'st.due': 'due', 'st.delivering': 'delivering', 'st.done': 'done', 'st.failed': 'failed',
+    'st.cancelled': 'cancelled', 'st.up': 'up', 'st.down': 'down', 'st.off': 'off',
+    'd.back': 'All projects', 'd.open': 'Open {address}', 'd.since': 'since {ago}', 'd.owner': 'owner {owner}',
+    'd.publish': 'Publish release', 'd.remove': 'Remove', 'd.purge': 'Purge', 'cancel': 'Cancel',
+    'd.removeTitle': 'Remove {name}?', 'd.removeBody': 'Its address will answer 404. Every volume, database, key prefix and bucket is kept; publishing again restores it.',
+    'd.purgeTitle': 'Purge {name}?', 'd.purgeBody': 'This deletes its files, database, key-value data and bucket. It cannot be undone.',
+    'd.purgeHint': 'Purge is possible after remove.', 'd.requests': 'Requests', 'd.errors': 'Errors', 'd.lastAccess': 'Last access', 'd.release': 'Current release',
+    'sec.policy': 'Policy', 'sec.policyDesc': 'Overrides for this app. An empty field follows the platform value.',
+    'p.effective': 'effective {v}', 'p.default': 'platform default ({v})', 'p.save': 'Save policy', 'p.saved': 'Policy saved.', 'p.nothing': 'Nothing changed.',
+    'p.dbNote': 'Changing the database provisions the other engine without migrating data.',
+    'p.idle_seconds': 'Idle before sleep (s)', 'p.ready_timeout_seconds': 'Ready timeout (s)', 'p.drain_timeout_seconds': 'Drain timeout (s)',
+    'p.connection_idle_seconds': 'Idle connection limit (s)', 'p.trigger_timeout_seconds': 'Trigger timeout (s)', 'p.db_backend': 'Database engine',
+    'sec.releases': 'Releases', 'sec.releasesDesc': 'Every publish, newest first.', 'r.current': 'current',
+    'sec.bindings': 'Capability bindings', 'sec.bindingsDesc': 'Resources the platform holds for this app.', 'empty.bindings': 'No resource capability is bound.',
+    'sec.deliveries': 'Trigger deliveries', 'sec.deliveriesDesc': 'The latest 50.', 'empty.deliveries': 'No deliveries.', 'd.onDemand': 'on demand',
+    'sec.logs': 'Logs', 'sec.logsDesc': 'Recent stdout and stderr of the current or last container.', 'logs.refresh': 'Refresh', 'empty.logs': 'No output.',
+    'pub.title': 'Publish', 'pub.titleFor': 'Publish {name}', 'pub.sub': 'The gateway resolves the image reference to an image id. Leave the image empty for a manifest with only static.',
+    'f.name': 'Name', 'f.nameHint': 'Lowercase letters, digits and -; the address is /apps/<name>/.', 'f.image': 'Image reference',
+    'f.owner': 'Owner', 'f.ownerHint': 'First publish only: the subject apps see as their owner.', 'f.manifest': 'Manifest (pneuma-space.json)',
+    'f.bundle': 'Static bundle', 'f.bundleHint': 'Optional tar of the static directory.', 'f.submit': 'Publish', 'f.busy': 'Publishing…', 'f.badJson': 'Not valid JSON: {msg}',
+    'pub.existing': 'Existing apps', 'pub.existingDesc': 'Pick one to publish a new release.', 'pub.none': 'No app yet.',
+    'err.load': 'Could not load: {msg}',
+    'dur.d': '{n} d', 'dur.h': '{n} h', 'dur.m': '{n} min', 'dur.s': '{n} s',
+  },
+};
+
 const POLICY_FIELDS = ['idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds'];
 const DB_BACKENDS = ['sqlite', 'postgres'];
+const LEASE_KINDS = ['request', 'channel', 'trigger'];
+const AWAKE_GATE = 20;
+const COLD_START_GATE_MS = 3000;
+const POLL_MS = 5000;
+const WINDOWS = [60, 360, 1440];
 const MANIFEST_EXAMPLE = { contract: 1, capabilities: { files: {}, db: {}, identity: {} } };
+const TONE = {
+  green: ['registered', 'awake', 'active', 'done', 'up'],
+  orange: ['waking', 'draining', 'stopping', 'purging', 'due', 'delivering'],
+  red: ['failed', 'down'],
+};
+
+const root = document.documentElement;
+const store = {
+  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, value); } catch {} },
+};
+let lang = root.lang;
+let win = Number(store.get('pneuma-space-window')) || 60;
+
+function t(key, vars) {
+  let text = I18N[lang][key];
+  if (text === undefined) {
+    console.error(`missing i18n key ${key}`);
+    text = key;
+  }
+  return vars ? text.replace(/\{(\w+)\}/g, (_, name) => vars[name]) : text;
+}
+const locale = () => (lang === 'zh' ? 'zh-CN' : 'en-US');
+const nf = (n) => new Intl.NumberFormat(locale()).format(n);
+const pct = (n) => new Intl.NumberFormat(locale(), { style: 'percent', maximumFractionDigits: 1 }).format(n);
+const ms = (v) => (v == null ? '-' : v >= 1000 ? `${new Intl.NumberFormat(locale(), { maximumFractionDigits: 1 }).format(v / 1000)} s` : `${nf(Math.round(v))} ms`);
+const clock = (v, seconds) => new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', second: seconds ? '2-digit' : undefined, hour12: false }).format(v);
+const stamp = (v) => new Intl.DateTimeFormat(locale(), { dateStyle: 'medium', timeStyle: 'short' }).format(v);
+
+function bytes(n) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${new Intl.NumberFormat(locale(), { maximumFractionDigits: i > 2 ? 1 : 0 }).format(n)} ${units[i]}`;
+}
+
+function duration(span) {
+  const s = Math.max(0, Math.floor(span / 1000));
+  const parts = [['d', Math.floor(s / 86400)], ['h', Math.floor(s / 3600) % 24], ['m', Math.floor(s / 60) % 60], ['s', s % 60]];
+  const first = parts.findIndex(([, n]) => n > 0);
+  return parts.slice(first < 0 ? 3 : first, (first < 0 ? 3 : first) + 2).map(([unit, n]) => t(`dur.${unit}`, { n })).join(' ');
+}
+
+function ago(v) {
+  if (v == null) return h('span', { class: 'muted' }, t('never'));
+  const s = Math.round((v - Date.now()) / 1000);
+  const [n, unit] = Math.abs(s) < 60 ? [s, 'second'] : Math.abs(s) < 3600 ? [Math.round(s / 60), 'minute'] : Math.abs(s) < 86400 ? [Math.round(s / 3600), 'hour'] : [Math.round(s / 86400), 'day'];
+  return h('time', { datetime: new Date(v).toISOString(), title: stamp(v) }, new Intl.RelativeTimeFormat(locale(), { numeric: 'auto' }).format(n, unit));
+}
 
 function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
@@ -74,7 +415,14 @@ function h(tag, attrs = {}, ...children) {
     if (key.startsWith('on')) el.addEventListener(key.slice(2), value);
     else el.setAttribute(key, value === true ? '' : value);
   }
-  el.append(...children.flat().filter((c) => c != null && c !== false));
+  el.append(...children.flat(Infinity).filter((c) => c != null && c !== false));
+  return el;
+}
+
+function svg(tag, attrs = {}, ...children) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [key, value] of Object.entries(attrs)) if (value != null) el.setAttribute(key, value);
+  el.append(...children);
   return el;
 }
 
@@ -85,230 +433,621 @@ async function api(method, path, body, contentType = 'application/json') {
     body: body === undefined || contentType !== 'application/json' ? body : JSON.stringify(body),
   });
   const text = await response.text();
+  if (response.headers.get('content-type')?.startsWith('text/plain')) return text;
   const data = text ? JSON.parse(text) : null;
-  if (!response.ok) throw new Error(data?.error ?? `${response.status} ${response.statusText}`);
+  if (!response.ok) throw Object.assign(new Error(data?.error ?? `${response.status} ${response.statusText}`), { status: response.status });
   return data;
 }
 
-const pill = (state) => h('span', { class: `pill ${state}` }, state);
 const appPath = (name) => `/api/apps/${encodeURIComponent(name)}`;
+const appLink = (name) => h('a', { href: `#/apps/${encodeURIComponent(name)}`, class: 'mono' }, name);
+const tone = (state) => Object.keys(TONE).find((k) => TONE[k].includes(state)) ?? '';
+const status = (state) => h('span', { class: `st ${tone(state)}` }, t(`st.${state}`));
+const chip = (text) => h('span', { class: 'chip' }, text);
+const leaseChips = (leases) => h('span', { class: 'chips' }, LEASE_KINDS.filter((k) => leases?.[k] > 0).map((k) => chip(`${k} ${leases[k]}`)));
 
-function ago(ms) {
-  if (ms == null) return h('span', { class: 'muted' }, 'never');
-  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
-  const text = s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)} min ago` : s < 86400 ? `${Math.floor(s / 3600)} h ago` : `${Math.floor(s / 86400)} d ago`;
-  return h('time', { datetime: new Date(ms).toISOString(), title: new Date(ms).toLocaleString() }, text);
+function sectionHead(index, title, desc, ...end) {
+  return h('div', { class: 'sh' },
+    h('span', { class: 'idx' }, String(index).padStart(2, '0')),
+    h('div', {}, h('h2', {}, t(title)), desc && h('p', {}, t(desc))),
+    end.length ? h('div', { class: 'end' }, end) : null);
 }
 
-const when = (ms) => (ms == null ? h('span', { class: 'muted' }, '-') : h('time', { datetime: new Date(ms).toISOString() }, new Date(ms).toLocaleString()));
-
-function table(columns, rows, emptyText) {
-  if (rows.length === 0) return h('section', {}, h('div', { class: 'empty' }, emptyText));
-  return h('section', {}, h('table', {},
-    h('thead', {}, h('tr', {}, columns.map(([label, cls]) => h('th', { class: cls }, label)))),
-    h('tbody', {}, rows.map((cells) => h('tr', {}, cells.map((cell, i) => h('td', { class: columns[i][1] }, cell)))))));
+/** columns: [labelKey, 'r' for right-aligned numbers]; a row with `href` opens it on click. */
+function table(columns, rows, emptyKey, scroll = false) {
+  if (rows.length === 0) return h('div', { class: 'card' }, h('div', { class: 'empty' }, t(emptyKey)));
+  return h('div', { class: scroll ? 'card table scroll' : 'card table' }, h('table', {},
+    h('thead', {}, h('tr', {}, columns.map(([label, align]) => h('th', { class: align }, t(label))))),
+    h('tbody', {}, rows.map((row) => h('tr', {
+      'data-href': row.href,
+      onclick: row.href && ((e) => { if (!e.target.closest('a')) location.hash = row.href; }),
+    }, row.cells.map((cell, i) => h('td', { class: columns[i][1] }, cell)))))));
 }
 
-function message(text, ok = false) {
-  return h('div', { class: ok ? 'message ok' : 'message', role: ok ? 'status' : 'alert' }, text);
+function segmented(items, current, onPick, label) {
+  return h('div', { class: 'seg', role: 'group', 'aria-label': label },
+    items.map(([value, content, title]) => h('button', {
+      type: 'button', 'aria-pressed': String(value === current), title, 'aria-label': title,
+      onclick: () => onPick(value),
+    }, content)));
 }
+
+function confirmDialog(title, body, action) {
+  return new Promise((resolve) => {
+    const dialog = h('dialog', {},
+      h('h3', {}, title), h('p', {}, body),
+      h('form', { method: 'dialog', class: 'actions' },
+        h('button', { class: 'btn', value: 'cancel', autofocus: true }, t('cancel')),
+        h('button', { class: 'btn danger', value: 'ok' }, action)));
+    dialog.addEventListener('close', () => { resolve(dialog.returnValue === 'ok'); dialog.remove(); });
+    document.body.append(dialog);
+    dialog.showModal();
+  });
+}
+
+const ICON = {
+  sun: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/></svg>',
+  moon: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"/></svg>',
+};
+const icon = (name) => { const span = h('span', { 'aria-hidden': 'true', style: 'display:inline-flex' }); span.innerHTML = ICON[name]; return span; };
+
+// Charts
+
+/** Sums minute buckets into bins: 1 h by minute, 6 h by 5 min, 24 h by 15 min. Latency bins take the median of minute medians. */
+function binned(series, key, minutes) {
+  const step = minutes === 60 ? 1 : minutes === 360 ? 5 : 15;
+  const values = series[key].slice(-minutes);
+  const out = [];
+  for (let i = 0; i < values.length; i += step) {
+    const chunk = values.slice(i, i + step);
+    if (key === 'wakeP50Ms') {
+      const present = chunk.filter((v) => v != null).sort((a, b) => a - b);
+      out.push(present.length ? present[Math.floor(present.length / 2)] : null);
+    } else out.push(chunk.reduce((a, b) => a + b, 0));
+  }
+  return { values: out, step };
+}
+
+function niceMax(v) {
+  if (v <= 4) return 4;
+  const p = 10 ** Math.floor(Math.log10(v));
+  return [1, 2, 2.5, 5, 10].map((m) => m * p).find((m) => m >= v);
+}
+
+/** layers: [{ key, color, kind: 'area' | 'bar' | 'line', axis: 'left' | 'right' }] */
+function chartCard(attrs, titleKey, layers) {
+  const el = h('div', { class: 'inset chart', ...attrs });
+  const tip = h('div', { class: 'tip', hidden: true });
+  const plot = h('div', { style: 'position:relative' });
+  let data = null;
+  let hover = null;
+  const draw = () => {
+    if (!data) return;
+    const width = Math.max(260, plot.clientWidth);
+    const height = 150;
+    const right = layers.some((l) => l.axis === 'right');
+    const pad = { l: 34, r: right ? 46 : 8, t: 8, b: 20 };
+    const binnedLayers = layers.map((l) => ({ ...l, ...binned(data.series, l.key, win) }));
+    const count = binnedLayers[0].values.length;
+    const step = binnedLayers[0].step;
+    const start = data.series.start + (1440 - win) * 60000;
+    const bw = (width - pad.l - pad.r) / count;
+    const x = (i) => pad.l + bw * (i + 0.5);
+    const maxOf = (axis) => niceMax(Math.max(0, ...binnedLayers.filter((l) => (l.axis ?? 'left') === axis).flatMap((l) => l.values.filter((v) => v != null))));
+    const max = { left: maxOf('left'), right: right ? maxOf('right') : 1 };
+    const y = (v, axis = 'left') => pad.t + (height - pad.t - pad.b) * (1 - v / max[axis]);
+    const g = svg('svg', { viewBox: `0 0 ${width} ${height}`, width, height, role: 'img', 'aria-label': t(titleKey) });
+    for (const f of [0, 0.5, 1]) {
+      g.append(svg('line', { x1: pad.l, x2: width - pad.r, y1: y(max.left * f), y2: y(max.left * f), style: 'stroke:var(--line-soft)' }));
+      g.append(svg('text', { x: pad.l - 6, y: y(max.left * f) + 4, 'text-anchor': 'end' }, nf(max.left * f)));
+      if (right) g.append(svg('text', { x: width - pad.r + 6, y: y(max.right * f, 'right') + 4 }, ms(max.right * f)));
+    }
+    for (const f of [0, 1 / 3, 2 / 3, 1]) {
+      const i = Math.min(count - 1, Math.round(f * (count - 1)));
+      g.append(svg('text', { x: x(i), y: height - 4, 'text-anchor': f === 0 ? 'start' : f === 1 ? 'end' : 'middle' }, clock(start + i * step * 60000)));
+    }
+    for (const l of binnedLayers) {
+      const axis = l.axis ?? 'left';
+      if (l.kind === 'bar') {
+        l.values.forEach((v, i) => v > 0 && g.append(svg('rect', { x: x(i) - Math.max(1, bw * 0.3), width: Math.max(2, bw * 0.6), y: y(v, axis), height: y(0) - y(v, axis), rx: 1, style: `fill:${l.color}` })));
+        continue;
+      }
+      const points = l.values.map((v, i) => (v == null ? null : [x(i), y(v, axis)]));
+      const runs = [];
+      for (const p of points) if (p) (runs.at(-1)?.open ? runs.at(-1).pts.push(p) : runs.push({ open: true, pts: [p] })); else if (runs.at(-1)) runs.at(-1).open = false;
+      for (const { pts } of runs) {
+        const line = pts.map(([px, py], i) => `${i ? 'L' : 'M'}${px.toFixed(1)},${py.toFixed(1)}`).join('');
+        if (l.kind === 'area' && pts.length > 1) g.append(svg('path', { d: `${line}L${pts.at(-1)[0].toFixed(1)},${y(0)}L${pts[0][0].toFixed(1)},${y(0)}Z`, style: `fill:${l.color};fill-opacity:.1` }));
+        if (pts.length === 1) g.append(svg('circle', { cx: pts[0][0], cy: pts[0][1], r: 2, style: `fill:${l.color}` }));
+        g.append(svg('path', { d: line, style: `fill:none;stroke:${l.color};stroke-width:${l.kind === 'line' ? 1.5 : 2};stroke-linejoin:round${l.dash ? ';stroke-dasharray:3 3' : ''}` }));
+      }
+    }
+    const cross = svg('line', { y1: pad.t, y2: height - pad.b, style: 'stroke:var(--ink-3);stroke-width:1', visibility: 'hidden' });
+    g.append(cross);
+    const show = (px) => {
+      const i = Math.max(0, Math.min(count - 1, Math.floor((px - pad.l) / bw)));
+      hover = px;
+      cross.setAttribute('x1', x(i));
+      cross.setAttribute('x2', x(i));
+      cross.setAttribute('visibility', 'visible');
+      const from = start + i * step * 60000;
+      tip.replaceChildren(
+        h('div', { class: 'mono' }, step === 1 ? clock(from) : `${clock(from)}–${clock(from + step * 60000)}`),
+        ...binnedLayers.map((l) => h('div', {}, h('span', { style: `color:${l.color}` }, '● '), `${t(`s.${l.key}`)} `, h('span', { class: 'mono' }, l.key === 'wakeP50Ms' ? ms(l.values[i]) : nf(l.values[i] ?? 0)))));
+      tip.hidden = false;
+      const left = x(i) + 12;
+      tip.style.left = `${left + tip.offsetWidth > width ? x(i) - tip.offsetWidth - 12 : left}px`;
+      tip.style.top = '4px';
+    };
+    g.addEventListener('pointermove', (e) => show(e.clientX - g.getBoundingClientRect().left));
+    g.addEventListener('pointerleave', () => { hover = null; tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
+    plot.replaceChildren(g, tip);
+    if (hover != null) show(hover);
+  };
+  new ResizeObserver(draw).observe(plot);
+  const legend = h('span', { style: 'display:inline-flex;gap:10px;flex-wrap:wrap' });
+  el.append(h('header', {}, h('b', {}, t(titleKey)), legend), plot);
+  return {
+    el,
+    set(next) {
+      data = next;
+      legend.replaceChildren(...layers.map((l) => {
+        const total = l.key === 'wakeP50Ms' ? null : binned(next.series, l.key, win).values.reduce((a, b) => a + b, 0);
+        return h('span', { class: 'legend' }, h('i', { style: `background:${l.color}` }), t(`s.${l.key}`), total == null ? null : h('span', { class: 'mono' }, nf(total)));
+      }));
+      draw();
+    },
+  };
+}
+
+// Views
+
+const main = () => document.getElementById('main');
+let poller = null;
 
 function show(...nodes) {
-  main.replaceChildren(...nodes);
+  main().replaceChildren(...nodes);
 }
 
-async function listView() {
-  const apps = await api('GET', '/api/apps');
+function tile(label, value, sub, ratio, extra = {}) {
+  return h('div', { class: 'card tile', ...extra },
+    h('div', { class: 'l' }, label),
+    h('div', { class: 'v' }, value),
+    ratio == null ? null : h('div', { class: 'bar' }, h('i', { class: ratio > 0.8 ? 'hot' : null, style: `width:${Math.min(100, ratio * 100).toFixed(1)}%` })),
+    h('div', { class: 's' }, sub));
+}
+
+function attentionRows(m) {
+  const deliveries = m.deliveries.recentFailures.map((d) => ({
+    at: d.at, app: d.app, what: status('failed'), label: t('att.delivery'),
+    detail: [t('att.deliveryDetail', { trigger: d.trigger, attempts: d.attempts }), d.reason && ` · ${d.reason}`],
+  }));
+  // A request wake failure is logged twice (wake-failed and the runtime's asleep); the runtime line is kept.
+  const errors = m.events.filter((e) => e.error !== undefined && e.ev !== 'wake-failed').map((e) => ({
+    at: e.t, app: e.app, what: h('span', { class: 'st red' }, e.ev), detail: String(e.error),
+  }));
+  return [...deliveries, ...errors].sort((a, b) => b.at - a.at).map((r) => ({
+    href: r.app ? `#/apps/${encodeURIComponent(r.app)}` : undefined,
+    cells: [h('span', { class: 'mono', title: stamp(r.at) }, clock(r.at, true)), r.app ? appLink(r.app) : '-', r.label ? h('span', { class: 'st red' }, r.label) : r.what, r.detail],
+  }));
+}
+
+function eventTone(e) {
+  if (e.error !== undefined || e.ev === 'delivery.failed') return 'red';
+  return tone(e.ev.replace(/^delivery\./, ''));
+}
+
+function eventFields(e) {
+  return Object.entries(e).filter(([k]) => !['t', 'ev', 'app'].includes(k))
+    .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' ');
+}
+
+async function overview() {
+  const sub = h('p', { class: 'sub' }, t('ov.waiting'));
+  const strip = h('div', { class: 'card strip', 'data-section': 'services' });
+  const tiles = h('div', { class: 'tiles', 'data-section': 'fleet' });
+  const charts = {
+    traffic: chartCard({ 'data-section': 'traffic' }, 'ch.traffic', [
+      { key: 'requests', color: 'var(--accent)', kind: 'area' },
+      { key: 'errors', color: 'var(--red)', kind: 'bar' }]),
+    wakes: chartCard({ 'data-section': 'wakes' }, 'ch.wakes', [
+      { key: 'wakes', color: 'var(--accent)', kind: 'bar' },
+      { key: 'wakeFailures', color: 'var(--red)', kind: 'bar' },
+      { key: 'wakeP50Ms', color: 'var(--orange)', kind: 'line', axis: 'right' }]),
+    deliveries: chartCard({ 'data-section': 'deliveries' }, 'ch.deliveries', [
+      { key: 'deliveriesDone', color: 'var(--accent)', kind: 'area' },
+      { key: 'deliveriesFailed', color: 'var(--red)', kind: 'bar' },
+      { key: 'deliveriesRetried', color: 'var(--orange)', kind: 'line', dash: true }]),
+  };
+  const awake = h('div');
+  const attention = h('div');
+  const events = h('div', { 'data-section': 'events' });
+  const filter = h('input', { type: 'search', placeholder: t('ev.filter'), 'aria-label': t('ev.filter'), oninput: () => renderEvents() });
+  const windows = h('span');
+  let last = null;
+
+  const renderWindows = () => windows.replaceChildren(segmented(WINDOWS.map((w) => [w, t(`win.${w}`)]), win, (w) => {
+    win = w;
+    store.set('pneuma-space-window', String(w));
+    renderWindows();
+    if (last) Object.values(charts).forEach((c) => c.set(last));
+  }));
+  const renderEvents = () => {
+    if (!last) return;
+    const needle = filter.value.trim().toLowerCase();
+    const rows = [...last.events].reverse()
+      .filter((e) => !needle || `${e.ev} ${e.app ?? ''} ${eventFields(e)}`.toLowerCase().includes(needle))
+      .map((e) => ({ cells: [
+        h('span', { class: 'mono', title: stamp(e.t) }, clock(e.t, true)),
+        h('span', { class: `st ${eventTone(e)}` }, h('span', { class: 'mono' }, e.ev)),
+        e.app ? appLink(e.app) : '-',
+        h('span', { class: 'mono', title: eventFields(e) }, eventFields(e)),
+      ] }));
+    const scrolled = events.querySelector('.scroll')?.scrollTop ?? 0;
+    events.replaceChildren(table([['col.time'], ['col.event'], ['col.app'], ['col.fields', 'wrap']], rows, last.events.length ? 'empty.filtered' : 'empty.events', true));
+    events.querySelector('.scroll')?.scrollTo(0, scrolled);
+  };
+  renderWindows();
+
   show(
-    h('div', { class: 'title' }, h('h1', {}, 'Apps'), h('span', { class: 'muted' }, `${apps.length} apps`)),
-    h('p', {}, h('a', { href: '#/publish' }, 'Publish an app')),
-    table(
-      [['Name'], ['Address'], ['Release', 'num'], ['Capabilities'], ['Status'], ['Instance'], ['Last access'], ['Requests', 'num'], ['Errors', 'num']],
-      apps.map((app) => [
-        h('a', { href: `#/apps/${app.name}` }, app.name),
-        app.status === 'registered' ? h('a', { href: app.address, target: '_blank', rel: 'noopener', class: 'mono' }, app.address) : h('span', { class: 'mono muted' }, app.address),
-        app.release == null ? '-' : `#${app.release}`,
-        app.capabilities.join(', ') || h('span', { class: 'muted' }, 'route only'),
-        pill(app.status),
-        pill(app.instance),
-        ago(app.lastAccessAt),
-        String(app.requests),
-        String(app.errors),
-      ]),
-      'No apps yet. Publish one to give it an address.',
-    ),
+    h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('ov.title')), sub)),
+    h('section', {}, sectionHead(1, 'sec.services', 'sec.servicesDesc'), strip),
+    h('section', {}, sectionHead(2, 'sec.fleet', 'sec.fleetDesc'), tiles),
+    h('section', {}, sectionHead(3, 'sec.activity', 'sec.activityDesc', windows), h('div', { class: 'charts' }, Object.values(charts).map((c) => c.el))),
+    h('section', {}, sectionHead(4, 'sec.awake', 'sec.awakeDesc'), awake),
+    h('section', {}, sectionHead(5, 'sec.attention', 'sec.attentionDesc'), attention),
+    h('section', {}, sectionHead(6, 'sec.events', 'sec.eventsDesc', filter), events),
   );
+
+  return async function update() {
+    const [m, apps] = await Promise.all([api('GET', '/api/metrics'), api('GET', '/api/apps')]);
+    last = m;
+    sub.replaceChildren(m.gateway.lastFlushAt ? t('ov.sub', { ago: ago(m.gateway.lastFlushAt).textContent }) : t('ov.waiting'));
+    footer(m.gateway.startedAt);
+
+    const service = (name) => {
+      const s = m.services[name] ?? { status: 'down', latencyMs: null };
+      return h('div', {},
+        h('span', { class: `st ${tone(s.status)}` }, t(`svc.${name}`)),
+        h('div', { class: 'v' }, s.status === 'up' ? ms(s.latencyMs) : t(`st.${s.status}`)),
+        h('div', { class: 's' }, s.status === 'up' ? t('st.up') : t(`svc.${s.status}`)));
+    };
+    strip.replaceChildren(
+      h('div', {},
+        h('span', { class: 'st green' }, t('svc.gateway')),
+        h('div', { class: 'v' }, duration(Date.now() - m.gateway.startedAt)),
+        h('div', { class: 's' }, t('svc.gatewaySub', { rss: bytes(m.gateway.rssBytes) }))),
+      ...['redis', 'object', 'postgres', 'coturn'].map(service));
+
+    const count = (state) => apps.filter((a) => a.instance === state).length;
+    const awakeNow = count('awake');
+    const w = m.wakes.last1h;
+    const requests = m.series.requests.slice(-60).reduce((a, b) => a + b, 0);
+    const errors = m.series.errors.slice(-60).reduce((a, b) => a + b, 0);
+    const host = m.host;
+    const memUsed = host ? host.memory.totalBytes - host.memory.freeBytes : 0;
+    tiles.replaceChildren(
+      tile(t('k.apps'), nf(m.fleet.apps.registered), t('k.appsSub', { removed: nf(m.fleet.apps.removed), purging: nf(m.fleet.apps.purging), active: nf(m.fleet.activeLast24h) })),
+      tile(t('k.awake'), [nf(awakeNow), h('small', {}, `/ ${AWAKE_GATE}`)], t('k.awakeSub', { waking: count('waking'), draining: count('draining'), stopping: count('stopping') }), awakeNow / AWAKE_GATE),
+      tile(t('k.requests'), nf(requests), t('k.requestsSub', { errors: nf(errors), ratio: requests ? pct(errors / requests) : '-' })),
+      tile(t('k.wakes'), nf(w.count), t('k.wakesSub', { failures: nf(w.failures), p50: ms(w.p50Ms), p95: ms(w.p95Ms) }), w.p95Ms == null ? null : w.p95Ms / COLD_START_GATE_MS),
+      tile(t('k.deliveries'), nf(m.deliveries.due), t('k.deliveriesSub', { delivering: nf(m.deliveries.delivering), failed: nf(m.deliveries.failed) })),
+      host
+        ? tile(t('k.host'), [new Intl.NumberFormat(locale(), { maximumFractionDigits: 2 }).format(host.load[0]), h('small', {}, t('k.cores', { n: host.cpus }))],
+          t('k.hostSub', { used: bytes(memUsed), total: bytes(host.memory.totalBytes), free: host.data ? bytes(host.data.freeBytes) : '-' }), memUsed / host.memory.totalBytes, { 'data-section': 'host' })
+        : tile(t('k.host'), '-', t('ov.waiting'), null, { 'data-section': 'host' }),
+    );
+    Object.values(charts).forEach((c) => c.set(m));
+
+    const live = apps.filter((a) => ['waking', 'awake', 'draining', 'stopping'].includes(a.instance)).sort((a, b) => (a.since ?? 0) - (b.since ?? 0));
+    awake.replaceChildren(table(
+      [['col.name'], ['col.state'], ['col.since'], ['col.leases'], ['col.requests', 'r'], ['col.errors', 'r']],
+      live.map((a) => ({ href: `#/apps/${encodeURIComponent(a.name)}`, cells: [appLink(a.name), status(a.instance), ago(a.since), leaseChips(a.leases), h('span', { class: 'num' }, nf(a.requests)), h('span', { class: 'num' }, nf(a.errors))] })),
+      'empty.awake'));
+    attention.replaceChildren(table([['col.time'], ['col.app'], ['col.what'], ['col.detail', 'wrap']], attentionRows(m), 'empty.attention'));
+    renderEvents();
+  };
 }
 
-async function detailView(name) {
-  const detail = await api('GET', appPath(name));
-  const { app, releases, bindings, policy, instance, stats, deliveries } = detail;
-  const current = releases.find((r) => r.number === app.current);
+const STATE_FILTERS = ['awake', 'waking', 'asleep', 'none', 'registered', 'removed', 'purging'];
+let appsFilter = { text: '', state: '' };
+
+async function projects() {
+  const count = h('p', { class: 'sub' });
+  const body = h('div');
+  let apps = [];
+  const text = h('input', { type: 'search', value: appsFilter.text, placeholder: t('apps.filter'), 'aria-label': t('apps.filter'), oninput: () => { appsFilter.text = text.value; render(); } });
+  const state = h('select', { 'aria-label': t('col.state'), onchange: () => { appsFilter.state = state.value; render(); } },
+    h('option', { value: '' }, t('apps.allStates')),
+    STATE_FILTERS.map((s) => h('option', { value: s, selected: appsFilter.state === s }, t(`st.${s}`))));
+  const render = () => {
+    count.textContent = t('apps.count', { n: nf(apps.length) });
+    const needle = appsFilter.text.trim().toLowerCase();
+    const rows = apps.filter((a) => (!needle || a.name.includes(needle)) && (!appsFilter.state || a.status === appsFilter.state || a.instance === appsFilter.state));
+    body.replaceChildren(apps.length === 0
+      ? h('div', { class: 'card' }, h('div', { class: 'empty' }, t('apps.empty'), h('div', { style: 'margin-top:12px' }, h('a', { class: 'btn primary', href: '#/publish' }, t('apps.publish')))))
+      : table(
+        [['col.name'], ['col.status'], ['col.instance'], ['col.since'], ['col.release', 'r'], ['col.capabilities'], ['col.requests', 'r'], ['col.errors', 'r'], ['col.lastAccess']],
+        rows.map((a) => ({ href: `#/apps/${encodeURIComponent(a.name)}`, cells: [
+          appLink(a.name), status(a.status),
+          h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(a.instance), leaseChips(a.leases)),
+          a.since == null ? h('span', { class: 'muted' }, '-') : ago(a.since),
+          h('span', { class: 'num' }, a.release == null ? '-' : `#${a.release}`),
+          a.capabilities.length ? h('span', { class: 'chips' }, a.capabilities.map(chip)) : h('span', { class: 'muted' }, t('routeOnly')),
+          h('span', { class: 'num' }, nf(a.requests)), h('span', { class: 'num' }, nf(a.errors)), ago(a.lastAccessAt),
+        ] })),
+        'empty.filtered'));
+  };
   show(
-    h('p', {}, h('a', { href: '#/' }, 'All apps')),
-    h('div', { class: 'title' }, h('h1', {}, app.name), pill(app.status), pill(instance)),
-    h('div', { class: 'summary' },
-      h('span', {}, 'Release ', h('strong', {}, app.current == null ? '-' : `#${app.current}`)),
-      h('span', {}, 'Capabilities ', h('strong', {}, current ? Object.keys(current.manifest.capabilities).join(', ') || 'route only' : '-')),
-      h('span', {}, 'Last access ', ago(stats.lastAccessAt)),
-      h('span', {}, 'Requests ', h('strong', {}, String(stats.requests))),
-      h('span', {}, 'Errors ', h('strong', {}, String(stats.errors)))),
-    h('h2', {}, 'Releases'),
-    table(
-      [['Release', 'num'], ['Image'], ['Capabilities'], ['Bundle'], ['Published']],
-      [...releases].sort((a, b) => b.number - a.number).map((r) => [
-        r.number === app.current ? h('strong', {}, `#${r.number} current`) : `#${r.number}`,
-        h('span', { class: 'mono', title: r.image ?? '' }, r.image ? r.image.slice(0, 19) : 'none'),
-        Object.keys(r.manifest.capabilities).join(', ') || 'route only',
-        h('span', { class: 'mono', title: r.bundle ?? '' }, r.bundle ? r.bundle.slice(0, 12) : 'none'),
-        when(r.publishedAt),
-      ]),
-      'No release.',
-    ),
-    h('h2', {}, 'Capability bindings'),
-    table([['Kind'], ['Provider'], ['State']], bindings.map((b) => [b.kind, b.provider, pill(b.state)]), 'No resource capabilities bound.'),
-    h('h2', {}, 'Policy'),
-    policyForm(app, policy),
-    h('h2', {}, 'Trigger deliveries'),
-    table(
-      [['Delivery'], ['Trigger'], ['State'], ['Attempts', 'num'], ['Scheduled for'], ['Next attempt'], ['Created']],
-      deliveries.map((d) => [
-        h('span', { class: 'mono' }, d.id), d.trigger, pill(d.state), String(d.attempts),
-        d.scheduledFor == null ? h('span', { class: 'muted' }, 'on demand') : when(d.scheduledFor),
-        d.state === 'due' ? when(d.nextAttemptAt) : h('span', { class: 'muted' }, '-'),
-        when(d.createdAt),
-      ]),
-      'No deliveries.',
-    ),
-    h('h2', {}, 'Lifecycle'),
-    lifecycle(app),
+    h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('apps.title')), count), h('a', { class: 'btn primary', href: '#/publish' }, t('apps.publish'))),
+    h('section', {}, h('div', { class: 'toolbar' }, text, state), body),
   );
+  return async function update() {
+    apps = await api('GET', '/api/apps');
+    render();
+  };
 }
 
-function policyForm(app, effective) {
+function policyForm(app, effective, reload) {
   const override = app.policyOverride;
-  const status = h('div');
-  const inputs = Object.fromEntries(POLICY_FIELDS.map((field) => [field,
-    h('input', { type: 'number', min: 1, step: 1, name: field, value: override[field] ?? '', placeholder: String(effective[field]) })]));
+  const message = h('div', { class: 'msg', role: 'status' });
+  const inputs = Object.fromEntries(POLICY_FIELDS.map((f) => [f, h('input', { type: 'number', min: 1, step: 1, name: f, value: override[f] ?? '', placeholder: String(effective[f]) })]));
   inputs.db_backend = h('select', { name: 'db_backend' },
-    h('option', { value: '' }, `default (${effective.db_backend})`),
+    h('option', { value: '' }, t('p.default', { v: effective.db_backend })),
     DB_BACKENDS.map((b) => h('option', { value: b, selected: override.db_backend === b }, b)));
-  const form = h('form', { class: 'card', onsubmit: async (event) => {
+  const field = (f) => h('label', { class: 'field' },
+    h('span', {}, t(`p.${f}`)), inputs[f],
+    h('small', {}, h('span', { class: 'mono' }, f), ' · ', t('p.effective', { v: String(effective[f]) })));
+  return h('form', { class: 'card form', onsubmit: async (event) => {
     event.preventDefault();
+    message.className = 'msg';
     const patch = {};
-    for (const [field, input] of Object.entries(inputs)) {
-      const value = input.value === '' ? null : field === 'db_backend' ? input.value : Number(input.value);
-      if (value !== (override[field] ?? null)) patch[field] = value;
+    for (const [f, input] of Object.entries(inputs)) {
+      const value = input.value === '' ? null : f === 'db_backend' ? input.value : Number(input.value);
+      if (value !== (override[f] ?? null)) patch[f] = value;
     }
-    if (Object.keys(patch).length === 0) return status.replaceChildren(message('Nothing changed.', true));
+    if (Object.keys(patch).length === 0) return void (message.textContent = t('p.nothing'));
     try {
       await api('PUT', `${appPath(app.name)}/policy`, patch);
-      await detailView(app.name);
+      await reload();
     } catch (error) {
-      status.replaceChildren(message(error.message));
+      message.className = 'msg err';
+      message.textContent = error.message;
     }
   } },
-    h('p', { class: 'muted', style: 'margin:0' }, 'Overrides for this app. An empty field follows the platform value shown in grey. Changing the database provisions the other engine without migrating data.'),
-    h('div', { class: 'grid' },
-      POLICY_FIELDS.map((field) => h('label', {}, field, inputs[field])),
-      h('label', {}, 'db_backend', inputs.db_backend)),
-    h('div', { class: 'actions' }, h('button', { type: 'submit' }, 'Save policy')),
-    status);
-  return form;
+    h('div', { class: 'fields' }, POLICY_FIELDS.map(field), field('db_backend')),
+    h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, t('p.save')), h('small', { class: 'muted' }, t('p.dbNote'))),
+    message);
 }
 
-function lifecycle(app) {
-  const status = h('div');
-  const act = (path, prompt) => async () => {
-    if (!confirm(prompt)) return;
+function logsPanel(name) {
+  const pre = h('pre', { class: 'log' });
+  const box = h('div', { class: 'inset' }, pre);
+  let tail = Number(store.get('pneuma-space-tail')) || 100;
+  const load = async () => {
     try {
-      await api('POST', path);
-      await detailView(app.name);
+      const text = await api('GET', `${appPath(name)}/logs?tail=${tail}`);
+      pre.replaceChildren(text || h('div', { class: 'empty' }, t('empty.logs')));
+      pre.scrollTop = pre.scrollHeight;
     } catch (error) {
-      status.replaceChildren(message(error.message));
+      pre.textContent = error.message;
     }
   };
-  return h('form', { class: 'card', onsubmit: (e) => e.preventDefault() },
-    h('div', { class: 'actions' },
-      h('button', { type: 'button', class: 'secondary', onclick: () => { location.hash = `#/publish/${app.name}`; } }, 'Publish a new release'),
-      h('button', { type: 'button', class: 'danger', disabled: app.status !== 'registered',
-        onclick: act(`${appPath(app.name)}/remove`, `Remove ${app.name}? Its address will answer 404. Data is kept and a later publish restores it.`) }, 'Remove'),
-      h('button', { type: 'button', class: 'danger', disabled: app.status !== 'removed',
-        onclick: act(`${appPath(app.name)}/purge`, `Purge ${app.name}? This deletes its files, database, key-value data and bucket. It cannot be undone.`) }, 'Purge')),
-    h('p', { class: 'muted', style: 'margin:0' }, 'Remove keeps every volume, database and bucket. Purge deletes them and is only possible after remove.'),
-    status);
+  const picker = h('span');
+  const renderPicker = () => picker.replaceChildren(segmented([100, 500, 2000].map((n) => [n, nf(n)]), tail, (n) => {
+    tail = n;
+    store.set('pneuma-space-tail', String(n));
+    renderPicker();
+    load();
+  }));
+  renderPicker();
+  load();
+  return { box, controls: [picker, h('button', { class: 'btn', type: 'button', onclick: load }, t('logs.refresh'))] };
 }
 
-async function publishView(prefill) {
+async function detail(name) {
+  const [d, apps] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps')]);
+  const { app, releases, bindings, policy, stats, deliveries } = d;
+  d.address = `/apps/${app.name}/`;
+  const reload = () => route();
+  const head = h('div', { class: 'grow' });
+  const tiles = h('div', { class: 'tiles four' });
+  const renderHead = (row, detailStats) => {
+    const s = row ?? { instance: d.instance, since: null, leases: null };
+    head.replaceChildren(
+      h('a', { class: 'back', href: '#/apps' }, `← ${t('d.back')}`),
+      h('h1', { class: 'mono', style: 'margin-top:12px' }, app.name),
+      h('div', { class: 'meta' },
+        status(app.status),
+        app.status === 'registered' ? h('a', { href: ingressOrigin() + d.address, target: '_blank', rel: 'noopener', class: 'mono', title: t('d.open', { address: d.address }) }, d.address) : h('span', { class: 'mono muted' }, d.address),
+        h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(s.instance), s.since != null ? h('span', { class: 'muted' }, t('d.since', { ago: ago(s.since).textContent })) : null, leaseChips(s.leases)),
+        h('span', { class: 'muted' }, t('d.owner', { owner: app.owner }))));
+    tiles.replaceChildren(
+      tile(t('d.requests'), nf(detailStats.requests), ''),
+      tile(t('d.errors'), nf(detailStats.errors), detailStats.requests ? pct(detailStats.errors / detailStats.requests) : ''),
+      tile(t('d.lastAccess'), detailStats.lastAccessAt == null ? t('never') : ago(detailStats.lastAccessAt).textContent, detailStats.lastAccessAt == null ? '' : stamp(detailStats.lastAccessAt)),
+      tile(t('d.release'), app.current == null ? '-' : `#${app.current}`, releases.length ? stamp(Math.max(...releases.map((r) => r.publishedAt))) : ''));
+  };
+  renderHead(apps.find((a) => a.name === app.name), stats);
+
+  const act = (kind) => async () => {
+    if (!(await confirmDialog(t(`d.${kind}Title`, { name: app.name }), t(`d.${kind}Body`), t(`d.${kind}`)))) return;
+    try {
+      await api('POST', `${appPath(app.name)}/${kind}`);
+      if (kind === 'purge') location.hash = '#/apps';
+      else await reload();
+    } catch (error) {
+      actionMessage.textContent = error.message;
+    }
+  };
+  const actionMessage = h('div', { class: 'msg err', role: 'alert' });
+  const logs = logsPanel(app.name);
+  const current = (r) => r.number === app.current;
+  show(
+    h('div', { class: 'head' }, head,
+      h('div', { style: 'display:grid;gap:8px;justify-items:end' },
+        h('div', { class: 'actions' },
+          h('a', { class: 'btn', href: `#/publish/${encodeURIComponent(app.name)}` }, t('d.publish')),
+          h('button', { class: 'btn danger', type: 'button', disabled: app.status !== 'registered', onclick: act('remove') }, t('d.remove')),
+          h('button', { class: 'btn danger', type: 'button', disabled: app.status !== 'removed', title: app.status === 'removed' ? null : t('d.purgeHint'), onclick: act('purge') }, t('d.purge'))),
+        actionMessage)),
+    h('section', { style: 'padding-top:0;border-top:0' }, tiles),
+    h('section', {}, sectionHead(1, 'sec.policy', 'sec.policyDesc'), policyForm(app, policy, reload)),
+    h('section', {}, sectionHead(2, 'sec.releases', 'sec.releasesDesc'), table(
+      [['col.release', 'r'], ['col.image'], ['col.capabilities'], ['col.bundle'], ['col.published']],
+      [...releases].sort((a, b) => b.number - a.number).map((r) => ({ cells: [
+        h('span', { class: 'num' }, `#${r.number}`, current(r) ? h('span', { class: 'chip', style: 'margin-left:6px' }, t('r.current')) : null),
+        h('span', { class: 'mono', title: r.image ?? '' }, r.image ? r.image.slice(0, 19) : '-'),
+        Object.keys(r.manifest.capabilities).length ? h('span', { class: 'chips' }, Object.keys(r.manifest.capabilities).map(chip)) : h('span', { class: 'muted' }, t('routeOnly')),
+        h('span', { class: 'mono', title: r.bundle ?? '' }, r.bundle ? r.bundle.slice(0, 12) : '-'),
+        h('span', { title: stamp(r.publishedAt) }, ago(r.publishedAt)),
+      ] })), 'empty.filtered')),
+    h('section', {}, sectionHead(3, 'sec.bindings', 'sec.bindingsDesc'), table(
+      [['col.kind'], ['col.provider'], ['col.state']],
+      bindings.map((b) => ({ cells: [chip(b.kind), h('span', { class: 'mono' }, b.provider), status(b.state)] })), 'empty.bindings')),
+    h('section', {}, sectionHead(4, 'sec.deliveries', 'sec.deliveriesDesc'), table(
+      [['col.state'], ['col.trigger'], ['col.attempts', 'r'], ['col.scheduledFor'], ['col.created'], ['col.nextAttempt']],
+      deliveries.map((x) => ({ cells: [
+        status(x.state), h('span', { class: 'mono' }, x.trigger), h('span', { class: 'num' }, nf(x.attempts)),
+        x.scheduledFor == null ? h('span', { class: 'muted' }, t('d.onDemand')) : h('span', { class: 'mono' }, stamp(x.scheduledFor)),
+        ago(x.createdAt), x.state === 'due' ? ago(x.nextAttemptAt) : h('span', { class: 'muted' }, '-'),
+      ] })), 'empty.deliveries')),
+    h('section', {}, sectionHead(5, 'sec.logs', 'sec.logsDesc', ...logs.controls), logs.box),
+  );
+  return async function update() {
+    const [fresh, list] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps')]);
+    renderHead(list.find((a) => a.name === app.name), fresh.stats);
+  };
+}
+
+// The admin API cannot know the host port of the ingress; compose publishes the two side by side (8080 and 8081 by default).
+const ingressOrigin = () => `${location.protocol}//${location.hostname}:${Number(location.port || 80) - 1}`;
+
+const FIELD_OF = [[/^app name/, 'name'], [/^subject/, 'owner'], [/^image|image "/, 'image'], [/^bundle|static is declared/, 'bundle']];
+
+async function publish(prefill) {
   const apps = await api('GET', '/api/apps');
   const existing = new Set(apps.map((a) => a.name));
-  const status = h('div');
-  const name = h('input', { name: 'name', required: true, pattern: '[a-z][a-z0-9\\-]{0,39}', value: prefill ?? '', placeholder: 'survey', autocomplete: 'off' });
-  const image = h('input', { name: 'image', placeholder: 'survey:latest', autocomplete: 'off' });
-  const manifest = h('textarea', { name: 'manifest', spellcheck: 'false' });
-  manifest.value = JSON.stringify(MANIFEST_EXAMPLE, null, 2);
-  const bundle = h('input', { name: 'bundle', type: 'file', accept: '.tar,application/x-tar' });
-  const owner = h('input', { name: 'owner', placeholder: 'user:ana', pattern: '(user|service):[A-Za-z0-9._@\\-]{1,64}', autocomplete: 'off' });
-  const ownerField = h('label', { id: 'owner-field' }, 'Owner', owner, h('small', {}, 'First publish only: the subject apps see as their owner.'));
-  const syncOwner = () => {
-    const isNew = !existing.has(name.value);
-    ownerField.hidden = !isNew;
-    owner.required = isNew;
+  const general = h('div', { class: 'msg err', role: 'alert' });
+  const hint = (key) => h('small', {}, t(key));
+  const err = () => h('small', { class: 'err', hidden: true });
+  const make = (key, control, hintKey) => ({ control, error: err(), label: key, hintKey });
+  const f = {
+    name: make('f.name', h('input', { name: 'name', required: true, pattern: '[a-z][a-z0-9\\-]{0,39}', value: prefill ?? '', placeholder: 'survey', autocomplete: 'off', spellcheck: 'false' }), 'f.nameHint'),
+    image: make('f.image', h('input', { name: 'image', placeholder: 'survey:latest', autocomplete: 'off', spellcheck: 'false' })),
+    owner: make('f.owner', h('input', { name: 'owner', placeholder: 'user:ana', autocomplete: 'off', spellcheck: 'false' }), 'f.ownerHint'),
+    manifest: make('f.manifest', h('textarea', { name: 'manifest', rows: 14, spellcheck: 'false' })),
+    bundle: make('f.bundle', h('input', { name: 'bundle', type: 'file', accept: '.tar,application/x-tar' }), 'f.bundleHint'),
   };
-  name.addEventListener('input', syncOwner);
+  f.manifest.control.value = JSON.stringify(MANIFEST_EXAMPLE, null, 2);
+  const label = (k) => h('label', { class: 'field', id: `field-${k}` }, h('span', {}, t(f[k].label)), f[k].control, f[k].hintKey ? hint(f[k].hintKey) : null, f[k].error);
+  const fail = (k, text) => {
+    f[k].error.textContent = text;
+    f[k].error.hidden = false;
+    f[k].control.setAttribute('aria-invalid', 'true');
+    f[k].control.focus();
+  };
+  const ownerField = label('owner');
+  const syncOwner = () => { ownerField.hidden = existing.has(f.name.control.value); };
+  f.name.control.addEventListener('input', syncOwner);
   syncOwner();
+  const submit = h('button', { class: 'btn primary', type: 'submit' }, t('f.submit'));
+
+  const form = h('form', { class: 'card form', novalidate: true, onsubmit: async (event) => {
+    event.preventDefault();
+    general.textContent = '';
+    for (const x of Object.values(f)) { x.error.hidden = true; x.control.removeAttribute('aria-invalid'); }
+    let manifest;
+    try {
+      manifest = JSON.parse(f.manifest.control.value);
+    } catch (error) {
+      return fail('manifest', t('f.badJson', { msg: error.message }));
+    }
+    const name = f.name.control.value.trim();
+    submit.disabled = true;
+    submit.textContent = t('f.busy');
+    try {
+      const file = f.bundle.control.files[0];
+      const bundle = file ? (await api('POST', '/api/bundles', file, 'application/x-tar')).bundle : null;
+      const body = { image: f.image.control.value.trim() || null, manifest, bundle };
+      if (!existing.has(name)) body.owner = f.owner.control.value.trim();
+      await api('PUT', `${appPath(name)}/release`, body);
+      location.hash = `#/apps/${encodeURIComponent(name)}`;
+    } catch (error) {
+      const field = !name ? 'name' : error.status === 400 || error.status === 404 ? FIELD_OF.find(([re]) => re.test(error.message))?.[1] ?? (error.status === 400 ? 'manifest' : null) : null;
+      if (field) fail(field, error.message);
+      else general.textContent = error.message;
+    } finally {
+      submit.disabled = false;
+      submit.textContent = t('f.submit');
+    }
+  } },
+    h('div', { class: 'fields' }, label('name'), label('image'), ownerField),
+    label('manifest'),
+    label('bundle'),
+    h('div', { class: 'actions' }, submit),
+    general);
+
   show(
-    h('h1', {}, prefill ? `Publish ${prefill}` : 'Publish'),
-    h('p', { class: 'muted' }, 'The gateway resolves the image reference to an image id. Leave the image empty for a manifest with only static.'),
-    h('form', { class: 'card', onsubmit: async (event) => {
-      event.preventDefault();
-      status.replaceChildren();
-      let parsed;
-      try {
-        parsed = JSON.parse(manifest.value);
-      } catch (error) {
-        return status.replaceChildren(message(`Manifest is not valid JSON: ${error.message}`));
-      }
-      try {
-        const file = bundle.files[0];
-        const bundleId = file ? (await api('POST', '/api/bundles', file, 'application/x-tar')).bundle : null;
-        const body = { image: image.value.trim() || null, manifest: parsed, bundle: bundleId };
-        if (!existing.has(name.value)) body.owner = owner.value.trim();
-        await api('PUT', `${appPath(name.value)}/release`, body);
-        location.hash = `#/apps/${name.value}`;
-      } catch (error) {
-        status.replaceChildren(message(error.message));
-      }
-    } },
-      h('div', { class: 'grid' },
-        h('label', {}, 'Name', name, h('small', {}, 'Lowercase letters, digits and -; the address is /apps/<name>/.')),
-        h('label', {}, 'Image reference', image),
-        ownerField),
-      h('label', {}, 'Manifest (pneuma-space.json)', manifest),
-      h('label', {}, 'Static bundle', bundle, h('small', {}, 'Optional tar of the static directory.')),
-      h('div', { class: 'actions' }, h('button', { type: 'submit' }, 'Publish')),
-      status),
+    h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, prefill ? t('pub.titleFor', { name: prefill }) : t('pub.title')), h('p', { class: 'sub' }, t('pub.sub')))),
+    h('section', {}, h('div', { class: 'split' }, form,
+      h('div', { class: 'card' },
+        h('div', { class: 'sh', style: 'margin:0' }, h('div', {}, h('h2', {}, t('pub.existing')), h('p', {}, t('pub.existingDesc')))),
+        apps.length ? h('div', { class: 'picks' }, apps.map((a) => h('a', { href: `#/publish/${encodeURIComponent(a.name)}` }, h('span', {}, a.name), status(a.status))))
+          : h('div', { class: 'empty' }, t('pub.none'))))),
   );
 }
 
-let refresh;
+// Shell
+
+function footer(startedAt) {
+  document.getElementById('foot').textContent = startedAt ? t('aside.since', { time: stamp(startedAt) }) : '';
+}
+
+function shell() {
+  const nav = document.querySelector('nav');
+  const [, view] = location.hash.split('/');
+  const current = view === 'apps' ? 'apps' : view === 'publish' ? 'publish' : 'overview';
+  nav.replaceChildren(h('div', { class: 'group' }, t('nav.group')),
+    ...[['overview', '#/'], ['apps', '#/apps'], ['publish', '#/publish']].map(([key, href]) => h('a', { href, 'aria-current': key === current ? 'page' : null }, t(`nav.${key}`))));
+  document.getElementById('brand-sub').textContent = t('brand.sub');
+  const theme = root.dataset.theme;
+  document.querySelector('.controls').replaceChildren(
+    segmented([['light', icon('sun'), t('theme.light')], ['dark', icon('moon'), t('theme.dark')]], theme, (value) => {
+      store.set('pneuma-space-theme', value);
+      root.dataset.theme = value;
+      shell();
+    }, 'theme'),
+    segmented([['zh', '中'], ['en', 'EN']], lang, (value) => {
+      store.set('pneuma-space-lang', value);
+      lang = root.lang = value;
+      route();
+    }, 'language'));
+}
+
 async function route() {
-  clearInterval(refresh);
+  clearInterval(poller);
+  poller = null;
+  shell();
   const [, view, name] = location.hash.split('/');
   const target = name && decodeURIComponent(name);
   try {
-    if (view === 'apps' && target) await detailView(target);
-    else if (view === 'publish') await publishView(target);
-    else {
-      await listView();
-      refresh = setInterval(() => listView().catch(() => {}), 5000);
+    const update = view === 'apps' && target ? await detail(target)
+      : view === 'apps' ? await projects()
+        : view === 'publish' ? (await publish(target), null)
+          : await overview();
+    if (update) {
+      await update();
+      poller = setInterval(() => { if (!document.hidden) update().catch(() => {}); }, POLL_MS);
+      document.onvisibilitychange = () => { if (!document.hidden) update().catch(() => {}); };
     }
   } catch (error) {
-    show(message(error.message), h('p', {}, h('a', { href: '#/' }, 'All apps')));
+    show(h('div', { class: 'head' }, h('div', { class: 'grow' }, h('p', { class: 'msg err' }, t('err.load', { msg: error.message })), h('p', {}, h('a', { class: 'back', href: '#/apps' }, `← ${t('d.back')}`)))));
   }
 }
 
 addEventListener('hashchange', route);
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', shell);
 route();
 </script>
 </body>

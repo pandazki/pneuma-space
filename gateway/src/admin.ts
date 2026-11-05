@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { emit } from './events.ts';
+import type { Metrics } from './metrics.ts';
 import {
   ADMIN_PATHS, ADMIN_PORT, Conflict, InputError, NotFound,
   appName, bundleId, parseManifest, subject,
@@ -11,6 +13,7 @@ export type AdminDeps = {
   readonly registry: Registry;
   readonly bundles: BundleStore;
   readonly runtime: Pick<Runtime, 'logs'>;
+  readonly metrics: Pick<Metrics, 'snapshot'>;
   readonly consoleFile?: string | URL;
 };
 
@@ -52,7 +55,7 @@ function tailOf(request: IncomingMessage): number {
   return tail;
 }
 
-function routes({ registry, bundles, runtime }: AdminDeps): Route[] {
+function routes({ registry, bundles, runtime, metrics }: AdminDeps): Route[] {
   const app = (name: string | undefined) => appName(name!);
   const found = <T>(value: T | null, name: string | undefined): T => {
     if (value === null) throw new NotFound(`no app named "${name}"`);
@@ -62,6 +65,7 @@ function routes({ registry, bundles, runtime }: AdminDeps): Route[] {
   return [
     { method: 'GET', path: at(ADMIN_PATHS.health), handle: () => ({ ok: true }) },
     { method: 'GET', path: at(ADMIN_PATHS.apps), handle: () => registry.listing() },
+    { method: 'GET', path: at(ADMIN_PATHS.metrics), handle: () => metrics.snapshot() },
     { method: 'GET', path: at(ADMIN_PATHS.app('<name>')), handle: async (_, name) => found(await registry.detail(app(name)), name) },
     { method: 'GET', path: at(ADMIN_PATHS.logs('<name>')), handle: (request, name) => runtime.logs(found(registry.view(app(name)), name).app, tailOf(request)) },
     {
@@ -131,7 +135,7 @@ export function createAdmin(deps: AdminDeps): Server {
       send(response, 404, { error: `no endpoint ${request.method} ${path}` });
     } catch (error) {
       const status = statusOf(error);
-      if (status === 500) console.log(JSON.stringify({ t: Date.now(), ev: 'admin-error', app: null, path, error: String(error) }));
+      if (status === 500) emit('admin-error', null, { path, error: String(error) });
       send(response, status, { error: (error as Error).message });
     }
   });
@@ -142,7 +146,7 @@ export function startAdmin(deps: AdminDeps, { port = ADMIN_PORT, host = '127.0.0
   return new Promise((resolve, reject) => {
     server.once('error', reject).listen(port, host, () => {
       const { port: bound } = server.address() as AddressInfo;
-      console.log(JSON.stringify({ t: Date.now(), ev: 'admin-listening', app: null, host, port: bound }));
+      emit('admin-listening', null, { host, port: bound });
       resolve(server);
     });
   });

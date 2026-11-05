@@ -2,20 +2,31 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
 import { startAdmin } from './admin.ts';
+import { EventLog } from './events.ts';
+import { Metrics } from './metrics.ts';
 import { appName, parseManifest, subject } from './model.ts';
 import { world } from './registry.fakes.ts';
 
 async function admin() {
   const w = world();
   const { registry, store } = await w.open();
-  const server = await startAdmin({ registry, bundles: w.bundles, runtime: w.runtime }, { port: 0 });
+  const metrics = new Metrics({
+    events: new EventLog(() => {}),
+    stats: () => [],
+    apps: () => registry.listing(),
+    deliveries: { counts: () => store.deliveryCounts(), failed: (limit) => store.deliveries({ state: 'failed', limit }) },
+    nameOf: (app) => registry.nameOf(app),
+    probes: { redis: async () => 'up' },
+    host: async () => ({ cpus: 1, load: [0, 0, 0], memory: { totalBytes: 1, freeBytes: 1 }, data: null }),
+  });
+  const server = await startAdmin({ registry, bundles: w.bundles, runtime: w.runtime, metrics }, { port: 0 });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
     const raw = typeof body === 'string' ? body : body === undefined ? undefined : JSON.stringify(body);
     const response = await fetch(base + path, { method, body: raw });
     return { status: response.status, body: await response.json() };
   };
-  return { w, registry, store, server, call, base };
+  return { w, registry, store, server, call, base, metrics };
 }
 
 const kvApp = { image: 'example:1', manifest: { contract: 1, capabilities: { kv: {} } }, owner: 'user:ann' };
@@ -90,4 +101,15 @@ test('GET /api/apps/<name>/logs answers the container output as text/plain for t
   const response = await fetch(`${base}/api/apps/survey/logs?tail=5`);
   assert.equal(response.headers.get('content-type'), 'text/plain; charset=utf-8');
   assert.equal(await response.text(), `last 5 lines of ${(await store.app(appName('survey')))!.id}\n`);
+});
+
+test('GET /api/metrics answers the sampled snapshot without a Docker call', async (t) => {
+  const { call, server, metrics, w } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  await metrics.sample();
+  w.runtime.calls.length = 0;
+  const replies = await Promise.all(Array.from({ length: 20 }, () => call('GET', '/api/metrics')));
+  assert.deepEqual(replies.map((r) => [r.status, r.body.fleet.apps.registered, r.body.services.redis.status]), Array(20).fill([200, 1, 'up']));
+  assert.deepEqual(w.runtime.calls, []);
 });
