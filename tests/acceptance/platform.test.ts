@@ -6,7 +6,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   OWNER, adminClient, adminUrl, appJson, appPut, appUrl, bucketExists, cleanup, connect, containerIp, deploy, docker, images, inNetwork,
-  median, publish, restartGateway, runningContainerFor, scratch, serviceToken, setIdle, setupSuite, stack, summary, teardownSuite,
+  median, publish, restartGateway, runningContainerFor, scratch, serviceToken, setIdle, setupSuite, sleep, stack, summary, teardownSuite,
   uniqueName, volumeExists, waitFor, waitInstance,
 } from './harness.ts';
 
@@ -141,6 +141,54 @@ test('AC-P-14', { timeout: 90_000 }, async (t) => {
   const page = await (await fetch(adminUrl + '/')).text();
   assert.ok(page.includes('data-live'), 'overview has the live indicator');
   for (const section of ['seats', 'timeline', 'attention', 'tail']) assert.ok(page.includes(`'data-section': '${section}'`), `overview has ${section}`);
+});
+
+test('AC-P-15', { timeout: 120_000 }, async (t) => {
+  const app = await deploy(t, { image: images.echo, capabilities: { files: {}, ws: {}, cron: { triggers: { report: {} } } } });
+  const requests = async (after: number) => (await fetch(`${adminUrl}/api/requests?after=${after}&limit=1000`)).json();
+  const newer = (after: number, kind: string) => waitFor(async () => (await requests(after)).filter((r: any) => r.app === app.name && r.kind === kind).at(-1), 15_000, `a ${kind} record`);
+  const start = (await requests(0)).at(-1)?.seq ?? 0;
+
+  await appJson(app.name, '/');
+  const cold = await newer(start, 'request');
+  const wake = (await (await fetch(adminUrl + '/api/metrics')).json()).events.findLast((e: any) => e.ev === 'awake' && e.app === app.name);
+  assert.ok((await requests(start)).every((r: any) => r.seq > start), 'only records after the cursor');
+  assert.equal(cold.cold, true, 'the first request found the app asleep');
+  assert.ok(cold.ms >= wake.ms, `ms ${cold.ms} against a wake of ${wake.ms} ms`);
+
+  const since = Date.now() / 1000;
+  const timings: number[] = [];
+  for (let i = 0; i < 7; i++) {
+    const begun = performance.now();
+    await requests(0);
+    timings.push(performance.now() - begun);
+  }
+  const until = Date.now() / 1000 + 1;
+  const events = docker('events', '--since', since.toFixed(3), '--until', until.toFixed(3), '--filter', `label=pneuma-space.network=${stack.network}`, '--format', '{{.Type}} {{.Action}}');
+  t.diagnostic(`GET /api/requests: median ${median(timings).toFixed(1)} ms, all ${timings.map((v) => v.toFixed(1)).join(' ')} ms`);
+  assert.ok(median(timings) < 50, `median ${median(timings).toFixed(1)} ms, gate 50 ms`);
+  assert.equal(events, '', 'no Docker activity while answering requests');
+
+  const beforeWs = (await requests(0)).at(-1).seq;
+  const socket = await connect(app.name, '/ws?mode=echo');
+  await sleep(300);
+  socket.ws.close();
+  await socket.closed;
+  const ws = await newer(beforeWs, 'ws');
+  assert.equal((await requests(beforeWs)).filter((r: any) => r.app === app.name && r.kind === 'ws').length, 1, 'one ws record');
+  assert.ok(ws.status === 101 && ws.ms >= 300, `ws record ${ws.status} ${ws.ms} ms`);
+
+  const beforeTrigger = (await requests(0)).at(-1).seq;
+  const invoked = await fetch(appUrl(app.name, '/_pneuma-space/trigger/report'), { method: 'POST', headers: { authorization: `Bearer ${await serviceToken(uniqueName('svc'))}` } });
+  assert.equal(invoked.status, 202);
+  await newer(beforeTrigger, 'trigger');
+  const triggers = (await requests(beforeTrigger)).filter((r: any) => r.app === app.name && r.kind === 'trigger');
+  assert.deepEqual(triggers.map((r: any) => [r.status, r.path]), [[200, '/_pneuma-space/trigger/report']], 'one trigger record with the app\'s answer');
+
+  const page = await (await fetch(adminUrl + '/')).text();
+  for (const section of ['filter', 'requests', 'realtime-events']) assert.ok(page.includes(`'data-section': '${section}'`), `realtime page has ${section}`);
+  assert.ok(page.includes('#/realtime') && page.includes('/api/requests?after='), 'the realtime page polls the request cursor');
+  assert.ok(page.includes('const TIMELINE_ROWS = 10;') && page.includes('timeline({ cap: TIMELINE_ROWS })') && page.includes('.splice(cap)'), 'the overview timeline draws at most 10 apps');
 });
 
 test('AC-P-7', { timeout: 90_000 }, async (t) => {

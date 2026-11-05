@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import { emit } from './events.ts';
 import type { Metrics } from './metrics.ts';
+import { RING, type RequestLog } from './requests.ts';
 import {
   ADMIN_PATHS, ADMIN_PORT, Conflict, InputError, NotFound,
   appName, bundleId, parseManifest, subject,
@@ -14,6 +15,7 @@ export type AdminDeps = {
   readonly bundles: BundleStore;
   readonly runtime: Pick<Runtime, 'logs'>;
   readonly metrics: Pick<Metrics, 'snapshot'>;
+  readonly requests: Pick<RequestLog, 'after'>;
   readonly ingressPort: number;
   readonly consoleFile?: string | URL;
 };
@@ -49,14 +51,14 @@ function optional<T>(value: unknown, field: string, parse: (raw: string) => T): 
   return parse(value);
 }
 
-function tailOf(request: IncomingMessage): number {
-  const raw = new URL(request.url ?? '/', 'http://admin').searchParams.get('tail') ?? '200';
-  const tail = Number(raw);
-  if (!Number.isInteger(tail) || tail < 1 || tail > MAX_TAIL) throw new InputError(`tail must be a whole number of lines from 1 to ${MAX_TAIL}, got "${raw}"`);
-  return tail;
+function wholeParam(request: IncomingMessage, name: string, fallback: number, min: number, max: number): number {
+  const raw = new URL(request.url ?? '/', 'http://admin').searchParams.get(name) ?? String(fallback);
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < min || value > max) throw new InputError(`${name} must be a whole number from ${min} to ${max}, got "${raw}"`);
+  return value;
 }
 
-function routes({ registry, bundles, runtime, metrics, ingressPort }: AdminDeps): Route[] {
+function routes({ registry, bundles, runtime, metrics, requests, ingressPort }: AdminDeps): Route[] {
   const app = (name: string | undefined) => appName(name!);
   const found = <T>(value: T | null, name: string | undefined): T => {
     if (value === null) throw new NotFound(`no app named "${name}"`);
@@ -67,8 +69,13 @@ function routes({ registry, bundles, runtime, metrics, ingressPort }: AdminDeps)
     { method: 'GET', path: at(ADMIN_PATHS.health), handle: () => ({ ok: true, ingressPort }) },
     { method: 'GET', path: at(ADMIN_PATHS.apps), handle: () => registry.listing() },
     { method: 'GET', path: at(ADMIN_PATHS.metrics), handle: () => metrics.snapshot() },
+    {
+      method: 'GET', path: at(ADMIN_PATHS.requests), handle: (request) => requests
+        .after(wholeParam(request, 'after', 0, 0, Number.MAX_SAFE_INTEGER), wholeParam(request, 'limit', 500, 1, RING))
+        .map((r) => ({ ...r, app: registry.nameOf(r.app) ?? r.app })),
+    },
     { method: 'GET', path: at(ADMIN_PATHS.app('<name>')), handle: async (_, name) => found(await registry.detail(app(name)), name) },
-    { method: 'GET', path: at(ADMIN_PATHS.logs('<name>')), handle: (request, name) => runtime.logs(found(registry.view(app(name)), name).app, tailOf(request)) },
+    { method: 'GET', path: at(ADMIN_PATHS.logs('<name>')), handle: (request, name) => runtime.logs(found(registry.view(app(name)), name).app, wholeParam(request, 'tail', 200, 1, MAX_TAIL)) },
     {
       method: 'PUT', path: at(ADMIN_PATHS.release('<name>')), handle: async (request, name) => {
         const body = await readJson(request);

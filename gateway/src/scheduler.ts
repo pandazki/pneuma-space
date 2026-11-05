@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { request } from 'node:http';
 import { emit, type Emit } from './events.ts';
+import { requests } from './requests.ts';
 import {
   HEADERS, MAX_ATTEMPTS, NotFound, TRIGGER_PATH,
   type AppId, type CronExpr, type Delivery, type DeliveryId, type InvokeRequest, type Lease,
@@ -9,7 +10,7 @@ import {
 
 export type SchedulerDeps = {
   readonly store: Pick<Store, 'apps' | 'insertDelivery' | 'updateDelivery' | 'deliveries' | 'lastScheduledFor' | 'deleteDeliveries'>;
-  readonly runtime: Pick<Runtime, 'acquire' | 'release'>;
+  readonly runtime: Pick<Runtime, 'acquire' | 'release' | 'state'>;
   readonly view: (app: AppId) => SchedulerView | null;
   readonly now?: () => number;
   readonly log?: Emit;
@@ -127,16 +128,29 @@ export class DeliveryScheduler implements Scheduler {
   }
 
   async #attempt(d: Delivery, timeoutMs: number): Promise<Outcome> {
+    const started = performance.now();
+    const cold = this.#runtime.state(d.app) !== 'awake';
+    let waitMs = 0;
+    const record = (status: number, error: string | null) => requests.record({
+      app: d.app, kind: 'trigger', method: 'POST', path: `${TRIGGER_PATH}${d.trigger}`, status,
+      ms: performance.now() - started, waitMs, cold, subject: d.caller, error,
+    });
     let lease: Lease;
     try {
       lease = await this.#runtime.acquire(d.app, 'trigger');
     } catch (error) {
-      return { ok: false, cancel: error instanceof NotFound, reason: `wake failed: ${(error as Error).message}` };
+      const reason = `wake failed: ${(error as Error).message}`;
+      waitMs = performance.now() - started;
+      record(0, reason);
+      return { ok: false, cancel: error instanceof NotFound, reason };
     }
+    waitMs = performance.now() - started;
     try {
       const status = await post(`http://${lease.address}${TRIGGER_PATH}${d.trigger}`, headersFor(d), d.body, timeoutMs);
+      record(status, null);
       return status >= 200 && status < 300 ? { ok: true, cancel: false } : { ok: false, cancel: false, reason: `HTTP ${status}` };
     } catch (error) {
+      record(0, (error as Error).message);
       return { ok: false, cancel: false, reason: (error as Error).message };
     } finally {
       this.#runtime.release(lease);

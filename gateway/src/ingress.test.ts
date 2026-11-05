@@ -11,6 +11,7 @@ import {
   type Principal, type ReleaseNumber, type RouteView, type Stats, type Subject,
 } from './model.ts';
 import { Ingress } from './ingress.ts';
+import { RING, requests } from './requests.ts';
 
 const APP_JS = Buffer.from('console.log("static");');
 
@@ -37,7 +38,8 @@ const PRINCIPALS: Record<string, Principal> = {
   'Bearer svc': { subject: 'service:cron' as Subject, name: 'cron' },
 };
 
-// Upstream app: /echo returns what arrived, /range answers 206, /hold streams until `finish()`, WebSocket clients form one room.
+// Upstream app: /echo returns what arrived, /range answers 206, /hold streams until `finish()`, /drop hangs up, WebSocket clients
+// form one room except at /refuse, which answers 500.
 let finish: () => void = () => {};
 const room = new Set<net.Socket>();
 const upstream = http.createServer((req, res) => {
@@ -49,8 +51,10 @@ const upstream = http.createServer((req, res) => {
     finish = () => res.end('last\n');
     return;
   }
+  if (req.url === '/drop') return void req.socket.destroy();
   res.writeHead(404).end();
-}).on('upgrade', (_req, socket: net.Socket) => {
+}).on('upgrade', (req, socket: net.Socket) => {
+  if (req.url === '/refuse') return void socket.end('HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\n\r\n');
   socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n');
   room.add(socket);
   socket.on('data', (chunk) => { for (const peer of room) if (peer !== socket) peer.write(chunk); });
@@ -66,6 +70,8 @@ let retires: (() => void)[] = [];
 let invoked: InvokeRequest[] = [];
 let addresses: string[] = [];
 let flushed: Stats[][] = [];
+let instance: 'asleep' | 'awake' = 'awake';
+let waking: Promise<void> = Promise.resolve();
 
 before(async () => {
   await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
@@ -75,10 +81,12 @@ before(async () => {
     runtime: {
       async acquire(app, kind) {
         events.push(`acquire ${kind}`);
+        await waking;
         if (app === ('id-nope' as AppId)) throw new NotFound('no run spec');
         return { app, address: addresses.shift() ?? `127.0.0.1:${upstreamPort}` };
       },
       release: () => void events.push('release'),
+      state: () => instance,
       channel: (_lease, onRetire) => {
         events.push('channel');
         retires.push(onRetire);
@@ -137,12 +145,21 @@ async function waitFor(predicate: () => boolean): Promise<void> {
   assert.ok(predicate(), `timed out; events: ${events.join(', ')}`);
 }
 
+const lastSeq = () => requests.after(0, RING).at(-1)?.seq ?? 0;
+
 async function websocket(path: string): Promise<net.Socket> {
   const socket = net.connect(port, '127.0.0.1');
   socket.write(`GET ${path} HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n`);
   const [head] = await once(socket, 'data');
   assert.match(String(head), /^HTTP\/1\.1 101/);
   return socket;
+}
+
+/** Holds every acquire until the returned function is called. */
+function holdWakes(): () => void {
+  let open = () => {};
+  waking = new Promise((resolve) => (open = resolve));
+  return open;
 }
 
 const frame = (text: string) => Buffer.concat([Buffer.from([0x81, text.length]), Buffer.from(text)]);
@@ -338,4 +355,78 @@ test('stats count every request to an app, static included, and flush hands them
 
 test('the gateway-root login page is delegated to the identity provider', async () => {
   assert.equal((await request('/_pneuma-space/login?next=/apps/who/')).body, 'login page');
+});
+
+test('a proxied request leaves one record with its status and whether it found the app asleep (AC-P-15)', async () => {
+  const from = lastSeq();
+  instance = 'asleep';
+  await request('/apps/plain/echo?x=1');
+  instance = 'awake';
+  await waitFor(() => requests.after(from, RING).length === 1);
+  const [record] = requests.after(from, RING);
+  assert.deepEqual([record.app, record.kind, record.path, record.status, record.cold], ['id-plain', 'request', '/apps/plain/echo', 200, true]);
+  assert.ok(record.waitMs! <= record.ms);
+});
+
+test('a WebSocket leaves one ws record when it closes, with how long it was open (AC-P-15)', async () => {
+  const from = lastSeq();
+  const socket = await websocket('/apps/chat/');
+  await sleep(120);
+  assert.deepEqual(requests.after(from, RING), []);
+  socket.end();
+  await waitFor(() => requests.after(from, RING).length === 1);
+  const [record] = requests.after(from, RING);
+  assert.deepEqual([record.kind, record.status], ['ws', 101]);
+  assert.ok(record.ms >= 120, `${record.ms} ms`);
+});
+
+test('a client that gives up during the wake is recorded as unanswered, counted but not as an error (AC-P-15)', async () => {
+  reset();
+  const from = lastSeq();
+  const errors = ingress.snapshot().find((s) => s.app === 'id-plain')?.errors ?? 0;
+  const wake = holdWakes();
+  const req = http.request({ host: '127.0.0.1', port, path: '/apps/plain/echo' }).on('error', () => {});
+  req.end();
+  await waitFor(() => events.includes('acquire request'));
+  req.destroy();
+  await waitFor(() => requests.after(from, RING).length === 1);
+  wake();
+  const [record] = requests.after(from, RING);
+  assert.deepEqual([record.status, record.error], [0, 'client closed the connection']);
+  assert.equal(ingress.snapshot().find((s) => s.app === 'id-plain')!.errors, errors);
+});
+
+test('a WebSocket closed during the wake leaves one unanswered ws record (AC-P-15)', async () => {
+  reset();
+  const from = lastSeq();
+  const wake = holdWakes();
+  const socket = net.connect(port, '127.0.0.1');
+  socket.on('error', () => {}).write('GET /apps/chat/ HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n');
+  await waitFor(() => events.includes('acquire request'));
+  socket.destroy();
+  await waitFor(() => requests.after(from, RING).length === 1);
+  wake();
+  await waitFor(() => events.includes('release'));
+  const records = requests.after(from, RING);
+  assert.deepEqual(records.map((r) => [r.kind, r.status, r.error]), [['ws', 0, 'client closed the connection']]);
+});
+
+test('a WebSocket upgrade the app refuses is recorded with the app\'s status (AC-P-15)', async () => {
+  const from = lastSeq();
+  const socket = net.connect(port, '127.0.0.1');
+  socket.write('GET /apps/chat/refuse HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n');
+  const [head] = await once(socket, 'data');
+  assert.match(String(head), /^HTTP\/1\.1 500/);
+  socket.destroy();
+  await waitFor(() => requests.after(from, RING).length === 1);
+  assert.deepEqual(requests.after(from, RING).map((r) => [r.kind, r.status]), [['ws', 500]]);
+});
+
+test('a request the app hangs up on is recorded as a 502 with the reason (AC-P-15)', async () => {
+  const from = lastSeq();
+  assert.equal((await request('/apps/plain/drop')).status, 502);
+  await waitFor(() => requests.after(from, RING).length === 1);
+  const [record] = requests.after(from, RING);
+  assert.equal(record.status, 502);
+  assert.match(record.error ?? '', /socket hang up|ECONNRESET/);
 });

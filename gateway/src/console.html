@@ -247,6 +247,7 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .tl-row.enter { animation: rowin .7s ease-out; }
 @keyframes rowin { from { background: var(--accent-tint); transform: translateY(-4px); opacity: 0; } }
 .tl-row.dim .tl-name a { color: var(--ink-3); }
+.tl-row.picked, .tl-row.picked:hover { background: var(--accent-tint); box-shadow: inset 2px 0 0 var(--accent); }
 .tl-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tl-name a { font: 12.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-name .st { font-size: 0; gap: 0; }
@@ -301,7 +302,7 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .item.enter { animation: slidein .6s cubic-bezier(.2, .9, .3, 1); }
 @keyframes slidein { from { transform: translateX(-12px); opacity: 0; background: var(--red-tint); } }
 .linkish { border: 0; background: none; padding: 0; font: inherit; font-size: 12px; color: var(--accent-ink); cursor: pointer; }
-.tailbox { position: relative; padding: 0; }
+.tailbox { position: relative; padding: 0; container: tail / inline-size; }
 .tailbox .rows { max-height: 520px; overflow-y: auto; overscroll-behavior: contain; }
 .ev { display: grid; grid-template-columns: 64px 150px 104px minmax(0, 1fr); gap: 12px; align-items: center; padding: 0 14px; height: 34px; border-bottom: 1px solid var(--line); font-size: 12px; }
 .ev > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -312,6 +313,10 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 @keyframes fresh { from { background: var(--accent-tint); } }
 @keyframes enter { from { transform: translateY(-10px); opacity: 0; } }
 .ev.mark { display: block; height: auto; padding: 7px 14px; font-size: 12px; color: var(--orange); background: var(--orange-tint); text-align: center; white-space: normal; }
+@container tail (max-width: 560px) {
+  .ev { grid-template-columns: 58px minmax(0, 1fr) minmax(0, 1fr); height: auto; padding: 7px 14px; gap: 2px 10px; }
+  .ev .f { grid-column: 1 / -1; }
+}
 .beats { display: flex; align-items: center; gap: 2px; margin-top: 12px; }
 .beats i { width: 6px; height: 18px; border-radius: 2px; background: var(--line-strong); }
 .beats i.awake { background: var(--green); }
@@ -330,12 +335,123 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
   .tl-row.axis { padding: 6px 14px; grid-template-areas: "track track"; }
   .tl-row.axis > :first-child, .tl-row.axis > :last-child { display: none; }
   .tl-name { grid-area: name; } .track { grid-area: track; } .tl-meta { grid-area: meta; }
-  .ev { grid-template-columns: 58px minmax(0, 1fr) minmax(0, 1fr); height: auto; padding: 7px 14px; gap: 2px 10px; }
-  .ev .f { grid-column: 1 / -1; }
+}
+.rt-head { padding-top: 48px; padding-bottom: 24px; }
+.rt-top { display: grid; gap: 12px; padding: 0 32px 32px; }
+.pulse { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 2.3fr); padding: 0; }
+.pulse > div { padding: 14px 16px; border-left: 1px dashed var(--line); min-width: 0; }
+.pulse > div:first-child { border-left: 0; }
+.pulse .l { font-size: 12px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pulse .l .num { font-size: 11px; color: var(--ink-3); }
+.pulse .l .on { color: var(--accent-ink); }
+.pulse .v { font: 600 24px/32px var(--mono); font-variant-numeric: tabular-nums; margin-top: 4px; }
+.pulse .v.bad { color: var(--red); }
+.pulse .s { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+.hist { display: flex; align-items: stretch; gap: 2px; height: 38px; margin-top: 8px; }
+.hist i { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; border-bottom: 1px solid var(--line-strong); }
+.hist b { display: block; background: var(--accent); transition: height .3s ease-out; }
+.hist b.ok { border-radius: 1.5px 1.5px 0 0; }
+.hist b.bad { background: var(--red); }
+.hist i.now b.ok { background: repeating-linear-gradient(-45deg, var(--accent) 0 2px, var(--accent-tint) 2px 4px); }
+.haxis { display: flex; justify-content: space-between; margin-top: 4px; font: 10.5px var(--mono); color: var(--ink-3); }
+.fbar { display: grid; gap: 10px; padding: 12px; }
+.fline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fline .q { position: relative; flex: 1 1 320px; display: flex; min-width: 0; }
+.fline .q > span { position: absolute; left: 10px; top: 8px; color: var(--ink-3); pointer-events: none; }
+.fline .q input { flex: 1; height: 32px; padding-left: 32px; font: 12.5px var(--mono); }
+.togs { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.tog { display: inline-flex; align-items: center; gap: 7px; height: 27px; padding: 0 12px 0 9px; border: 0; border-radius: 999px; background: var(--field); box-shadow: 0 0 0 1px var(--line-strong); font-size: 12.5px; font-weight: 500; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+.tog:hover { background: var(--hover-2); }
+.tog .ck { width: 14px; height: 14px; border-radius: 4px; display: inline-grid; place-items: center; box-shadow: inset 0 0 0 1.5px var(--ink-3); color: transparent; }
+.tog[aria-pressed="true"] { background: var(--accent-tint); box-shadow: 0 0 0 1px var(--accent); color: var(--accent-ink); }
+.tog[aria-pressed="true"] .ck { background: var(--accent); box-shadow: none; color: white; }
+.fkeys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 12px; color: var(--ink-3); }
+.fkeys > span { margin-right: 2px; }
+.fkeys button { height: 22px; padding: 0 7px; border: 0; border-radius: 6px; background: var(--inset); box-shadow: 0 0 0 1px var(--line); font: 11.5px var(--mono); color: var(--ink-2); cursor: pointer; }
+.fkeys button:hover { background: var(--hover-2); color: var(--ink); }
+.fwarn { font-size: 12px; color: var(--orange); }
+.fwarn:empty { display: none; }
+.rt-lane { padding-top: 28px; }
+@media (min-width: 901px) { .rt-lane .tl-row:not(.axis) { height: 36px; } }
+.rt-grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; }
+.rt-grid .rows { height: clamp(380px, calc(100vh - 150px), 900px); max-height: none; scrollbar-gutter: stable; }
+.cnt { display: inline-flex; gap: 8px; font: 11.5px var(--mono); color: var(--ink-3); white-space: nowrap; }
+.cnt .hold { color: var(--accent-ink); font-family: var(--font); }
+.reqs { container: rq / inline-size; }
+.reqs .pill { top: 38px; }
+.rq { display: grid; grid-template-columns: 60px 42px 44px minmax(56px, 120px) minmax(0, 1fr) 56px 72px; gap: 10px; align-items: center; height: 34px; padding: 0 14px; border-bottom: 1px solid var(--line); font: 11.5px/16px var(--mono); font-variant-numeric: tabular-nums; cursor: pointer; outline: none; }
+.rq > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rq:hover, .rqx.open .rq { background: var(--hover); }
+.rq:focus-visible { box-shadow: inset 2px 0 0 var(--accent); }
+.rq.failed { background: linear-gradient(90deg, var(--red-tint), transparent 55%); }
+.rq.failed:hover { background: var(--red-tint); }
+.rq.hd { height: 30px; cursor: default; font: 500 11.5px var(--font); color: var(--ink-3); overflow-y: hidden; scrollbar-gutter: stable; }
+.rq.hd:hover { background: none; }
+.rq .tm { color: var(--ink-3); }
+.rq .mt { color: var(--ink-2); }
+.rq .du { text-align: right; color: var(--ink-2); }
+.rq .du.slow { color: var(--orange); }
+.rq.hd .du { text-align: right; }
+.rq.hd .wf { display: block; height: auto; background: none; box-shadow: none; }
+.rq .pt { display: flex; align-items: center; gap: 6px; }
+.rq .pt > * { flex: none; }
+.rq .pt .p { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rq .pt .er { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 11.5px var(--font); color: var(--ink-3); }
+.rq.failed .pt .er { color: var(--red); }
+.rq .sb { display: none; color: var(--ink-2); }
+.sc { font-weight: 600; font-family: var(--mono); }
+.sc.green { color: var(--green); }
+.sc.orange { color: var(--orange); }
+.sc.red { color: var(--red); }
+.sc.accent { color: var(--accent-ink); }
+.sc.muted { color: var(--ink-2); }
+.chip.k { height: 18px; padding: 0 5px; border-radius: 5px; font-size: 10.5px; }
+.chip.k.ws, .chip.k.trigger { color: var(--accent-ink); }
+.cold { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 5px; background: var(--orange-tint); color: var(--orange); font: 500 10.5px var(--mono); white-space: nowrap; }
+.wf { display: flex; height: 8px; border-radius: 2px; background: var(--inset); box-shadow: inset 0 0 0 1px var(--line); }
+.wf i { height: 100%; min-width: 0; }
+.wf i:first-child { border-radius: 2px 0 0 2px; }
+.wf .w { background: var(--ink-3); opacity: .5; }
+.wf .w.cold { background: var(--orange); opacity: 1; }
+.wf .r { background: var(--accent); border-radius: 0 2px 2px 0; min-width: 2px; }
+.wf .r.bad { background: var(--red); }
+.wf .r.ch { background: repeating-linear-gradient(-45deg, var(--accent) 0 2px, var(--accent-tint) 2px 4px); }
+.rqx.fresh { animation: fresh 2.4s ease-out; }
+.rqx.fresh .rq > * { animation: enter .45s cubic-bezier(.2, .9, .3, 1); }
+.rqd { padding: 12px 14px 14px 84px; background: var(--inset); border-bottom: 1px solid var(--line); box-shadow: inset 2px 0 0 var(--accent); }
+.rqd dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 18px; margin: 0; font-size: 12px; }
+.rqd dt { color: var(--ink-3); line-height: 20px; }
+.rqd dd { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font: 12px/20px var(--mono); overflow-wrap: anywhere; min-width: 0; }
+.rqd .muted { font-family: var(--font); }
+.rqd .er { color: var(--red); white-space: pre-wrap; }
+.term { border: 0; background: none; padding: 0 5px; border-radius: 5px; font: 11px/18px var(--mono); color: var(--accent-ink); cursor: pointer; }
+.term:hover { background: var(--accent-tint); }
+@container rq (min-width: 820px) {
+  .rq { grid-template-columns: 60px 42px 44px minmax(56px, 130px) minmax(0, 1fr) 56px 72px 112px; }
+  .rq .sb { display: block; }
+}
+@container rq (max-width: 540px) {
+  .rq { grid-template-columns: 34px 40px minmax(0, 1fr) 56px; grid-template-areas: "sc mt pt du" "tm tm ap wf"; height: auto; padding: 7px 14px; row-gap: 4px; }
+  .rq .sc { grid-area: sc; } .rq .mt { grid-area: mt; } .rq .pt { grid-area: pt; } .rq .du { grid-area: du; }
+  .rq .tm { grid-area: tm; } .rq .ap { grid-area: ap; color: var(--ink-2); } .rq .wf { grid-area: wf; }
+  .rq.hd { display: none; }
+  .reqs .pill { top: 8px; }
+  .rqd { padding-left: 14px; }
+}
+@media (max-width: 1240px) { .rt-grid { grid-template-columns: minmax(0, 1fr); } .rt-grid .rows { height: clamp(320px, 60vh, 720px); } }
+@media (max-width: 900px) {
+  .rt-head { padding-top: 28px; padding-bottom: 20px; }
+  .rt-top { padding: 0 20px 24px; }
+  .pulse { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pulse > .ph { grid-column: 1 / -1; border-left: 0; border-top: 1px dashed var(--line); }
+  .pulse > div { padding: 12px; }
+  .pulse .v { font-size: 18px; line-height: 26px; }
+  .pulse .s, .pulse .l { white-space: normal; }
+  .rt-lane { padding-top: 20px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
-  .ev.fresh, .item.enter, .tl-row.enter { background: var(--accent-tint); }
+  .ev.fresh, .item.enter, .tl-row.enter, .rqx.fresh { background: var(--accent-tint); }
   .seat.ignite { box-shadow: 0 0 0 3px var(--accent); }
   .bump { background: var(--accent-tint); }
   .gate .w.drop { outline: 2px solid var(--accent-tint); }
@@ -440,9 +556,27 @@ const I18N = {
     'att.wake': '唤醒失败', 'att.service': '{name} 不可达', 'att.serviceDetail': '网关的探测连不上它。',
     'att.p95': '唤醒 p95 超过门槛', 'att.p95Detail': '最近 1 小时 p95 {p95}，门槛 3 秒',
     'att.seen': '标为已读', 'att.allSeen': '全部已读', 'att.showSeen': '已读 {n} 条', 'att.hideSeen': '收起已读',
-    'tail.restart': '网关重启，序号从 1 重新开始。', 'tail.gap': '两次轮询之间超过 100 条事件，有 {n} 条没有显示。', 'tail.new': '{n} 条新事件', 'tail.paused': '已暂停跟随',
+    'tail.restart': '网关重启，序号从 1 重新开始。', 'tail.gap': '两次轮询之间超过 100 条事件，有 {n} 条没有显示。', 'tail.new': '{n} 条新事件', 'tail.paused': '已暂停跟随', 'tail.dropped': '暂停期间丢弃 {n} 条',
     'd.recent': '最近的状态变化',
     'dur.d': '{n} 天', 'dur.h': '{n} 小时', 'dur.m': '{n} 分', 'dur.s': '{n} 秒',
+    'nav.realtime': '实时', 'ov.toRealtime': '实时页', 'tl.cut': '只画最近有变化的 {n} 个，共 {total} 个',
+    'live.lastRequest': '上一条请求 {ago}', 'yes': '是', 'no': '否',
+    'rt.title': '实时', 'rt.sub': '经过网关的每一次请求和每一条生命周期事件，最新在上。',
+    'rt.rate': '每秒请求', 'rt.rateSub': '最近 10 秒', 'rt.errors': '错误（1 分钟）', 'rt.errorsSub': '5xx 或没有应答',
+    'rt.sockets': '打开的连接', 'rt.socketsSub': 'WebSocket 和 SSE 的 channel Lease', 'rt.matching': '匹配过滤条件',
+    'rt.hist': '最近 60 秒每秒请求', 'rt.peak': '峰值 {n}', 'rt.ago': '-{n} 秒', 'rt.histTip': '{time} · {n} 个请求 · {e} 个错误',
+    'rt.filter': '过滤请求和事件', 'rt.placeholder': 'app:survey status:5xx path:/api cold:true', 'rt.clear': '清除',
+    'rt.errorsOnly': '只看错误', 'rt.hideStatic': '隐藏静态', 'rt.keys': '条件',
+    'rt.unknown': '不认识的条件 {keys}。可用的有 {known}。',
+    'rt.requests': '请求', 'rt.requestsDesc': '每次交换结束时记一条，最新在上。点一行看全部字段。',
+    'rt.events': '事件', 'rt.eventsDesc': '生命周期事件。app 和 error 条件也作用于这里。',
+    'rt.shown': '显示 {shown} / 共 {kept} 条', 'rt.new': '{n} 条新请求', 'empty.requests': '还没有请求。',
+    'rt.gap': '两次轮询之间结束的请求超过 {ring} 条，有 {n} 条没有显示。', 'rt.restart': '网关重启，请求序号从 1 重新开始。',
+    'rt.cold': '冷启动 {ms}', 'rt.noAnswer': '没有应答', 'rt.addFilter': '加入过滤条件',
+    'rt.c.tm': '时间', 'rt.c.sc': '状态', 'rt.c.mt': '方法', 'rt.c.ap': '应用', 'rt.c.pt': '路径', 'rt.c.du': '耗时', 'rt.c.wf': '时序', 'rt.c.sb': '主体',
+    'rt.timelineDesc': '最近 15 分钟醒过的每个实例，随过滤条件收窄。点一行只看这个应用，再点一次取消。', 'rt.pick': '只看 {name}', 'rt.unpick': '取消只看 {name}',
+    'rt.f.seq': '序号', 'rt.f.app': '应用', 'rt.f.kind': '类别', 'rt.f.request': '请求', 'rt.f.status': '状态码', 'rt.f.ms': '总耗时',
+    'rt.f.open': '连接存续', 'rt.f.wait': '等上游就绪', 'rt.f.waitHint': '含唤醒', 'rt.f.cold': '冷启动', 'rt.f.subject': '主体', 'rt.f.error': '错误',
   },
   en: {
     'brand.sub': 'Console', 'nav.group': 'Platform', 'nav.overview': 'Overview', 'nav.apps': 'Projects', 'nav.publish': 'Publish',
@@ -511,9 +645,27 @@ const I18N = {
     'att.wake': 'Wake failed', 'att.service': '{name} is down', 'att.serviceDetail': 'The gateway probe cannot reach it.',
     'att.p95': 'Wake p95 over the gate', 'att.p95Detail': 'p95 {p95} in the last hour against 3 s',
     'att.seen': 'Mark seen', 'att.allSeen': 'Mark all seen', 'att.showSeen': '{n} seen', 'att.hideSeen': 'Hide seen',
-    'tail.restart': 'Gateway restarted; seq starts again at 1.', 'tail.gap': '{n} events not shown: more than 100 arrived between two polls.', 'tail.new': '{n} new', 'tail.paused': 'following paused',
+    'tail.restart': 'Gateway restarted; seq starts again at 1.', 'tail.gap': '{n} events not shown: more than 100 arrived between two polls.', 'tail.new': '{n} new', 'tail.paused': 'following paused', 'tail.dropped': '{n} dropped while paused',
     'd.recent': 'recent state changes',
     'dur.d': '{n} d', 'dur.h': '{n} h', 'dur.m': '{n} min', 'dur.s': '{n} s',
+    'nav.realtime': 'Realtime', 'ov.toRealtime': 'Realtime page', 'tl.cut': 'the {n} most recently changed of {total}',
+    'live.lastRequest': 'last request {ago}', 'yes': 'yes', 'no': 'no',
+    'rt.title': 'Realtime', 'rt.sub': 'Every request through the gateway and every lifecycle event, newest on top.',
+    'rt.rate': 'Requests per second', 'rt.rateSub': 'last 10 s', 'rt.errors': 'Errors, last minute', 'rt.errorsSub': '5xx or no answer',
+    'rt.sockets': 'Open sockets', 'rt.socketsSub': 'WebSocket and SSE channel leases', 'rt.matching': 'matching the filter',
+    'rt.hist': 'Requests per second, last 60 s', 'rt.peak': 'peak {n}', 'rt.ago': '-{n} s', 'rt.histTip': '{time} · {n} requests · {e} errors',
+    'rt.filter': 'Filter requests and events', 'rt.placeholder': 'app:survey status:5xx path:/api cold:true', 'rt.clear': 'Clear',
+    'rt.errorsOnly': 'Errors only', 'rt.hideStatic': 'Hide static', 'rt.keys': 'Terms',
+    'rt.unknown': 'Unknown term {keys}. The terms are {known}.',
+    'rt.requests': 'Requests', 'rt.requestsDesc': 'One row per exchange as it ends, newest on top. Click a row for every field.',
+    'rt.events': 'Events', 'rt.eventsDesc': 'Lifecycle events. The app and error terms apply here too.',
+    'rt.shown': '{shown} of {kept} shown', 'rt.new': '{n} new', 'empty.requests': 'No requests yet.',
+    'rt.gap': '{n} requests not shown: more than {ring} ended between two polls.', 'rt.restart': 'Gateway restarted; request seq starts again at 1.',
+    'rt.cold': 'cold {ms}', 'rt.noAnswer': 'no answer', 'rt.addFilter': 'Add to the filter',
+    'rt.c.tm': 'Time', 'rt.c.sc': 'Status', 'rt.c.mt': 'Method', 'rt.c.ap': 'App', 'rt.c.pt': 'Path', 'rt.c.du': 'Duration', 'rt.c.wf': 'Waterfall', 'rt.c.sb': 'Subject',
+    'rt.timelineDesc': 'Every instance awake in the last 15 min, narrowed by the filter. Click a row to follow that app; click again to clear.', 'rt.pick': 'Follow only {name}', 'rt.unpick': 'Stop following only {name}',
+    'rt.f.seq': 'Seq', 'rt.f.app': 'App', 'rt.f.kind': 'Kind', 'rt.f.request': 'Request', 'rt.f.status': 'Status', 'rt.f.ms': 'Duration',
+    'rt.f.open': 'Open for', 'rt.f.wait': 'Upstream ready after', 'rt.f.waitHint': 'wake included', 'rt.f.cold': 'Cold', 'rt.f.subject': 'Subject', 'rt.f.error': 'Error',
   },
 };
 
@@ -654,6 +806,8 @@ function confirmDialog(title, body, action) {
 
 const ICON = {
   sun: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/></svg>',
+  check: '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2 5 8.5l4.5-5"/></svg>',
+  search: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>',
   moon: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"/></svg>',
 };
 const icon = (name) => { const span = h('span', { 'aria-hidden': 'true', style: 'display:inline-flex' }); span.innerHTML = ICON[name]; return span; };
@@ -683,6 +837,10 @@ const SPAN_MS = 15 * 60_000;
 const AHEAD_MS = 60_000;
 const KEEP_EVENTS = 600;
 const TAIL_ROWS = 300;
+const EVENT_RING = 100;
+const FRESH_ROWS = 40;
+/** The awake timeline draws only the apps whose state changed most recently (ADR 0016). */
+const TIMELINE_ROWS = 10;
 const ACTIVE = ['waking', 'awake', 'draining', 'stopping'];
 const INSTANCE_EVENTS = ['waking', 'awake', 'draining', 'stopping', 'asleep', 'removed'];
 const MARKS = {
@@ -805,25 +963,50 @@ function flash(el, cls) {
   el.flashed = setTimeout(() => el.classList.remove(cls), 1600);
 }
 
-function liveHeader(controls) {
+/** The live indicator of a polling page: on, paused by the operator, or offline after a failed poll. `lastKey` names the latest arrival. */
+function liveHeader(lastKey, onResume) {
   const dot = h('span', { class: 'dot' });
   const text = h('span');
-  const button = h('button', { class: 'btn', type: 'button', onclick: () => controls.toggle() });
+  const button = h('button', { class: 'btn', type: 'button', onclick: () => {
+    mode = mode === 'paused' ? 'on' : 'paused';
+    render();
+    if (mode === 'on') onResume();
+  } });
   const el = h('div', { class: 'live', 'data-live': 'on', role: 'status' }, dot, text, button);
+  let mode = 'on';
+  let last = null;
   let restartedAt = null;
+  const render = () => {
+    el.dataset.live = mode;
+    fill(button, t(mode === 'paused' ? 'live.resume' : 'live.pause'));
+    fill(text,
+      h('b', {}, t(`live.${mode}`)),
+      mode === 'on' ? [' · ', ticking(() => (last ? t(lastKey, { ago: since(last) }) : t('live.none')))] : null,
+      restartedAt && Date.now() - restartedAt < 120_000 ? h('span', { class: 'note' }, ` · ${t('live.restarted', { time: clock(restartedAt, true) })}`) : null);
+  };
+  render();
   return {
     el,
     restarted(at) { restartedAt = at; },
-    render(model, mode) {
-      el.dataset.live = mode;
-      fill(button, t(mode === 'paused' ? 'live.resume' : 'live.pause'));
-      const last = model.events.at(-1)?.t;
-      fill(text,
-        h('b', {}, t(`live.${mode}`)),
-        mode === 'on' ? [' · ', ticking(() => (last ? t('live.last', { ago: since(last) }) : t('live.none')))] : null,
-        restartedAt && Date.now() - restartedAt < 120_000 ? h('span', { class: 'note' }, ` · ${t('live.restarted', { time: clock(restartedAt, true) })}`) : null);
-    },
+    seen(at) { last = at ?? last; render(); },
     beat() { flash(dot, 'beat'); },
+    /** A poll that skips while paused or while its previous run is still out. */
+    guarded(fn) {
+      let busy = false;
+      return async () => {
+        if (mode === 'paused' || busy) return;
+        busy = true;
+        try {
+          await fn();
+          if (mode === 'offline') { mode = 'on'; render(); }
+        } catch {
+          mode = 'offline';
+          render();
+        } finally {
+          busy = false;
+        }
+      };
+    },
   };
 }
 
@@ -958,11 +1141,17 @@ function hostCard() {
   };
 }
 
-function timeline() {
+/**
+ * `cap` keeps the apps that changed most recently; `shows` narrows the rows; with `pick`, a row click picks the app
+ * (and `pick.is` marks it) instead of opening its project.
+ */
+function timeline({ cap = Infinity, shows = () => true, pick = null } = {}) {
   const body = h('div', { class: 'card tl', 'data-section': 'timeline' });
+  const note = h('span', { class: 'muted', style: 'font-size:12px' });
   const rendered = new Set();
   return {
     el: body,
+    note,
     render(model, animate) {
       const now = Date.now();
       const from = now - SPAN_MS;
@@ -975,8 +1164,12 @@ function timeline() {
           const known = Math.max(from, knownFrom(list, model.horizon));
           return { name, list, known, segs: segments(list, known, now) };
         })
-        .filter((r) => r.segs.length && listed.has(r.name) && listed.get(r.name).status !== 'purging')
-        .sort((a, b) => (a.name < b.name ? -1 : 1));
+        .filter((r) => r.segs.length && listed.has(r.name) && listed.get(r.name).status !== 'purging');
+      const any = rows.length > 0;
+      rows.splice(0, rows.length, ...rows.filter((r) => shows(r.name)));
+      note.textContent = rows.length > cap ? t('tl.cut', { n: cap, total: nf(rows.length) }) : '';
+      rows.sort((a, b) => b.list.at(-1).t - a.list.at(-1).t).splice(cap);
+      rows.sort((a, b) => (a.name < b.name ? -1 : 1));
       const axis = h('div', { class: 'tl-row axis' }, h('span', {}),
         h('div', { class: 'track' }, h('div', { class: 'ahead', style: `left:${pct(now)}` }), noData(Math.max(from, model.horizon)),
           [15, 10, 5].map((n) => h('span', { class: n === 15 ? 'tick first' : 'tick', style: `left:${pct(now - n * 60_000)}` }, t('tl.minus', { n }))),
@@ -984,7 +1177,7 @@ function timeline() {
         h('span', {}));
       if (!rows.length) {
         rendered.clear();
-        return void fill(body, axis, h('div', { class: 'empty' }, t('tl.empty')));
+        return void fill(body, axis, h('div', { class: 'empty' }, t(any ? 'empty.filtered' : 'tl.empty')));
       }
       const present = new Set(rows.map((r) => r.name));
       for (const name of rendered) if (!present.has(name)) rendered.delete(name);
@@ -1009,7 +1202,11 @@ function timeline() {
           ? ticking(() => (a.sleepsAt > Date.now() ? t('tl.sleepsIn', { d: duration(a.sleepsAt - Date.now() + 999) }) : t('tl.sleepingNow')))
           : ACTIVE.includes(state) ? null
             : h('span', { class: 'muted' }, ticking(() => t('tl.asleep', { d: duration(Date.now() - list.at(-1).t) })));
-        const row = h('div', { class: `tl-row${ACTIVE.includes(state) ? '' : ' dim'}`, 'data-href': `#/apps/${encodeURIComponent(name)}`, onclick: (e) => { if (!e.target.closest('a')) location.hash = `#/apps/${encodeURIComponent(name)}`; } },
+        const open = (e) => {
+          if (e.target.closest('a')) return;
+          if (pick) pick.set(name); else location.hash = `#/apps/${encodeURIComponent(name)}`;
+        };
+        const row = h('div', { class: `tl-row${ACTIVE.includes(state) ? '' : ' dim'}${pick?.is(name) ? ' picked' : ''}`, 'data-href': `#/apps/${encodeURIComponent(name)}`, title: pick ? t(pick.is(name) ? 'rt.unpick' : 'rt.pick', { name }) : null, onclick: open },
           h('div', { class: 'tl-name' }, h('span', { class: `st ${tone(state === 'none' ? 'asleep' : state)}`, title: t(`st.${state}`) }, t(`st.${state}`)), appLink(name)),
           h('div', { class: 'track' }, h('div', { class: 'ahead', style: `left:${pct(now)}` }), noData(known), bands, plan, label),
           h('div', { class: 'tl-meta' },
@@ -1279,85 +1476,119 @@ function eventFields(e) {
     .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' ');
 }
 
-function eventTail() {
-  const rows = h('div', { class: 'rows', 'data-section': 'tail' });
+const eventText = (e) => `${e.ev} ${e.app ?? ''} ${eventFields(e)}`.toLowerCase();
+
+function eventLine({ item: e }) {
+  return h('div', { class: 'ev', title: `#${e.seq} · ${stamp(e.t)}` },
+    h('span', { class: 'mono' }, clock(e.t, true)),
+    h('span', { class: `st ${eventTone(e)}` }, h('span', { class: 'mono' }, e.ev)),
+    e.app ? appLink(e.app) : h('span', { class: 'muted' }, '-'),
+    h('span', { class: 'f', title: eventFields(e) }, eventFields(e)));
+}
+
+const eventMarks = (diff) => [diff.restarted && t('tail.restart'), diff.missed > 0 && t('tail.gap', { n: nf(diff.missed) })].filter(Boolean);
+
+/**
+ * A newest-on-top stream that follows arrivals (ADR 0015): while the pointer is over it or it is scrolled down, new
+ * entries wait behind a pill, at most `hold` of them, the gateway's ring for that stream. An entry is `{ item }` or
+ * `{ mark }`; a mark (a gap, a restart) shows whatever the filter.
+ */
+function follow({ line, keep, limit, hold, empty, newKey, attrs = {}, head = null }) {
+  const rows = h('div', { class: 'rows' });
   const pill = h('button', { class: 'pill', type: 'button', hidden: true, onclick: () => { rows.scrollTo({ top: 0 }); hovering = false; flush(); } });
-  const box = h('div', { class: 'card tailbox' }, pill, rows);
-  const filter = h('input', { type: 'search', name: 'filter', placeholder: t('ev.filter'), 'aria-label': t('ev.filter'), oninput: () => rebuild() });
-  const state = h('span', { class: 'muted' });
-  const head = h('div', { class: 'tailhead' }, filter, state);
-  const el = h('div', { 'data-section': 'events' }, head, box);
-  const entries = [];
+  const el = h('div', { ...attrs, class: `card tailbox ${attrs.class ?? ''}` }, pill, head, rows);
+  let entries = [];
   const pending = [];
+  let dropped = 0;
+  let match = () => true;
   let hovering = false;
+  let changed = () => {};
   const paused = () => hovering || rows.scrollTop > 4;
-  const matches = (entry) => {
-    const needle = filter.value.trim().toLowerCase();
-    return entry.mark || !needle || `${entry.e.ev} ${entry.e.app ?? ''} ${eventFields(entry.e)}`.toLowerCase().includes(needle);
-  };
-  const line = (entry) => {
-    if (entry.mark) return h('div', { class: 'ev mark' }, entry.mark);
-    const e = entry.e;
-    return h('div', { class: 'ev', title: `#${e.seq} · ${stamp(e.t)}` },
-      h('span', { class: 'mono' }, clock(e.t, true)),
-      h('span', { class: `st ${eventTone(e)}` }, h('span', { class: 'mono' }, e.ev)),
-      e.app ? appLink(e.app) : h('span', { class: 'muted' }, '-'),
-      h('span', { class: 'f', title: eventFields(e) }, eventFields(e)));
-  };
+  const shows = (entry) => entry.mark !== undefined || match(entry.item);
+  const node = (entry) => (entry.mark !== undefined ? h('div', { class: 'ev mark' }, entry.mark) : line(entry));
   const rebuild = () => {
-    const shown = entries.filter(matches);
-    fill(rows, ...(shown.length ? shown.map(line) : [h('div', { class: 'empty' }, t(entries.length ? 'empty.filtered' : 'empty.events'))]));
+    const shown = [];
+    for (const entry of entries) {
+      if (shown.length >= limit) break;
+      if (shows(entry)) shown.push(node(entry));
+    }
+    fill(rows, shown.length ? shown : h('div', { class: 'empty' }, t(entries.some((e) => e.item) ? 'empty.filtered' : empty)));
+    changed();
   };
   const flush = () => {
     pill.hidden = true;
-    state.textContent = '';
-    if (!pending.length) return;
-    const batch = pending.splice(0).reverse();
-    entries.unshift(...batch);
-    entries.splice(TAIL_ROWS);
-    for (const old of rows.querySelectorAll('.fresh')) old.classList.remove('fresh');
-    rows.querySelector('.empty')?.remove();
-    const nodes = batch.filter(matches).map((entry) => {
-      const node = line(entry);
-      node.classList.add('fresh');
-      return node;
-    });
-    rows.prepend(...nodes);
-    while (rows.children.length > TAIL_ROWS) rows.lastChild.remove();
+    if (dropped) pending.unshift({ mark: t('tail.dropped', { n: nf(dropped) }) });
+    dropped = 0;
+    if (pending.length) {
+      const batch = pending.splice(0).reverse();
+      entries = batch.concat(entries);
+      entries.splice(keep);
+      for (const old of rows.querySelectorAll('.fresh')) old.classList.remove('fresh');
+      const shown = batch.filter(shows).slice(0, limit);
+      // A batch held back by a pause arrives at once; flashing hundreds of rows says nothing.
+      const nodes = shown.map((entry) => {
+        const n = node(entry);
+        if (shown.length <= FRESH_ROWS) n.classList.add('fresh');
+        return n;
+      });
+      if (nodes.length) rows.querySelector('.empty')?.remove();
+      rows.prepend(...nodes);
+      while (rows.children.length > limit) rows.lastChild.remove();
+    }
+    changed();
   };
   rows.addEventListener('pointerenter', () => { hovering = true; });
   rows.addEventListener('pointerleave', () => { hovering = false; if (!paused()) flush(); });
   rows.addEventListener('scroll', () => { if (!paused()) flush(); }, { passive: true });
   return {
     el,
-    seed(events) {
-      entries.unshift(...[...events].reverse().map((e) => ({ e })));
+    /** Items shown, items kept, and how many matching ones wait behind the pill. */
+    get counts() {
+      return { shown: rows.querySelectorAll(':scope > :not(.mark):not(.empty)').length, kept: entries.filter((e) => e.item).length, waiting: pending.filter((p) => p.item && match(p.item)).length };
+    },
+    onChange(fn) { changed = fn; },
+    setMatch(fn) { match = fn; rebuild(); },
+    seed(items) {
+      entries.unshift(...[...items].reverse().map((item) => ({ item })));
+      entries.splice(keep);
       rebuild();
     },
-    push(diff) {
-      if (diff.restarted) pending.push({ mark: t('tail.restart') });
-      if (diff.missed > 0) pending.push({ mark: t('tail.gap', { n: nf(diff.missed) }) });
-      pending.push(...diff.fresh.map((e) => ({ e })));
+    push(marks, items) {
+      for (const mark of marks) pending.push({ mark });
+      for (const item of items) pending.push({ item });
       if (!paused()) return flush();
-      const n = pending.filter((p) => p.e).length;
-      if (!n) return;
-      pill.hidden = false;
-      pill.textContent = `↑ ${t('tail.new', { n: nf(n) })}`;
-      state.textContent = t('tail.paused');
+      for (const old of pending.splice(0, Math.max(0, pending.length - hold))) if (old.item) dropped += 1;
+      const n = pending.filter((p) => p.item && match(p.item)).length;
+      pill.hidden = !n && !dropped;
+      pill.textContent = [`↑ ${t(newKey, { n: nf(n) })}`, dropped && t('tail.dropped', { n: nf(dropped) })].filter(Boolean).join(' · ');
+      changed();
     },
+  };
+}
+
+function eventTail() {
+  const stream = follow({ line: eventLine, keep: TAIL_ROWS, limit: TAIL_ROWS, hold: EVENT_RING, empty: 'empty.events', newKey: 'tail.new', attrs: { 'data-section': 'tail' } });
+  const filter = h('input', { type: 'search', name: 'filter', placeholder: t('ev.filter'), 'aria-label': t('ev.filter'), oninput: () => {
+    const needle = filter.value.trim().toLowerCase();
+    stream.setMatch((e) => !needle || eventText(e).includes(needle));
+  } });
+  const state = h('span', { class: 'muted' });
+  stream.onChange(() => { state.textContent = stream.counts.waiting ? t('tail.paused') : ''; });
+  return {
+    el: h('div', { 'data-section': 'events' }, h('div', { class: 'tailhead' }, filter, state), stream.el),
+    seed: (events) => stream.seed(events),
+    push: (diff) => stream.push(eventMarks(diff), diff.fresh),
   };
 }
 
 async function overview() {
   const model = liveModel();
-  let mode = 'on';
-  const controls = { toggle: () => { mode = mode === 'paused' ? 'on' : 'paused'; header.render(model, mode); if (mode === 'on') refresh(); } };
-  const header = liveHeader(controls);
+  const header = liveHeader('live.last', () => refresh());
   const services = servicesLine();
   const seats = seatsCard();
   const gate = gateCard();
   const host = hostCard();
-  const lane = timeline();
+  const lane = timeline({ cap: TIMELINE_ROWS });
   const inbox = attentionInbox();
   const tail = eventTail();
   const charts = [
@@ -1387,11 +1618,11 @@ async function overview() {
     h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('ov.title')), h('p', { class: 'sub' }, t('ov.sub'))), header.el),
     services.el,
     h('section', {}, sectionHead(1, 'sec.fleet', 'sec.fleetDesc'), h('div', { class: 'fleet', 'data-section': 'fleet' }, seats.el, gate.el, host.el)),
-    h('section', {}, sectionHead(2, 'sec.timeline', 'sec.timelineDesc'), lane.el),
+    h('section', {}, sectionHead(2, 'sec.timeline', 'sec.timelineDesc', lane.note), lane.el),
     h('section', {}, sectionHead(3, 'sec.activity', 'sec.activityDesc', windows), h('div', { class: 'charts' }, charts.map((c) => c.el))),
     h('div', { class: 'pair' },
       h('section', {}, sectionHead(4, 'sec.attention', 'sec.attentionDesc', inbox.action), inbox.el),
-      h('section', {}, sectionHead(5, 'sec.events', 'sec.eventsDesc'), tail.el)),
+      h('section', {}, sectionHead(5, 'sec.events', 'sec.eventsDesc', h('a', { href: '#/realtime', style: 'font-size:12px' }, `${t('ov.toRealtime')} →`)), tail.el)),
   );
 
   const pollMetrics = async () => {
@@ -1416,7 +1647,7 @@ async function overview() {
   };
   let paintedAt = 0;
   const render = (animate, moved) => {
-    header.render(model, mode);
+    header.seen(model.events.at(-1)?.t);
     services.render(model.metrics);
     seats.render(model, animate);
     gate.render(model, animate);
@@ -1429,23 +1660,359 @@ async function overview() {
     charts.forEach((c) => c.set(model));
     inbox.render(model, animate);
   };
-  const guarded = (fn) => {
-    let busy = false;
-    return async () => {
-      if (mode === 'paused' || busy) return;
-      busy = true;
-      try {
-        await fn();
-        if (mode === 'offline') header.render(model, mode = 'on');
-      } catch {
-        header.render(model, mode = 'offline');
-      } finally {
-        busy = false;
-      }
-    };
+  const refresh = header.guarded(pollMetrics);
+  return { loops: [[METRICS_MS, refresh], [APPS_MS, header.guarded(pollApps)]], first: refresh };
+}
+
+// Realtime (ADR 0016): the request ring and the event ring, read by cursor, under one filter.
+
+const REQUESTS_MS = 1000;
+const REQUEST_RING = 1000;
+const REQUEST_PAGE = 1000;
+const KEEP_REQUESTS = 5000;
+const REQUEST_ROWS = 1000;
+const RATE_WINDOW_MS = 10_000;
+const HISTORY_S = 60;
+const WATERFALL_MS = 30_000;
+const FILTER_KEYS = ['app', 'kind', 'status', 'path', 'subject', 'cold', 'error'];
+const FILTER_HINTS = ['app:', 'kind:', 'status:5xx', 'path:', 'subject:', 'cold:true', 'error:true'];
+
+/** Whitespace-separated terms: `key:value` or a bare word matched as a substring. */
+function parseFilter(text) {
+  const terms = {};
+  const words = [];
+  const unknown = [];
+  for (const token of text.toLowerCase().split(/\s+/).filter(Boolean)) {
+    const [, key, value] = /^([a-z]+):(.*)$/.exec(token) ?? [];
+    if (key === undefined) words.push(token);
+    else if (!FILTER_KEYS.includes(key)) unknown.push(key);
+    else if (value) (terms[key] ??= []).push(value);
+  }
+  return { terms, words, unknown };
+}
+
+/** Same as the Stats error count: a 5xx, or no answer at all. */
+const requestFailed = (r) => r.status === 0 || r.status >= 500;
+const lower = (v) => String(v ?? '').toLowerCase();
+const statusIs = (status, v) => (/^[1-5]xx$/.test(v) ? Math.floor(status / 100) === Number(v[0]) : String(status) === v);
+const requestText = (r) => `${r.app} ${r.kind} ${r.method} ${r.path} ${r.status} ${r.subject ?? ''} ${r.error ?? ''}`.toLowerCase();
+
+const REQUEST_TERMS = {
+  app: (r, v) => lower(r.app).startsWith(v),
+  kind: (r, v) => r.kind === v,
+  status: (r, v) => statusIs(r.status, v),
+  path: (r, v) => lower(r.path).includes(v),
+  subject: (r, v) => lower(r.subject).includes(v),
+  cold: (r, v) => String(r.cold) === v,
+  error: (r, v) => String(requestFailed(r)) === v,
+};
+const EVENT_TERMS = {
+  app: (e, v) => lower(e.app).startsWith(v),
+  error: (e, v) => String(eventTone(e) === 'red') === v,
+};
+
+/** Values of one key are alternatives; keys and bare words must all hold. A key the stream has no field for does not narrow it. */
+function matcher(filter, table, text) {
+  const terms = Object.entries(filter.terms).filter(([key]) => table[key]);
+  return (item) => terms.every(([key, values]) => values.some((v) => table[key](item, v))) && filter.words.every((w) => text(item).includes(w));
+}
+
+function filterState() {
+  const params = new URLSearchParams(location.hash.split('?')[1] ?? '');
+  return { text: params.get('q') ?? '', errors: params.get('errors') === '1', hideStatic: params.get('static') === '0' };
+}
+
+function writeFilterState(state) {
+  const params = new URLSearchParams();
+  if (state.text.trim()) params.set('q', state.text.trim());
+  if (state.errors) params.set('errors', '1');
+  if (state.hideStatic) params.set('static', '0');
+  const query = params.toString();
+  history.replaceState(null, '', `#/realtime${query ? `?${query}` : ''}`);
+}
+
+const statusTone = (s) => (s === 0 || s >= 500 ? 'red' : s >= 400 ? 'orange' : s >= 300 ? 'muted' : s < 200 ? 'accent' : 'green');
+const took = (v) => (v >= 60_000 ? `${new Intl.NumberFormat(locale(), { maximumFractionDigits: 1 }).format(v / 60_000)} min` : ms(v));
+const reach = (v) => Math.min(1, Math.log10(1 + v) / Math.log10(1 + WATERFALL_MS));
+/** The path below the app's address, as the app's routes read it; the full path stays in the detail. */
+const appRelative = (r) => (r.path.startsWith(`/apps/${r.app}/`) ? r.path.slice(`/apps/${r.app}`.length) : r.path);
+
+function filterBar(state, onChange) {
+  const input = h('input', {
+    type: 'search', value: state.text, placeholder: t('rt.placeholder'), 'aria-label': t('rt.filter'), spellcheck: 'false', autocomplete: 'off',
+    oninput: () => { state.text = input.value; changed(); },
+  });
+  const clear = h('button', { class: 'btn', type: 'button', onclick: () => { input.value = state.text = ''; changed(); input.focus(); } }, t('rt.clear'));
+  const toggle = (key, label) => {
+    const button = h('button', { type: 'button', class: 'tog', 'aria-pressed': String(state[key]), onclick: () => {
+      state[key] = !state[key];
+      button.setAttribute('aria-pressed', String(state[key]));
+      changed();
+    } }, h('span', { class: 'ck' }, icon('check')), t(label));
+    return button;
   };
-  const refresh = guarded(pollMetrics);
-  return { loops: [[METRICS_MS, refresh], [APPS_MS, guarded(pollApps)]], first: refresh };
+  const warn = h('div', { class: 'fwarn', role: 'status' });
+  const add = (term) => {
+    const tokens = input.value.trim().split(/\s+/).filter(Boolean);
+    if (!tokens.includes(term)) tokens.push(term);
+    input.value = state.text = tokens.join(' ');
+    changed();
+    input.focus();
+  };
+  /** Makes `name` the only app term, or clears it when it already is. */
+  const pickApp = (name) => {
+    const tokens = input.value.trim().split(/\s+/).filter(Boolean);
+    const apps = tokens.filter((x) => x.startsWith('app:'));
+    const rest = tokens.filter((x) => !x.startsWith('app:'));
+    input.value = state.text = (apps.length === 1 && apps[0] === `app:${name}` ? rest : [...rest, `app:${name}`]).join(' ');
+    changed();
+  };
+  const changed = () => {
+    clear.hidden = !state.text;
+    const parsed = parseFilter(state.text);
+    warn.textContent = parsed.unknown.length ? t('rt.unknown', { keys: parsed.unknown.join(', '), known: FILTER_KEYS.join(' ') }) : '';
+    onChange(parsed);
+  };
+  const el = h('div', { class: 'card fbar', 'data-section': 'filter' },
+    h('div', { class: 'fline' },
+      h('label', { class: 'q' }, icon('search'), input),
+      clear,
+      h('span', { class: 'togs' }, toggle('errors', 'rt.errorsOnly'), toggle('hideStatic', 'rt.hideStatic'))),
+    h('div', { class: 'fkeys' }, h('span', {}, t('rt.keys')), FILTER_HINTS.map((hint) => h('button', { type: 'button', onclick: () => add(hint) }, hint))),
+    warn);
+  return { el, add, pickApp, changed };
+}
+
+/** Three live numbers and a per-second histogram over the last minute, all over the records the filter keeps. */
+function pulseStrip() {
+  const cell = (key) => ({ key, v: h('div', { class: 'v' }), s: h('div', { class: 's' }) });
+  const cells = [cell('rate'), cell('errors'), cell('sockets')];
+  const bars = Array.from({ length: HISTORY_S }, () => {
+    const ok = h('b', { class: 'ok' });
+    const bad = h('b', { class: 'bad' });
+    return { el: h('i', {}, ok, bad), ok, bad };
+  });
+  const top = h('span', { class: 'num' });
+  const scope = h('span', { class: 'on' });
+  const el = h('div', { class: 'card pulse', 'data-section': 'pulse' },
+    cells.map((c) => h('div', { class: 'pn' }, h('div', { class: 'l' }, t(`rt.${c.key}`)), c.v, c.s)),
+    h('div', { class: 'ph' },
+      h('div', { class: 'l' }, t('rt.hist'), top, scope),
+      h('div', { class: 'hist', 'aria-hidden': 'true' }, bars.map((b) => b.el)),
+      h('div', { class: 'haxis' }, h('span', {}, t('rt.ago', { n: HISTORY_S })), h('span', {}, t('rt.ago', { n: HISTORY_S / 2 })), h('span', {}, t('tl.now')))));
+  return {
+    el,
+    render(records, match, sockets, filtered) {
+      const now = Date.now();
+      const end = Math.floor(now / 1000);
+      const bins = bars.map(() => ({ n: 0, bad: 0 }));
+      let recent = 0;
+      let failed = 0;
+      for (let i = records.length - 1; i >= 0; i--) {
+        const r = records[i];
+        if (r.t < now - HISTORY_S * 1000) break;
+        if (!match(r)) continue;
+        const bin = bins[Math.min(HISTORY_S - 1, HISTORY_S - 1 - (end - Math.floor(r.t / 1000)))];
+        if (bin) {
+          bin.n++;
+          if (requestFailed(r)) bin.bad++;
+        }
+        if (r.t >= now - RATE_WINDOW_MS) recent++;
+        if (requestFailed(r)) failed++;
+      }
+      scope.textContent = filtered ? ` · ${t('rt.matching')}` : '';
+      const [rate, errors, open] = cells;
+      fill(rate.v, new Intl.NumberFormat(locale(), { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(recent / (RATE_WINDOW_MS / 1000)));
+      fill(rate.s, t('rt.rateSub'));
+      fill(errors.v, nf(failed));
+      errors.v.classList.toggle('bad', failed > 0);
+      fill(errors.s, t('rt.errorsSub'));
+      fill(open.v, nf(sockets));
+      fill(open.s, t('rt.socketsSub'));
+      const max = niceMax(Math.max(...bins.map((b) => b.n)));
+      top.textContent = ` · ${t('rt.peak', { n: nf(Math.max(...bins.map((b) => b.n))) })}`;
+      bins.forEach((b, i) => {
+        const bar = bars[i];
+        bar.ok.style.height = `${((b.n - b.bad) / max) * 100}%`;
+        bar.bad.style.height = `${(b.bad / max) * 100}%`;
+        bar.el.classList.toggle('now', i === HISTORY_S - 1);
+        bar.el.title = t('rt.histTip', { time: clock((end - (HISTORY_S - 1 - i)) * 1000, true), n: nf(b.n), e: nf(b.bad) });
+      });
+    },
+  };
+}
+
+function realtime() {
+  const filter = filterState();
+  const model = liveModel();
+  const page = { cursor: 0, generation: 0, seeded: false, skip: new Set(), records: [], parsed: parseFilter(filter.text) };
+  const match = { request: () => true, event: () => true };
+  const header = liveHeader('live.lastRequest', () => first());
+  const pulse = pulseStrip();
+  const column = (key) => h('span', { class: key }, t(`rt.c.${key}`));
+  const requestHead = h('div', { class: 'rq hd', 'aria-hidden': 'true' }, ['tm', 'sc', 'mt', 'ap', 'pt', 'du', 'wf', 'sb'].map(column));
+
+  const term = (text) => h('button', { type: 'button', class: 'term', title: t('rt.addFilter'), onclick: (e) => { e.stopPropagation(); bar.add(text); } }, `+ ${text}`);
+  const detail = (r) => {
+    const row = (key, ...value) => [h('dt', {}, t(`rt.f.${key}`)), h('dd', {}, value)];
+    return h('div', { class: 'rqd' }, h('dl', {},
+      row('seq', `#${nf(r.seq)}`, h('span', { class: 'muted' }, `${new Intl.DateTimeFormat(locale(), { dateStyle: 'medium' }).format(r.t)} ${clock(r.t, true)}.${String(r.t % 1000).padStart(3, '0')}`)),
+      row('app', appLink(r.app), term(`app:${r.app}`)),
+      row('kind', r.kind, term(`kind:${r.kind}`)),
+      row('request', `${r.method} ${r.path}`),
+      row('status', h('span', { class: `sc ${statusTone(r.status)}` }, r.status === 0 ? t('rt.noAnswer') : String(r.status)), term(`status:${r.status === 0 ? 0 : `${Math.floor(r.status / 100)}xx`}`)),
+      row(r.kind === 'ws' ? 'open' : 'ms', took(r.ms)),
+      row('wait', r.waitMs == null ? '-' : [ms(r.waitMs), h('span', { class: 'muted' }, t('rt.f.waitHint'))]),
+      row('cold', r.cold ? [h('span', { class: 'cold' }, t('yes')), term('cold:true')] : t('no')),
+      row('subject', r.subject ?? '-', r.subject ? term(`subject:${r.subject}`) : null),
+      row('error', r.error ? h('span', { class: 'er' }, r.error) : '-')));
+  };
+  const requestLine = (entry) => {
+    const r = entry.item;
+    const failed = requestFailed(r);
+    const rel = appRelative(r);
+    const wait = r.waitMs ?? 0;
+    const width = reach(r.ms) * 100;
+    const row = h('div', {
+      class: `rq${failed ? ' failed' : ''}`, role: 'button', tabindex: '0', 'aria-expanded': String(Boolean(entry.open)),
+      title: r.error ?? null,
+      onclick: () => toggle(),
+      onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } },
+    },
+      h('span', { class: 'tm' }, clock(r.t, true)),
+      h('span', { class: `sc ${statusTone(r.status)}` }, r.status === 0 ? 'ERR' : String(r.status)),
+      h('span', { class: 'mt' }, r.method),
+      h('span', { class: 'ap' }, r.app),
+      h('span', { class: 'pt' },
+        r.kind === 'request' ? null : h('span', { class: `chip k ${r.kind}` }, r.kind),
+        r.cold ? h('span', { class: 'cold' }, t('rt.cold', { ms: ms(r.waitMs) })) : null,
+        h('span', { class: 'p' }, rel),
+        r.error ? h('span', { class: 'er' }, r.error) : null),
+      h('span', { class: `du${r.kind !== 'ws' && r.ms > COLD_START_GATE_MS ? ' slow' : ''}` }, took(r.ms)),
+      h('span', { class: 'wf', title: r.waitMs == null ? took(r.ms) : `${t('rt.f.wait')} ${ms(r.waitMs)} · ${took(r.ms)}` },
+        h('i', { class: `w${r.cold ? ' cold' : ''}`, style: `width:${r.ms ? (width * Math.min(wait, r.ms)) / r.ms : 0}%` }),
+        h('i', { class: `r${failed ? ' bad' : r.kind === 'ws' ? ' ch' : ''}`, style: `width:${r.ms ? (width * (r.ms - Math.min(wait, r.ms))) / r.ms : 0}%` })),
+      h('span', { class: 'sb' }, r.subject ?? ''));
+    const wrap = h('div', { class: `rqx${entry.open ? ' open' : ''}` }, row, entry.open ? detail(r) : null);
+    const toggle = () => {
+      entry.open = !entry.open;
+      const next = requestLine(entry);
+      wrap.replaceWith(next);
+      next.firstChild.focus({ preventScroll: true });
+    };
+    return wrap;
+  };
+
+  const requests = follow({ line: requestLine, keep: KEEP_REQUESTS, limit: REQUEST_ROWS, hold: REQUEST_RING, empty: 'empty.requests', newKey: 'rt.new', head: requestHead, attrs: { class: 'reqs', 'data-section': 'requests' } });
+  const events = follow({ line: eventLine, keep: KEEP_EVENTS, limit: TAIL_ROWS, hold: EVENT_RING, empty: 'empty.events', newKey: 'tail.new', attrs: { 'data-section': 'realtime-events' } });
+  const count = (stream) => {
+    const el = h('span', { class: 'cnt' });
+    stream.onChange(() => {
+      const { shown, kept, waiting } = stream.counts;
+      fill(el, waiting ? h('span', { class: 'hold' }, t('tail.paused')) : null, t('rt.shown', { shown: nf(shown), kept: nf(kept) }));
+    });
+    return el;
+  };
+  const requestCount = count(requests);
+  const eventCount = count(events);
+
+  const sockets = () => {
+    const names = page.parsed.terms.app;
+    return model.apps.filter((a) => !names || names.some((v) => a.name.startsWith(v))).reduce((sum, a) => sum + (a.leases?.channel ?? 0), 0);
+  };
+  const filtered = () => Boolean(filter.text.trim() || filter.errors || filter.hideStatic);
+  /** Apps passing the app terms and, when anything else narrows, owning a matching record or (for error) event in the window. */
+  const appShows = () => {
+    const { terms, words } = page.parsed;
+    const narrowed = words.length > 0 || filter.errors || Object.keys(terms).some((k) => k !== 'app');
+    const from = Date.now() - SPAN_MS;
+    const owners = new Set();
+    if (narrowed) {
+      for (const r of page.records) if (r.t >= from && match.request(r)) owners.add(r.app);
+      if (filter.errors || terms.error) for (const e of model.events) if (e.app && e.t >= from && match.event(e)) owners.add(e.app);
+    }
+    return (name) => (!terms.app || terms.app.some((v) => name.startsWith(v))) && (!narrowed || owners.has(name));
+  };
+  let shows = () => true;
+  const lane = timeline({
+    shows: (name) => shows(name),
+    pick: { set: (name) => bar.pickApp(name), is: (name) => page.parsed.terms.app?.length === 1 && page.parsed.terms.app[0] === name },
+  });
+  const renderLane = (animate) => {
+    shows = appShows();
+    lane.render(model, animate);
+  };
+  const renderPulse = () => pulse.render(page.records, match.request, sockets(), filtered());
+  const bar = filterBar(filter, (parsed) => {
+    page.parsed = parsed;
+    const effective = filter.errors ? { ...parsed, terms: { ...parsed.terms, error: ['true'] } } : parsed;
+    const request = matcher(effective, REQUEST_TERMS, requestText);
+    match.request = filter.hideStatic ? (r) => r.kind !== 'static' && request(r) : request;
+    match.event = matcher(effective, EVENT_TERMS, eventText);
+    requests.setMatch(match.request);
+    events.setMatch(match.event);
+    writeFilterState(filter);
+    renderPulse();
+    if (model.metrics) renderLane(false);
+  });
+  bar.changed();
+
+  show(
+    h('div', { class: 'head rt-head' }, h('div', { class: 'grow' }, h('h1', {}, t('rt.title')), h('p', { class: 'sub' }, t('rt.sub'))), header.el),
+    h('div', { class: 'rt-top' }, pulse.el, bar.el),
+    h('section', { class: 'rt-lane' }, sectionHead(1, 'sec.timeline', 'rt.timelineDesc'), lane.el),
+    h('section', { class: 'rt-streams' }, h('div', { class: 'rt-grid' },
+      h('div', {}, sectionHead(2, 'rt.requests', 'rt.requestsDesc', requestCount), requests.el),
+      h('div', {}, sectionHead(3, 'rt.events', 'rt.eventsDesc', eventCount), events.el))),
+  );
+
+  const pollRequests = async () => {
+    for (let round = 0; round < 3; round++) {
+      const generation = page.generation;
+      const batch = await api('GET', `/api/requests?after=${page.cursor}&limit=${REQUEST_PAGE}`);
+      // Asked of the process before the restart was seen: its seqs mean nothing to the new cursor.
+      if (generation !== page.generation) return;
+      const missed = page.seeded && batch.length ? batch[0].seq - page.cursor - 1 : 0;
+      if (batch.length) page.cursor = batch.at(-1).seq;
+      const fresh = batch.filter((r) => !page.skip.has(r.seq));
+      page.records.push(...fresh);
+      page.records.splice(0, Math.max(0, page.records.length - KEEP_REQUESTS));
+      if (!page.seeded) requests.seed(fresh);
+      else if (fresh.length || missed > 0) {
+        requests.push(missed > 0 ? [t('rt.gap', { n: nf(missed), ring: nf(REQUEST_RING) })] : [], fresh);
+        header.beat();
+      }
+      page.seeded = true;
+      if (batch.length < REQUEST_PAGE) break;
+    }
+    header.seen(page.records.at(-1)?.t);
+    renderPulse();
+  };
+  const pollMetrics = async () => {
+    const m = await api('GET', '/api/metrics');
+    const diff = absorbMetrics(model, m);
+    if (diff.restarted) {
+      header.restarted(m.gateway.startedAt);
+      // Records already read from the new process come again once the cursor starts over.
+      page.skip = new Set(page.records.filter((r) => r.t >= m.gateway.startedAt).map((r) => r.seq));
+      page.cursor = 0;
+      page.generation += 1;
+      requests.push([t('rt.restart')], []);
+    }
+    if (diff.reset) absorbApps(model, await api('GET', '/api/apps'), Date.now());
+    if (diff.initial) events.seed(diff.fresh);
+    else events.push(eventMarks(diff), diff.fresh);
+    renderLane(!diff.initial);
+  };
+  const pollApps = async () => {
+    if (!model.metrics) return;
+    absorbApps(model, await api('GET', '/api/apps'), Date.now());
+    renderPulse();
+    renderLane(true);
+  };
+  const polls = [pollMetrics, pollRequests, pollApps].map((fn) => header.guarded(fn));
+  const first = () => Promise.all(polls.map((fn) => fn()));
+  return { loops: [[METRICS_MS, polls[0]], [REQUESTS_MS, polls[1]], [APPS_MS, polls[2]]], first };
 }
 
 const STATE_FILTERS = ['awake', 'waking', 'asleep', 'none', 'registered', 'removed', 'purging'];
@@ -1720,10 +2287,10 @@ function footer(startedAt) {
 
 function shell() {
   const nav = document.querySelector('nav');
-  const [, view] = location.hash.split('/');
-  const current = view === 'apps' ? 'apps' : view === 'publish' ? 'publish' : 'overview';
+  const [, view] = location.hash.split('?')[0].split('/');
+  const current = ['apps', 'publish', 'realtime'].includes(view) ? view : 'overview';
   nav.replaceChildren(h('div', { class: 'group' }, t('nav.group')),
-    ...[['overview', '#/'], ['apps', '#/apps'], ['publish', '#/publish']].map(([key, href]) => h('a', { href, 'aria-current': key === current ? 'page' : null }, t(`nav.${key}`))));
+    ...[['overview', '#/'], ['realtime', '#/realtime'], ['apps', '#/apps'], ['publish', '#/publish']].map(([key, href]) => h('a', { href, 'aria-current': key === current ? 'page' : null }, t(`nav.${key}`))));
   document.getElementById('brand-sub').textContent = t('brand.sub');
   const theme = root.dataset.theme;
   document.querySelector('.controls').replaceChildren(
@@ -1755,13 +2322,14 @@ async function route() {
   document.onvisibilitychange = null;
   crosshair.reset();
   shell();
-  const [, view, name] = location.hash.split('/');
+  const [, view, name] = location.hash.split('?')[0].split('/');
   const target = name && decodeURIComponent(name);
   try {
     const live = view === 'apps' && target ? await detail(target)
       : view === 'apps' ? await projects()
         : view === 'publish' ? (await publish(target), null)
-          : await overview();
+          : view === 'realtime' ? realtime()
+            : await overview();
     if (gen !== generation) return;
     if (typeof live === 'function') {
       await live();
