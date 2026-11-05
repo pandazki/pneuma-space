@@ -539,7 +539,8 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .explain .xg { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px 20px; }
 .explain h3 { margin: 0 0 4px; font-size: 12.5px; font-weight: 600; }
 .explain p { margin: 0; font-size: 12.5px; line-height: 19px; color: var(--ink-2); }
-.explain ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.explain .xb.checks { grid-column: 1 / -1; }
+.explain ul { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px 20px; }
 .explain li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; align-items: start; font-size: 12.5px; line-height: 19px; color: var(--ink-2); }
 .explain li .chip { justify-content: center; }
 .runtime { color: var(--accent-ink); }
@@ -714,7 +715,7 @@ const I18N = {
     'tp.explain': '怎么跑',
     'tp.explainFor': '{kind} 运行时说明',
     'tp.noApps': '没有应用',
-    'tp.unreachable': '不可达 · {fix}',
+    'tp.svcOff': '{name} 未启用',
     'tp.unreachableShort': '不可达',
     'tp.lift': '解除隔离',
     'tp.stage.ingress': '入口',
@@ -891,7 +892,7 @@ const I18N = {
     'tp.explain': 'How it runs',
     'tp.explainFor': 'How the {kind} runtime works',
     'tp.noApps': 'No apps',
-    'tp.unreachable': 'unreachable · {fix}',
+    'tp.svcOff': '{name} is off',
     'tp.unreachableShort': 'unreachable',
     'tp.lift': 'Unquarantine',
     'tp.stage.ingress': 'ingress',
@@ -1014,7 +1015,7 @@ function h(tag, attrs = {}, ...children) {
 function svg(tag, attrs = {}, ...children) {
   const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
   for (const [key, value] of Object.entries(attrs)) if (value != null) el.setAttribute(key, value);
-  el.append(...children);
+  el.append(...children.filter((c) => c != null && c !== false));
   return el;
 }
 
@@ -2742,12 +2743,12 @@ function laneScene(model, width, on) {
     if (down) g.append(svg('rect', { x: lx, y, width: lw, height: lh, rx: 14, class: 'downwash' }));
     const explainText = `${t('tp.explain')} →`;
     const explainW = textWidth(explainText, 12, false, 500);
-    const countText = down ? t('tp.unreachable', { fix: fixFor(model, 'runner') }) : appCount(apps.length);
+    const countText = down ? t('tp.unreachableShort') : appCount(apps.length);
     const countW = textWidth(countText, 11.5, !down);
     const nameW = textWidth(lane, 13, false, 600);
     g.append(act(svg('g', { class: 'lanet' },
       tx(lx + 14, y + 24, lane, 'lanen'),
-      tx(lx + 22 + nameW, y + 24, fit(t(`tp.lane.${lane}.sub`), 11.5, false, lw - 28 - nameW - 8 - explainW - countW - 36), 't3 small'),
+      textWidth(t(`tp.lane.${lane}.sub`), 11.5) <= lw - 28 - nameW - 8 - explainW - countW - 36 ? tx(lx + 22 + nameW, y + 24, t(`tp.lane.${lane}.sub`), 't3 small') : null,
       tx(lx + lw - 14, y + 24, explainText, 'linkt', { 'text-anchor': 'end' })), t('tp.explainFor', { kind: lane }), () => on.explain(lane)),
       tx(lx + lw - 26 - explainW, y + 24, countText, down ? 'bad small' : 't3 small m', { 'text-anchor': 'end' }));
     if (!apps.length) g.append(tx(inner, y + 59, t('tp.noApps'), 't3 small'));
@@ -2863,7 +2864,7 @@ function graphScene(model, width, shown, hidden, on) {
   const gx = 152, gw = 272, bandW = (gw - 16) / STAGES.length;
   const ax = gx + gw + 28, aw = 172;
   const sw = 164, sx = W - 16 - sw;
-  const cw = 124, cx = sx - 72 - cw;
+  const cw = 138, cx = sx - 64 - cw;
   const el = svg('svg', { class: 'topo-svg graph', width: W, role: 'img', 'aria-label': t('tp.graph.label') });
   const under = svg('g');
   const edges = svg('g');
@@ -3072,7 +3073,7 @@ function explainPanel(model, kind) {
   return h('div', { class: 'card explain', 'data-section': 'explain' },
     h('div', { class: 'xh' }, h('b', { class: 'mono' }, kind), h('span', { class: 'muted' }, t(`tp.lane.${kind}.sub`))),
     h('div', { class: 'xg' }, ['request', 'wake', 'state', 'failure'].map(block),
-      h('div', { class: 'xb' }, h('h3', {}, t('tp.x.checks')),
+      h('div', { class: 'xb checks' }, h('h3', {}, t('tp.x.checks')),
         checks.length ? h('ul', {}, checks.map((c) => h('li', {}, h('span', { class: 'chip' }, c), h('span', {}, t(`tp.check.${c}`)))))
           : h('p', {}, t('tp.x.noChecks')))));
 }
@@ -3083,7 +3084,7 @@ function faultBanner(model) {
     if (!svcFault(model, s)) continue;
     const hit = dependents(model, s).map((a) => a.name);
     items.push(h('div', { class: 'fault-item' },
-      h('span', { class: `st red` }, t('att.service', { name: t(`svc.${s}`) })),
+      h('span', { class: 'st red' }, t(svcStatus(model, s) === 'off' ? 'tp.svcOff' : 'att.service', { name: t(`svc.${s}`) })),
       h('span', { class: 'muted' }, hit.length ? t('tp.affects', { n: nf(hit.length) }) : t('tp.affectsNone')),
       h('span', { class: 'chips' }, hit.slice(0, 8).map((n) => appLink(n)), hit.length > 8 ? chip(`+${hit.length - 8}`) : null),
       h('span', { class: 'mono fix' }, fixFor(model, s))));

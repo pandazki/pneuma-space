@@ -121,6 +121,33 @@ test('AC-P-13', { timeout: 60_000 }, async (t) => {
   for (const marker of ['zh: {', 'en: {', 'data-theme']) assert.ok(page.includes(marker), `console has ${marker}`);
 });
 
+// The browser half (lanes, graph selection, redis stop and start, runner off, unquarantine) is verified by screenshots.
+test('AC-P-16', { timeout: 60_000 }, async (t) => {
+  const app = await deploy(t, { image: images.echo, capabilities: { db: {} } });
+  const health = async () => (await fetch(adminUrl + '/api/health')).json();
+  await health();
+  const since = Date.now() / 1000;
+  const timings: number[] = [];
+  let body: any;
+  for (let i = 0; i < 7; i++) {
+    const start = performance.now();
+    body = await health();
+    timings.push(performance.now() - start);
+  }
+  const until = Date.now() / 1000 + 1;
+  const events = docker('events', '--since', since.toFixed(3), '--until', until.toFixed(3), '--filter', `label=pneuma-space.network=${stack.network}`, '--format', '{{.Type}} {{.Action}}');
+  t.diagnostic(`GET /api/health: median ${median(timings).toFixed(1)} ms`);
+  assert.ok(median(timings) < 50, `median ${median(timings).toFixed(1)} ms, gate 50 ms`);
+  assert.equal(events, '', 'no Docker activity while answering health');
+  assert.deepEqual(Object.keys(body.runtimes).sort(), ['container', 'isolate']);
+  assert.ok(body.runtimes.container.health.includes('exit') && body.runtimes.isolate.health.includes('hang'), JSON.stringify(body.runtimes));
+  assert.equal(body.runtimes.isolate.profile, 'isolate');
+  assert.ok(['sqlite', 'postgres'].includes(body.policy.db_backend), JSON.stringify(body.policy));
+
+  const listed = (await (await fetch(adminUrl + '/api/apps')).json()).find((a: any) => a.name === app.name);
+  assert.equal(listed.dbBackend, body.policy.db_backend);
+});
+
 test('AC-P-14', { timeout: 90_000 }, async (t) => {
   const app = await deploy(t, { image: images.echo, capabilities: { ws: {} } });
   await setIdle(app.name, 5);
