@@ -14,10 +14,16 @@ const NET = process.allowedNodeEnvironmentFlags.has('--allow-net') ? ['--allow-n
 /** Every route the runner and IsolateRuntime tests drive; plain JS so a worker starts without type stripping. */
 export const APP = `import { createServer } from 'node:http';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { register } from 'node:module';
 import { Worker } from 'node:worker_threads';
 const env = process.env;
 if (env.START_FIFO) readFileSync(env.START_FIFO);
 for (const end = Date.now() + Number(env.START_BUSY_MS ?? 0); Date.now() < end;);
+if (env.START_BUFFERS) {
+  globalThis.held = [0, 1, 2, 3].map(() => Buffer.alloc(64 * 2 ** 20, 1));
+  await new Promise((r) => setTimeout(r, 60_000));
+}
+if (env.DECOY) createServer((q, s) => s.end('decoy')).listen(0);
 const routes = {
   '/': () => env.PNEUMA_SPACE_APP + ' ' + env.PNEUMA_SPACE_RELEASE,
   '/hang': () => { for (;;) {} },
@@ -33,6 +39,10 @@ const routes = {
     const attempt = (W) => { try { new W('process.kill(process.pid, "SIGKILL")', { eval: true }); return 'started'; } catch (error) { return error.code; } };
     return JSON.stringify({ imported: attempt(Worker), builtin: attempt(process.getBuiltinModule('node:worker_threads').Worker) });
   },
+  '/register': () => {
+    try { register('data:text/javascript,' + encodeURIComponent('process.kill(process.pid, "SIGKILL")')); return 'registered'; } catch (error) { return error.code; }
+  },
+  '/blank': () => { for (let i = 0; i < 1e5; i++) console.log(''); console.log('done'); return 'printed'; },
   '/exit': () => process.exit(3),
   '/files': () => { writeFileSync(env.PNEUMA_SPACE_FILES_DIR + '/kept', 'kept'); return env.PNEUMA_SPACE_FILES_DIR; },
 };
@@ -62,7 +72,7 @@ export async function serveBundle(t: TestContext, files: Record<string, string> 
 }
 
 /** `exited` resolves with the signal that ended the runner, or its exit code. */
-export type RunnerProcess = { readonly url: string; readonly data: string; readonly exited: Promise<string | number | null>; stop(): Promise<void> };
+export type RunnerProcess = { readonly url: string; readonly data: string; readonly pid: number; readonly exited: Promise<string | number | null>; stop(): Promise<void> };
 
 /** The runner as compose runs it, with the permission flags, on an ephemeral port and a scratch /data. */
 export async function startRunner(t: TestContext, env: Record<string, string> = {}, data = tempDir(t, 'pneuma-space-runner-')): Promise<RunnerProcess> {
@@ -80,7 +90,7 @@ export async function startRunner(t: TestContext, env: Record<string, string> = 
     const event = JSON.parse(line);
     if (event.ev === 'runner-ready') {
       child.stdout!.resume();
-      return { url: `http://127.0.0.1:${event.port}`, data, exited, stop };
+      return { url: `http://127.0.0.1:${event.port}`, data, pid: child.pid!, exited, stop };
     }
   }
   throw new Error('runner exited before it was ready');

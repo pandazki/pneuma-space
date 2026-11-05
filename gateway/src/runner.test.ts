@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { connect } from 'node:net';
+import { once } from 'node:events';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { connect, type AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -129,15 +131,34 @@ test('a stuck count past PNEUMA_SPACE_RUNNER_STUCK_LIMIT aborts the runner', asy
   assert.equal(await Promise.race([runner.exited, sleep(12_000, 'still running')]), 'SIGABRT');
 });
 
-test('a worker blocked before it listens fails its start at the ready timeout and counts once as stuck', async (t) => {
+const post = (runner: RunnerProcess, app: string, request: StartRequest) => fetch(`${runner.url}/instances/${app}`, { method: 'POST', body: JSON.stringify(request) });
+
+test('a worker blocked before it listens fails its start at the ready timeout', async (t) => {
   const runner = await startRunner(t, HEALTHY);
   const request: StartRequest = { release: 1, spec: 's', bundleUrl: await serveBundle(t), entry: 'app.mjs', env: { START_FIFO: fifo(runner) }, storage: [], readyMs: 6000 };
-  const response = await fetch(`${runner.url}/instances/blocked`, { method: 'POST', body: JSON.stringify(request) });
+  const response = await post(runner, 'blocked', request);
   assert.deepEqual([response.status, (await response.json()).error], [502, 'worker did not listen on PNEUMA_SPACE_PORT within 6000 ms']);
-  await sleep(6500);
+});
+
+test('a hung worker that is also stopped while it is being terminated counts once as stuck', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'blocked', { env: { FIFO: fifo(runner) } });
+  app.fire('/fifo');
+  await nextEvent(runner, app.worker, 5000);
+  await call(runner, 'DELETE', '/instances/blocked?drain=0');
   const page = await call<EventPage>(runner, 'GET', '/events?after=0');
-  assert.deepEqual(page.events.map((e) => [e.ev, e.reason]), [['exit', 'stuck']]);
+  assert.deepEqual(page.events.filter((e) => e.worker === app.worker && e.ev !== 'ready').map((e) => [e.ev, e.reason]), [['hung', 'no answer to the watchdog for 3000 ms'], ['exit', 'stuck']]);
   assert.equal((await call<{ stuck: number }>(runner, 'GET', '/health')).stuck, 1);
+});
+
+test('a worker past the off-heap budget before it listens is ended oom inside the ready timeout', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const started = performance.now();
+  const response = await post(runner, 'early', { release: 1, spec: 's', bundleUrl: await serveBundle(t), entry: 'app.mjs', env: { START_BUFFERS: '1' }, storage: [], readyMs: 8000 });
+  assert.equal(response.status, 502);
+  assert.ok(performance.now() - started < 8000, 'ended before the ready timeout');
+  const page = await call<EventPage>(runner, 'GET', '/events?after=0');
+  assert.deepEqual(page.events.map((e) => [e.ev, e.reason]), [['oom', 'offheap']]);
 });
 
 test('a worker that runs 5 s of synchronous startup inside its ready timeout starts and is not reported hung', async (t) => {
@@ -171,4 +192,55 @@ test('a storage binding is a directory under the app that {dir} names, and destr
   await call(runner, 'DELETE', '/instances/s1?drain=1000');
   await call(runner, 'DELETE', '/storage/s1/pneuma-space-files-s1');
   assert.equal(existsSync(dir), false);
+});
+
+test('module.register throws inside a worker and the runner keeps running', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'hooks');
+  assert.equal(await app.get('/register'), 'ERR_ACCESS_DENIED');
+  await sleep(500);
+  assert.equal((await call<{ ok: boolean }>(runner, 'GET', '/health')).ok, true);
+});
+
+test('an app that listens on another server first is reached on PNEUMA_SPACE_PORT', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'decoy', { env: { PNEUMA_SPACE_APP: 'decoy', PNEUMA_SPACE_RELEASE: '1', DECOY: '1' } });
+  assert.equal(await app.get('/'), 'decoy 1');
+});
+
+test('100 000 empty lines leave at most 1000 log entries', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'blank');
+  assert.equal(await app.get('/blank'), 'printed');
+  let logs = '';
+  for (const end = performance.now() + 5000; !logs.endsWith('done'); await sleep(50)) {
+    assert.ok(performance.now() < end, 'the last line arrived');
+    logs = await call<string>(runner, 'GET', '/logs/blank?tail=200000');
+  }
+  assert.ok(logs.split('\n').length <= 1000, `${logs.split('\n').length} entries`);
+});
+
+test('a .tmp- directory a killed extraction left is swept at runner start', async (t) => {
+  const first = await startRunner(t, HEALTHY);
+  const tmp = join(first.data, 'apps', 'a1', '.tmp-1-1');
+  mkdirSync(tmp, { recursive: true });
+  await first.stop();
+  await startRunner(t, HEALTHY, first.data);
+  assert.equal(existsSync(tmp), false);
+});
+
+test('a bundle download that does not finish fails the start at the ready timeout', { timeout: 5000 }, async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const silent = createServer(() => {}).listen(0, '127.0.0.1');
+  t.after(() => { silent.closeAllConnections(); silent.close(); });
+  await once(silent, 'listening');
+  const response = await post(runner, 'slow', { release: 1, spec: 's', bundleUrl: `http://127.0.0.1:${(silent.address() as AddressInfo).port}/b.tar`, entry: 'app.mjs', env: {}, storage: [], readyMs: 1000 });
+  assert.deepEqual([response.status, (await response.json()).error], [502, 'bundle download did not finish within the ready timeout']);
+});
+
+test('two starts of one app at once get the same worker', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const bundleUrl = await serveBundle(t);
+  const [a, b] = await Promise.all([start(runner, bundleUrl, 'twice'), start(runner, bundleUrl, 'twice')]);
+  assert.equal(a.worker, b.worker);
 });

@@ -43,6 +43,9 @@ const SHUTDOWN_DRAIN_MS = 3000;
 const EVENT_RING = 1000;
 const LINE_BYTES = 4 * 2 ** 10;
 const LOG_BYTES = 256 * 2 ** 10;
+const LOG_LINES = 1000;
+/** Counted per line on top of its bytes, so empty lines are bounded too. */
+const LINE_OVERHEAD = 64;
 const SHIM = new URL('./isolate-shim.ts', import.meta.url);
 const SEGMENT = /^[a-z0-9][a-z0-9-]{0,80}$/;
 
@@ -55,7 +58,7 @@ type Instance = {
   readonly since: number;
   port: number | null;
   ping: { readonly seq: number; readonly sentAt: number } | null;
-  /** Set by the first terminal event; later ones for this worker are dropped. */
+  /** Set by the first terminal event; later ones for this worker are dropped. The instance stays in the map until its thread is gone. */
   ended: boolean;
   stopping: boolean;
   error: string | null;
@@ -86,7 +89,6 @@ function record(inst: Instance, ev: RunnerEvent['ev'], extra: { code?: number; r
 function end(inst: Instance, ev: 'exit' | 'hung' | 'oom', extra: { code?: number; reason?: string } = {}): void {
   if (inst.ended) return;
   inst.ended = true;
-  if (instances.get(inst.app) === inst) instances.delete(inst.app);
   record(inst, ev, extra);
 }
 
@@ -123,8 +125,8 @@ function append(app: string, line: Buffer): void {
   if (!log) logs.set(app, (log = { lines: [], bytes: 0 }));
   const kept = Buffer.from(line.subarray(0, LINE_BYTES));
   log.lines.push(kept);
-  log.bytes += kept.length;
-  while (log.bytes > LOG_BYTES) log.bytes -= log.lines.shift()!.length;
+  log.bytes += kept.length + LINE_OVERHEAD;
+  while (log.bytes > LOG_BYTES || log.lines.length > LOG_LINES) log.bytes -= log.lines.shift()!.length + LINE_OVERHEAD;
 }
 
 /** A line longer than LINE_BYTES is kept up to there and the rest of it, up to the next newline, is dropped. */
@@ -184,7 +186,7 @@ async function code(app: string, release: number, url: string, deadline: number)
 
 async function start(app: string, request: StartRequest): Promise<Started> {
   const current = instances.get(app);
-  if (current?.port && current.release === request.release && current.spec === request.spec) return { worker: current.worker, port: current.port };
+  if (current && !current.ended && current.port && current.release === request.release && current.spec === request.spec) return { worker: current.worker, port: current.port };
   if (current) await stop(current, 0);
   const deadline = Date.now() + request.readyMs;
   const dir = await code(app, request.release, request.bundleUrl, deadline);
@@ -198,7 +200,7 @@ async function start(app: string, request: StartRequest): Promise<Started> {
   // No execArgv: any value replaces the inherited --permission, and with it the bans on child_process and addons.
   const thread = new Worker(SHIM, {
     workerData: { entry: pathToFileURL(join(dir, request.entry)).href },
-    env: { ...request.env, ...storage, [RUNTIME_ENV.port]: '0' },
+    env: { ...request.env, ...storage },
     resourceLimits: { maxOldGenerationSizeMb: HEAP_MB, maxYoungGenerationSizeMb: Math.max(8, Math.round(HEAP_MB / 8)) },
     stdout: true,
     stderr: true,
@@ -215,6 +217,8 @@ async function start(app: string, request: StartRequest): Promise<Started> {
   thread.on('message', (message: { type: 'listening'; port: number } | { type: 'pong'; seq: number; external: number }) => {
     if (message.type === 'listening') {
       inst.port = message.port;
+      // The hang clock starts here: a ping unanswered during startup belongs to the ready timeout.
+      inst.ping = null;
       ready.resolve(message.port);
     } else if (inst.ping?.seq === message.seq) {
       inst.ping = null;
@@ -230,6 +234,7 @@ async function start(app: string, request: StartRequest): Promise<Started> {
   });
   thread.on('exit', (exitCode) => {
     exited.resolve();
+    if (instances.get(app) === inst) instances.delete(app);
     ready.reject(new Error(`worker exited with code ${exitCode} before it listened${inst.error ? `: ${inst.error}` : ''}`));
     end(inst, 'exit', { code: exitCode, reason: inst.stopping ? 'stopped' : inst.error ?? undefined });
   });
@@ -244,17 +249,21 @@ async function start(app: string, request: StartRequest): Promise<Started> {
   return { worker: inst.worker, port };
 }
 
+let tickedAt = performance.now();
 setInterval(() => {
   const now = performance.now();
+  // A runner that was itself paused gave no worker a chance to answer.
+  const paused = now - tickedAt > 2 * PING_MS;
+  tickedAt = now;
   for (const inst of instances.values()) {
-    // Startup belongs to the ready timeout: a long synchronous module evaluation is not a hang.
-    if (inst.ended || inst.stopping || inst.port === null) continue;
-    if (inst.ping && now - inst.ping.sentAt >= SILENCE_MS) {
-      end(inst, 'hung', { reason: `no answer to the watchdog for ${SILENCE_MS} ms` });
-      void terminate(inst);
-    } else if (!inst.ping) {
+    if (inst.ended || inst.stopping) continue;
+    if (paused) inst.ping = null;
+    if (!inst.ping) {
       inst.ping = { seq: ++pings, sentAt: now };
       inst.thread.postMessage({ type: 'ping', seq: inst.ping.seq });
+    } else if (inst.port !== null && now - inst.ping.sentAt >= SILENCE_MS) {
+      end(inst, 'hung', { reason: `no answer to the watchdog for ${SILENCE_MS} ms` });
+      void terminate(inst);
     }
   }
 }, PING_MS);
@@ -290,7 +299,7 @@ async function route(request: IncomingMessage, url: URL): Promise<unknown> {
   const method = request.method;
   if (method === 'GET' && resource === 'health') return { ok: true, startedAt, stuck, workers: instances.size };
   if (method === 'GET' && resource === 'instances' && !a) {
-    return [...instances.values()].filter((i) => i.port !== null).map((i): Listed => ({ app: i.app, release: i.release, spec: i.spec, worker: i.worker, port: i.port!, since: i.since }));
+    return [...instances.values()].filter((i) => !i.ended && i.port !== null).map((i): Listed => ({ app: i.app, release: i.release, spec: i.spec, worker: i.worker, port: i.port!, since: i.since }));
   }
   if (method === 'POST' && resource === 'instances') {
     const app = segment(a);
@@ -301,7 +310,8 @@ async function route(request: IncomingMessage, url: URL): Promise<unknown> {
     const app = segment(a);
     await serial(app, async () => {
       const inst = instances.get(app);
-      if (inst) await stop(inst, Number(url.searchParams.get('drain') ?? 0));
+      const worker = url.searchParams.get('worker');
+      if (inst && (worker === null || inst.worker === worker)) await stop(inst, Number(url.searchParams.get('drain') ?? 0));
       if (url.searchParams.get('retire') !== '1') return;
       logs.delete(app);
       for (const name of await readdir(appDir(app)).catch(() => [] as string[])) if (isRelease(name)) await rm(join(appDir(app), name), { recursive: true, force: true });
