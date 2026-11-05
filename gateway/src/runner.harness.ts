@@ -26,8 +26,10 @@ const routes = {
     try { process.getBuiltinModule('node:child_process').execFileSync('true'); } catch (error) { child = error.code; }
     return JSON.stringify({ kill: typeof process.kill, abort: typeof process.abort, child });
   },
+  '/exit': () => process.exit(3),
   '/files': () => { writeFileSync(env.PNEUMA_SPACE_FILES_DIR + '/kept', 'kept'); return env.PNEUMA_SPACE_FILES_DIR; },
 };
+console.log('fixture ready');
 createServer((q, s) => s.end(String(routes[q.url]()))).listen(Number(env.PNEUMA_SPACE_PORT), '0.0.0.0');
 process.on('SIGTERM', () => process.exit(0));
 `;
