@@ -57,21 +57,36 @@ function logged(bytes: Buffer): void {
     start = i + 1;
   }
   if (lines.length) port.postMessage({ type: 'log', lines });
-  if (budget.dropped && !budget.notice) {
-    budget.notice = true;
-    setTimeout(() => {
-      budget.notice = false;
-      const notice = refill();
-      if (notice.length) port.postMessage({ type: 'log', lines: notice });
-    }, budget.at + 1000 - performance.now()).unref();
-  }
+  if (budget.dropped) noticeLater();
 }
 
+/** The drop count is sent when the budget refills, even if the app writes nothing more. */
+function noticeLater(): void {
+  if (budget.notice) return;
+  budget.notice = true;
+  setTimeout(() => {
+    budget.notice = false;
+    const notice = refill();
+    if (notice.length) port.postMessage({ type: 'log', lines: notice });
+    else if (budget.dropped) noticeLater();
+  }, Math.max(0, budget.at + 1000 - performance.now())).unref();
+}
+
+type Done = (error?: Error | null) => void;
+// One tick per synchronous run of writes, with consecutive equal callbacks counted, as Node's Writable does: console.log passes the same one every time.
+const pending: { done: Done; count: number }[] = [];
+const flush = () => {
+  for (const { done, count } of pending.splice(0)) for (let i = 0; i < count; i++) done();
+};
+
 for (const stream of [process.stdout, process.stderr]) {
-  stream.write = ((chunk: string | Uint8Array, encoding?: BufferEncoding | ((error?: Error | null) => void), callback?: (error?: Error | null) => void) => {
+  stream.write = ((chunk: string | Uint8Array, encoding?: BufferEncoding | Done, callback?: Done) => {
     logged(typeof chunk === 'string' ? Buffer.from(chunk, typeof encoding === 'string' ? encoding : 'utf8') : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
     const done = typeof encoding === 'function' ? encoding : callback;
-    if (done) process.nextTick(done);
+    if (!done) return true;
+    if (pending.length === 0) process.nextTick(flush);
+    if (pending.at(-1)?.done === done) pending.at(-1)!.count++;
+    else pending.push({ done, count: 1 });
     return true;
   }) as typeof stream.write;
 }
