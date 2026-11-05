@@ -20,7 +20,7 @@ PneumaSpace 把有状态的 web 应用部署到一台可信机器上。应用声
 | Trigger | `(app, name)` | `schedule?`（cron，空表示只按需） | 平台库，随 Release 在同一事务重写 | Registry |
 | Delivery | `id` | `app`, `trigger`, `scheduled_for`, `caller?`, `idempotency_key?`, `body`, `state`, `attempts`, `next_attempt_at` | 平台库 | Scheduler |
 | Token | `id` | `subject`（`service:<name>`）, 哈希 | 平台库 | Registry；本地 IdentityProvider 只读 |
-| Bundle | `sha256(tar)` | 文件索引 `path -> (size, etag, content_type)`；tar 内路径相对 `static.dir` | 对象存储 `pneuma-space-bundles/<sha256>/` | BundleStore |
+| Bundle | `sha256(tar)` | 文件索引 `path -> (size, etag, content_type)`；tar 内路径相对 `static.dir`（isolate 发布的代码包相对应用根，静态根为 `static.dir`，ADR 0017） | 对象存储 `pneuma-space-bundles/<sha256>/` | BundleStore |
 | Stats | `app` | `requests`, `errors`, `last_access_at`（经过网关的请求，含静态路径；对象读不经网关，不计入。闲置判断用的是 Instance 的 `last_release_at`，只看 Lease） | 内存，每 10 s 快照到平台库 | Ingress |
 | Instance | `app` | `release`, `state`, `address`, `leases`, `last_release_at`, 每实例一把锁；`quarantine`（ADR 0017，由 Guard 持有） | 内存，启动时从各运行时收养：容器按标签，isolate 向 runner 查询 | Runtime |
 | Metrics | 全局一份 | 24 h 的分钟桶（请求、错误、唤醒次数和耗时、休眠、投递结果）、最近 100 条生命周期事件（每条带进程内递增的序号）、最近 1000 条请求记录（ADR 0016）、平台服务探测结果、宿主机负载、内存和 `/data` 所在文件系统 | 内存，不持久，重启清零 | Metrics |

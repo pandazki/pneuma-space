@@ -74,7 +74,7 @@ function readManifest(file: string): Manifest {
 }
 
 function needsRuntime(manifest: Manifest): boolean {
-  return declaredKinds(manifest).some((kind) => CAPABILITIES[kind].needsImage);
+  return declaredKinds(manifest).some((kind) => CAPABILITIES[kind].needsRuntime);
 }
 
 // Without a declared runtime, a Dockerfile keeps a directory scaffolded before ADR 0017 on the container runtime and its volumes.

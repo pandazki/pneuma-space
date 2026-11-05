@@ -12,19 +12,21 @@ import {
 } from './model.ts';
 import { Ingress } from './ingress.ts';
 import { RING, requests } from './requests.ts';
+import { Unavailable } from './runtimes.ts';
 
 const APP_JS = Buffer.from('console.log("static");');
 
 function view(name: string, kinds: CapabilityKind[], extra: Partial<RouteView> = {}): RouteView {
   return {
     app: `id-${name}` as AppId, name: name as AppName, status: 'registered', owner: 'user:alice' as Subject,
-    release: 1 as ReleaseNumber, image: 'sha256:x' as ImageId, kinds: new Set(['route', ...kinds]), bundle: null,
+    release: 1 as ReleaseNumber, image: 'sha256:x' as ImageId, runtime: 'container', kinds: new Set(['route', ...kinds]), bundle: null, staticRoot: '',
     identity: kinds.includes('identity') ? {} : null, policyOverride: {}, ...extra,
   };
 }
 
 const VIEWS = new Map([
   view('plain', []),
+  view('parked', []),
   view('who', ['identity']),
   view('guest', ['identity'], { identity: { required: false } }),
   view('chat', ['ws']),
@@ -83,6 +85,7 @@ before(async () => {
         events.push(`acquire ${kind}`);
         await waking;
         if (app === ('id-nope' as AppId)) throw new NotFound('no run spec');
+        if (app === ('id-parked' as AppId)) throw new Unavailable('isolate');
         return { app, address: addresses.shift() ?? `127.0.0.1:${upstreamPort}` };
       },
       release: () => void events.push('release'),
@@ -429,4 +432,17 @@ test('a request the app hangs up on is recorded as a 502 with the reason (AC-P-1
   const [record] = requests.after(from, RING);
   assert.equal(record.status, 502);
   assert.match(record.error ?? '', /socket hang up|ECONNRESET/);
+});
+
+test('a runtime without an implementation answers 503 with the start-the-profile message', async () => {
+  const got = await request('/apps/parked/');
+  assert.deepEqual([got.status, JSON.parse(got.body).error], [503, 'runtime isolate is not available; start docker compose --profile isolate']);
+});
+
+test('a Guard answer counts as a request but not as an app error', async () => {
+  const before = ingress.snapshot().find((s) => s.app === 'id-parked') ?? { requests: 0, errors: 0 };
+  await request('/apps/parked/');
+  await waitFor(() => (ingress.snapshot().find((s) => s.app === 'id-parked')?.requests ?? 0) > before.requests);
+  const after = ingress.snapshot().find((s) => s.app === 'id-parked')!;
+  assert.deepEqual([after.requests - before.requests, after.errors], [1, before.errors]);
 });

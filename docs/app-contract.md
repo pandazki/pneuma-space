@@ -123,4 +123,4 @@ POST /api/apps/<name>/purge           only when removed; data deleted
 POST /api/tokens                      {"name": ...} -> {"token": one-time secret, "subject": "service:<name>"}
 ```
 
-Policy fields: `idle_seconds`, `ready_timeout_seconds`, `drain_timeout_seconds`, `connection_idle_seconds`, `trigger_timeout_seconds`, `db_backend` (`sqlite` or `postgres`; the global value is the default for an app's first database; a per-app change provisions the other engine and does not migrate data), and global-only `timezone`.
+Policy fields: `idle_seconds`, `ready_timeout_seconds`, `drain_timeout_seconds`, `connection_idle_seconds`, `trigger_timeout_seconds`, `max_failures`, `failure_window_seconds`, `restart_backoff_seconds`, `db_backend` (`sqlite` or `postgres`; the global value is the default for an app's first database; a per-app change provisions the other engine and does not migrate data), and global-only `timezone`.

@@ -11,6 +11,7 @@ import {
 import { emit } from './events.ts';
 import { connect, forward, tunnel, type Hold } from './proxy.ts';
 import { requests, type RequestKind } from './requests.ts';
+import { Backoff, Quarantined, Unavailable } from './runtimes.ts';
 import { serveStatic, staticPath } from './static.ts';
 
 export type IngressDeps = {
@@ -35,8 +36,8 @@ type Route =
   | { readonly to: 'static'; readonly view: RouteView; readonly path: string }
   | { readonly to: 'app'; readonly view: RouteView; readonly path: string; readonly headers: string[] };
 
-/** What a request record learns on the way through, beyond what the request and response carry; no app, no record. */
-type Trace = { app: AppId | null; kind: RequestKind; subject: string | null; waitMs: number | null; cold: boolean; error: string | null };
+/** What a request record learns on the way through, beyond what the request and response carry; no app, no record. `refused`: the Guard answered, so a 503 is not the app's error. */
+type Trace = { app: AppId | null; kind: RequestKind; subject: string | null; waitMs: number | null; cold: boolean; error: string | null; refused?: boolean };
 
 type Counter = { requests: number; errors: number; lastAccessAt: number | null };
 
@@ -145,10 +146,10 @@ export class Ingress {
     return this.#deps.deleteStats(app);
   }
 
-  #count(app: AppId, status: number): void {
+  #count(app: AppId, status: number, refused: boolean): void {
     const counter = this.#stats.get(app) ?? { requests: 0, errors: 0, lastAccessAt: null };
     counter.requests += 1;
-    if (status >= 500) counter.errors += 1;
+    if (status >= 500 && !refused) counter.errors += 1;
     counter.lastAccessAt = Date.now();
     this.#stats.set(app, counter);
   }
@@ -158,8 +159,9 @@ export class Ingress {
     const { app } = trace;
     if (!app) return;
     if (status === 0) trace.error ??= 'client closed the connection';
-    this.#count(app, status);
-    requests.record({ ...trace, app, method: req.method ?? 'GET', path: (req.url ?? '/').split('?')[0], status, ms: performance.now() - started });
+    const { refused = false, ...record } = trace;
+    this.#count(app, status, refused);
+    requests.record({ ...record, app, method: req.method ?? 'GET', path: (req.url ?? '/').split('?')[0], status, ms: performance.now() - started });
   }
 
   /** The gateway's reason, when it has one, wins over the text the client is shown. */
@@ -200,7 +202,7 @@ export class Ingress {
       return { to: 'trigger', view, trigger: trigger[1] };
     }
     if (!upgrade && view.bundle && (req.method === 'GET' || req.method === 'HEAD')) {
-      const path = staticPath(view.bundle, rest);
+      const path = staticPath(view.bundle, rest, view.staticRoot);
       if (path !== null) {
         trace.kind = 'static';
         return { to: 'static', view, path };
@@ -215,7 +217,7 @@ export class Ingress {
       else if (view.identity.required !== false) return { to: 'reply', reply: challenge(result) };
     }
     trace.subject = who?.subject ?? null;
-    if (view.image === null) return reply(404, 'no file at this path');
+    if (view.runtime === null) return reply(404, 'no file at this path');
     return { to: 'app', view, path: rest + search, headers: forwardedHeaders(req, view, who) };
   }
 
@@ -251,6 +253,10 @@ export class Ingress {
       trace.waitMs = performance.now() - from;
       if (error instanceof NotFound) return { status: 404, error: 'no app at this address' };
       trace.error = String(error);
+      if (error instanceof Backoff || error instanceof Quarantined || error instanceof Unavailable) {
+        trace.refused = true;
+        return { status: 503, error: error.message, headers: error instanceof Backoff ? { 'retry-after': String(error.retryAfterSeconds) } : undefined };
+      }
       log('wake-failed', view.app, { error: String(error) });
       return { status: 502, error: `the app did not start; run appctl logs ${view.name}` };
     }

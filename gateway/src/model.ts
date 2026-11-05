@@ -69,7 +69,7 @@ export type IdentityDeclaration = { readonly required?: boolean };
 
 type CapabilitySpec = {
   readonly class: KindClass;
-  readonly needsImage: boolean;
+  readonly needsRuntime: boolean;
   /** Provider implementations; non-empty exactly for resource kinds. */
   readonly providers: readonly string[];
   readonly parse: (raw: unknown, where: string) => unknown;
@@ -77,16 +77,16 @@ type CapabilitySpec = {
 
 /** The only capability list. Env names, providers to call and gateway flags derive from it. */
 export const CAPABILITIES = {
-  route:    { class: 'ingress',  needsImage: false, providers: [],                     parse: implicit },
-  files:    { class: 'resource', needsImage: true,  providers: ['volume'],             parse: empty },
-  db:       { class: 'resource', needsImage: true,  providers: ['sqlite', 'postgres'], parse: empty },
-  kv:       { class: 'resource', needsImage: true,  providers: ['redis'],              parse: empty },
-  object:   { class: 'resource', needsImage: true,  providers: ['s3'],                 parse: empty },
-  static:   { class: 'ingress',  needsImage: false, providers: [],                     parse: parseStatic },
-  ws:       { class: 'ingress',  needsImage: true,  providers: [],                     parse: empty },
-  cron:     { class: 'schedule', needsImage: true,  providers: [],                     parse: parseCron },
-  identity: { class: 'ingress',  needsImage: true,  providers: [],                     parse: parseIdentity },
-  rtc:      { class: 'resource', needsImage: true,  providers: ['coturn'],             parse: empty },
+  route:    { class: 'ingress',  needsRuntime: false, providers: [],                     parse: implicit },
+  files:    { class: 'resource', needsRuntime: true,  providers: ['volume'],             parse: empty },
+  db:       { class: 'resource', needsRuntime: true,  providers: ['sqlite', 'postgres'], parse: empty },
+  kv:       { class: 'resource', needsRuntime: true,  providers: ['redis'],              parse: empty },
+  object:   { class: 'resource', needsRuntime: true,  providers: ['s3'],                 parse: empty },
+  static:   { class: 'ingress',  needsRuntime: false, providers: [],                     parse: parseStatic },
+  ws:       { class: 'ingress',  needsRuntime: true,  providers: [],                     parse: empty },
+  cron:     { class: 'schedule', needsRuntime: true,  providers: [],                     parse: parseCron },
+  identity: { class: 'ingress',  needsRuntime: true,  providers: [],                     parse: parseIdentity },
+  rtc:      { class: 'resource', needsRuntime: true,  providers: ['coturn'],             parse: empty },
 } as const satisfies Record<CapabilityKind, CapabilitySpec>;
 
 export type Declaration<K extends CapabilityKind> = ReturnType<(typeof CAPABILITIES)[K]['parse']>;
@@ -398,7 +398,7 @@ export type Token = {
 };
 
 export type BundleFile = { readonly size: number; readonly etag: string; readonly contentType: string };
-/** Paths are relative to `static.dir`, without a leading slash. */
+/** Paths without a leading slash, relative to `static.dir` in a static bundle and to the app root in a code bundle. */
 export type BundleIndex = { readonly id: BundleId; readonly files: Readonly<Record<string, BundleFile>> };
 
 export type Stats = {
@@ -422,16 +422,17 @@ export type LeaseKind = 'request' | 'channel' | 'trigger';
 /** A handle the Runtime issued; give it back exactly once with `release`. */
 export type Lease = { readonly app: AppId; readonly address: string };
 
-export type Mount = { readonly volume: string; readonly target: string };
-/** Derived from the current Release's bindings at container creation; never stored. */
-export type Injection = { readonly env: Readonly<Record<string, string>>; readonly mounts: readonly Mount[] };
+/** A persistent directory an app needs; the runtime realizes `id` (a volume, or a directory in the runner's volume) and replaces `{dir}` in `env` values with where it put it. */
+export type StorageBinding = { readonly id: string; readonly target: string; readonly env: Readonly<Record<string, string>> };
+/** Derived from the current Release's bindings at instance creation; never stored. */
+export type Injection = { readonly env: Readonly<Record<string, string>>; readonly storage: readonly StorageBinding[] };
 
 /** Everything the Runtime needs to run an app; it never reads a Manifest. */
 export type RunSpec = {
   readonly app: AppId;
   readonly name: AppName;
   readonly release: ReleaseNumber;
-  readonly image: ImageId;
+  readonly runtime: { readonly kind: 'container'; readonly image: ImageId } | { readonly kind: 'isolate'; readonly bundle: BundleId; readonly entry: string };
   readonly injection: Injection;
   readonly policy: Policy;
 };
@@ -444,8 +445,13 @@ export type RouteView = {
   readonly owner: Subject;
   readonly release: ReleaseNumber | null;
   readonly image: ImageId | null;
+  /** Null for a static-only release: nothing to wake. */
+  readonly runtime: RuntimeKind | null;
   readonly kinds: ReadonlySet<CapabilityKind>;
+  /** Null unless the release declares `static`. */
   readonly bundle: BundleIndex | null;
+  /** Prefix a static request resolves under inside `bundle`: '' for a static bundle, `<static.dir>/` for a code bundle. */
+  readonly staticRoot: string;
   /** Null when the release does not declare identity. */
   readonly identity: IdentityDeclaration | null;
   readonly policyOverride: PolicyOverride;
@@ -489,6 +495,7 @@ export type AppDetail = {
   readonly instance: InstanceState | 'none';
   readonly stats: Stats;
   readonly deliveries: readonly Delivery[];
+  readonly quarantine: Quarantine | null;
 };
 
 export type Principal = { readonly subject: Subject; readonly name: string };
@@ -497,7 +504,7 @@ export type Challenge = { readonly status: 303; readonly location: string } | { 
 
 export type ByteRange = { readonly start: number; readonly end: number };
 
-/** Compose services a provider administers through `Runtime.runJob`. */
+/** Compose services a provider administers through `Infra.runJob`. */
 export type InfraService = 'postgres' | 'redis';
 export type Job = { readonly service: InfraService; readonly argv: readonly string[]; readonly stdin?: string };
 export type JobResult = { readonly exitCode: number; readonly stdout: string; readonly stderr: string };
@@ -555,8 +562,9 @@ export interface Store extends StoreOps {
   transaction<T>(fn: (tx: StoreOps) => Promise<T>): Promise<T>;
 }
 
-/** Hides Docker: instances, leases, the reaper and container lifecycle. The M2 multi-node seam. */
+/** Hides how instances run: instances, leases, the reaper and their lifecycle. The M2 multi-node seam. */
 export interface Runtime {
+  readonly kind: RuntimeKind;
   /** Wakes the app if needed. Rejects with NotFound when the app has no RunSpec; any other rejection is a failed wake (502). */
   acquire(app: AppId, kind: 'request' | 'trigger'): Promise<Lease>;
   release(lease: Lease): void;
@@ -573,10 +581,16 @@ export interface Runtime {
   sleepsAt(app: AppId): number | null;
   /** The last `tail` lines of stdout and stderr of the app's current or last container; empty when it has none. */
   logs(app: AppId, tail: number): Promise<string>;
+  /** What this runtime detects; it reports failures as lifecycle events. */
+  health(): readonly HealthCheck[];
+  /** Deletes what the runtime realized for a StorageBinding id; the end of a storage provider's destroy. */
+  destroyStorage(app: AppId, id: string): Promise<void>;
+}
+
+/** Docker for Providers and publish, whatever runtime an app uses. */
+export interface Infra {
   runJob(job: Job): Promise<JobResult>;
   resolveImage(reference: string): Promise<ImageId | null>;
-  ensureVolume(name: string): Promise<void>;
-  removeVolume(name: string): Promise<void>;
 }
 
 /** Hides one backend for one resource kind. Every method is idempotent. */

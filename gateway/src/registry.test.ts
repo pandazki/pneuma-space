@@ -202,7 +202,7 @@ test('runSpec, which every acquire reads, makes no store read', async () => {
       return typeof value === 'function' ? (...args: unknown[]) => (reads++, value.apply(target, args)) : value;
     },
   });
-  const registry = await PlatformRegistry.open({ store: counting, runtime: w.runtime, bundles: w.bundles, providers: [...w.providers.values()] });
+  const registry = await PlatformRegistry.open({ store: counting, runtime: w.runtime, guard: w.runtime, infra: w.runtime, bundles: w.bundles, providers: [...w.providers.values()] });
   const { app } = await publish(registry, { kv: {} });
   reads = 0;
   for (let i = 0; i < 3; i++) assert.equal(registry.runSpec(app)?.release, 1);
@@ -224,7 +224,38 @@ test('the listing carries the sleepsAt the Runtime answers', async () => {
   const w = world();
   const { store } = await w.open();
   const runtime = Object.assign(new FakeRuntime(), { sleepsAt: () => 1_800_000_000_000 });
-  const registry = await PlatformRegistry.open({ store, runtime, bundles: w.bundles, providers: [...w.providers.values()] });
+  const registry = await PlatformRegistry.open({ store, runtime, guard: runtime, infra: runtime, bundles: w.bundles, providers: [...w.providers.values()] });
   await publish(registry, {});
   assert.equal((await registry.listing())[0].sleepsAt, 1_800_000_000_000);
+});
+
+test('publish derives runtime container from an image and isolate from a code bundle', async () => {
+  const w = world();
+  w.services.add('runner');
+  const { registry } = await w.open();
+  const bundle = await w.bundles.put(Readable.from([Buffer.from('app dir')]));
+  const manifest = parseManifest({ contract: 1, capabilities: { kv: {} } });
+  const container = await publish(registry, { kv: {} });
+  const isolate = await registry.publish({ name: appName('quiz'), image: null, manifest, bundle, owner: ann });
+  assert.deepEqual([container.runtime, isolate.runtime], ['container', 'isolate']);
+  assert.deepEqual(registry.runSpec(isolate.app)?.runtime, { kind: 'isolate', bundle, entry: 'src/server.ts' });
+});
+
+test('an isolate publish while the runner is absent is refused with Conflict', async () => {
+  const w = world();
+  const { registry } = await w.open();
+  const bundle = await w.bundles.put(Readable.from([Buffer.from('app dir')]));
+  const manifest = parseManifest({ contract: 1, runtime: 'isolate', capabilities: {} });
+  await assert.rejects(registry.publish({ name: survey, image: null, manifest, bundle, owner: ann }), (e) => e instanceof Conflict && /--profile isolate/.test(e.message));
+});
+
+test('republishing an unchanged isolate app returns the current release while the runner is absent (INV-6)', async () => {
+  const w = world();
+  w.services.add('runner');
+  const { registry } = await w.open();
+  const bundle = await w.bundles.put(Readable.from([Buffer.from('app dir')]));
+  const request = { name: survey, image: null, manifest: parseManifest({ contract: 1, runtime: 'isolate', capabilities: {} }), bundle, owner: ann };
+  const first = await registry.publish(request);
+  w.services.delete('runner');
+  assert.deepEqual(await registry.publish(request), first);
 });

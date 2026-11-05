@@ -1,27 +1,32 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
-  APPS_PATH, CAPABILITIES, Conflict, InputError, NotFound,
+  APPS_PATH, CAPABILITIES, Conflict, DEFAULT_ENTRY, InputError, NotFound, RUNTIMES,
   declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider,
   type App, type AppDetail, type AppId, type AppName, type AppSummary, type Binding, type BindingState,
-  type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type CapabilityProvider, type ImageId,
+  type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type CapabilityProvider, type Guard, type Infra,
   type Injection, type Manifest, type Policy, type PolicyOverride, type PolicyPatch, type ProviderName,
   type PublishRequest, type Registry, type Release, type ReleaseNumber, type ResourceKind, type RouteView,
-  type RunSpec, type Runtime, type SchedulerView, type Stats, type Store, type StoreOps, type Subject, type Trigger, type TriggerName,
+  type RunSpec, type Runtime, type RuntimeKind, type SchedulerView, type Stats, type Store, type StoreOps, type Subject, type Trigger, type TriggerName,
 } from './model.ts';
 import { emit } from './events.ts';
 import { issueToken } from './identity.ts';
+import { resolvesOnNetwork, type ServiceProbe } from './providers.ts';
 
 export type RegistryDeps = {
   readonly store: Store;
-  readonly runtime: Runtime;
+  readonly runtime: Pick<Runtime, 'retire' | 'state' | 'since' | 'leases' | 'sleepsAt'>;
+  readonly guard: Pick<Guard, 'quarantine'>;
+  readonly infra: Pick<Infra, 'resolveImage'>;
   readonly bundles: BundleStore;
   readonly providers: readonly CapabilityProvider[];
+  /** Whether a runtime's compose service is up; publish refuses a runtime whose service is not. */
+  readonly probe?: ServiceProbe;
   /** Ingress counters once U8 wires them; the last snapshot otherwise. */
   readonly statsSource?: () => Promise<Stats[]>;
 };
 
-const SECONDS_FIELDS = ['idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds'] as const;
+const SECONDS_FIELDS = ['idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds', 'failure_window_seconds', 'restart_backoff_seconds'] as const;
 const DETAIL_DELIVERIES = 50;
 
 const log = emit;
@@ -36,7 +41,7 @@ function desiredState(app: App, manifest: Manifest | null, policy: Policy, bindi
 
 function parsePolicyPatch(raw: unknown, scope: 'global' | 'app'): Record<string, unknown> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new InputError('policy must be a JSON object');
-  const allowed: readonly string[] = [...SECONDS_FIELDS, 'db_backend', ...(scope === 'global' ? ['timezone'] : [])];
+  const allowed: readonly string[] = [...SECONDS_FIELDS, 'max_failures', 'db_backend', ...(scope === 'global' ? ['timezone'] : [])];
   for (const [key, value] of Object.entries(raw)) {
     if (!allowed.includes(key)) {
       const hint = key === 'timezone' ? 'timezone is global only; set it with PUT /api/policy' : `allowed: ${allowed.join(', ')}`;
@@ -45,6 +50,9 @@ function parsePolicyPatch(raw: unknown, scope: 'global' | 'app'): Record<string,
     if (value === null && scope === 'app') continue;
     if ((SECONDS_FIELDS as readonly string[]).includes(key) && !(Number.isInteger(value) && (value as number) > 0)) {
       throw new InputError(`${key} must be a positive integer number of seconds, got ${JSON.stringify(value)}`);
+    }
+    if (key === 'max_failures' && !(Number.isInteger(value) && (value as number) > 0)) {
+      throw new InputError(`max_failures must be a positive integer, got ${JSON.stringify(value)}`);
     }
     if (key === 'db_backend' && !(CAPABILITIES.db.providers as readonly unknown[]).includes(value)) {
       throw new InputError(`db_backend must be one of ${CAPABILITIES.db.providers.join(', ')}, got ${JSON.stringify(value)}`);
@@ -76,13 +84,17 @@ function triggersOf(app: AppId, manifest: Manifest): Trigger[] {
 
 export class PlatformRegistry implements Registry {
   readonly #store: Store;
-  readonly #runtime: Runtime;
+  readonly #runtime: RegistryDeps['runtime'];
+  readonly #guard: RegistryDeps['guard'];
+  readonly #infra: RegistryDeps['infra'];
+  readonly #probe: ServiceProbe;
   readonly #bundles: BundleStore;
   readonly #providers: ReadonlyMap<ProviderName, CapabilityProvider>;
   readonly #stats: () => Promise<Stats[]>;
   readonly #changed = new EventEmitter();
   readonly #views = new Map<AppName, RouteView>();
   readonly #specs = new Map<AppId, RunSpec>();
+  readonly #runtimes = new Map<AppId, RuntimeKind | null>();
   readonly #names = new Map<AppId, AppName>();
   readonly #schedules = new Map<AppId, SchedulerView>();
   readonly #indexes = new Map<BundleId, BundleIndex>();
@@ -92,6 +104,9 @@ export class PlatformRegistry implements Registry {
   private constructor(deps: RegistryDeps, policy: Policy) {
     this.#store = deps.store;
     this.#runtime = deps.runtime;
+    this.#guard = deps.guard;
+    this.#infra = deps.infra;
+    this.#probe = deps.probe ?? resolvesOnNetwork;
     this.#bundles = deps.bundles;
     this.#providers = new Map(deps.providers.map((p) => [p.name, p]));
     this.#stats = deps.statsSource ?? (() => deps.store.stats());
@@ -115,13 +130,18 @@ export class PlatformRegistry implements Registry {
 
   async #publish({ name, image: reference, manifest, bundle, owner }: PublishRequest): Promise<Release> {
     const kinds = declaredKinds(manifest);
-    if (reference === null && !(kinds.includes('static') && !kinds.some((k) => CAPABILITIES[k].needsImage))) {
-      throw new InputError('image is required unless the manifest declares static and nothing that needs a container');
+    const needsRuntime = kinds.some((k) => CAPABILITIES[k].needsRuntime);
+    const runtime: RuntimeKind | null = manifest.runtime ?? (reference !== null ? 'container' : bundle !== null && needsRuntime ? 'isolate' : null);
+    if (runtime === null && !(kinds.includes('static') && !needsRuntime)) {
+      throw new InputError('image or code bundle is required unless the manifest declares static and nothing that needs a runtime');
     }
-    if (kinds.includes('static') !== (bundle !== null)) {
-      throw new InputError(bundle === null ? 'static is declared; upload the directory with POST /api/bundles and pass its id as bundle' : 'bundle given but the manifest does not declare static');
+    if ((runtime === 'container') !== (reference !== null)) {
+      throw new InputError(reference === null ? 'runtime "container" needs an image' : `an image is for runtime "container", not "${runtime}"`);
     }
-    const image = reference === null ? null : await this.#runtime.resolveImage(reference);
+    if (runtime === 'isolate' && bundle === null) throw new InputError('runtime "isolate" needs the app directory uploaded with POST /api/bundles, its id as bundle');
+    if (kinds.includes('static') && bundle === null) throw new InputError('static is declared; upload the directory with POST /api/bundles and pass its id as bundle');
+    if (bundle !== null && runtime !== 'isolate' && !kinds.includes('static')) throw new InputError('bundle given but the manifest declares neither static nor runtime "isolate"');
+    const image = reference === null ? null : await this.#infra.resolveImage(reference);
     if (reference !== null && image === null) throw new NotFound(`image "${reference}" not found on this host; docker build it first`);
     if (bundle !== null && !this.#indexes.has(bundle)) this.#indexes.set(bundle, await this.#bundles.index(bundle));
     const key = releaseKey(image, manifest, bundle);
@@ -130,6 +150,10 @@ export class PlatformRegistry implements Registry {
     if (app?.status === 'purging') throw new Conflict(`app "${name}" is being purged; publish again once purge finishes`);
     const current = app && (await currentRelease(this.#store, app));
     if (app?.status === 'registered' && current?.releaseKey === key) return current;
+    const service = runtime === null ? null : RUNTIMES[runtime].service;
+    if (runtime !== null && service !== null && !(await this.#probe(service))) {
+      throw new Conflict(`runtime "${runtime}" needs the ${service} service; start the platform with --profile ${RUNTIMES[runtime].profile}`);
+    }
 
     const override: PolicyOverride = app?.policyOverride ?? {};
     const pinned = kinds.includes('db') && override.db_backend === undefined ? { ...override, db_backend: this.#policy.db_backend } : override;
@@ -155,7 +179,7 @@ export class PlatformRegistry implements Registry {
       const release: Release = reused ?? {
         app: fresh.id,
         number: (((await tx.releases(fresh.id)).at(-1)?.number ?? 0) + 1) as ReleaseNumber,
-        image, manifest, bundle, releaseKey: key, publishedAt: Date.now(),
+        image, manifest, bundle, runtime, releaseKey: key, publishedAt: Date.now(),
       };
       if (!reused) await tx.putRelease(release);
       await tx.replaceTriggers(fresh.id, triggersOf(fresh.id, manifest));
@@ -214,6 +238,7 @@ export class PlatformRegistry implements Registry {
     await this.#store.deleteApp(app.id);
     this.#views.delete(app.name);
     this.#specs.delete(app.id);
+    this.#runtimes.delete(app.id);
     this.#schedules.delete(app.id);
     log('purge', app.name);
     this.#emit(app.id);
@@ -309,6 +334,8 @@ export class PlatformRegistry implements Registry {
         since: this.#runtime.since(view.app),
         leases: this.#runtime.leases(view.app),
         sleepsAt: this.#runtime.sleepsAt(view.app),
+        runtime: this.#runtimes.get(view.app) ?? null,
+        quarantine: this.#guard.quarantine(view.app),
         lastAccessAt: s?.lastAccessAt ?? null,
         requests: s?.requests ?? 0,
         errors: s?.errors ?? 0,
@@ -329,6 +356,7 @@ export class PlatformRegistry implements Registry {
         instance: this.#runtime.state(app.id),
         stats: stats.find((s) => s.app === app.id) ?? { app: app.id, requests: 0, errors: 0, lastAccessAt: null },
         deliveries: await tx.deliveries({ app: app.id, limit: DETAIL_DELIVERIES }),
+        quarantine: this.#guard.quarantine(app.id),
       };
     });
   }
@@ -417,14 +445,17 @@ export class PlatformRegistry implements Registry {
         owner: app.owner,
         release: release?.number ?? null,
         image: release?.image ?? null,
+        runtime: release?.runtime ?? null,
         kinds: new Set(release ? declaredKinds(release.manifest) : []),
-        bundle: (release?.bundle && this.#indexes.get(release.bundle)) || null,
+        bundle: (release?.manifest.capabilities.static && release.bundle && this.#indexes.get(release.bundle)) || null,
+        staticRoot: release?.runtime === 'isolate' && release.manifest.capabilities.static ? `${release.manifest.capabilities.static.dir}/` : '',
         identity: release?.manifest.capabilities.identity ?? null,
         policyOverride: Object.freeze({ ...app.policyOverride }),
       });
       this.#views.set(name, view);
       this.#names.set(app.id, name);
-      const spec = release?.image && app.status === 'registered' ? this.#spec(app, release.image, release, await tx.bindings(app.id), policy) : null;
+      this.#runtimes.set(app.id, release?.runtime ?? null);
+      const spec = release?.runtime && app.status === 'registered' ? this.#spec(app, release, await tx.bindings(app.id), policy) : null;
       if (spec) this.#specs.set(app.id, spec);
       else this.#specs.delete(app.id);
       if (release) {
@@ -440,7 +471,7 @@ export class PlatformRegistry implements Registry {
     });
   }
 
-  #spec(app: App, image: ImageId, release: Release, bindings: readonly Binding[], policy: Policy): RunSpec {
+  #spec(app: App, release: Release, bindings: readonly Binding[], policy: Policy): RunSpec {
     const injections: Injection[] = bindings
       .filter((b) => b.state === 'active' && desiredState(app, release.manifest, policy, b) === 'active')
       .map((b) => this.#provider(b.provider).inject(app.id, b.resource));
@@ -448,10 +479,12 @@ export class PlatformRegistry implements Registry {
       app: app.id,
       name: app.name,
       release: release.number,
-      image,
+      runtime: release.runtime === 'isolate'
+        ? { kind: 'isolate', bundle: release.bundle!, entry: release.manifest.entry ?? DEFAULT_ENTRY }
+        : { kind: 'container', image: release.image! },
       injection: {
         env: Object.assign({}, ...injections.map((i) => i.env)),
-        mounts: injections.flatMap((i) => i.mounts),
+        storage: injections.flatMap((i) => i.storage),
       },
       policy,
     };
