@@ -101,10 +101,11 @@ Idempotency-Key: <optional; the same key within 24 h returns the same delivery>
 
 ## Admin API (operators and tooling, not apps)
 
-Loopback port 8081, JSON. The console renders projects only (list, publish with an owner field on first publish, releases, capability bindings, per-app policy, state, last access, counts, trigger deliveries, remove, purge); global policy, tokens and owner changes are `appctl` commands. `appctl publish <name> <dir|image> --owner user:<name>` sends the owner; `--owner` defaults to `PNEUMA_SPACE_OWNER` in the environment.
+Loopback port 8081, JSON. The console renders an overview (services, fleet, wakes, traffic, deliveries, host, recent events) and projects (list, publish with an owner field on first publish, releases, capability bindings, per-app policy, state and leases, last access, counts, trigger deliveries, logs, remove, purge); global policy, tokens and owner changes are `appctl` commands. `appctl publish <name> <dir|image> --owner user:<name>` sends the owner; `--owner` defaults to `PNEUMA_SPACE_OWNER` in the environment.
 
 ```
-GET  /api/apps                        list: name, address, release, capabilities, status (registered|removed|purging), instance (none|asleep|waking|awake|draining|stopping), last access, requests, errors
+GET  /api/apps                        list: name, address, release, capabilities, status (registered|removed|purging), instance (none|asleep|waking|awake|draining|stopping), since (epoch ms the instance entered that state, null when none), leases {request, channel, trigger}, last access, requests, errors
+GET  /api/metrics                     one snapshot from gateway memory, never a Docker call: gateway (startedAt, rssBytes, lastFlushAt), host (cpus, load, memory, data filesystem), services (redis, object, postgres, coturn: up|down|off, latencyMs), fleet (apps and instances by state, leases by kind, activeLast24h), wakes (last 1 h and 24 h: count, failures, p50Ms, p95Ms), deliveries (due, delivering, failed, recent failures), series (minute buckets for 24 h: requests, errors, wakes, wakeFailures, sleeps, deliveriesDone, deliveriesFailed, deliveriesRetried), events (last 100 lifecycle events). Lost on restart
 GET  /api/apps/<name>                 releases, bindings, policy, state, stats, deliveries
 GET  /api/apps/<name>/logs?tail=200   text/plain: the app container's recent stdout and stderr (current or last container; empty when none)
 PUT  /api/apps/<name>/release         {"image": reference|null, "manifest": {...}, "bundle": id|null, "owner": subject} -> the release {"number": n, "image": id|null, "bundle": id|null, ...}; the gateway resolves the reference to an image id; owner required on first publish, ignored after

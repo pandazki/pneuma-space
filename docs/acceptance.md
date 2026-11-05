@@ -11,11 +11,12 @@ One check per M1 story in `docs/user-stories.md`, plus the numeric thresholds. A
 | AC-P-3 | Add `kv` to the manifest and publish; the container sees `PNEUMA_SPACE_KV_URL`. Remove `kv` and publish; the variable is absent; add it back and the previously written keys are still there. |
 | AC-P-4 | After the idle timeout, `GET /api/apps` shows the app asleep; a request wakes it and earlier data is present. |
 | AC-P-5 | From a clean checkout, `docker compose up -d` is the only command before the console at `127.0.0.1:8081` loads. |
-| AC-P-6 | The console shows only projects: list, publish, releases, capability bindings, per-app policy, state, last access, request count, error count, trigger deliveries, remove, purge. No global policy, token or owner page. |
+| AC-P-6 | The console shows an overview and projects: list, publish, releases, capability bindings, per-app policy, state with leases, last access, request count, error count, trigger deliveries, logs, remove, purge. No global policy, token or owner page. |
 | AC-P-7 | `PUT /api/apps/<name>/policy` with `idle_seconds=5`, and `PUT /api/policy` with `idle_seconds=5` for an app without an override, each take effect on the next reaper tick without a publish. |
 | AC-P-8 | With 500 registered apps and 20 running, `GET /api/apps` completes under 100 ms and issues zero Docker calls. |
 | AC-P-9 | After `remove`, the address returns 404 and the volume, database and bucket still exist. After `purge`, they are gone. `purge` on a registered app is refused. |
 | AC-P-10 | `docker compose restart gateway`; every registration, release, policy and binding is unchanged; a sleeping app wakes on request; a `delivering` trigger re-runs. |
+| AC-P-13 | `GET /api/metrics` answers under 50 ms with zero Docker calls. After one request to a sleeping app, the next snapshot counts one wake with its latency and one request; the overview page renders the services, fleet, wakes, traffic, deliveries, host and events sections in Chinese and English, light and dark. |
 | AC-FORM-1 | The same app image serves correct results with `db_backend=sqlite` and, after switching and republishing, with `db_backend=postgres`, with no code change. |
 | AC-FORM-2 | A request with a forged `X-Pneuma-Space-Subject` header reaches the app without it. A logged-in browser's request reaches the app with the platform-set subject. |
 | AC-FORM-3 | `X-Pneuma-Space-Owner: 1` is present only for the owner's subject. |
