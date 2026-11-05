@@ -1,10 +1,6 @@
 # PneumaSpace app template
 
-You are building a web app for PneumaSpace. The app is one Node program behind the address `/apps/<name>/`, by default an isolate: a worker thread in the platform's runner service, published without Docker. The platform starts it on the first request, stops it when idle, and provides the infrastructure the app declares in `pneuma-space.json`. This file, `src/server.ts`, `ui/` and `sdk/` are all you need. The default `src/server.ts` greets the visitor by name, or offers a sign-in link, in a finished page. The full contract is `docs/app-contract.md` in the PneumaSpace repository.
-
-## Start
-
-`appctl init <dir>` copies this template into `<dir>`. `--container` adds a `Dockerfile` and `"runtime": "container"`, for an app the isolate rule below excludes or that needs its own image; `--static` copies the static-site template instead. Isolate apps need the platform started with `docker compose --profile isolate up -d`; without it a publish answers 409. `appctl` is `node <repo>/cli/appctl.ts`; it talks to the admin API at `PNEUMA_SPACE_ADMIN` (default `http://127.0.0.1:8081`), and apps answer at the ingress, by default `http://127.0.0.1:8080/apps/<name>/`. The operator may remap both ports.
+You are building a web app for PneumaSpace: one Node program behind the address `/apps/<name>/`, by default an isolate, a worker thread in the platform's runner service, published without Docker. The platform starts it on the first request, stops it when idle, and provides what the app declares in `pneuma-space.json`. This file, `src/server.ts`, `ui/` and `sdk/` are all you need; the default `src/server.ts` is a finished page that greets the visitor by name or offers a sign-in link. The full contract is `docs/app-contract.md` in the PneumaSpace repository.
 
 ## What the platform gives
 
@@ -19,6 +15,20 @@ You are building a web app for PneumaSpace. The app is one Node program behind t
 | `cron` | Named triggers called on a 5-field cron schedule (UTC unless the operator changes it) or on demand, at least once; a delivery wakes the app like a request |
 | `identity` | The visitor as headers; a browser (a `GET` whose `Accept` includes `text/html`) without a session is sent to the platform login first, any other client gets 401. `{"required": false}` lets anonymous visitors through with `identity` null; send them to `/_pneuma-space/login?next=<path>` when a page needs a login |
 | `rtc` | STUN and TURN servers for WebRTC; signaling goes over your own `ws` |
+
+## Test, run, publish
+
+```sh
+npm ci && npm test                                               # install and test
+PNEUMA_SPACE_APP=dev PNEUMA_SPACE_RELEASE=0 node src/server.ts   # run on :8000; add the variables of each capability you declare
+node <repo>/cli/appctl.ts publish <name> . --owner user:<you>    # publish to the ingress
+```
+
+The sections below detail each: [Run and test locally](#run-and-test-locally) and [Publish](#publish).
+
+## Start
+
+`appctl init <dir>` copies this template into `<dir>`. `--container` adds a `Dockerfile` and `"runtime": "container"`, for an app the isolate rule below excludes or that needs its own image; `--static` copies the static-site template instead. Isolate apps need the platform started with `docker compose --profile isolate up -d`; without it a publish answers 409. `appctl` is `node <repo>/cli/appctl.ts`; it talks to the admin API at `PNEUMA_SPACE_ADMIN` (default `http://127.0.0.1:8081`), and apps answer at the ingress, by default `http://127.0.0.1:8080/apps/<name>/`. The operator may remap both ports.
 
 ## Manifest
 
