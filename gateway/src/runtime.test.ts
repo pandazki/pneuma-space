@@ -166,6 +166,17 @@ function inner(image: ImageId, network: string): void {
     assert.equal(docker.stops, 1);
   });
 
+  test('sleepsAt is null while a lease is held and is the release time plus idle_seconds after release', async (t) => {
+    const { app, runtime } = fixture(t, { idle_seconds: 30 });
+    const lease = await runtime.acquire(app, 'request');
+    assert.equal(runtime.sleepsAt(app), null);
+    const before = Date.now();
+    runtime.release(lease);
+    const after = Date.now();
+    const at = runtime.sleepsAt(app)!;
+    assert.ok(at >= before + 30_000 && at <= after + 30_000, `sleepsAt ${at - before} ms after release`);
+  });
+
   test('an acquire during stopping waits and wakes the instance again', async (t) => {
     const { app, docker, runtime } = fixture(t, { idle_seconds: 1 });
     runtime.release(await runtime.acquire(app, 'request'));

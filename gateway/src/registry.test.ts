@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { Ingress } from './ingress.ts';
 import { Conflict, InputError, appName, parseManifest, subject, triggerName, type AppId, type BundleId, type Capabilities } from './model.ts';
 import { PlatformRegistry } from './registry.ts';
-import { world } from './registry.fakes.ts';
+import { FakeRuntime, world } from './registry.fakes.ts';
 import { DeliveryScheduler } from './scheduler.ts';
 
 const survey = appName('survey');
@@ -218,4 +218,13 @@ test('republishing a removed app starts its schedules at the republish, not at t
   const again = await publish(registry, { cron: { triggers: { nightly: { schedule: '0 3 * * *' } } } });
   assert.equal(again.number, 1);
   assert.ok(registry.schedule(app)!.publishedAt >= republishedAt);
+});
+
+test('the listing carries the sleepsAt the Runtime answers', async () => {
+  const w = world();
+  const { store } = await w.open();
+  const runtime = Object.assign(new FakeRuntime(), { sleepsAt: () => 1_800_000_000_000 });
+  const registry = await PlatformRegistry.open({ store, runtime, bundles: w.bundles, providers: [...w.providers.values()] });
+  await publish(registry, {});
+  assert.equal((await registry.listing())[0].sleepsAt, 1_800_000_000_000);
 });

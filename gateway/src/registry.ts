@@ -308,6 +308,7 @@ export class PlatformRegistry implements Registry {
         instance: this.#runtime.state(view.app),
         since: this.#runtime.since(view.app),
         leases: this.#runtime.leases(view.app),
+        sleepsAt: this.#runtime.sleepsAt(view.app),
         lastAccessAt: s?.lastAccessAt ?? null,
         requests: s?.requests ?? 0,
         errors: s?.errors ?? 0,

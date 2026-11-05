@@ -114,6 +114,7 @@ section { padding: 40px 32px; border-top: 1px dashed var(--line); }
 .sh .idx { font: 11px/18px var(--mono); color: var(--ink-3); }
 .sh h2 { margin: 0; font-size: 13px; line-height: 18px; font-weight: 600; }
 .sh p { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-3); }
+.sh > div:nth-child(2) { flex: 1 1 240px; min-width: 0; }
 .sh .end { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 .card { background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-card); padding: 16px; }
 .inset { background: var(--canvas); border-radius: 14px; box-shadow: 0 0 0 1px var(--line); padding: 12px; }
@@ -172,16 +173,6 @@ td.wrap { white-space: normal; min-width: 240px; max-width: 520px; overflow-wrap
 .bar { height: 4px; border-radius: 2px; background: var(--inset); box-shadow: 0 0 0 1px var(--line); margin-top: 10px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--accent); }
 .bar i.hot { background: var(--orange); }
-.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
-.chart { position: relative; }
-.chart header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 2px 4px 8px; }
-.chart header b { font-size: 12.5px; font-weight: 600; }
-.legend { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-3); }
-.legend i { width: 8px; height: 8px; border-radius: 2px; }
-.chart svg { display: block; width: 100%; height: 150px; overflow: visible; }
-.chart text { font: 11px var(--mono); fill: var(--ink-3); }
-.tip { position: absolute; pointer-events: none; z-index: 5; background: var(--tip-bg); color: var(--tip-fg); font-size: 12px; line-height: 17px; border-radius: 6px; padding: 4px 8px; white-space: nowrap; }
-.tip .mono { font-size: 11.5px; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .toolbar input { width: 240px; }
 .form { display: grid; gap: 16px; }
@@ -199,6 +190,156 @@ td.wrap { white-space: normal; min-width: 240px; max-width: 520px; overflow-wrap
 .picks a:hover { background: var(--hover); text-decoration: none; }
 pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); }
 .back { font-size: 12.5px; color: var(--ink-3); }
+.live { display: inline-flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-2); }
+.live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px var(--green-tint); flex: none; }
+.live[data-live="paused"] .dot { background: var(--ink-3); box-shadow: 0 0 0 3px var(--hover-2); }
+.live[data-live="offline"] .dot { background: var(--red); box-shadow: 0 0 0 3px var(--red-tint); }
+.live .dot.beat { animation: beat 1s ease-out; }
+.live b { font-weight: 500; color: var(--ink); }
+.live .note { color: var(--orange); }
+@keyframes beat { from { box-shadow: 0 0 0 0 var(--green); } to { box-shadow: 0 0 0 9px oklch(0% 0 0 / 0); } }
+.svcline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; padding: 11px 16px; margin: 0 32px 32px; font-size: 12px; }
+.svcline .num { font-size: 11.5px; color: var(--ink-3); margin-left: 6px; }
+.svcline .probe { margin-left: auto; font: 11px var(--mono); color: var(--ink-3); }
+.fleet { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, .75fr); gap: 12px; }
+@media (max-width: 1240px) { .fleet { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .fleet > :first-child { grid-column: 1 / -1; } }
+@media (max-width: 560px) { .fleet { grid-template-columns: minmax(0, 1fr); } }
+.kh { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.kh .l { font-size: 12px; color: var(--ink-2); }
+.kv { font: 600 24px/32px var(--mono); font-variant-numeric: tabular-nums; margin-top: 6px; display: inline-block; border-radius: 6px; padding: 0 4px; margin-left: -4px; }
+.kv small { font-size: 12px; font-weight: 400; color: var(--ink-3); margin-left: 4px; }
+.ks { font-size: 12px; color: var(--ink-3); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.ks .over { color: var(--red); }
+.bump { animation: bump 1.6s ease-out; }
+@keyframes bump { from { background: var(--accent-tint); color: var(--accent-ink); } }
+.seats { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; margin-top: 14px; }
+.seat { aspect-ratio: 1; border-radius: 7px; background: var(--inset); box-shadow: inset 0 0 0 1px var(--line-strong); transition: background-color .6s, box-shadow .6s; cursor: default; }
+.seat[data-app] { cursor: pointer; }
+.seat[data-state="awake"] { background: var(--green); box-shadow: 0 0 0 3px var(--green-tint); }
+.seat[data-state="waking"] { background: var(--orange-tint); box-shadow: inset 0 0 0 1.5px var(--orange); animation: breathe 1.1s ease-in-out infinite; }
+.seat[data-state="draining"], .seat[data-state="stopping"] { background: repeating-linear-gradient(-45deg, var(--orange) 0 3px, var(--orange-tint) 3px 6px); box-shadow: inset 0 0 0 1px var(--orange); animation: breathe 1.1s ease-in-out infinite; }
+.seat.ignite { animation: ignite 1.1s cubic-bezier(.2, .9, .3, 1.2); }
+@keyframes breathe { 50% { opacity: .4; } }
+@keyframes ignite { 0% { transform: scale(.6); box-shadow: 0 0 0 0 var(--green); } 55% { transform: scale(1.1); } 100% { transform: scale(1); box-shadow: 0 0 0 12px oklch(0% 0 0 / 0); } }
+.gate { position: relative; height: 46px; margin: 18px 0 4px; }
+.gate .rail { position: absolute; left: 0; right: 0; top: 20px; height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--green-tint), var(--orange-tint) 70%, var(--red-tint)); box-shadow: inset 0 0 0 1px var(--line); }
+.gate .limit { position: absolute; top: 8px; bottom: 6px; width: 0; border-left: 1.5px dashed var(--red); }
+.gate .limit span { position: absolute; top: -9px; right: 4px; font: 10.5px var(--mono); color: var(--red); white-space: nowrap; }
+.gate .w { position: absolute; top: 15px; width: 2px; height: 16px; margin-left: -1px; border-radius: 1px; background: var(--accent); opacity: .35; }
+.gate .w.last { opacity: 1; width: 3px; margin-left: -1.5px; height: 20px; top: 13px; }
+.gate .w.fail { background: var(--red); opacity: .9; }
+.gate .w.drop { animation: drop .8s cubic-bezier(.2, .9, .3, 1.3); }
+@keyframes drop { from { transform: translateY(-14px); opacity: 0; } }
+.gate .p { position: absolute; top: 31px; font: 10.5px var(--mono); color: var(--ink-2); white-space: nowrap; }
+.gate .p.end { transform: translateX(-100%); padding-right: 3px; border-right: 1px solid var(--ink-2); }
+.gate .p.start { padding-left: 3px; border-left: 1px solid var(--ink-2); }
+.gate .p.axis { top: 0; color: var(--ink-3); transform: translateX(-50%); }
+.gate .p.zero { transform: none; }
+.meter { display: grid; gap: 4px; margin-top: 12px; font-size: 12px; color: var(--ink-2); }
+.meter > div { display: flex; justify-content: space-between; gap: 8px; }
+.meter .num { font-size: 11.5px; color: var(--ink-3); }
+.tl { padding: 0; overflow: hidden; }
+.tl-row { display: grid; grid-template-columns: 170px minmax(0, 1fr) 210px; align-items: center; gap: 16px; padding: 0 16px; height: 44px; border-bottom: 1px solid var(--line); }
+.tl-row:last-child { border-bottom: 0; }
+.tl-row.axis { height: 30px; font: 10.5px var(--mono); color: var(--ink-3); }
+.tl-row[data-href] { cursor: pointer; }
+.tl-row[data-href]:hover { background: var(--hover); }
+.tl-row.enter { animation: rowin .7s ease-out; }
+@keyframes rowin { from { background: var(--accent-tint); transform: translateY(-4px); opacity: 0; } }
+.tl-row.dim .tl-name a { color: var(--ink-3); }
+.tl-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tl-name a { font: 12.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-name .st { font-size: 0; gap: 0; }
+.track { position: relative; height: 18px; }
+.track::before { content: ""; position: absolute; left: 0; right: 0; top: 8.5px; height: 1px; background: var(--line-strong); }
+.axis .track::before { display: none; }
+.track .ahead { position: absolute; top: -13px; bottom: -13px; right: 0; background: repeating-linear-gradient(-45deg, transparent 0 4px, var(--stripe) 4px 5px); border-left: 1px dashed var(--ink-3); }
+.axis .track .ahead { top: 0; bottom: 0; }
+.band { position: absolute; top: 3px; bottom: 3px; border-radius: 3px; min-width: 2px; }
+.band.awake { background: var(--green); }
+.band.waking { background: var(--orange); top: 0; bottom: 0; min-width: 3px; }
+.band.draining { background: repeating-linear-gradient(-45deg, var(--orange) 0 3px, var(--orange-tint) 3px 6px); }
+.band.stopping { background: var(--orange); opacity: .55; }
+.band.open.waking, .band.open.draining, .band.open.stopping { animation: breathe 1.1s ease-in-out infinite; }
+.band.plan { background: repeating-linear-gradient(90deg, var(--green) 0 3px, transparent 3px 6px); opacity: .55; }
+.band.fail { background: var(--red); top: 0; bottom: 0; min-width: 3px; }
+.track .ms { position: absolute; top: -13px; font: 600 10px/12px var(--mono); color: var(--orange); white-space: nowrap; transform: translateX(-100%); }
+.track .ms::after { content: ""; position: absolute; right: -1px; bottom: -3px; width: 1px; height: 4px; background: var(--orange); }
+.track .ms.after { transform: none; }
+.track .ms.after::after { left: -1px; right: auto; }
+.axis .tick { position: absolute; top: 7px; transform: translateX(-50%); white-space: nowrap; }
+.axis .tick.now { color: var(--ink-2); }
+.axis .tick.first { transform: none; }
+.tl-meta { display: flex; align-items: center; justify-content: flex-end; gap: 8px; font-size: 12px; color: var(--ink-2); white-space: nowrap; min-width: 0; }
+.tl-meta .num { font-size: 11.5px; }
+.tl-meta .soon { color: var(--orange); }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.chart { position: relative; }
+.chart header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 2px 4px 8px; }
+.chart header b { font-size: 12.5px; font-weight: 600; }
+.legend { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ink-3); }
+.legend i { width: 8px; height: 8px; border-radius: 2px; }
+.chart svg { display: block; width: 100%; height: 160px; overflow: visible; }
+.chart text { font: 11px var(--mono); fill: var(--ink-3); }
+.tip { position: absolute; pointer-events: none; z-index: 5; background: var(--tip-bg); color: var(--tip-fg); font-size: 12px; line-height: 17px; border-radius: 6px; padding: 4px 8px; white-space: nowrap; }
+.tip .mono { font-size: 11.5px; }
+.pair { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 0; padding: 0; }
+.pair > section { border-top: 0; min-width: 0; }
+.pair > section + section { border-left: 1px dashed var(--line); }
+@media (max-width: 1240px) { .pair { grid-template-columns: minmax(0, 1fr); } .pair > section + section { border-left: 0; border-top: 1px dashed var(--line); } }
+.inbox { padding: 4px 0; max-height: 560px; overflow-y: auto; }
+.item { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 4px 12px; align-items: start; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.item:last-child { border-bottom: 0; }
+.item::before { content: ""; width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: var(--red); box-shadow: 0 0 0 3px var(--red-tint); }
+.item.orange::before { background: var(--orange); box-shadow: 0 0 0 3px var(--orange-tint); }
+.item.seen::before { background: var(--ink-3); box-shadow: none; }
+.item.seen { opacity: .62; }
+.item .what { font-size: 13px; font-weight: 500; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.item .what .mono { font-size: 12px; font-weight: 400; }
+.item .why { grid-column: 2; font: 11.5px/17px var(--mono); color: var(--ink-3); overflow-wrap: anywhere; }
+.item .side { display: grid; justify-items: end; gap: 4px; font: 11px var(--mono); color: var(--ink-3); }
+.item .side button { border: 0; background: none; padding: 2px 6px; border-radius: 6px; font: 500 11.5px var(--font); color: var(--ink-2); cursor: pointer; }
+.item .side button:hover { background: var(--hover-2); }
+.item.enter { animation: slidein .6s cubic-bezier(.2, .9, .3, 1); }
+@keyframes slidein { from { transform: translateX(-12px); opacity: 0; background: var(--red-tint); } }
+.linkish { border: 0; background: none; padding: 0; font: inherit; font-size: 12px; color: var(--accent-ink); cursor: pointer; }
+.tailbox { position: relative; padding: 0; }
+.tailbox .rows { max-height: 520px; overflow-y: auto; overscroll-behavior: contain; }
+.ev { display: grid; grid-template-columns: 64px 150px 104px minmax(0, 1fr); gap: 12px; align-items: center; padding: 0 14px; height: 34px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.ev > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev .mono { font-size: 11.5px; }
+.ev .f { font: 11px var(--mono); color: var(--ink-3); }
+.ev.fresh { animation: fresh 2.4s ease-out; }
+.ev.fresh > * { animation: enter .45s cubic-bezier(.2, .9, .3, 1); }
+@keyframes fresh { from { background: var(--accent-tint); } }
+@keyframes enter { from { transform: translateY(-10px); opacity: 0; } }
+.ev.mark { display: block; height: auto; padding: 7px 14px; font-size: 12px; color: var(--orange); background: var(--orange-tint); text-align: center; white-space: normal; }
+.beats { display: flex; align-items: center; gap: 2px; margin-top: 12px; }
+.beats i { width: 6px; height: 18px; border-radius: 2px; background: var(--line-strong); }
+.beats i.awake { background: var(--green); }
+.beats i.waking, .beats i.draining, .beats i.stopping { background: var(--orange); }
+.beats i.fail { background: var(--red); }
+.beats span { margin-left: 8px; font-size: 12px; }
+.pill { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 3; border: 0; border-radius: 999px; height: 24px; padding: 0 10px; background: var(--accent); color: white; font: 500 12px var(--font); box-shadow: var(--shadow-sm); cursor: pointer; animation: enter .3s ease-out; }
+.tailhead { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.tailhead input { flex: 1; max-width: 260px; }
+.tailhead .muted { font-size: 12px; }
+@media (max-width: 900px) {
+  .svcline { margin: 0 20px 24px; }
+  .tl-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name meta" "track track"; height: auto; padding: 10px 14px; gap: 16px 10px; }
+  .tl-row.axis { padding: 6px 14px; grid-template-areas: "track track"; }
+  .tl-row.axis > :first-child, .tl-row.axis > :last-child { display: none; }
+  .tl-name { grid-area: name; } .track { grid-area: track; } .tl-meta { grid-area: meta; }
+  .ev { grid-template-columns: 58px minmax(0, 1fr) minmax(0, 1fr); height: auto; padding: 7px 14px; gap: 2px 10px; }
+  .ev .f { grid-column: 1 / -1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .ev.fresh, .item.enter, .tl-row.enter { background: var(--accent-tint); }
+  .seat.ignite { box-shadow: 0 0 0 3px var(--accent); }
+  .bump { background: var(--accent-tint); }
+  .gate .w.drop { outline: 2px solid var(--accent-tint); }
+}
 dialog { border: 0; padding: 20px; border-radius: 12px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-card); width: min(420px, calc(100vw - 32px)); }
 dialog::backdrop { background: oklch(0% 0 0 / .3); }
 dialog h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
@@ -235,32 +376,27 @@ const I18N = {
   zh: {
     'brand.sub': '控制台', 'nav.group': '平台', 'nav.overview': '总览', 'nav.apps': '项目', 'nav.publish': '发布',
     'theme.light': '浅色', 'theme.dark': '深色', 'aside.since': '自 {time} 起采样，网关重启后清零。',
-    'ov.title': '总览', 'ov.sub': '最近采样：{ago}', 'ov.waiting': '等待第一次采样',
-    'sec.services': '平台服务', 'sec.servicesDesc': '网关每 10 秒探测一次可达性。',
+    'ov.title': '总览', 'ov.waiting': '等待第一次采样',
     'svc.gateway': '网关', 'svc.redis': 'Redis', 'svc.object': '对象存储', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn',
-    'svc.gatewaySub': '已运行 · 内存 {rss}', 'svc.off': '未启用 profile', 'svc.down': '不可达',
-    'sec.fleet': '应用与负载', 'sec.fleetDesc': '实时数量，对照 M1 的门槛。',
-    'k.apps': '已注册应用', 'k.appsSub': '已移除 {removed} · 清除中 {purging} · 24 小时内访问 {active}',
-    'k.awake': '运行中', 'k.awakeSub': '唤醒中 {waking} · 排空中 {draining} · 停止中 {stopping}',
-    'k.requests': '请求（1 小时）', 'k.requestsSub': '错误 {errors} · 错误率 {ratio}',
-    'k.wakes': '唤醒（1 小时）', 'k.wakesSub': '失败 {failures} · p50 {p50} · p95 {p95}，门槛 3 秒',
-    'k.deliveries': '待投递', 'k.deliveriesSub': '投递中 {delivering} · 累计失败 {failed}',
-    'k.host': '主机负载', 'k.cores': '/ {n} 核', 'k.hostSub': '内存 {used} / {total} · 数据盘剩余 {free}',
-    'sec.activity': '活动', 'sec.activityDesc': '网关内存中的每分钟计数。',
+    'svc.gatewaySub': '已运行 {up} · 内存 {rss}', 'svc.off': '未启用 profile', 'svc.down': '不可达',
+    'sec.fleet': '席位、唤醒与主机', 'sec.fleetDesc': '醒着的实例占一个席位；唤醒对照 3 秒门槛。',
+    'k.awakeSub': '唤醒中 {waking} · 排空中 {draining} · 停止中 {stopping}',
+    'k.wakes': '唤醒（1 小时）',
+    'k.host': '主机负载', 'k.cores': '/ {n} 核',
+    'sec.activity': '活动', 'sec.activityDesc': '每分钟计数，当前分钟画成未完成；上方标记是事件。',
     'win.60': '1 小时', 'win.360': '6 小时', 'win.1440': '24 小时',
     'ch.traffic': '流量', 'ch.wakes': '唤醒', 'ch.deliveries': '投递',
     's.requests': '请求', 's.errors': '错误', 's.wakes': '唤醒', 's.wakeFailures': '失败', 's.wakeP50Ms': 'p50 耗时',
     's.deliveriesDone': '完成', 's.deliveriesFailed': '失败', 's.deliveriesRetried': '重试',
-    'sec.awake': '运行中的实例', 'sec.awakeDesc': '每个实例为什么醒着：它持有的 Lease。',
-    'sec.attention': '需要关注', 'sec.attentionDesc': '失败的投递和平台错误，最新在前。',
-    'sec.events': '最近事件', 'sec.eventsDesc': '最近 100 条生命周期事件，最新在前。', 'ev.filter': '筛选事件',
-    'col.name': '名称', 'col.state': '状态', 'col.since': '进入时间', 'col.leases': 'Lease', 'col.requests': '请求', 'col.errors': '错误',
-    'col.time': '时间', 'col.app': '应用', 'col.event': '事件', 'col.detail': '详情', 'col.what': '类型', 'col.status': '状态',
+    'sec.attention': '需要关注', 'sec.attentionDesc': '投递失败、唤醒失败、服务不可达、唤醒 p95 超门槛。已读只记在这个浏览器里。',
+    'sec.events': '事件流', 'sec.eventsDesc': '生命周期事件，最新在上。悬停或向下滚动即暂停跟随。', 'ev.filter': '筛选事件',
+    'col.name': '名称', 'col.state': '状态', 'col.since': '进入时间', 'col.requests': '请求', 'col.errors': '错误',
+    'col.status': '状态',
     'col.instance': '实例', 'col.release': '版本', 'col.capabilities': '能力', 'col.lastAccess': '最近访问', 'col.image': '镜像',
     'col.bundle': '静态包', 'col.published': '发布时间', 'col.kind': '能力', 'col.provider': 'Provider', 'col.trigger': '触发器',
-    'col.attempts': '尝试次数', 'col.scheduledFor': '计划时间', 'col.created': '创建时间', 'col.nextAttempt': '下次尝试', 'col.fields': '字段',
-    'empty.awake': '没有运行中的实例。', 'empty.attention': '没有需要关注的事项。', 'empty.events': '还没有事件。', 'empty.filtered': '没有匹配的记录。',
-    'att.delivery': '投递失败', 'att.error': '错误', 'att.deliveryDetail': '{trigger} · 尝试 {attempts} 次',
+    'col.attempts': '尝试次数', 'col.scheduledFor': '计划时间', 'col.created': '创建时间', 'col.nextAttempt': '下次尝试',
+    'empty.attention': '没有需要关注的事项。', 'empty.events': '还没有事件。', 'empty.filtered': '没有匹配的记录。',
+    'att.delivery': '投递失败', 'att.deliveryDetail': '{trigger} · 尝试 {attempts} 次',
     'apps.title': '项目', 'apps.count': '{n} 个应用', 'apps.filter': '按名称筛选', 'apps.allStates': '全部状态',
     'apps.empty': '还没有应用。发布一个即可获得地址。', 'apps.publish': '发布应用',
     'never': '从未', 'routeOnly': '仅路由',
@@ -288,37 +424,50 @@ const I18N = {
     'f.bundle': '静态包', 'f.bundleHint': '可选，static 目录打成的 tar。', 'f.submit': '发布', 'f.busy': '发布中…', 'f.badJson': '不是合法的 JSON：{msg}',
     'pub.existing': '已有应用', 'pub.existingDesc': '选一个来发布新版本。', 'pub.none': '还没有应用。',
     'err.load': '加载失败：{msg}',
+    'ov.sub': '醒睡周期，正在发生。', 'ago': '{d}前',
+    'live.on': '直播中', 'live.paused': '已暂停', 'live.offline': '网关无响应，重试中', 'live.pause': '暂停', 'live.resume': '继续',
+    'live.last': '上一条事件 {ago}', 'live.none': '还没有事件', 'live.restarted': '网关在 {time} 重启，计数从零开始',
+    'svc.probed': '{ago}探测',
+    'seats.title': '并发席位', 'seats.gate': 'M1 门槛 {n}', 'seats.free': '空闲席位', 'seats.over': '超出门槛 {n} 个',
+    'seats.fleet': '已注册 {registered} · 24 小时内访问 {active} · 已移除 {removed}',
+    'gate.sub': 'p50 {p50} · p95 {p95} · 失败 {failures}', 'gate.line': '3 秒门槛', 'gate.latest': '最近一次 {ms}', 'gate.failed': '最近一次失败', 'gate.none': '这一小时还没有唤醒。',
+    'host.mem': '内存', 'host.disk': '数据盘', 'host.diskFree': '剩余 {free}',
+    'sec.timeline': '醒着的实例', 'sec.timelineDesc': '最近 15 分钟醒过的每个实例：唤醒和耗时、醒着、排空；右侧是它为什么还醒着。',
+    'tl.minus': '-{n} 分', 'tl.now': '现在', 'tl.empty': '最近 15 分钟没有实例醒过。', 'tl.wake': '唤醒 {ms}', 'tl.sleepsAt': '{time} 休眠',
+    'tl.sleepsIn': '{d}后休眠', 'tl.sleepingNow': '即将休眠', 'tl.asleep': '已休眠 {d}', 'tl.rate': '{n} 请求/秒',
+    'mk.publish': '发布', 'mk.wake': '唤醒', 'mk.wakeFailed': '唤醒失败', 'mk.deliveryFailed': '投递失败',
+    'ch.partial': '本分钟未结束', 'ch.due': '待投递 {due} · 投递中 {delivering}',
+    'att.wake': '唤醒失败', 'att.service': '{name} 不可达', 'att.serviceDetail': '网关的探测连不上它。',
+    'att.p95': '唤醒 p95 超过门槛', 'att.p95Detail': '最近 1 小时 p95 {p95}，门槛 3 秒',
+    'att.seen': '标为已读', 'att.allSeen': '全部已读', 'att.showSeen': '已读 {n} 条', 'att.hideSeen': '收起已读',
+    'tail.restart': '网关重启，序号从 1 重新开始。', 'tail.gap': '两次轮询之间超过 100 条事件，有 {n} 条没有显示。', 'tail.new': '{n} 条新事件', 'tail.paused': '已暂停跟随',
+    'd.recent': '最近的状态变化',
     'dur.d': '{n} 天', 'dur.h': '{n} 小时', 'dur.m': '{n} 分', 'dur.s': '{n} 秒',
   },
   en: {
     'brand.sub': 'Console', 'nav.group': 'Platform', 'nav.overview': 'Overview', 'nav.apps': 'Projects', 'nav.publish': 'Publish',
     'theme.light': 'Light', 'theme.dark': 'Dark', 'aside.since': 'Sampling since {time}; a gateway restart clears it.',
-    'ov.title': 'Overview', 'ov.sub': 'Last sample {ago}', 'ov.waiting': 'Waiting for the first sample',
-    'sec.services': 'Services', 'sec.servicesDesc': 'Reachability from the gateway, probed every 10 s.',
+    'ov.title': 'Overview', 'ov.waiting': 'Waiting for the first sample',
     'svc.gateway': 'Gateway', 'svc.redis': 'Redis', 'svc.object': 'Object store', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn',
-    'svc.gatewaySub': 'up · RSS {rss}', 'svc.off': 'profile not running', 'svc.down': 'not reachable',
-    'sec.fleet': 'Fleet and load', 'sec.fleetDesc': 'Live counts against the M1 gates.',
-    'k.apps': 'Registered apps', 'k.appsSub': 'removed {removed} · purging {purging} · accessed in 24 h {active}',
-    'k.awake': 'Awake now', 'k.awakeSub': 'waking {waking} · draining {draining} · stopping {stopping}',
-    'k.requests': 'Requests, 1 h', 'k.requestsSub': 'errors {errors} · error ratio {ratio}',
-    'k.wakes': 'Wakes, 1 h', 'k.wakesSub': 'failed {failures} · p50 {p50} · p95 {p95} against 3 s',
-    'k.deliveries': 'Deliveries due', 'k.deliveriesSub': 'delivering {delivering} · failed {failed} in total',
-    'k.host': 'Host load', 'k.cores': '/ {n} cores', 'k.hostSub': 'memory {used} of {total} · data free {free}',
-    'sec.activity': 'Activity', 'sec.activityDesc': 'Per-minute counts from gateway memory.',
+    'svc.gatewaySub': 'up {up} · RSS {rss}', 'svc.off': 'profile not running', 'svc.down': 'not reachable',
+    'sec.fleet': 'Seats, wakes and host', 'sec.fleetDesc': 'Each awake instance takes a seat; wakes are measured against the 3 s gate.',
+    'k.awakeSub': 'waking {waking} · draining {draining} · stopping {stopping}',
+    'k.wakes': 'Wakes, 1 h',
+    'k.host': 'Host load', 'k.cores': '/ {n} cores',
+    'sec.activity': 'Activity', 'sec.activityDesc': 'Per-minute counts, the current minute drawn as unfinished; marks above are events.',
     'win.60': '1 h', 'win.360': '6 h', 'win.1440': '24 h',
     'ch.traffic': 'Traffic', 'ch.wakes': 'Wakes', 'ch.deliveries': 'Deliveries',
     's.requests': 'requests', 's.errors': 'errors', 's.wakes': 'wakes', 's.wakeFailures': 'failures', 's.wakeP50Ms': 'p50 latency',
     's.deliveriesDone': 'done', 's.deliveriesFailed': 'failed', 's.deliveriesRetried': 'retried',
-    'sec.awake': 'Awake instances', 'sec.awakeDesc': 'Why each one is awake: the leases it holds.',
-    'sec.attention': 'Attention', 'sec.attentionDesc': 'Failed deliveries and platform errors, newest first.',
-    'sec.events': 'Recent events', 'sec.eventsDesc': 'The last 100 lifecycle events, newest first.', 'ev.filter': 'Filter events',
-    'col.name': 'Name', 'col.state': 'State', 'col.since': 'Since', 'col.leases': 'Leases', 'col.requests': 'Requests', 'col.errors': 'Errors',
-    'col.time': 'Time', 'col.app': 'App', 'col.event': 'Event', 'col.detail': 'Detail', 'col.what': 'What', 'col.status': 'Status',
+    'sec.attention': 'Attention', 'sec.attentionDesc': 'Failed deliveries and wakes, a service down, wake p95 over the gate. Seen marks stay in this browser.',
+    'sec.events': 'Event tail', 'sec.eventsDesc': 'Lifecycle events, newest on top. Hover or scroll down to pause following.', 'ev.filter': 'Filter events',
+    'col.name': 'Name', 'col.state': 'State', 'col.since': 'Since', 'col.requests': 'Requests', 'col.errors': 'Errors',
+    'col.status': 'Status',
     'col.instance': 'Instance', 'col.release': 'Release', 'col.capabilities': 'Capabilities', 'col.lastAccess': 'Last access', 'col.image': 'Image',
     'col.bundle': 'Bundle', 'col.published': 'Published', 'col.kind': 'Kind', 'col.provider': 'Provider', 'col.trigger': 'Trigger',
-    'col.attempts': 'Attempts', 'col.scheduledFor': 'Scheduled for', 'col.created': 'Created', 'col.nextAttempt': 'Next attempt', 'col.fields': 'Fields',
-    'empty.awake': 'No instance is awake.', 'empty.attention': 'Nothing needs attention.', 'empty.events': 'No events yet.', 'empty.filtered': 'Nothing matches.',
-    'att.delivery': 'Delivery failed', 'att.error': 'Error', 'att.deliveryDetail': '{trigger} · {attempts} attempts',
+    'col.attempts': 'Attempts', 'col.scheduledFor': 'Scheduled for', 'col.created': 'Created', 'col.nextAttempt': 'Next attempt',
+    'empty.attention': 'Nothing needs attention.', 'empty.events': 'No events yet.', 'empty.filtered': 'Nothing matches.',
+    'att.delivery': 'Delivery failed', 'att.deliveryDetail': '{trigger} · {attempts} attempts',
     'apps.title': 'Projects', 'apps.count': '{n} apps', 'apps.filter': 'Filter by name', 'apps.allStates': 'All states',
     'apps.empty': 'No apps yet. Publish one to give it an address.', 'apps.publish': 'Publish an app',
     'never': 'never', 'routeOnly': 'route only',
@@ -346,6 +495,24 @@ const I18N = {
     'f.bundle': 'Static bundle', 'f.bundleHint': 'Optional tar of the static directory.', 'f.submit': 'Publish', 'f.busy': 'Publishing…', 'f.badJson': 'Not valid JSON: {msg}',
     'pub.existing': 'Existing apps', 'pub.existingDesc': 'Pick one to publish a new release.', 'pub.none': 'No app yet.',
     'err.load': 'Could not load: {msg}',
+    'ov.sub': 'The wake cycle, as it happens.', 'ago': '{d} ago',
+    'live.on': 'Live', 'live.paused': 'Paused', 'live.offline': 'Gateway not answering; retrying', 'live.pause': 'Pause', 'live.resume': 'Resume',
+    'live.last': 'last event {ago}', 'live.none': 'no event yet', 'live.restarted': 'gateway restarted at {time}; counters start over',
+    'svc.probed': 'probed {ago}',
+    'seats.title': 'Seats', 'seats.gate': 'M1 gate {n}', 'seats.free': 'free seat', 'seats.over': '{n} over the gate',
+    'seats.fleet': 'registered {registered} · accessed in 24 h {active} · removed {removed}',
+    'gate.sub': 'p50 {p50} · p95 {p95} · failed {failures}', 'gate.line': '3 s gate', 'gate.latest': 'latest {ms}', 'gate.failed': 'latest failed', 'gate.none': 'No wake in the last hour.',
+    'host.mem': 'Memory', 'host.disk': 'Data disk', 'host.diskFree': '{free} free',
+    'sec.timeline': 'Awake timeline', 'sec.timelineDesc': 'Every instance awake in the last 15 min: wakes with their latency, awake, draining; on the right, why it is still up.',
+    'tl.minus': '-{n} min', 'tl.now': 'now', 'tl.empty': 'No instance has been awake in the last 15 minutes.', 'tl.wake': 'wake {ms}', 'tl.sleepsAt': 'sleeps at {time}',
+    'tl.sleepsIn': 'sleeps in {d}', 'tl.sleepingNow': 'going to sleep', 'tl.asleep': 'asleep {d}', 'tl.rate': '{n} req/s',
+    'mk.publish': 'publish', 'mk.wake': 'wake', 'mk.wakeFailed': 'wake failed', 'mk.deliveryFailed': 'delivery failed',
+    'ch.partial': 'minute in progress', 'ch.due': 'due {due} · delivering {delivering}',
+    'att.wake': 'Wake failed', 'att.service': '{name} is down', 'att.serviceDetail': 'The gateway probe cannot reach it.',
+    'att.p95': 'Wake p95 over the gate', 'att.p95Detail': 'p95 {p95} in the last hour against 3 s',
+    'att.seen': 'Mark seen', 'att.allSeen': 'Mark all seen', 'att.showSeen': '{n} seen', 'att.hideSeen': 'Hide seen',
+    'tail.restart': 'Gateway restarted; seq starts again at 1.', 'tail.gap': '{n} events not shown: more than 100 arrived between two polls.', 'tail.new': '{n} new', 'tail.paused': 'following paused',
+    'd.recent': 'recent state changes',
     'dur.d': '{n} d', 'dur.h': '{n} h', 'dur.m': '{n} min', 'dur.s': '{n} s',
   },
 };
@@ -491,6 +658,332 @@ const ICON = {
 };
 const icon = (name) => { const span = h('span', { 'aria-hidden': 'true', style: 'display:inline-flex' }); span.innerHTML = ICON[name]; return span; };
 
+// Views
+
+const main = () => document.getElementById('main');
+let generation = 0;
+
+function show(...nodes) {
+  main().replaceChildren(...nodes);
+}
+
+function tile(label, value, sub, ratio, extra = {}) {
+  return h('div', { class: 'card tile', ...extra },
+    h('div', { class: 'l' }, label),
+    h('div', { class: 'v' }, value),
+    ratio == null ? null : h('div', { class: 'bar' }, h('i', { class: ratio > 0.8 ? 'hot' : null, style: `width:${Math.min(100, ratio * 100).toFixed(1)}%` })),
+    h('div', { class: 's' }, sub));
+}
+
+// Live overview (ADR 0015): consecutive snapshots are diffed in the browser and the diff drives every animation.
+
+const METRICS_MS = 2000;
+const APPS_MS = 5000;
+const SPAN_MS = 15 * 60_000;
+const AHEAD_MS = 60_000;
+const KEEP_EVENTS = 600;
+const TAIL_ROWS = 300;
+const ACTIVE = ['waking', 'awake', 'draining', 'stopping'];
+const INSTANCE_EVENTS = ['waking', 'awake', 'draining', 'stopping', 'asleep', 'removed'];
+const MARKS = {
+  publish: { test: (e) => e.ev === 'publish', color: 'var(--ink-2)' },
+  wake: { test: (e) => e.ev === 'awake' && typeof e.ms === 'number', color: 'var(--accent)' },
+  wakeFailed: { test: (e) => e.ev === 'asleep' && e.error !== undefined, color: 'var(--red)' },
+  deliveryFailed: { test: (e) => e.ev === 'delivery.failed', color: 'var(--red)' },
+};
+
+/** Everything the overview knows, folded from snapshots: the event history by seq and each app's state transitions. */
+function liveModel() {
+  return { startedAt: null, lastSeq: 0, events: [], transitions: new Map(), metrics: null, apps: [], appsAt: 0, rates: new Map() };
+}
+
+function absorbMetrics(model, m) {
+  const initial = model.startedAt === null;
+  const restarted = !initial && m.gateway.startedAt !== model.startedAt;
+  if (restarted) model.lastSeq = 0;
+  model.startedAt = m.gateway.startedAt;
+  const fresh = m.events.filter((e) => e.seq > model.lastSeq);
+  const missed = !initial && fresh.length ? fresh[0].seq - model.lastSeq - 1 : 0;
+  if (fresh.length) model.lastSeq = fresh.at(-1).seq;
+  for (const e of fresh) {
+    if (!e.app || !INSTANCE_EVENTS.includes(e.ev)) continue;
+    const list = model.transitions.get(e.app) ?? [];
+    list.push({ state: e.ev === 'removed' ? 'none' : e.ev, t: e.t, ms: e.ms, error: e.error });
+    let old = 0;
+    while (old < list.length - 1 && list[old + 1].t < e.t - SPAN_MS) old++;
+    list.splice(0, old);
+    model.transitions.set(e.app, list);
+  }
+  model.events.push(...fresh);
+  model.events.splice(0, Math.max(0, model.events.length - KEEP_EVENTS));
+  model.metrics = m;
+  return { initial, fresh, missed, restarted };
+}
+
+/** The listing is the authority when its `since` is newer than the last event seen for the app. */
+function absorbApps(model, apps, at) {
+  const before = new Map(model.apps.map((a) => [a.name, a]));
+  for (const a of apps) {
+    const prev = before.get(a.name);
+    if (prev && model.appsAt) model.rates.set(a.name, Math.max(0, a.requests - prev.requests) / ((at - model.appsAt) / 1000));
+    if (a.since == null) continue;
+    const list = model.transitions.get(a.name) ?? [];
+    const last = list.at(-1);
+    if (!last || (a.since > last.t && last.state !== a.instance)) list.push({ state: a.instance, t: a.since });
+    model.transitions.set(a.name, list);
+  }
+  model.apps = apps;
+  model.appsAt = at;
+}
+
+const stateOf = (model, name) => model.transitions.get(name)?.at(-1)?.state ?? 'none';
+
+function segments(list, from, now) {
+  const out = [];
+  list.forEach((s, i) => {
+    const end = list[i + 1]?.t ?? now;
+    if (end < from) return;
+    if (ACTIVE.includes(s.state)) out.push({ state: s.state, from: Math.max(from, s.t), to: end, open: i === list.length - 1, ms: s.ms, t: s.t });
+    else if (s.state === 'asleep' && s.error !== undefined && s.t >= from) out.push({ state: 'fail', from: s.t, to: s.t, error: s.error, t: s.t });
+  });
+  return out;
+}
+
+const since = (v) => t('ago', { d: duration(Date.now() - v) });
+
+/** Text that changes with the clock alone; refreshed once a second instead of re-rendering. */
+function ticking(fn) {
+  const el = h('span', { 'data-tick': '' });
+  el.tick = () => { el.textContent = fn(); };
+  el.tick();
+  return el;
+}
+
+/** replaceChildren that, like h(), flattens arrays and skips null and false. */
+function fill(el, ...children) {
+  el.replaceChildren(...children.flat(Infinity).filter((c) => c != null && c !== false));
+}
+
+function flash(el, cls) {
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+}
+
+function liveHeader(controls) {
+  const dot = h('span', { class: 'dot' });
+  const text = h('span');
+  const button = h('button', { class: 'btn', type: 'button', onclick: () => controls.toggle() });
+  const el = h('div', { class: 'live', 'data-live': 'on', role: 'status' }, dot, text, button);
+  let restartedAt = null;
+  return {
+    el,
+    restarted(at) { restartedAt = at; },
+    render(model, mode) {
+      el.dataset.live = mode;
+      fill(button, t(mode === 'paused' ? 'live.resume' : 'live.pause'));
+      const last = model.events.at(-1)?.t;
+      fill(text,
+        h('b', {}, t(`live.${mode}`)),
+        mode === 'on' ? [' · ', ticking(() => (last ? t('live.last', { ago: since(last) }) : t('live.none')))] : null,
+        restartedAt && Date.now() - restartedAt < 120_000 ? h('span', { class: 'note' }, ` · ${t('live.restarted', { time: clock(restartedAt, true) })}`) : null);
+    },
+    beat() { flash(dot, 'beat'); },
+  };
+}
+
+function servicesLine() {
+  const el = h('div', { class: 'card svcline', 'data-section': 'services' });
+  return {
+    el,
+    render(m) {
+      const item = (name) => {
+        const s = m.services[name] ?? { status: 'down', latencyMs: null };
+        return h('span', { class: `st ${tone(s.status)}`, title: s.status === 'up' ? t('st.up') : t(`svc.${s.status}`) },
+          t(`svc.${name}`), h('span', { class: 'num' }, s.status === 'up' ? ms(s.latencyMs) : t(`st.${s.status}`)));
+      };
+      fill(el,
+        h('span', { class: 'st green' }, t('svc.gateway'), h('span', { class: 'num' }, t('svc.gatewaySub', { up: duration(Date.now() - m.gateway.startedAt), rss: bytes(m.gateway.rssBytes) }))),
+        ...['redis', 'object', 'postgres', 'coturn'].map(item),
+        h('span', { class: 'probe' }, m.gateway.lastFlushAt ? ticking(() => t('svc.probed', { ago: since(m.gateway.lastFlushAt) })) : t('ov.waiting')));
+    },
+  };
+}
+
+function seatsCard() {
+  const value = h('span', { class: 'kv' });
+  const sub = h('div', { class: 'ks' });
+  const fleet = h('div', { class: 'ks' });
+  const grid = h('div', { class: 'seats', role: 'list' });
+  const cells = Array.from({ length: AWAKE_GATE }, () => h('div', { class: 'seat', role: 'listitem', onclick: (e) => { const app = e.currentTarget.dataset.app; if (app) location.hash = `#/apps/${encodeURIComponent(app)}`; } }));
+  grid.append(...cells);
+  const el = h('div', { class: 'card', 'data-section': 'seats' }, h('div', { class: 'kh' }, h('span', { class: 'l' }, t('seats.title')), h('span', { class: 'ks', style: 'margin:0' }, t('seats.gate', { n: AWAKE_GATE }))), value, sub, grid, fleet);
+  const seatOf = new Map();
+  let shown = null;
+  return {
+    el,
+    render(model, animate) {
+      const names = new Set([...model.transitions.keys()].filter((n) => ACTIVE.includes(stateOf(model, n))));
+      for (const name of seatOf.keys()) if (!names.has(name)) seatOf.delete(name);
+      const taken = new Set(seatOf.values());
+      const overflow = [];
+      for (const name of [...names].sort()) {
+        if (seatOf.has(name)) continue;
+        const free = cells.findIndex((_, i) => !taken.has(i));
+        if (free < 0) { overflow.push(name); continue; }
+        seatOf.set(name, free);
+        taken.add(free);
+      }
+      const byIndex = new Map([...seatOf].map(([name, i]) => [i, name]));
+      cells.forEach((cell, i) => {
+        const name = byIndex.get(i);
+        const state = name ? stateOf(model, name) : 'free';
+        cell.classList.remove('ignite');
+        if (animate && state === 'awake' && cell.dataset.state !== 'awake') flash(cell, 'ignite');
+        cell.dataset.state = state;
+        if (name) cell.dataset.app = name; else delete cell.dataset.app;
+        cell.title = name ? `${name} · ${t(`st.${state}`)}` : t('seats.free');
+      });
+      const count = (state) => [...names].filter((n) => stateOf(model, n) === state).length;
+      const next = `${names.size}`;
+      if (shown !== next) {
+        fill(value, nf(names.size), h('small', {}, `/ ${AWAKE_GATE}`));
+        if (animate && shown !== null) flash(value, 'bump');
+        shown = next;
+      }
+      fill(sub, t('k.awakeSub', { waking: count('waking'), draining: count('draining'), stopping: count('stopping') }),
+        overflow.length ? h('span', { class: 'over' }, ` · ${t('seats.over', { n: overflow.length })}`) : null);
+      const f = model.metrics.fleet;
+      fill(fleet, t('seats.fleet', { registered: nf(f.apps.registered), active: nf(f.activeLast24h), removed: nf(f.apps.removed) }));
+    },
+  };
+}
+
+function gateCard() {
+  const value = h('span', { class: 'kv' });
+  const sub = h('div', { class: 'ks' });
+  const strip = h('div', { class: 'gate', 'aria-hidden': 'true' });
+  const latest = h('div', { class: 'ks' });
+  const el = h('div', { class: 'card', 'data-section': 'gate' }, h('div', { class: 'kh' }, h('span', { class: 'l' }, t('k.wakes'))), value, sub, strip, latest);
+  let lastSeq = null;
+  let shown = null;
+  return {
+    el,
+    render(model, animate) {
+      const w = model.metrics.wakes.last1h;
+      if (shown !== w.count) {
+        fill(value, nf(w.count));
+        if (animate && shown !== null) flash(value, 'bump');
+        shown = w.count;
+      }
+      fill(sub, t('gate.sub', { p50: ms(w.p50Ms), p95: ms(w.p95Ms), failures: nf(w.failures) }));
+      const wakes = model.events.filter((e) => MARKS.wake.test(e) || MARKS.wakeFailed.test(e)).slice(-40);
+      const top = Math.max(COLD_START_GATE_MS * 1.25, ...wakes.map((e) => (e.ms ?? 0) * 1.08));
+      const x = (v) => `${Math.sqrt(Math.min(v, top) / top) * 100}%`;
+      const newest = wakes.at(-1);
+      fill(strip,
+        h('div', { class: 'rail' }),
+        h('div', { class: 'limit', style: `left:${x(COLD_START_GATE_MS)}` }, h('span', {}, t('gate.line'))),
+        ...wakes.map((e) => {
+          const failed = e.ms === undefined;
+          return h('div', {
+            class: ['w', failed ? 'fail' : '', e === newest ? 'last' : '', animate && lastSeq !== null && e.seq > lastSeq ? 'drop' : ''].join(' '),
+            style: `left:${failed ? '100%' : x(e.ms)}`,
+          });
+        }),
+        ...[['p50', w.p50Ms, 'end'], ['p95', w.p95Ms, 'start']].filter(([, v]) => v != null).map(([label, v, side]) => h('span', { class: `p ${side}`, style: `left:${x(v)}` }, label)),
+        ...[0, 1000].map((v) => h('span', { class: `p axis${v ? '' : ' zero'}`, style: `left:${x(v)}` }, v ? ms(v) : '0')));
+      lastSeq = model.lastSeq;
+      fill(latest, newest
+        ? [newest.ms === undefined ? h('span', { class: 'over' }, t('gate.failed')) : t('gate.latest', { ms: ms(newest.ms) }), ' · ', newest.app ?? '', ' · ', ticking(() => since(newest.t))]
+        : t('gate.none'));
+    },
+  };
+}
+
+function hostCard() {
+  const value = h('span', { class: 'kv' });
+  const meter = h('div', { class: 'meter' });
+  const el = h('div', { class: 'card', 'data-section': 'host' }, h('div', { class: 'kh' }, h('span', { class: 'l' }, t('k.host'))), value, meter);
+  return {
+    el,
+    render(m) {
+      const host = m.host;
+      if (!host) return void fill(value, '-');
+      const used = host.memory.totalBytes - host.memory.freeBytes;
+      fill(value, new Intl.NumberFormat(locale(), { maximumFractionDigits: 2 }).format(host.load[0]), h('small', {}, t('k.cores', { n: host.cpus })));
+      const row = (label, text, ratio) => [
+        h('div', {}, h('span', {}, label), h('span', { class: 'num' }, text)),
+        h('div', { class: 'bar', style: 'margin-top:0' }, h('i', { class: ratio > 0.85 ? 'hot' : null, style: `width:${Math.min(100, ratio * 100).toFixed(1)}%` })),
+      ];
+      fill(meter,
+        ...row(t('host.mem'), `${bytes(used)} / ${bytes(host.memory.totalBytes)}`, used / host.memory.totalBytes),
+        ...(host.data ? row(t('host.disk'), t('host.diskFree', { free: bytes(host.data.freeBytes) }), 1 - host.data.freeBytes / host.data.totalBytes) : []));
+    },
+  };
+}
+
+function timeline() {
+  const body = h('div', { class: 'card tl', 'data-section': 'timeline' });
+  const rendered = new Set();
+  return {
+    el: body,
+    render(model, animate) {
+      const now = Date.now();
+      const from = now - SPAN_MS;
+      const span = SPAN_MS + AHEAD_MS;
+      const pct = (v) => `${(((v - from) / span) * 100).toFixed(3)}%`;
+      const listed = new Map(model.apps.map((a) => [a.name, a]));
+      const rows = [...model.transitions.entries()]
+        .map(([name, list]) => ({ name, list, segs: segments(list, from, now) }))
+        .filter((r) => r.segs.length && listed.has(r.name) && listed.get(r.name).status !== 'purging')
+        .sort((a, b) => (a.name < b.name ? -1 : 1));
+      const axis = h('div', { class: 'tl-row axis' }, h('span', {}),
+        h('div', { class: 'track' }, h('div', { class: 'ahead', style: `left:${pct(now)}` }),
+          [15, 10, 5].map((n) => h('span', { class: n === 15 ? 'tick first' : 'tick', style: `left:${pct(now - n * 60_000)}` }, t('tl.minus', { n }))),
+          h('span', { class: 'tick now', style: `left:${pct(now)}` }, t('tl.now'))),
+        h('span', {}));
+      if (!rows.length) {
+        rendered.clear();
+        return void fill(body, axis, h('div', { class: 'empty' }, t('tl.empty')));
+      }
+      const present = new Set(rows.map((r) => r.name));
+      for (const name of rendered) if (!present.has(name)) rendered.delete(name);
+      fill(body, axis, ...rows.map(({ name, list, segs }) => {
+        const state = stateOf(model, name);
+        const a = listed.get(name);
+        const lastWake = [...list].reverse().find((s) => s.state === 'awake' && typeof s.ms === 'number' && s.t >= from);
+        const bands = segs.map((s) => h('div', {
+          class: `band ${s.state}${s.open ? ' open' : ''}`,
+          style: `left:${pct(s.from)};width:calc(${pct(s.to)} - ${pct(s.from)})`,
+          title: s.state === 'fail' ? `${t('mk.wakeFailed')} ${clock(s.t, true)} · ${s.error}`
+            : `${t(`st.${s.state}`)} ${clock(s.from, true)} – ${s.open ? t('tl.now') : clock(s.to, true)}${s.ms ? ` · ${t('tl.wake', { ms: ms(s.ms) })}` : ''}`,
+        }));
+        const plan = state === 'awake' && a?.sleepsAt && a.instance === 'awake' && a.sleepsAt > now
+          ? h('div', { class: 'band plan', style: `left:${pct(now)};width:calc(${pct(Math.min(a.sleepsAt, now + AHEAD_MS))} - ${pct(now)})`, title: t('tl.sleepsAt', { time: clock(a.sleepsAt, true) }) })
+          : null;
+        const label = lastWake ? h('span', { class: `ms${(lastWake.t - from) / span < 0.12 ? ' after' : ''}`, style: `left:${pct(lastWake.t)}` }, ms(lastWake.ms)) : null;
+        const leases = a && ACTIVE.includes(state) ? leaseChips(a.leases) : null;
+        const rate = model.rates.get(name);
+        const why = state === 'awake' && a?.instance === 'awake' && a.sleepsAt
+          ? ticking(() => (a.sleepsAt > Date.now() ? t('tl.sleepsIn', { d: duration(a.sleepsAt - Date.now() + 999) }) : t('tl.sleepingNow')))
+          : ACTIVE.includes(state) ? null
+            : h('span', { class: 'muted' }, ticking(() => t('tl.asleep', { d: duration(Date.now() - list.at(-1).t) })));
+        const row = h('div', { class: `tl-row${ACTIVE.includes(state) ? '' : ' dim'}`, 'data-href': `#/apps/${encodeURIComponent(name)}`, onclick: (e) => { if (!e.target.closest('a')) location.hash = `#/apps/${encodeURIComponent(name)}`; } },
+          h('div', { class: 'tl-name' }, h('span', { class: `st ${tone(state === 'none' ? 'asleep' : state)}`, title: t(`st.${state}`) }, t(`st.${state}`)), appLink(name)),
+          h('div', { class: 'track' }, h('div', { class: 'ahead', style: `left:${pct(now)}` }), bands, plan, label),
+          h('div', { class: 'tl-meta' },
+            rate > 0 && ACTIVE.includes(state) ? h('span', { class: 'num' }, t('tl.rate', { n: new Intl.NumberFormat(locale(), { maximumFractionDigits: 1 }).format(rate) })) : null,
+            leases,
+            why && h('span', { class: state === 'awake' && a?.sleepsAt && a.sleepsAt - now < 10_000 ? 'soon' : '' }, why)));
+        if (animate && !rendered.has(name)) row.classList.add('enter');
+        rendered.add(name);
+        return row;
+      }));
+    },
+  };
+}
+
 // Charts
 
 /** Sums minute buckets into bins: 1 h by minute, 6 h by 5 min, 24 h by 15 min. Latency bins take the median of minute medians. */
@@ -514,29 +1007,45 @@ function niceMax(v) {
   return [1, 2, 2.5, 5, 10].map((m) => m * p).find((m) => m >= v);
 }
 
-/** layers: [{ key, color, kind: 'area' | 'bar' | 'line', axis: 'left' | 'right' }] */
-function chartCard(attrs, titleKey, layers) {
+/** One crosshair for every chart on the page: hovering one draws the line on all. */
+const crosshair = { charts: new Set(), at(i) { for (const c of this.charts) c.cross(i); } };
+
+/** layers: [{ key, color, kind: 'area' | 'bar' | 'line', axis: 'left' | 'right' }]; marks: keys of MARKS drawn in the lane above the plot. */
+function chartCard(attrs, titleKey, layers, marks, extra = () => null) {
   const el = h('div', { class: 'inset chart', ...attrs });
   const tip = h('div', { class: 'tip', hidden: true });
   const plot = h('div', { style: 'position:relative' });
-  let data = null;
-  let hover = null;
+  const legend = h('span', { style: 'display:inline-flex;gap:10px;flex-wrap:wrap' });
+  const note = h('div', { class: 'legend', style: 'padding:6px 4px 0' });
+  let model = null;
+  let cross = () => {};
+  const id = `c${Math.random().toString(36).slice(2, 8)}`;
   const draw = () => {
-    if (!data) return;
+    if (!model) return;
+    const series = model.metrics.series;
     const width = Math.max(260, plot.clientWidth);
-    const height = 150;
+    const height = 160;
     const right = layers.some((l) => l.axis === 'right');
-    const pad = { l: 34, r: right ? 46 : 8, t: 8, b: 20 };
-    const binnedLayers = layers.map((l) => ({ ...l, ...binned(data.series, l.key, win) }));
-    const count = binnedLayers[0].values.length;
-    const step = binnedLayers[0].step;
-    const start = data.series.start + (1440 - win) * 60000;
+    const pad = { l: 34, r: right ? 46 : 8, t: 18, b: 20 };
+    const bins = layers.map((l) => ({ ...l, ...binned(series, l.key, win) }));
+    const count = bins[0].values.length;
+    const step = bins[0].step;
+    const start = series.start + (1440 - win) * 60000;
+    const binMs = step * 60000;
+    const done = Math.min(1, (Date.now() - (start + (count - 1) * binMs)) / binMs);
     const bw = (width - pad.l - pad.r) / count;
     const x = (i) => pad.l + bw * (i + 0.5);
-    const maxOf = (axis) => niceMax(Math.max(0, ...binnedLayers.filter((l) => (l.axis ?? 'left') === axis).flatMap((l) => l.values.filter((v) => v != null))));
+    const maxOf = (axis) => niceMax(Math.max(0, ...bins.filter((l) => (l.axis ?? 'left') === axis).flatMap((l) => l.values.filter((v) => v != null))));
     const max = { left: maxOf('left'), right: right ? maxOf('right') : 1 };
     const y = (v, axis = 'left') => pad.t + (height - pad.t - pad.b) * (1 - v / max[axis]);
     const g = svg('svg', { viewBox: `0 0 ${width} ${height}`, width, height, role: 'img', 'aria-label': t(titleKey) });
+    const defs = svg('defs');
+    for (const [n, l] of bins.entries()) {
+      defs.append(svg('pattern', { id: `${id}-${n}`, width: 4, height: 4, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' },
+        svg('rect', { width: 4, height: 4, style: `fill:${l.color};fill-opacity:.12` }),
+        svg('line', { x1: 0, y1: 0, x2: 0, y2: 4, style: `stroke:${l.color};stroke-width:1.6` })));
+    }
+    g.append(defs);
     for (const f of [0, 0.5, 1]) {
       g.append(svg('line', { x1: pad.l, x2: width - pad.r, y1: y(max.left * f), y2: y(max.left * f), style: 'stroke:var(--line-soft)' }));
       g.append(svg('text', { x: pad.l - 6, y: y(max.left * f) + 4, 'text-anchor': 'end' }, nf(max.left * f)));
@@ -544,15 +1053,22 @@ function chartCard(attrs, titleKey, layers) {
     }
     for (const f of [0, 1 / 3, 2 / 3, 1]) {
       const i = Math.min(count - 1, Math.round(f * (count - 1)));
-      g.append(svg('text', { x: x(i), y: height - 4, 'text-anchor': f === 0 ? 'start' : f === 1 ? 'end' : 'middle' }, clock(start + i * step * 60000)));
+      g.append(svg('text', { x: x(i), y: height - 4, 'text-anchor': f === 0 ? 'start' : f === 1 ? 'end' : 'middle' }, clock(start + i * binMs)));
     }
-    for (const l of binnedLayers) {
+    const lastX = x(count - 1) - bw / 2;
+    g.append(svg('rect', { x: lastX, y: pad.t, width: Math.max(1, bw * done), height: height - pad.t - pad.b, style: 'fill:var(--stripe)' }));
+    for (const [n, l] of bins.entries()) {
       const axis = l.axis ?? 'left';
+      const v = l.values;
       if (l.kind === 'bar') {
-        l.values.forEach((v, i) => v > 0 && g.append(svg('rect', { x: x(i) - Math.max(1, bw * 0.3), width: Math.max(2, bw * 0.6), y: y(v, axis), height: y(0) - y(v, axis), rx: 1, style: `fill:${l.color}` })));
+        v.forEach((value, i) => value > 0 && g.append(svg('rect', {
+          x: x(i) - Math.max(1, bw * 0.3), width: Math.max(2, bw * 0.6), y: y(value, axis), height: y(0) - y(value, axis), rx: 1,
+          style: i === count - 1 ? `fill:url(#${id}-${n});stroke:${l.color};stroke-width:1` : `fill:${l.color}`,
+        })));
         continue;
       }
-      const points = l.values.map((v, i) => (v == null ? null : [x(i), y(v, axis)]));
+      const solid = l.kind === 'area' ? count - 1 : count;
+      const points = v.slice(0, solid).map((value, i) => (value == null ? null : [x(i), y(value, axis)]));
       const runs = [];
       for (const p of points) if (p) (runs.at(-1)?.open ? runs.at(-1).pts.push(p) : runs.push({ open: true, pts: [p] })); else if (runs.at(-1)) runs.at(-1).open = false;
       for (const { pts } of runs) {
@@ -561,76 +1077,148 @@ function chartCard(attrs, titleKey, layers) {
         if (pts.length === 1) g.append(svg('circle', { cx: pts[0][0], cy: pts[0][1], r: 2, style: `fill:${l.color}` }));
         g.append(svg('path', { d: line, style: `fill:none;stroke:${l.color};stroke-width:${l.kind === 'line' ? 1.5 : 2};stroke-linejoin:round${l.dash ? ';stroke-dasharray:3 3' : ''}` }));
       }
+      if (l.kind === 'area' && v[count - 1] > 0) {
+        g.append(svg('rect', { x: x(count - 1) - Math.max(1, bw * 0.3), width: Math.max(2, bw * 0.6), y: y(v[count - 1], axis), height: y(0) - y(v[count - 1], axis), rx: 1, style: `fill:url(#${id}-${n});stroke:${l.color};stroke-width:1` }));
+      }
     }
-    const cross = svg('line', { y1: pad.t, y2: height - pad.b, style: 'stroke:var(--ink-3);stroke-width:1', visibility: 'hidden' });
-    g.append(cross);
-    const show = (px) => {
-      const i = Math.max(0, Math.min(count - 1, Math.floor((px - pad.l) / bw)));
-      hover = px;
-      cross.setAttribute('x1', x(i));
-      cross.setAttribute('x2', x(i));
-      cross.setAttribute('visibility', 'visible');
-      const from = start + i * step * 60000;
-      tip.replaceChildren(
-        h('div', { class: 'mono' }, step === 1 ? clock(from) : `${clock(from)}–${clock(from + step * 60000)}`),
-        ...binnedLayers.map((l) => h('div', {}, h('span', { style: `color:${l.color}` }, '● '), `${t(`s.${l.key}`)} `, h('span', { class: 'mono' }, l.key === 'wakeP50Ms' ? ms(l.values[i]) : nf(l.values[i] ?? 0)))));
+    const binOf = (time) => Math.floor((time - start) / binMs);
+    const lane = new Map();
+    for (const e of model.events) {
+      const i = binOf(e.t);
+      if (i < 0 || i >= count) continue;
+      for (const kind of marks) if (MARKS[kind].test(e)) {
+        const key = `${i}:${kind}`;
+        lane.set(key, { i, kind, n: (lane.get(key)?.n ?? 0) + 1 });
+      }
+    }
+    const offsets = { publish: 0, wake: 0, wakeFailed: 6, deliveryFailed: 6 };
+    for (const { i, kind } of lane.values()) {
+      const cx = x(i) + (marks.length > 1 ? offsets[kind] - 3 : 0);
+      const color = MARKS[kind].color;
+      if (kind === 'publish') {
+        g.append(svg('line', { x1: x(i), x2: x(i), y1: pad.t, y2: height - pad.b, style: 'stroke:var(--ink-3);stroke-dasharray:2 3' }));
+        g.append(svg('path', { d: `M${x(i)},${pad.t - 10}l3.5,3.5l-3.5,3.5l-3.5,-3.5Z`, style: `fill:${color}` }));
+      } else if (kind === 'wake') g.append(svg('rect', { x: cx - 1, y: pad.t - 11, width: 2, height: 7, rx: 1, style: `fill:${color}` }));
+      else g.append(svg('circle', { cx, cy: pad.t - 7, r: 2.6, style: `fill:${color}` }));
+    }
+    const line = svg('line', { y1: pad.t - 12, y2: height - pad.b, style: 'stroke:var(--ink-3);stroke-width:1', visibility: 'hidden' });
+    g.append(line);
+    cross = (i) => {
+      if (i == null) return void line.setAttribute('visibility', 'hidden');
+      line.setAttribute('x1', x(i));
+      line.setAttribute('x2', x(i));
+      line.setAttribute('visibility', 'visible');
+    };
+    const show = (i) => {
+      const from = start + i * binMs;
+      const here = marks.map((kind) => [kind, lane.get(`${i}:${kind}`)?.n ?? 0]).filter(([, n]) => n > 0);
+      fill(tip,
+        h('div', { class: 'mono' }, step === 1 ? clock(from) : `${clock(from)}–${clock(from + binMs)}`, i === count - 1 ? ` · ${t('ch.partial')}` : ''),
+        ...bins.map((l) => h('div', {}, h('span', { style: `color:${l.color}` }, '● '), `${t(`s.${l.key}`)} `, h('span', { class: 'mono' }, l.key === 'wakeP50Ms' ? ms(l.values[i]) : nf(l.values[i] ?? 0)))),
+        ...here.map(([kind, n]) => h('div', {}, h('span', { style: `color:${MARKS[kind].color}` }, '◆ '), `${t(`mk.${kind}`)} `, h('span', { class: 'mono' }, nf(n)))));
       tip.hidden = false;
       const left = x(i) + 12;
       tip.style.left = `${left + tip.offsetWidth > width ? x(i) - tip.offsetWidth - 12 : left}px`;
       tip.style.top = '4px';
     };
-    g.addEventListener('pointermove', (e) => show(e.clientX - g.getBoundingClientRect().left));
-    g.addEventListener('pointerleave', () => { hover = null; tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
-    plot.replaceChildren(g, tip);
-    if (hover != null) show(hover);
+    const index = (e) => Math.max(0, Math.min(count - 1, Math.floor((e.clientX - g.getBoundingClientRect().left - pad.l) / bw)));
+    g.addEventListener('pointermove', (e) => { const i = index(e); crosshair.at(i); show(i); });
+    g.addEventListener('pointerleave', () => { tip.hidden = true; crosshair.at(null); });
+    fill(plot, g, tip);
   };
+  const chart = { cross: (i) => cross(i) };
+  crosshair.charts.add(chart);
   new ResizeObserver(draw).observe(plot);
-  const legend = h('span', { style: 'display:inline-flex;gap:10px;flex-wrap:wrap' });
-  el.append(h('header', {}, h('b', {}, t(titleKey)), legend), plot);
+  el.append(h('header', {}, h('b', {}, t(titleKey)), legend), plot, note);
   return {
     el,
     set(next) {
-      data = next;
-      legend.replaceChildren(...layers.map((l) => {
-        const total = l.key === 'wakeP50Ms' ? null : binned(next.series, l.key, win).values.reduce((a, b) => a + b, 0);
+      model = next;
+      fill(legend, ...layers.map((l) => {
+        const total = l.key === 'wakeP50Ms' ? null : binned(next.metrics.series, l.key, win).values.reduce((a, b) => a + b, 0);
         return h('span', { class: 'legend' }, h('i', { style: `background:${l.color}` }), t(`s.${l.key}`), total == null ? null : h('span', { class: 'mono' }, nf(total)));
       }));
+      fill(note, extra(next));
+      note.hidden = !note.childNodes.length;
       draw();
     },
   };
 }
 
-// Views
+// Attention
 
-const main = () => document.getElementById('main');
-let poller = null;
+const SEEN_KEY = 'pneuma-space-seen';
+const loadSeen = () => { try { return new Set(JSON.parse(store.get(SEEN_KEY) ?? '[]')); } catch { return new Set(); } };
 
-function show(...nodes) {
-  main().replaceChildren(...nodes);
+function attentionItems(model, downSince) {
+  const m = model.metrics;
+  const items = m.deliveries.recentFailures.map((d) => ({
+    id: `d:${d.app}:${d.trigger}:${d.at}`, group: `d:${d.app}:${d.trigger}`, tone: 'red', at: d.at, app: d.app,
+    what: t('att.delivery'), why: [t('att.deliveryDetail', { trigger: d.trigger, attempts: d.attempts }), d.reason ? ` · ${d.reason}` : ''].join(''),
+  }));
+  for (const e of model.events) {
+    if (e.error === undefined || e.ev === 'wake-failed') continue;
+    const wake = e.ev === 'asleep';
+    items.push({ id: `e:${e.ev}:${e.app}:${e.t}`, group: `e:${e.ev}:${e.app}`, tone: 'red', at: e.t, app: e.app, what: wake ? t('att.wake') : h('span', { class: 'mono' }, e.ev), why: String(e.error) });
+  }
+  for (const [name, at] of downSince) items.push({ id: `s:${name}:${at}`, group: `s:${name}`, tone: 'red', at, app: null, what: t('att.service', { name: t(`svc.${name}`) }), why: t('att.serviceDetail') });
+  const p95 = m.wakes.last1h.p95Ms;
+  if (p95 != null && p95 > COLD_START_GATE_MS) {
+    const hour = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+    items.push({ id: `p95:${hour}`, group: 'p95', tone: 'orange', at: hour, app: null, what: t('att.p95'), why: t('att.p95Detail', { p95: ms(p95) }) });
+  }
+  const groups = new Map();
+  for (const item of items.sort((a, b) => b.at - a.at)) {
+    const first = groups.get(item.group);
+    if (first) first.count++;
+    else groups.set(item.group, { ...item, count: 1 });
+  }
+  return [...groups.values()];
 }
 
-function tile(label, value, sub, ratio, extra = {}) {
-  return h('div', { class: 'card tile', ...extra },
-    h('div', { class: 'l' }, label),
-    h('div', { class: 'v' }, value),
-    ratio == null ? null : h('div', { class: 'bar' }, h('i', { class: ratio > 0.8 ? 'hot' : null, style: `width:${Math.min(100, ratio * 100).toFixed(1)}%` })),
-    h('div', { class: 's' }, sub));
+function attentionInbox() {
+  const list = h('div', { class: 'card inbox' });
+  const all = h('button', { class: 'linkish', type: 'button', onclick: () => { for (const i of items) seen.add(i.id); save(); paint(false); } }, t('att.allSeen'));
+  const el = h('div', { 'data-section': 'attention' }, list);
+  const seen = loadSeen();
+  const downSince = new Map();
+  let items = [];
+  let known = null;
+  let open = false;
+  const save = () => store.set(SEEN_KEY, JSON.stringify([...seen].slice(-300)));
+  const row = (i, fresh) => h('div', { class: `item ${i.tone}${seen.has(i.id) ? ' seen' : ''}${fresh ? ' enter' : ''}` },
+    h('div', { class: 'what' }, i.what, i.app ? appLink(i.app) : null, i.count > 1 ? h('span', { class: 'chip' }, `×${nf(i.count)}`) : null),
+    h('div', { class: 'side', style: 'grid-row: span 2' },
+      h('span', { title: stamp(i.at) }, clock(i.at, true)),
+      seen.has(i.id) ? null : h('button', { type: 'button', onclick: () => { seen.add(i.id); save(); paint(false); } }, t('att.seen'))),
+    h('div', { class: 'why' }, i.why));
+  const paint = (animate) => {
+    const unseen = items.filter((i) => !seen.has(i.id));
+    const done = items.filter((i) => seen.has(i.id));
+    const fresh = (i) => animate && known !== null && !known.has(i.id);
+    fill(list,
+      unseen.length ? unseen.map((i) => row(i, fresh(i))) : h('div', { class: 'empty' }, t('empty.attention')),
+      done.length ? h('div', { class: 'item', style: 'display:block;padding:8px 14px' },
+        h('button', { class: 'linkish', type: 'button', onclick: () => { open = !open; paint(false); } }, open ? t('att.hideSeen') : t('att.showSeen', { n: done.length }))) : null,
+      open ? done.map((i) => row(i, false)) : null);
+    all.hidden = unseen.length === 0;
+    known = new Set(items.map((i) => i.id));
+  };
+  return {
+    el,
+    action: all,
+    render(model, animate) {
+      for (const [name, s] of Object.entries(model.metrics.services)) {
+        if (s.status === 'down' && !downSince.has(name)) downSince.set(name, model.metrics.gateway.lastFlushAt ?? Date.now());
+        if (s.status !== 'down') downSince.delete(name);
+      }
+      items = attentionItems(model, downSince);
+      paint(animate);
+    },
+  };
 }
 
-function attentionRows(m) {
-  const deliveries = m.deliveries.recentFailures.map((d) => ({
-    at: d.at, app: d.app, what: status('failed'), label: t('att.delivery'),
-    detail: [t('att.deliveryDetail', { trigger: d.trigger, attempts: d.attempts }), d.reason && ` · ${d.reason}`],
-  }));
-  // A request wake failure is logged twice (wake-failed and the runtime's asleep); the runtime line is kept.
-  const errors = m.events.filter((e) => e.error !== undefined && e.ev !== 'wake-failed').map((e) => ({
-    at: e.t, app: e.app, what: h('span', { class: 'st red' }, e.ev), detail: String(e.error),
-  }));
-  return [...deliveries, ...errors].sort((a, b) => b.at - a.at).map((r) => ({
-    href: r.app ? `#/apps/${encodeURIComponent(r.app)}` : undefined,
-    cells: [h('span', { class: 'mono', title: stamp(r.at) }, clock(r.at, true)), r.app ? appLink(r.app) : '-', r.label ? h('span', { class: 'st red' }, r.label) : r.what, r.detail],
-  }));
-}
+// Event tail
 
 function eventTone(e) {
   if (e.error !== undefined || e.ev === 'delivery.failed') return 'red';
@@ -638,115 +1226,174 @@ function eventTone(e) {
 }
 
 function eventFields(e) {
-  return Object.entries(e).filter(([k]) => !['t', 'ev', 'app'].includes(k))
+  return Object.entries(e).filter(([k]) => !['seq', 't', 'ev', 'app'].includes(k))
     .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' ');
 }
 
+function eventTail() {
+  const rows = h('div', { class: 'rows', 'data-section': 'tail' });
+  const pill = h('button', { class: 'pill', type: 'button', hidden: true, onclick: () => { rows.scrollTo({ top: 0 }); hovering = false; flush(); } });
+  const box = h('div', { class: 'card tailbox' }, pill, rows);
+  const filter = h('input', { type: 'search', name: 'filter', placeholder: t('ev.filter'), 'aria-label': t('ev.filter'), oninput: () => rebuild() });
+  const state = h('span', { class: 'muted' });
+  const head = h('div', { class: 'tailhead' }, filter, state);
+  const el = h('div', { 'data-section': 'events' }, head, box);
+  const entries = [];
+  const pending = [];
+  let hovering = false;
+  const paused = () => hovering || rows.scrollTop > 4;
+  const matches = (entry) => {
+    const needle = filter.value.trim().toLowerCase();
+    return entry.mark || !needle || `${entry.e.ev} ${entry.e.app ?? ''} ${eventFields(entry.e)}`.toLowerCase().includes(needle);
+  };
+  const line = (entry) => {
+    if (entry.mark) return h('div', { class: 'ev mark' }, entry.mark);
+    const e = entry.e;
+    return h('div', { class: 'ev', title: `#${e.seq} · ${stamp(e.t)}` },
+      h('span', { class: 'mono' }, clock(e.t, true)),
+      h('span', { class: `st ${eventTone(e)}` }, h('span', { class: 'mono' }, e.ev)),
+      e.app ? appLink(e.app) : h('span', { class: 'muted' }, '-'),
+      h('span', { class: 'f', title: eventFields(e) }, eventFields(e)));
+  };
+  const rebuild = () => {
+    const shown = entries.filter(matches);
+    fill(rows, ...(shown.length ? shown.map(line) : [h('div', { class: 'empty' }, t(entries.length ? 'empty.filtered' : 'empty.events'))]));
+  };
+  const flush = () => {
+    pill.hidden = true;
+    state.textContent = '';
+    if (!pending.length) return;
+    const batch = pending.splice(0).reverse();
+    entries.unshift(...batch);
+    entries.splice(TAIL_ROWS);
+    for (const old of rows.querySelectorAll('.fresh')) old.classList.remove('fresh');
+    rows.querySelector('.empty')?.remove();
+    const nodes = batch.filter(matches).map((entry) => {
+      const node = line(entry);
+      node.classList.add('fresh');
+      return node;
+    });
+    rows.prepend(...nodes);
+    while (rows.children.length > TAIL_ROWS) rows.lastChild.remove();
+  };
+  rows.addEventListener('pointerenter', () => { hovering = true; });
+  rows.addEventListener('pointerleave', () => { hovering = false; if (!paused()) flush(); });
+  rows.addEventListener('scroll', () => { if (!paused()) flush(); }, { passive: true });
+  return {
+    el,
+    seed(events) {
+      entries.unshift(...[...events].reverse().map((e) => ({ e })));
+      rebuild();
+    },
+    push(diff) {
+      if (diff.restarted) pending.push({ mark: t('tail.restart') });
+      if (diff.missed > 0) pending.push({ mark: t('tail.gap', { n: nf(diff.missed) }) });
+      pending.push(...diff.fresh.map((e) => ({ e })));
+      if (!paused()) return flush();
+      const n = pending.filter((p) => p.e).length;
+      if (!n) return;
+      pill.hidden = false;
+      pill.textContent = `↑ ${t('tail.new', { n: nf(n) })}`;
+      state.textContent = t('tail.paused');
+    },
+  };
+}
+
 async function overview() {
-  const sub = h('p', { class: 'sub' }, t('ov.waiting'));
-  const strip = h('div', { class: 'card strip', 'data-section': 'services' });
-  const tiles = h('div', { class: 'tiles', 'data-section': 'fleet' });
-  const charts = {
-    traffic: chartCard({ 'data-section': 'traffic' }, 'ch.traffic', [
+  const model = liveModel();
+  let mode = 'on';
+  const controls = { toggle: () => { mode = mode === 'paused' ? 'on' : 'paused'; header.render(model, mode); if (mode === 'on') refresh(); } };
+  const header = liveHeader(controls);
+  const services = servicesLine();
+  const seats = seatsCard();
+  const gate = gateCard();
+  const host = hostCard();
+  const lane = timeline();
+  const inbox = attentionInbox();
+  const tail = eventTail();
+  const charts = [
+    chartCard({ 'data-section': 'traffic' }, 'ch.traffic', [
       { key: 'requests', color: 'var(--accent)', kind: 'area' },
-      { key: 'errors', color: 'var(--red)', kind: 'bar' }]),
-    wakes: chartCard({ 'data-section': 'wakes' }, 'ch.wakes', [
+      { key: 'errors', color: 'var(--red)', kind: 'bar' }], ['publish', 'wakeFailed']),
+    chartCard({ 'data-section': 'wakes' }, 'ch.wakes', [
       { key: 'wakes', color: 'var(--accent)', kind: 'bar' },
       { key: 'wakeFailures', color: 'var(--red)', kind: 'bar' },
-      { key: 'wakeP50Ms', color: 'var(--orange)', kind: 'line', axis: 'right' }]),
-    deliveries: chartCard({ 'data-section': 'deliveries' }, 'ch.deliveries', [
+      { key: 'wakeP50Ms', color: 'var(--orange)', kind: 'line', axis: 'right' }], ['wake', 'wakeFailed']),
+    chartCard({ 'data-section': 'deliveries' }, 'ch.deliveries', [
       { key: 'deliveriesDone', color: 'var(--accent)', kind: 'area' },
       { key: 'deliveriesFailed', color: 'var(--red)', kind: 'bar' },
-      { key: 'deliveriesRetried', color: 'var(--orange)', kind: 'line', dash: true }]),
-  };
-  const awake = h('div');
-  const attention = h('div');
-  const events = h('div', { 'data-section': 'events' });
-  const filter = h('input', { type: 'search', placeholder: t('ev.filter'), 'aria-label': t('ev.filter'), oninput: () => renderEvents() });
+      { key: 'deliveriesRetried', color: 'var(--orange)', kind: 'line', dash: true }], ['deliveryFailed', 'publish'],
+    (m) => t('ch.due', { due: nf(m.metrics.deliveries.due), delivering: nf(m.metrics.deliveries.delivering) })),
+  ];
   const windows = h('span');
-  let last = null;
-
-  const renderWindows = () => windows.replaceChildren(segmented(WINDOWS.map((w) => [w, t(`win.${w}`)]), win, (w) => {
+  const renderWindows = () => fill(windows, segmented(WINDOWS.map((w) => [w, t(`win.${w}`)]), win, (w) => {
     win = w;
     store.set('pneuma-space-window', String(w));
     renderWindows();
-    if (last) Object.values(charts).forEach((c) => c.set(last));
+    if (model.metrics) charts.forEach((c) => c.set(model));
   }));
-  const renderEvents = () => {
-    if (!last) return;
-    const needle = filter.value.trim().toLowerCase();
-    const rows = [...last.events].reverse()
-      .filter((e) => !needle || `${e.ev} ${e.app ?? ''} ${eventFields(e)}`.toLowerCase().includes(needle))
-      .map((e) => ({ cells: [
-        h('span', { class: 'mono', title: stamp(e.t) }, clock(e.t, true)),
-        h('span', { class: `st ${eventTone(e)}` }, h('span', { class: 'mono' }, e.ev)),
-        e.app ? appLink(e.app) : '-',
-        h('span', { class: 'mono', title: eventFields(e) }, eventFields(e)),
-      ] }));
-    const scrolled = events.querySelector('.scroll')?.scrollTop ?? 0;
-    events.replaceChildren(table([['col.time'], ['col.event'], ['col.app'], ['col.fields', 'wrap']], rows, last.events.length ? 'empty.filtered' : 'empty.events', true));
-    events.querySelector('.scroll')?.scrollTo(0, scrolled);
-  };
   renderWindows();
 
   show(
-    h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('ov.title')), sub)),
-    h('section', {}, sectionHead(1, 'sec.services', 'sec.servicesDesc'), strip),
-    h('section', {}, sectionHead(2, 'sec.fleet', 'sec.fleetDesc'), tiles),
-    h('section', {}, sectionHead(3, 'sec.activity', 'sec.activityDesc', windows), h('div', { class: 'charts' }, Object.values(charts).map((c) => c.el))),
-    h('section', {}, sectionHead(4, 'sec.awake', 'sec.awakeDesc'), awake),
-    h('section', {}, sectionHead(5, 'sec.attention', 'sec.attentionDesc'), attention),
-    h('section', {}, sectionHead(6, 'sec.events', 'sec.eventsDesc', filter), events),
+    h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('ov.title')), h('p', { class: 'sub' }, t('ov.sub'))), header.el),
+    services.el,
+    h('section', {}, sectionHead(1, 'sec.fleet', 'sec.fleetDesc'), h('div', { class: 'fleet', 'data-section': 'fleet' }, seats.el, gate.el, host.el)),
+    h('section', {}, sectionHead(2, 'sec.timeline', 'sec.timelineDesc'), lane.el),
+    h('section', {}, sectionHead(3, 'sec.activity', 'sec.activityDesc', windows), h('div', { class: 'charts' }, charts.map((c) => c.el))),
+    h('div', { class: 'pair' },
+      h('section', {}, sectionHead(4, 'sec.attention', 'sec.attentionDesc', inbox.action), inbox.el),
+      h('section', {}, sectionHead(5, 'sec.events', 'sec.eventsDesc'), tail.el)),
   );
 
-  return async function update() {
-    const [m, apps] = await Promise.all([api('GET', '/api/metrics'), api('GET', '/api/apps')]);
-    last = m;
-    sub.replaceChildren(m.gateway.lastFlushAt ? t('ov.sub', { ago: ago(m.gateway.lastFlushAt).textContent }) : t('ov.waiting'));
-    footer(m.gateway.startedAt);
-
-    const service = (name) => {
-      const s = m.services[name] ?? { status: 'down', latencyMs: null };
-      return h('div', {},
-        h('span', { class: `st ${tone(s.status)}` }, t(`svc.${name}`)),
-        h('div', { class: 'v' }, s.status === 'up' ? ms(s.latencyMs) : t(`st.${s.status}`)),
-        h('div', { class: 's' }, s.status === 'up' ? t('st.up') : t(`svc.${s.status}`)));
-    };
-    strip.replaceChildren(
-      h('div', {},
-        h('span', { class: 'st green' }, t('svc.gateway')),
-        h('div', { class: 'v' }, duration(Date.now() - m.gateway.startedAt)),
-        h('div', { class: 's' }, t('svc.gatewaySub', { rss: bytes(m.gateway.rssBytes) }))),
-      ...['redis', 'object', 'postgres', 'coturn'].map(service));
-
-    const count = (state) => apps.filter((a) => a.instance === state).length;
-    const awakeNow = count('awake');
-    const w = m.wakes.last1h;
-    const requests = m.series.requests.slice(-60).reduce((a, b) => a + b, 0);
-    const errors = m.series.errors.slice(-60).reduce((a, b) => a + b, 0);
-    const host = m.host;
-    const memUsed = host ? host.memory.totalBytes - host.memory.freeBytes : 0;
-    tiles.replaceChildren(
-      tile(t('k.apps'), nf(m.fleet.apps.registered), t('k.appsSub', { removed: nf(m.fleet.apps.removed), purging: nf(m.fleet.apps.purging), active: nf(m.fleet.activeLast24h) })),
-      tile(t('k.awake'), [nf(awakeNow), h('small', {}, `/ ${AWAKE_GATE}`)], t('k.awakeSub', { waking: count('waking'), draining: count('draining'), stopping: count('stopping') }), awakeNow / AWAKE_GATE),
-      tile(t('k.requests'), nf(requests), t('k.requestsSub', { errors: nf(errors), ratio: requests ? pct(errors / requests) : '-' })),
-      tile(t('k.wakes'), nf(w.count), t('k.wakesSub', { failures: nf(w.failures), p50: ms(w.p50Ms), p95: ms(w.p95Ms) }), w.p95Ms == null ? null : w.p95Ms / COLD_START_GATE_MS),
-      tile(t('k.deliveries'), nf(m.deliveries.due), t('k.deliveriesSub', { delivering: nf(m.deliveries.delivering), failed: nf(m.deliveries.failed) })),
-      host
-        ? tile(t('k.host'), [new Intl.NumberFormat(locale(), { maximumFractionDigits: 2 }).format(host.load[0]), h('small', {}, t('k.cores', { n: host.cpus }))],
-          t('k.hostSub', { used: bytes(memUsed), total: bytes(host.memory.totalBytes), free: host.data ? bytes(host.data.freeBytes) : '-' }), memUsed / host.memory.totalBytes, { 'data-section': 'host' })
-        : tile(t('k.host'), '-', t('ov.waiting'), null, { 'data-section': 'host' }),
-    );
-    Object.values(charts).forEach((c) => c.set(m));
-
-    const live = apps.filter((a) => ['waking', 'awake', 'draining', 'stopping'].includes(a.instance)).sort((a, b) => (a.since ?? 0) - (b.since ?? 0));
-    awake.replaceChildren(table(
-      [['col.name'], ['col.state'], ['col.since'], ['col.leases'], ['col.requests', 'r'], ['col.errors', 'r']],
-      live.map((a) => ({ href: `#/apps/${encodeURIComponent(a.name)}`, cells: [appLink(a.name), status(a.instance), ago(a.since), leaseChips(a.leases), h('span', { class: 'num' }, nf(a.requests)), h('span', { class: 'num' }, nf(a.errors))] })),
-      'empty.awake'));
-    attention.replaceChildren(table([['col.time'], ['col.app'], ['col.what'], ['col.detail', 'wrap']], attentionRows(m), 'empty.attention'));
-    renderEvents();
+  const pollMetrics = async () => {
+    const m = await api('GET', '/api/metrics');
+    const diff = absorbMetrics(model, m);
+    if (diff.restarted) header.restarted(m.gateway.startedAt);
+    if (diff.initial) {
+      absorbApps(model, await api('GET', '/api/apps'), Date.now());
+      tail.seed(diff.fresh);
+    } else tail.push(diff);
+    const moved = diff.initial || diff.fresh.length > 0 || diff.restarted;
+    if (moved && !diff.initial) header.beat();
+    render(!diff.initial, moved);
   };
+  const pollApps = async () => {
+    if (!model.metrics) return;
+    absorbApps(model, await api('GET', '/api/apps'), Date.now());
+    render(true, true);
+  };
+  let paintedAt = 0;
+  const render = (animate, moved) => {
+    header.render(model, mode);
+    services.render(model.metrics);
+    seats.render(model, animate);
+    gate.render(model, animate);
+    host.render(model.metrics);
+    const awake = [...model.transitions.keys()].some((n) => ACTIVE.includes(stateOf(model, n)));
+    if (moved || awake || Date.now() - paintedAt > 60_000) {
+      lane.render(model, animate);
+      paintedAt = Date.now();
+    }
+    charts.forEach((c) => c.set(model));
+    inbox.render(model, animate);
+  };
+  const guarded = (fn) => {
+    let busy = false;
+    return async () => {
+      if (mode === 'paused' || busy) return;
+      busy = true;
+      try {
+        await fn();
+        if (mode === 'offline') header.render(model, mode = 'on');
+      } catch {
+        header.render(model, mode = 'offline');
+      } finally {
+        busy = false;
+      }
+    };
+  };
+  const refresh = guarded(pollMetrics);
+  return { loops: [[METRICS_MS, refresh], [APPS_MS, guarded(pollApps)]], first: refresh };
 }
 
 const STATE_FILTERS = ['awake', 'waking', 'asleep', 'none', 'registered', 'removed', 'purging'];
@@ -845,14 +1492,26 @@ function logsPanel(name) {
   return { box, controls: [picker, h('button', { class: 'btn', type: 'button', onclick: load }, t('logs.refresh'))] };
 }
 
+/** One beat per recent state change of the app, oldest on the left. */
+function stateStrip(events, name) {
+  const beats = events.filter((e) => e.app === name && INSTANCE_EVENTS.includes(e.ev)).slice(-48);
+  if (!beats.length) return null;
+  return h('div', { class: 'beats', role: 'img', 'aria-label': t('d.recent') },
+    beats.map((e) => h('i', {
+      class: e.error !== undefined ? 'fail' : e.ev,
+      title: `${clock(e.t, true)} · ${e.error !== undefined ? t('mk.wakeFailed') : t(`st.${e.ev === 'removed' ? 'none' : e.ev}`)}${typeof e.ms === 'number' ? ` · ${ms(e.ms)}` : ''}`,
+    })),
+    h('span', { class: 'muted' }, t('d.recent')));
+}
+
 async function detail(name) {
-  const [d, apps] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps')]);
+  const [d, apps, m] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), api('GET', '/api/metrics')]);
   const { app, releases, bindings, policy, stats, deliveries } = d;
   d.address = `/apps/${app.name}/`;
   const reload = () => route();
   const head = h('div', { class: 'grow' });
   const tiles = h('div', { class: 'tiles four' });
-  const renderHead = (row, detailStats) => {
+  const renderHead = (row, detailStats, events) => {
     const s = row ?? { instance: d.instance, since: null, leases: null };
     head.replaceChildren(
       h('a', { class: 'back', href: '#/apps' }, `← ${t('d.back')}`),
@@ -861,14 +1520,15 @@ async function detail(name) {
         status(app.status),
         app.status === 'registered' ? h('a', { href: ingressOrigin() + d.address, target: '_blank', rel: 'noopener', class: 'mono', title: t('d.open', { address: d.address }) }, d.address) : h('span', { class: 'mono muted' }, d.address),
         h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(s.instance), s.since != null ? h('span', { class: 'muted' }, t('d.since', { ago: ago(s.since).textContent })) : null, leaseChips(s.leases)),
-        h('span', { class: 'muted' }, t('d.owner', { owner: app.owner }))));
+        h('span', { class: 'muted' }, t('d.owner', { owner: app.owner }))),
+      stateStrip(events, app.name));
     tiles.replaceChildren(
       tile(t('d.requests'), nf(detailStats.requests), ''),
       tile(t('d.errors'), nf(detailStats.errors), detailStats.requests ? pct(detailStats.errors / detailStats.requests) : ''),
       tile(t('d.lastAccess'), detailStats.lastAccessAt == null ? t('never') : ago(detailStats.lastAccessAt).textContent, detailStats.lastAccessAt == null ? '' : stamp(detailStats.lastAccessAt)),
       tile(t('d.release'), app.current == null ? '-' : `#${app.current}`, releases.length ? stamp(Math.max(...releases.map((r) => r.publishedAt))) : ''));
   };
-  renderHead(apps.find((a) => a.name === app.name), stats);
+  renderHead(apps.find((a) => a.name === app.name), stats, m.events);
 
   const act = (kind) => async () => {
     if (!(await confirmDialog(t(`d.${kind}Title`, { name: app.name }), t(`d.${kind}Body`), t(`d.${kind}`)))) return;
@@ -915,8 +1575,8 @@ async function detail(name) {
     h('section', {}, sectionHead(5, 'sec.logs', 'sec.logsDesc', ...logs.controls), logs.box),
   );
   return async function update() {
-    const [fresh, list] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps')]);
-    renderHead(list.find((a) => a.name === app.name), fresh.stats);
+    const [fresh, list, now] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), api('GET', '/api/metrics')]);
+    renderHead(list.find((a) => a.name === app.name), fresh.stats, now.events);
   };
 }
 
@@ -1025,27 +1685,42 @@ function shell() {
     }, 'language'));
 }
 
+/** Each loop runs only while the tab is visible and stops when the route changes. */
+function every(loops) {
+  const gen = generation;
+  const run = (ms, fn) => setTimeout(async () => {
+    if (gen !== generation) return;
+    if (!document.hidden) await fn().catch(() => {});
+    run(ms, fn);
+  }, ms);
+  for (const [ms, fn] of loops) run(ms, fn);
+  document.onvisibilitychange = () => { if (!document.hidden && gen === generation) for (const [, fn] of loops) fn().catch(() => {}); };
+}
+
 async function route() {
-  clearInterval(poller);
-  poller = null;
+  generation++;
+  document.onvisibilitychange = null;
   shell();
   const [, view, name] = location.hash.split('/');
   const target = name && decodeURIComponent(name);
   try {
-    const update = view === 'apps' && target ? await detail(target)
+    const live = view === 'apps' && target ? await detail(target)
       : view === 'apps' ? await projects()
         : view === 'publish' ? (await publish(target), null)
           : await overview();
-    if (update) {
-      await update();
-      poller = setInterval(() => { if (!document.hidden) update().catch(() => {}); }, POLL_MS);
-      document.onvisibilitychange = () => { if (!document.hidden) update().catch(() => {}); };
+    if (typeof live === 'function') {
+      await live();
+      every([[POLL_MS, live]]);
+    } else if (live) {
+      await live.first();
+      every(live.loops);
     }
   } catch (error) {
     show(h('div', { class: 'head' }, h('div', { class: 'grow' }, h('p', { class: 'msg err' }, t('err.load', { msg: error.message })), h('p', {}, h('a', { class: 'back', href: '#/apps' }, `← ${t('d.back')}`)))));
   }
 }
 
+setInterval(() => { if (!document.hidden) for (const el of document.querySelectorAll('[data-tick]')) el.tick?.(); }, 1000);
 addEventListener('hashchange', route);
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', shell);
 route();

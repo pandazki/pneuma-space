@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  OWNER, adminClient, adminUrl, appJson, appPut, appUrl, bucketExists, cleanup, containerIp, deploy, docker, images, inNetwork,
+  OWNER, adminClient, adminUrl, appJson, appPut, appUrl, bucketExists, cleanup, connect, containerIp, deploy, docker, images, inNetwork,
   median, publish, restartGateway, runningContainerFor, scratch, serviceToken, setIdle, setupSuite, stack, summary, teardownSuite,
   uniqueName, volumeExists, waitFor, waitInstance,
 } from './harness.ts';
@@ -119,6 +119,28 @@ test('AC-P-13', { timeout: 60_000 }, async (t) => {
   const page = await (await fetch(adminUrl + '/')).text();
   for (const section of ['services', 'fleet', 'wakes', 'traffic', 'deliveries', 'host', 'events']) assert.ok(page.includes(`'data-section': '${section}'`), `overview has ${section}`);
   for (const marker of ['zh: {', 'en: {', 'data-theme']) assert.ok(page.includes(marker), `console has ${marker}`);
+});
+
+test('AC-P-14', { timeout: 90_000 }, async (t) => {
+  const app = await deploy(t, { image: images.echo, capabilities: { ws: {} } });
+  await setIdle(app.name, 5);
+  const socket = await connect(app.name, '/ws?mode=echo');
+  assert.equal((await summary(app.name)).sleepsAt, null, 'null while a channel lease is held');
+  const before = Date.now();
+  socket.ws.close();
+  const sleepsAt = await waitFor(async () => (await summary(app.name)).sleepsAt, 5000, 'sleepsAt after the lease is released');
+  const after = Date.now();
+  t.diagnostic(`sleepsAt is ${sleepsAt - before} ms after the close was sent`);
+  assert.ok(sleepsAt >= before + 5000 - 100 && sleepsAt <= after + 5000, 'last release plus idle_seconds');
+  await waitInstance(app.name, 'asleep', 20_000);
+  assert.ok(Date.now() <= sleepsAt + 10_000, `asleep ${Date.now() - sleepsAt} ms after sleepsAt`);
+
+  const seqs = (await (await fetch(adminUrl + '/api/metrics')).json()).events.map((e: { seq: number }) => e.seq);
+  assert.ok(seqs.length > 1 && seqs.every((seq: number, i: number) => i === 0 || seq > seqs[i - 1]), 'seq strictly increases');
+
+  const page = await (await fetch(adminUrl + '/')).text();
+  assert.ok(page.includes('data-live'), 'overview has the live indicator');
+  for (const section of ['seats', 'timeline', 'attention', 'tail']) assert.ok(page.includes(`'data-section': '${section}'`), `overview has ${section}`);
 });
 
 test('AC-P-7', { timeout: 90_000 }, async (t) => {

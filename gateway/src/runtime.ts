@@ -192,6 +192,12 @@ export class DockerRuntime implements Runtime {
     return counts;
   }
 
+  sleepsAt(app: AppId): number | null {
+    const inst = this.instances.get(app);
+    if (inst?.state !== 'awake' || inst.leases.size > 0) return null;
+    return inst.lastReleaseAt + (this.specFor(app) ?? inst.spec).policy.idle_seconds * 1000;
+  }
+
   async logs(app: AppId, tail: number): Promise<string> {
     const container = this.instances.get(app)?.container;
     return container ? this.docker.logs(container, tail) : '';
