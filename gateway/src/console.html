@@ -254,17 +254,15 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .track::before { content: ""; position: absolute; left: 0; right: 0; top: 8.5px; height: 1px; background: var(--line-strong); }
 .axis .track::before { display: none; }
 .track .ahead { position: absolute; top: -13px; bottom: -13px; right: 0; background: repeating-linear-gradient(-45deg, transparent 0 4px, var(--stripe) 4px 5px); border-left: 1px dashed var(--ink-3); }
-.axis .track .ahead { top: 0; bottom: 0; }
-.band { position: absolute; top: 3px; bottom: 3px; border-radius: 3px; min-width: 2px; }
-.band.awake { background: var(--green); }
-.band.waking { background: var(--orange); top: 0; bottom: 0; min-width: 3px; }
-.band.draining { background: repeating-linear-gradient(-45deg, var(--orange) 0 3px, var(--orange-tint) 3px 6px); }
-.band.stopping { background: var(--orange); opacity: .55; }
-.band.open.waking, .band.open.draining, .band.open.stopping { animation: breathe 1.1s ease-in-out infinite; }
+.track .nodata { position: absolute; top: -13px; bottom: -13px; left: 0; background: repeating-linear-gradient(-45deg, transparent 0 4px, var(--stripe) 4px 5px); border-right: 1px dashed var(--line-strong); }
+.axis .track .ahead, .axis .track .nodata { top: 0; bottom: 0; }
+.band { position: absolute; top: 3px; bottom: 3px; border-radius: 3px; background: var(--green-tint); box-shadow: inset 0 0 0 1px var(--green); }
+.band.tail { opacity: .45; }
 .band.plan { background: repeating-linear-gradient(90deg, var(--green) 0 3px, transparent 3px 6px); opacity: .55; }
-.band.fail { background: var(--red); top: 0; bottom: 0; min-width: 3px; }
-.track .ms { position: absolute; top: -13px; font: 600 10px/12px var(--mono); color: var(--orange); white-space: nowrap; transform: translateX(-100%); }
-.track .ms::after { content: ""; position: absolute; right: -1px; bottom: -3px; width: 1px; height: 4px; background: var(--orange); }
+.band.fail { top: 0; bottom: 0; width: 2px; border-radius: 1px; background: var(--red); box-shadow: none; }
+.track .ms { position: absolute; top: -13px; font: 500 10px/12px var(--mono); color: var(--ink-3); white-space: nowrap; transform: translateX(-100%); }
+.track .ms::after { content: ""; position: absolute; right: -1px; bottom: -3px; width: 1px; height: 4px; background: currentColor; }
+.track .ms.slow { color: var(--orange); }
 .track .ms.after { transform: none; }
 .track .ms.after::after { left: -1px; right: auto; }
 .axis .tick { position: absolute; top: 7px; transform: translateX(-50%); white-space: nowrap; }
@@ -435,7 +433,7 @@ const I18N = {
     'gate.sub': 'p50 {p50} · p95 {p95} · 失败 {failures}', 'gate.line': '3 秒门槛', 'gate.latest': '最近一次 {ms}', 'gate.failed': '最近一次失败', 'gate.none': '这一小时还没有唤醒。',
     'host.mem': '内存', 'host.disk': '数据盘', 'host.diskFree': '剩余 {free}',
     'sec.timeline': '醒着的实例', 'sec.timelineDesc': '最近 15 分钟醒过的每个实例：唤醒和耗时、醒着、排空；右侧是它为什么还醒着。',
-    'tl.minus': '-{n} 分', 'tl.now': '现在', 'tl.empty': '最近 15 分钟没有实例醒过。', 'tl.wake': '唤醒 {ms}', 'tl.sleepsAt': '{time} 休眠',
+    'tl.minus': '-{n} 分', 'tl.now': '现在', 'tl.empty': '最近 15 分钟没有实例醒过。', 'tl.nodata': '无数据：早于网关保留的最早事件', 'tl.wake': '唤醒 {ms}', 'tl.sleepsAt': '{time} 休眠',
     'tl.sleepsIn': '{d}后休眠', 'tl.sleepingNow': '即将休眠', 'tl.asleep': '已休眠 {d}', 'tl.rate': '{n} 请求/秒',
     'mk.publish': '发布', 'mk.wake': '唤醒', 'mk.wakeFailed': '唤醒失败', 'mk.deliveryFailed': '投递失败',
     'ch.partial': '本分钟未结束', 'ch.due': '待投递 {due} · 投递中 {delivering}',
@@ -506,7 +504,7 @@ const I18N = {
     'gate.sub': 'p50 {p50} · p95 {p95} · failed {failures}', 'gate.line': '3 s gate', 'gate.latest': 'latest {ms}', 'gate.failed': 'latest failed', 'gate.none': 'No wake in the last hour.',
     'host.mem': 'Memory', 'host.disk': 'Data disk', 'host.diskFree': '{free} free',
     'sec.timeline': 'Awake timeline', 'sec.timelineDesc': 'Every instance awake in the last 15 min: wakes with their latency, awake, draining; on the right, why it is still up.',
-    'tl.minus': '-{n} min', 'tl.now': 'now', 'tl.empty': 'No instance has been awake in the last 15 minutes.', 'tl.wake': 'wake {ms}', 'tl.sleepsAt': 'sleeps at {time}',
+    'tl.minus': '-{n} min', 'tl.now': 'now', 'tl.empty': 'No instance has been awake in the last 15 minutes.', 'tl.nodata': 'No data: older than the oldest event the gateway keeps', 'tl.wake': 'wake {ms}', 'tl.sleepsAt': 'sleeps at {time}',
     'tl.sleepsIn': 'sleeps in {d}', 'tl.sleepingNow': 'going to sleep', 'tl.asleep': 'asleep {d}', 'tl.rate': '{n} req/s',
     'mk.publish': 'publish', 'mk.wake': 'wake', 'mk.wakeFailed': 'wake failed', 'mk.deliveryFailed': 'delivery failed',
     'ch.partial': 'minute in progress', 'ch.due': 'due {due} · delivering {delivering}',
@@ -690,13 +688,13 @@ const INSTANCE_EVENTS = ['waking', 'awake', 'draining', 'stopping', 'asleep', 'r
 const MARKS = {
   publish: { test: (e) => e.ev === 'publish', color: 'var(--ink-2)' },
   wake: { test: (e) => e.ev === 'awake' && typeof e.ms === 'number', color: 'var(--accent)' },
-  wakeFailed: { test: (e) => e.ev === 'asleep' && e.error !== undefined, color: 'var(--red)' },
+  wakeFailed: { test: (e, model) => model.wakeFailures.has(e), color: 'var(--red)' },
   deliveryFailed: { test: (e) => e.ev === 'delivery.failed', color: 'var(--red)' },
 };
 
 /** Everything the overview knows, folded from snapshots: the event history by seq and each app's state transitions. */
 function liveModel() {
-  return { startedAt: null, lastSeq: 0, events: [], transitions: new Map(), metrics: null, apps: [], appsAt: 0, rates: new Map() };
+  return { startedAt: null, lastSeq: 0, horizon: 0, events: [], transitions: new Map(), wakeFailures: new WeakSet(), metrics: null, apps: [], appsAt: 0, rates: new Map() };
 }
 
 function absorbMetrics(model, m) {
@@ -706,11 +704,23 @@ function absorbMetrics(model, m) {
   model.startedAt = m.gateway.startedAt;
   const fresh = m.events.filter((e) => e.seq > model.lastSeq);
   const missed = !initial && fresh.length ? fresh[0].seq - model.lastSeq - 1 : 0;
+  const lost = m.events.length > 0 && m.events[0].seq > model.lastSeq + 1;
+  const reset = initial || restarted || lost;
+  if (reset) {
+    model.horizon = lost ? m.events[0].t : m.gateway.startedAt;
+    for (const [name, list] of model.transitions) {
+      const kept = list.filter((s) => s.t >= model.horizon);
+      if (kept.length) model.transitions.set(name, kept); else model.transitions.delete(name);
+    }
+  }
   if (fresh.length) model.lastSeq = fresh.at(-1).seq;
   for (const e of fresh) {
     if (!e.app || !INSTANCE_EVENTS.includes(e.ev)) continue;
     const list = model.transitions.get(e.app) ?? [];
-    list.push({ state: e.ev === 'removed' ? 'none' : e.ev, t: e.t, ms: e.ms, error: e.error });
+    // As in metrics.ts: a failed `docker stop` after a drain also emits asleep with an error, but after stopping.
+    const failed = e.ev === 'asleep' && e.error !== undefined && list.at(-1)?.state === 'waking';
+    if (failed) model.wakeFailures.add(e);
+    list.push({ state: e.ev === 'removed' ? 'none' : e.ev, t: e.t, ms: e.ms, error: e.error, failed });
     let old = 0;
     while (old < list.length - 1 && list[old + 1].t < e.t - SPAN_MS) old++;
     list.splice(0, old);
@@ -719,36 +729,56 @@ function absorbMetrics(model, m) {
   model.events.push(...fresh);
   model.events.splice(0, Math.max(0, model.events.length - KEEP_EVENTS));
   model.metrics = m;
-  return { initial, fresh, missed, restarted };
+  return { initial, fresh, missed, restarted, reset };
 }
 
-/** The listing is the authority when its `since` is newer than the last event seen for the app. */
-function absorbApps(model, apps, at) {
+/** The listing is the authority for every known app's current state unless an event seen for the app is newer than the request. */
+function absorbApps(model, apps, asked) {
   const before = new Map(model.apps.map((a) => [a.name, a]));
+  const listed = new Map(apps.map((a) => [a.name, a]));
   for (const a of apps) {
     const prev = before.get(a.name);
-    if (prev && model.appsAt) model.rates.set(a.name, Math.max(0, a.requests - prev.requests) / ((at - model.appsAt) / 1000));
-    if (a.since == null) continue;
-    const list = model.transitions.get(a.name) ?? [];
+    if (prev && model.appsAt) model.rates.set(a.name, Math.max(0, a.requests - prev.requests) / ((asked - model.appsAt) / 1000));
+  }
+  for (const name of new Set([...listed.keys(), ...model.transitions.keys()])) {
+    const a = listed.get(name);
+    const state = a?.instance ?? 'none';
+    const list = model.transitions.get(name) ?? [];
     const last = list.at(-1);
-    if (!last || (a.since > last.t && last.state !== a.instance)) list.push({ state: a.instance, t: a.since });
-    model.transitions.set(a.name, list);
+    const t = a?.since ?? asked;
+    if (last ? last.state === state || t < last.t : state === 'none') continue;
+    list.push({ state, t });
+    model.transitions.set(name, list);
   }
   model.apps = apps;
-  model.appsAt = at;
+  model.appsAt = asked;
 }
+
+/** Before the ring's horizon nothing is known; an app's state before its first transition is known only when that transition is a wake. */
+const knownFrom = (list, horizon) => (list[0].state === 'waking' ? Math.min(horizon, list[0].t) : list[0].t);
 
 const stateOf = (model, name) => model.transitions.get(name)?.at(-1)?.state ?? 'none';
 
+/** One band per awake period, from the wake to the stop; draining and stopping are its tail. */
 function segments(list, from, now) {
   const out = [];
+  let band = null;
   list.forEach((s, i) => {
     const end = list[i + 1]?.t ?? now;
-    if (end < from) return;
-    if (ACTIVE.includes(s.state)) out.push({ state: s.state, from: Math.max(from, s.t), to: end, open: i === list.length - 1, ms: s.ms, t: s.t });
-    else if (s.state === 'asleep' && s.error !== undefined && s.t >= from) out.push({ state: 'fail', from: s.t, to: s.t, error: s.error, t: s.t });
+    if (ACTIVE.includes(s.state)) {
+      band ??= { state: 'awake', from: s.t, tail: null };
+      if (s.state === 'draining' || s.state === 'stopping') band.tail ??= s.t;
+      if (typeof s.ms === 'number') band.ms = s.ms;
+      band.to = end;
+      band.open = i === list.length - 1;
+      return;
+    }
+    if (band) out.push(band);
+    band = null;
+    if (s.failed) out.push({ state: 'fail', from: s.t, to: s.t, error: s.error, t: s.t });
   });
-  return out;
+  if (band) out.push(band);
+  return out.filter((b) => b.to >= from).map((b) => ({ ...b, from: Math.max(from, b.from), tail: b.tail && Math.max(from, b.tail) }));
 }
 
 const since = (v) => t('ago', { d: duration(Date.now() - v) });
@@ -766,10 +796,13 @@ function fill(el, ...children) {
   el.replaceChildren(...children.flat(Infinity).filter((c) => c != null && c !== false));
 }
 
+/** Removing the class later matters only under prefers-reduced-motion, where the highlight is static. */
 function flash(el, cls) {
   el.classList.remove(cls);
   void el.offsetWidth;
   el.classList.add(cls);
+  clearTimeout(el.flashed);
+  el.flashed = setTimeout(() => el.classList.remove(cls), 1600);
 }
 
 function liveHeader(controls) {
@@ -879,7 +912,7 @@ function gateCard() {
         shown = w.count;
       }
       fill(sub, t('gate.sub', { p50: ms(w.p50Ms), p95: ms(w.p95Ms), failures: nf(w.failures) }));
-      const wakes = model.events.filter((e) => MARKS.wake.test(e) || MARKS.wakeFailed.test(e)).slice(-40);
+      const wakes = model.events.filter((e) => MARKS.wake.test(e) || MARKS.wakeFailed.test(e, model)).slice(-40);
       const top = Math.max(COLD_START_GATE_MS * 1.25, ...wakes.map((e) => (e.ms ?? 0) * 1.08));
       const x = (v) => `${Math.sqrt(Math.min(v, top) / top) * 100}%`;
       const newest = wakes.at(-1);
@@ -935,13 +968,17 @@ function timeline() {
       const from = now - SPAN_MS;
       const span = SPAN_MS + AHEAD_MS;
       const pct = (v) => `${(((v - from) / span) * 100).toFixed(3)}%`;
+      const noData = (until) => (until > from ? h('div', { class: 'nodata', style: `width:${pct(Math.min(until, now))}`, title: t('tl.nodata') }) : null);
       const listed = new Map(model.apps.map((a) => [a.name, a]));
       const rows = [...model.transitions.entries()]
-        .map(([name, list]) => ({ name, list, segs: segments(list, from, now) }))
+        .map(([name, list]) => {
+          const known = Math.max(from, knownFrom(list, model.horizon));
+          return { name, list, known, segs: segments(list, known, now) };
+        })
         .filter((r) => r.segs.length && listed.has(r.name) && listed.get(r.name).status !== 'purging')
         .sort((a, b) => (a.name < b.name ? -1 : 1));
       const axis = h('div', { class: 'tl-row axis' }, h('span', {}),
-        h('div', { class: 'track' }, h('div', { class: 'ahead', style: `left:${pct(now)}` }),
+        h('div', { class: 'track' }, h('div', { class: 'ahead', style: `left:${pct(now)}` }), noData(Math.max(from, model.horizon)),
           [15, 10, 5].map((n) => h('span', { class: n === 15 ? 'tick first' : 'tick', style: `left:${pct(now - n * 60_000)}` }, t('tl.minus', { n }))),
           h('span', { class: 'tick now', style: `left:${pct(now)}` }, t('tl.now'))),
         h('span', {}));
@@ -951,20 +988,21 @@ function timeline() {
       }
       const present = new Set(rows.map((r) => r.name));
       for (const name of rendered) if (!present.has(name)) rendered.delete(name);
-      fill(body, axis, ...rows.map(({ name, list, segs }) => {
+      fill(body, axis, ...rows.map(({ name, list, known, segs }) => {
         const state = stateOf(model, name);
         const a = listed.get(name);
-        const lastWake = [...list].reverse().find((s) => s.state === 'awake' && typeof s.ms === 'number' && s.t >= from);
-        const bands = segs.map((s) => h('div', {
-          class: `band ${s.state}${s.open ? ' open' : ''}`,
-          style: `left:${pct(s.from)};width:calc(${pct(s.to)} - ${pct(s.from)})`,
-          title: s.state === 'fail' ? `${t('mk.wakeFailed')} ${clock(s.t, true)} · ${s.error}`
-            : `${t(`st.${s.state}`)} ${clock(s.from, true)} – ${s.open ? t('tl.now') : clock(s.to, true)}${s.ms ? ` · ${t('tl.wake', { ms: ms(s.ms) })}` : ''}`,
-        }));
+        const lastWake = [...list].reverse().find((s) => s.state === 'awake' && typeof s.ms === 'number' && s.t >= known);
+        const block = (cls, a, b, title) => h('div', { class: `band ${cls}`, style: `left:${pct(a)};width:calc(${pct(b)} - ${pct(a)})`, title });
+        const bands = segs.map((s) => (s.state === 'fail'
+          ? h('div', { class: 'band fail', style: `left:${pct(s.t)}`, title: `${t('mk.wakeFailed')} ${clock(s.t, true)} · ${s.error}` })
+          : [
+            block('', s.from, s.tail ?? s.to, `${t('st.awake')} ${clock(s.from, true)} – ${s.open && !s.tail ? t('tl.now') : clock(s.tail ?? s.to, true)}${s.ms ? ` · ${t('tl.wake', { ms: ms(s.ms) })}` : ''}`),
+            s.tail ? block('tail', s.tail, s.to, `${t('st.draining')} ${clock(s.tail, true)} – ${s.open ? t('tl.now') : clock(s.to, true)}`) : null,
+          ]));
         const plan = state === 'awake' && a?.sleepsAt && a.instance === 'awake' && a.sleepsAt > now
           ? h('div', { class: 'band plan', style: `left:${pct(now)};width:calc(${pct(Math.min(a.sleepsAt, now + AHEAD_MS))} - ${pct(now)})`, title: t('tl.sleepsAt', { time: clock(a.sleepsAt, true) }) })
           : null;
-        const label = lastWake ? h('span', { class: `ms${(lastWake.t - from) / span < 0.12 ? ' after' : ''}`, style: `left:${pct(lastWake.t)}` }, ms(lastWake.ms)) : null;
+        const label = lastWake ? h('span', { class: `ms${(lastWake.t - from) / span < 0.12 ? ' after' : ''}${lastWake.ms > COLD_START_GATE_MS ? ' slow' : ''}`, style: `left:${pct(lastWake.t)}` }, ms(lastWake.ms)) : null;
         const leases = a && ACTIVE.includes(state) ? leaseChips(a.leases) : null;
         const rate = model.rates.get(name);
         const why = state === 'awake' && a?.instance === 'awake' && a.sleepsAt
@@ -973,7 +1011,7 @@ function timeline() {
             : h('span', { class: 'muted' }, ticking(() => t('tl.asleep', { d: duration(Date.now() - list.at(-1).t) })));
         const row = h('div', { class: `tl-row${ACTIVE.includes(state) ? '' : ' dim'}`, 'data-href': `#/apps/${encodeURIComponent(name)}`, onclick: (e) => { if (!e.target.closest('a')) location.hash = `#/apps/${encodeURIComponent(name)}`; } },
           h('div', { class: 'tl-name' }, h('span', { class: `st ${tone(state === 'none' ? 'asleep' : state)}`, title: t(`st.${state}`) }, t(`st.${state}`)), appLink(name)),
-          h('div', { class: 'track' }, h('div', { class: 'ahead', style: `left:${pct(now)}` }), bands, plan, label),
+          h('div', { class: 'track' }, h('div', { class: 'ahead', style: `left:${pct(now)}` }), noData(known), bands, plan, label),
           h('div', { class: 'tl-meta' },
             rate > 0 && ACTIVE.includes(state) ? h('span', { class: 'num' }, t('tl.rate', { n: new Intl.NumberFormat(locale(), { maximumFractionDigits: 1 }).format(rate) })) : null,
             leases,
@@ -1010,7 +1048,11 @@ function niceMax(v) {
 }
 
 /** One crosshair for every chart on the page: hovering one draws the line on all. */
-const crosshair = { charts: new Set(), at(i) { for (const c of this.charts) c.cross(i); } };
+const crosshair = {
+  charts: new Set(),
+  at(i) { for (const c of this.charts) c.cross(i); },
+  reset() { for (const c of this.charts) c.observer.disconnect(); this.charts.clear(); },
+};
 
 /** layers: [{ key, color, kind: 'area' | 'bar' | 'line', axis: 'left' | 'right' }]; marks: keys of MARKS drawn in the lane above the plot. */
 function chartCard(attrs, titleKey, layers, marks, extra = () => null) {
@@ -1088,7 +1130,7 @@ function chartCard(attrs, titleKey, layers, marks, extra = () => null) {
     for (const e of model.events) {
       const i = binOf(e.t);
       if (i < 0 || i >= count) continue;
-      for (const kind of marks) if (MARKS[kind].test(e)) {
+      for (const kind of marks) if (MARKS[kind].test(e, model)) {
         const key = `${i}:${kind}`;
         lane.set(key, { i, kind, n: (lane.get(key)?.n ?? 0) + 1 });
       }
@@ -1128,9 +1170,9 @@ function chartCard(attrs, titleKey, layers, marks, extra = () => null) {
     g.addEventListener('pointerleave', () => { tip.hidden = true; crosshair.at(null); });
     fill(plot, g, tip);
   };
-  const chart = { cross: (i) => cross(i) };
+  const chart = { cross: (i) => cross(i), observer: new ResizeObserver(draw) };
   crosshair.charts.add(chart);
-  new ResizeObserver(draw).observe(plot);
+  chart.observer.observe(plot);
   el.append(h('header', {}, h('b', {}, t(titleKey)), legend), plot, note);
   return {
     el,
@@ -1164,7 +1206,7 @@ function attentionItems(model, downSince) {
     what: t('att.delivery'), why: [t('att.deliveryDetail', { trigger: d.trigger, attempts: d.attempts }), d.reason ? ` · ${d.reason}` : ''].join(''),
   }));
   for (const e of model.events) {
-    if (e.error === undefined || e.ev === 'wake-failed') continue;
+    if (e.error === undefined || e.ev === 'wake-failed' || (e.ev === 'asleep' && !model.wakeFailures.has(e))) continue;
     const wake = e.ev === 'asleep';
     items.push({ id: `e:${e.ev}:${e.app}:${e.t}`, group: `e:${e.ev}:${e.app}`, tone: 'red', at: e.t, app: e.app, what: wake ? t('att.wake') : h('span', { class: 'mono' }, e.ev), why: String(e.error) });
   }
@@ -1356,17 +1398,20 @@ async function overview() {
     const m = await api('GET', '/api/metrics');
     const diff = absorbMetrics(model, m);
     if (diff.restarted) header.restarted(m.gateway.startedAt);
-    if (diff.initial) {
-      absorbApps(model, await api('GET', '/api/apps'), Date.now());
-      tail.seed(diff.fresh);
-    } else tail.push(diff);
+    if (diff.reset) {
+      const asked = Date.now();
+      absorbApps(model, await api('GET', '/api/apps'), asked);
+    }
+    if (diff.initial) tail.seed(diff.fresh);
+    else tail.push(diff);
     const moved = diff.initial || diff.fresh.length > 0 || diff.restarted;
     if (moved && !diff.initial) header.beat();
     render(!diff.initial, moved);
   };
   const pollApps = async () => {
     if (!model.metrics) return;
-    absorbApps(model, await api('GET', '/api/apps'), Date.now());
+    const asked = Date.now();
+    absorbApps(model, await api('GET', '/api/apps'), asked);
     render(true, true);
   };
   let paintedAt = 0;
@@ -1501,13 +1546,16 @@ function logsPanel(name) {
 
 /** One beat per recent state change of the app, oldest on the left. */
 function stateStrip(events, name) {
-  const beats = events.filter((e) => e.app === name && INSTANCE_EVENTS.includes(e.ev)).slice(-48);
-  if (!beats.length) return null;
+  const changes = events.filter((e) => e.app === name && INSTANCE_EVENTS.includes(e.ev));
+  if (!changes.length) return null;
   return h('div', { class: 'beats', role: 'img', 'aria-label': t('d.recent') },
-    beats.map((e) => h('i', {
-      class: e.error !== undefined ? 'fail' : e.ev,
-      title: `${clock(e.t, true)} · ${e.error !== undefined ? t('mk.wakeFailed') : t(`st.${e.ev === 'removed' ? 'none' : e.ev}`)}${typeof e.ms === 'number' ? ` · ${ms(e.ms)}` : ''}`,
-    })),
+    changes.map((e, i) => {
+      const failed = e.ev === 'asleep' && e.error !== undefined && changes[i - 1]?.ev === 'waking';
+      return h('i', {
+        class: failed ? 'fail' : e.ev,
+        title: `${clock(e.t, true)} · ${failed ? t('mk.wakeFailed') : t(`st.${e.ev === 'removed' ? 'none' : e.ev}`)}${typeof e.ms === 'number' ? ` · ${ms(e.ms)}` : ''}`,
+      });
+    }).slice(-48),
     h('span', { class: 'muted' }, t('d.recent')));
 }
 
@@ -1693,8 +1741,7 @@ function shell() {
 }
 
 /** Each loop runs only while the tab is visible and stops when the route changes. */
-function every(loops) {
-  const gen = generation;
+function every(loops, gen) {
   const run = (ms, fn) => setTimeout(async () => {
     if (gen !== generation) return;
     if (!document.hidden) await fn().catch(() => {});
@@ -1705,8 +1752,9 @@ function every(loops) {
 }
 
 async function route() {
-  generation++;
+  const gen = ++generation;
   document.onvisibilitychange = null;
+  crosshair.reset();
   shell();
   const [, view, name] = location.hash.split('/');
   const target = name && decodeURIComponent(name);
@@ -1715,12 +1763,13 @@ async function route() {
       : view === 'apps' ? await projects()
         : view === 'publish' ? (await publish(target), null)
           : await overview();
+    if (gen !== generation) return;
     if (typeof live === 'function') {
       await live();
-      every([[POLL_MS, live]]);
+      if (gen === generation) every([[POLL_MS, live]], gen);
     } else if (live) {
       await live.first();
-      every(live.loops);
+      if (gen === generation) every(live.loops, gen);
     }
   } catch (error) {
     show(h('div', { class: 'head' }, h('div', { class: 'grow' }, h('p', { class: 'msg err' }, t('err.load', { msg: error.message })), h('p', {}, h('a', { class: 'back', href: '#/apps' }, `← ${t('d.back')}`)))));
