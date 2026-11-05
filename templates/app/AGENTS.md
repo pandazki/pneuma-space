@@ -4,7 +4,7 @@ You are building a web app for PneumaSpace. The app is one Node program behind t
 
 ## Start
 
-`appctl init <dir>` copies this template into `<dir>`. `--container` adds a `Dockerfile` and `"runtime": "container"`, for an app that needs native addons, child processes or its own image; `--static` copies the static-site template instead. Isolate apps need the platform started with `docker compose --profile isolate up -d`; without it a publish answers 409. `appctl` is `node <repo>/cli/appctl.ts`; it talks to the admin API at `PNEUMA_SPACE_ADMIN` (default `http://127.0.0.1:8081`), and apps answer at the ingress, by default `http://127.0.0.1:8080/apps/<name>/`. The operator may remap both ports.
+`appctl init <dir>` copies this template into `<dir>`. `--container` adds a `Dockerfile` and `"runtime": "container"`, for an app the isolate rule below excludes or that needs its own image; `--static` copies the static-site template instead. Isolate apps need the platform started with `docker compose --profile isolate up -d`; without it a publish answers 409. `appctl` is `node <repo>/cli/appctl.ts`; it talks to the admin API at `PNEUMA_SPACE_ADMIN` (default `http://127.0.0.1:8081`), and apps answer at the ingress, by default `http://127.0.0.1:8080/apps/<name>/`. The operator may remap both ports.
 
 ## What the platform gives
 
@@ -62,7 +62,7 @@ Plain TypeScript in `sdk/`, run by Node 24 with no build step. Its only packages
 ## Rules
 
 - Keep state only in the files directory, the database, the KV store or the bucket. Memory and every other file are lost when the app sleeps and on every release.
-- An isolate app uses pure JavaScript packages only: no native addons and no child processes. Use `--container` for anything that needs them.
+- An isolate app uses pure JavaScript packages only: no native addons, no child processes. Use `--container` for anything that needs them.
 - Start every link, redirect, form action, asset and WebSocket URL with `prefix`. Never write `/apps/<name>` yourself.
 - A trigger can arrive twice with the same `delivery.id`. Make it idempotent: an append job keys its row by `delivery.id` or `delivery.scheduledFor` with `ON CONFLICT DO NOTHING`; a recompute job upserts one `latest` row. It gets 600 s and five attempts.
 - Create tables at startup with `CREATE TABLE IF NOT EXISTS`; there is no migration step.
@@ -90,7 +90,7 @@ Set only the variables of capabilities you declare; without `kv`, skip Redis and
 
 ## Publish
 
-`appctl publish <name> . --owner user:<you>` publishes this directory at the ingress. An isolate app is copied without `node_modules`, `data`, `.git` and test files, gets `npm ci --omit=dev --ignore-scripts` in the copy, and is uploaded with its `node_modules`; nothing is built. A container app is built with `docker build`. Both need `package-lock.json` to match `package.json`; unused `pg` or `redis` entries may stay. The owner is needed on the first publish only, or set `PNEUMA_SPACE_OWNER`. Publishing again under the same name keeps all data. External programs call a trigger with `POST /apps/<name>/_pneuma-space/trigger/<trigger>` and `Authorization: Bearer <token>`. `appctl token create <service>` issues a token for a service, not for one app; its subject is `service:<service>` and the last line of the output is the secret, shown once.
+`appctl publish <name> . --owner user:<you>` publishes this directory at the ingress. An isolate app is copied with links followed and without `node_modules`, `data`, `.git`, `.env*`, `.npmrc` and test files, gets `npm ci --omit=dev --ignore-scripts` in the copy, and is uploaded with its `node_modules`; nothing is built. A link that leads outside the directory, such as a `file:` dependency, is skipped with a warning. A container app is built with `docker build`. Both need `package-lock.json` to match `package.json`; unused `pg` or `redis` entries may stay. The owner is needed on the first publish only, or set `PNEUMA_SPACE_OWNER`. Publishing again under the same name keeps all data. External programs call a trigger with `POST /apps/<name>/_pneuma-space/trigger/<trigger>` and `Authorization: Bearer <token>`. `appctl token create <service>` issues a token for a service, not for one app; its subject is `service:<service>` and the last line of the output is the secret, shown once.
 
 Other commands: `appctl list`, `appctl show <name>` (runtime, quarantine, instance state asleep or awake, bindings, recent trigger deliveries), `appctl logs <name>`, `appctl unquarantine <name>` (an app that kept crashing or hanging answers 503 until this or a new publish), `appctl policy <name> idle_seconds=5` (per-app override; the default idle is 60 s), `appctl remove` and `appctl purge`.
 

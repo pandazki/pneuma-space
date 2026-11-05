@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { cpSync, createReadStream, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { cpSync, createReadStream, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -84,26 +84,50 @@ function runtimeOf(manifest: Manifest, dir: string): RuntimeKind | null {
   return existsSync(join(dir, 'Dockerfile')) ? 'container' : 'isolate';
 }
 
-const NOT_SHIPPED = new Set(['.git', 'node_modules', '.audit']);
-const TEST_FILE = /\.test\.[cm]?[jt]sx?$/;
+// `.audit` holds the pstack decision trail a developer leaves in a scaffold.
+const NOT_SHIPPED = new Set(['.git', 'node_modules', '.audit', '.npmrc']);
+const notShipped = (name: string) => NOT_SHIPPED.has(name) || name.startsWith('.env') || /\.test\.[cm]?[jt]sx?$/.test(name);
 
-/** A copy of `dir` as the runner loads it: no local state or tests, production dependencies installed without their scripts. */
-function codeBundle(dir: string): string {
-  const out = mkdtempSync(join(tmpdir(), 'appctl-bundle-'));
-  cpSync(dir, out, {
-    recursive: true,
-    filter: (src) => !NOT_SHIPPED.has(basename(src)) && !TEST_FILE.test(basename(src)) && relative(dir, src) !== 'data',
-  });
-  const pkg = join(out, 'package.json');
-  if (existsSync(pkg) && Object.keys(JSON.parse(readFileSync(pkg, 'utf8')).dependencies ?? {}).length) {
-    try {
-      execFileSync('npm', ['ci', '--omit=dev', '--ignore-scripts'], { cwd: out, stdio: ['ignore', 2, 'inherit'] });
-    } catch (error) {
-      rmSync(out, { recursive: true, force: true });
-      throw new Failure(EXIT.build, `npm ci for ${dir} failed (package-lock.json must match package.json): ${(error as Error).message}`);
-    }
+/** Where `path` really is, or null with a warning when it is a dangling link or leads outside `base`. */
+function inside(base: string, path: string, shown: string): string | null {
+  let real: string;
+  try {
+    real = realpathSync(path);
+  } catch {
+    console.error(`appctl: skipping ${shown}: dangling link`);
+    return null;
   }
-  return out;
+  const rel = relative(base, real);
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    console.error(`appctl: skipping ${shown}: links outside ${base}`);
+    return null;
+  }
+  return real;
+}
+
+/** Fills `out` with `dir` as the runner loads it: links followed, no local state, secrets or tests, production dependencies installed without their scripts. */
+function codeBundle(dir: string, out: string): void {
+  try {
+    const base = realpathSync(dir);
+    cpSync(dir, out, {
+      recursive: true,
+      dereference: true,
+      filter: (src) => {
+        const rel = relative(dir, src);
+        return rel === '' || (!notShipped(basename(src)) && rel !== 'data' && inside(base, src, rel) !== null);
+      },
+    });
+    const pkg = join(out, 'package.json');
+    if (existsSync(pkg) && Object.keys(JSON.parse(readFileSync(pkg, 'utf8')).dependencies ?? {}).length) {
+      try {
+        execFileSync('npm', ['ci', '--omit=dev', '--ignore-scripts'], { cwd: out, stdio: ['ignore', 2, 'inherit'] });
+      } catch {
+        throw new Error('npm ci --omit=dev --ignore-scripts failed; package-lock.json must match package.json');
+      }
+    }
+  } catch (error) {
+    throw new Failure(EXIT.build, `bundling ${dir} failed: ${(error as Error).message.split('\n')[0]}`);
+  }
 }
 
 function build(name: string, dir: string, tag: string | undefined): string {
@@ -121,11 +145,19 @@ const BLOCK = 512;
 
 function bundleFiles(root: string): { path: string; size: number }[] {
   if (!existsSync(root) || !statSync(root).isDirectory()) throw new ManifestError(`static.dir ${root} is not a directory`);
-  return (readdirSync(root, { recursive: true }) as string[])
-    .map((path) => path.split('\\').join('/'))
-    .filter((path) => statSync(join(root, path)).isFile())
-    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-    .map((path) => ({ path, size: statSync(join(root, path)).size }));
+  const base = realpathSync(root);
+  const files: { path: string; size: number }[] = [];
+  const walk = (dir: string) => {
+    for (const name of readdirSync(join(root, dir))) {
+      const path = dir ? `${dir}/${name}` : name;
+      const real = inside(base, join(root, path), path);
+      const stat = real && statSync(real);
+      if (stat && stat.isDirectory()) walk(path);
+      else if (stat && stat.isFile()) files.push({ path, size: stat.size });
+    }
+  };
+  walk('');
+  return files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
 function splitPath(path: string): [prefix: string, name: string] {
@@ -177,13 +209,14 @@ async function publish([rawName, target, ...extra]: string[], options: Options):
   const manifestFile = fromDir ? join(target, 'pneuma-space.json') : resolve(options.manifest ?? 'pneuma-space.json');
   const manifest = readManifest(manifestFile);
   const root = dirname(manifestFile);
-  const staticRoot = manifest.capabilities.static ? join(root, manifest.capabilities.static.dir) : null;
-  const files = staticRoot ? bundleFiles(staticRoot) : null;
-
   const runtime = fromDir ? runtimeOf(manifest, target) : 'container';
+  const staticRoot = manifest.capabilities.static ? join(root, manifest.capabilities.static.dir) : null;
+  const files = staticRoot && runtime !== 'isolate' ? bundleFiles(staticRoot) : null;
   const image = runtime !== 'container' ? null : fromDir ? build(name, target, options.tag) : target;
-  const code = runtime === 'isolate' ? codeBundle(target) : null;
+
+  const code = runtime === 'isolate' ? mkdtempSync(join(tmpdir(), 'appctl-bundle-')) : null;
   try {
+    if (code) codeBundle(target, code);
     const [bundleRoot, bundled] = code ? [code, bundleFiles(code)] : [staticRoot, files];
     const bundle = bundleRoot && bundled ? (await api('POST', ADMIN_PATHS.bundles, ReadableStream.from(tar(bundleRoot, bundled)))).bundle : null;
     const release = await api('PUT', ADMIN_PATHS.release(name), { image, manifest, bundle, ...(owner && { owner }) });
@@ -203,6 +236,10 @@ function init([dir, ...extra]: string[], options: Options): void {
   for (const template of [scaffold, overlay]) if (template && !existsSync(template)) throw new Failure(EXIT.usage, `template ${template} not found`);
   if (existsSync(dir) && readdirSync(dir).length) throw new Failure(EXIT.usage, `${dir} is not empty`);
   assemble(dir, scaffold, overlay);
+  if (options.container) {
+    const manifest = join(dir, 'pneuma-space.json');
+    writeFileSync(manifest, `${JSON.stringify({ ...JSON.parse(readFileSync(manifest, 'utf8')), runtime: 'container' }, null, 2)}\n`);
+  }
   console.log(`created ${dir} from ${[scaffold, overlay].filter(Boolean).join(' + ')}`);
 }
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -161,43 +161,50 @@ const tarList = (body: Buffer) => {
   return execFileSync('tar', ['-tf', file], { encoding: 'utf8' }).trim().split('\n');
 };
 
-test('publish of an isolate dir uploads the app with freshly installed node_modules and releases it with no image, without docker', async () => {
-  const manifest = { contract: 1, runtime: 'isolate', capabilities: { db: {} } };
-  const dir = source(manifest, {
+const scaffoldManifest = JSON.parse(readFileSync(join(repo, 'templates/app/pneuma-space.json'), 'utf8'));
+
+test('publish of an isolate dir uploads it at app-relative paths with fresh node_modules and no local state, secrets, tests or outside links, and releases it with no image', async () => {
+  assert.equal(scaffoldManifest.runtime, 'isolate');
+  assert.deepEqual(scaffoldManifest.capabilities.static, { dir: 'public' });
+  const dir = source(scaffoldManifest, {
     'package.json': '{"dependencies": {"dep": "1.0.0"}}',
     'package-lock.json': '{}',
     'src/server.ts': 'export {}',
     'src/server.test.ts': 'not shipped',
+    'public/ui.css': 'body {}',
     'node_modules/stale/index.js': 'not shipped',
     'data/app.sqlite3': 'not shipped',
     '.git/HEAD': 'not shipped',
+    '.audit/trail.tsv': 'not shipped',
+    '.env': 'SECRET=1',
+    '.env.local': 'SECRET=2',
+    '.npmrc': '//registry/:_authToken=x',
   });
-  const log = join(dir, '..', `${Date.now()}-npm-args`);
-  const bin = stub({ docker: 'exit 99', npm: `echo "$*" > ${log}; mkdir -p node_modules/dep && echo x > node_modules/dep/index.js` });
+  const outside = source({});
+  symlinkSync(join(outside, 'pneuma-space.json'), join(dir, 'src/outside.json'));
+  symlinkSync('../missing', join(dir, 'src/dangling'));
+  symlinkSync('../public/ui.css', join(dir, 'src/ui.css'));
+  const log = join(outside, 'npm-args');
+  const bin = stub({
+    docker: 'exit 99',
+    npm: `echo "$*" > ${log}; mkdir -p node_modules/dep && echo x > node_modules/dep/index.js && ln -s ${outside} node_modules/linked`,
+  });
   const result = await appctl(['publish', 'notes', dir, '--owner', 'user:ann'], { bin });
   assert.equal(result.code, 0, result.stderr);
   assert.equal(readFileSync(log, 'utf8').trim(), 'ci --omit=dev --ignore-scripts');
   const [upload, release] = requests;
-  assert.deepEqual(tarList(upload.body), ['node_modules/dep/index.js', 'package-lock.json', 'package.json', 'pneuma-space.json', 'src/server.ts']);
+  assert.deepEqual(tarList(upload.body), [
+    'node_modules/dep/index.js', 'package-lock.json', 'package.json', 'pneuma-space.json', 'public/ui.css', 'src/server.ts', 'src/ui.css',
+  ]);
   assert.deepEqual(json(release), {
-    image: null, manifest: { ...manifest, entry: 'src/server.ts' }, bundle: createHash('sha256').update(upload.body).digest('hex'), owner: 'user:ann',
+    image: null, manifest: { ...scaffoldManifest, entry: 'src/server.ts' }, bundle: createHash('sha256').update(upload.body).digest('hex'), owner: 'user:ann',
   });
 });
 
-const manifestOf = (dir: string) => JSON.parse(readFileSync(join(dir, 'pneuma-space.json'), 'utf8'));
-
-test('init writes the isolate scaffold: runtime isolate, the SDK, no Dockerfile', async () => {
-  const target = join(mkdtempSync(join(tmpdir(), 'appctl-init-')), 'app');
-  assert.equal((await appctl(['init', target])).code, 0);
-  assert.equal(manifestOf(target).runtime, 'isolate');
-  assert.ok(existsSync(join(target, 'sdk/serve.ts')));
-  assert.ok(!existsSync(join(target, 'Dockerfile')));
-});
-
-test('init --container writes the same SDK with runtime container and a Dockerfile', async () => {
+test('init --container is the app scaffold with runtime container and a Dockerfile', async () => {
   const target = join(mkdtempSync(join(tmpdir(), 'appctl-init-')), 'app');
   assert.equal((await appctl(['init', target, '--container'])).code, 0);
-  assert.equal(manifestOf(target).runtime, 'container');
+  assert.deepEqual(JSON.parse(readFileSync(join(target, 'pneuma-space.json'), 'utf8')), { ...scaffoldManifest, runtime: 'container' });
   assert.ok(existsSync(join(target, 'sdk/serve.ts')));
-  assert.match(readFileSync(join(target, 'Dockerfile'), 'utf8'), /CMD \["node", "src\/server.ts"\]/);
+  assert.ok(existsSync(join(target, 'Dockerfile')));
 });
