@@ -493,7 +493,7 @@ const I18N = {
     'brand.sub': '控制台', 'nav.group': '平台', 'nav.overview': '总览', 'nav.apps': '项目', 'nav.publish': '发布',
     'theme.light': '浅色', 'theme.dark': '深色', 'aside.since': '自 {time} 起采样，网关重启后清零。',
     'ov.title': '总览', 'ov.waiting': '等待第一次采样',
-    'svc.gateway': '网关', 'svc.redis': 'Redis', 'svc.object': '对象存储', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn',
+    'svc.gateway': '网关', 'svc.redis': 'Redis', 'svc.object': '对象存储', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn', 'svc.runner': 'runner',
     'svc.gatewaySub': '已运行 {up} · 内存 {rss}', 'svc.off': '未启用 profile', 'svc.down': '不可达',
     'sec.fleet': '席位、唤醒与主机', 'sec.fleetDesc': '醒着的实例占一个席位；唤醒对照 3 秒门槛。',
     'k.awakeSub': '唤醒中 {waking} · 排空中 {draining} · 停止中 {stopping}',
@@ -582,7 +582,7 @@ const I18N = {
     'brand.sub': 'Console', 'nav.group': 'Platform', 'nav.overview': 'Overview', 'nav.apps': 'Projects', 'nav.publish': 'Publish',
     'theme.light': 'Light', 'theme.dark': 'Dark', 'aside.since': 'Sampling since {time}; a gateway restart clears it.',
     'ov.title': 'Overview', 'ov.waiting': 'Waiting for the first sample',
-    'svc.gateway': 'Gateway', 'svc.redis': 'Redis', 'svc.object': 'Object store', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn',
+    'svc.gateway': 'Gateway', 'svc.redis': 'Redis', 'svc.object': 'Object store', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn', 'svc.runner': 'runner',
     'svc.gatewaySub': 'up {up} · RSS {rss}', 'svc.off': 'profile not running', 'svc.down': 'not reachable',
     'sec.fleet': 'Seats, wakes and host', 'sec.fleetDesc': 'Each awake instance takes a seat; wakes are measured against the 3 s gate.',
     'k.awakeSub': 'waking {waking} · draining {draining} · stopping {stopping}',
@@ -1022,7 +1022,7 @@ function servicesLine() {
       };
       fill(el,
         h('span', { class: 'st green' }, t('svc.gateway'), h('span', { class: 'num' }, t('svc.gatewaySub', { up: duration(Date.now() - m.gateway.startedAt), rss: bytes(m.gateway.rssBytes) }))),
-        ...['redis', 'object', 'postgres', 'coturn'].map(item),
+        ...['redis', 'object', 'postgres', 'coturn', 'runner'].map(item),
         h('span', { class: 'probe' }, m.gateway.lastFlushAt ? ticking(() => t('svc.probed', { ago: since(m.gateway.lastFlushAt) })) : t('ov.waiting')));
     },
   };

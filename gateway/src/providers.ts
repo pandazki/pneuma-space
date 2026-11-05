@@ -291,6 +291,8 @@ export function createProviders(infra: ProviderInfra, storage: Storage, config: 
 
 const BUNDLES = 'pneuma-space-bundles';
 const indexKey = (id: BundleId) => `${id}/${RESERVED_SEGMENT}/index.json`;
+// Under the reserved segment, which no bundle path may use.
+const tarKey = (id: BundleId) => `${id}/${RESERVED_SEGMENT}/bundle.tar`;
 
 const CONTENT_TYPES: Readonly<Record<string, string>> = {
   html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8',
@@ -317,7 +319,8 @@ export class S3BundleStore implements BundleStore {
     const bytes = Buffer.concat(await tar.toArray());
     const id = createHash('sha256').update(bytes).digest('hex') as BundleId;
     const root = this.#store.root;
-    if ((await signedFetch(root, 'HEAD', objectUrl(this.#store, BUNDLES, indexKey(id)))).ok) return id;
+    const exists = async (key: string) => (await signedFetch(root, 'HEAD', objectUrl(this.#store, BUNDLES, key))).ok;
+    if ((await exists(indexKey(id))) && (await exists(tarKey(id)))) return id;
     await createBucket(this.#store, BUNDLES);
     const files: Record<string, BundleFile> = {};
     for (const { path, body } of tarFiles(bytes)) {
@@ -325,6 +328,7 @@ export class S3BundleStore implements BundleStore {
       await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, `${id}/${path}`), body, { 'content-type': type }), `put ${path}`);
       files[path] = { size: body.length, etag: createHash('md5').update(body).digest('hex'), contentType: type };
     }
+    await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, tarKey(id)), bytes, { 'content-type': 'application/x-tar' }), 'put bundle tar');
     const index: BundleIndex = { id, files };
     await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, indexKey(id)), JSON.stringify(index), { 'content-type': 'application/json' }), 'put bundle index');
     this.#cache.set(id, index);
@@ -348,6 +352,11 @@ export class S3BundleStore implements BundleStore {
     if (res.status === 404) throw new NotFound(`bundle ${id} has no file ${path}`);
     await ok(res, `get ${path}`);
     return Readable.fromWeb(res.body as import('node:stream/web').ReadableStream);
+  }
+
+  /** A GET URL for the whole tar that needs no credential, so the runner fetches the bytes itself (ADR 0017). */
+  presignTar(id: BundleId, seconds = 600): string {
+    return presignGet(this.#store.root, objectUrl(this.#store, BUNDLES, tarKey(id)), seconds);
   }
 
   async delete(id: BundleId): Promise<void> {
@@ -384,7 +393,7 @@ function bundlePath(raw: string): string {
 }
 
 /** Regular files of a ustar, pax or GNU tar; directories are implied by paths, links are refused. */
-function* tarFiles(tar: Buffer): Generator<TarFile> {
+export function* tarFiles(tar: Buffer): Generator<TarFile> {
   let pax: Record<string, string> = {};
   let longName: string | null = null;
   for (let at = 0; at + 512 <= tar.length; ) {
@@ -470,6 +479,18 @@ export async function signedFetch(
   return fetch(url, { method, headers, body: method === 'GET' || method === 'HEAD' ? undefined : body });
 }
 
+export function presignGet(cred: Credential, url: URL, seconds: number): string {
+  const { stamp, day } = amzDate(new Date());
+  const scope = `${day}/${REGION}/s3/aws4_request`;
+  const signed = new URL(url);
+  for (const [k, v] of Object.entries({
+    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256', 'X-Amz-Credential': `${cred.accessKey}/${scope}`, 'X-Amz-Date': stamp,
+    'X-Amz-Expires': String(seconds), 'X-Amz-SignedHeaders': 'host',
+  })) signed.searchParams.set(k, v);
+  const req = canonicalRequest('GET', signed, { host: signed.host }, 'UNSIGNED-PAYLOAD');
+  signed.searchParams.set('X-Amz-Signature', signature(cred, day, ['AWS4-HMAC-SHA256', stamp, scope, sha256(req.text)].join('\n')));
+  return signed.href;
+}
 
 async function ok(res: Response, what: string): Promise<Response> {
   if (!res.ok) throw new Error(`object service ${what}: ${res.status} ${await res.text()}`);

@@ -10,7 +10,7 @@ const WINDOW_MINUTES = 24 * 60;
 const PROBE_TIMEOUT_MS = 1000;
 const RECENT_FAILURES = 20;
 
-export type ServiceName = 'redis' | 'object' | 'postgres' | 'coturn';
+export type ServiceName = 'redis' | 'object' | 'postgres' | 'coturn' | 'runner';
 export type ServiceStatus = 'up' | 'down' | 'off';
 export type Probe = () => Promise<ServiceStatus>;
 type ServiceSample = { readonly status: ServiceStatus; readonly latencyMs: number | null };
@@ -203,7 +203,7 @@ export const httpProbe = (url: string): Probe => async () =>
   ((await fetch(url, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })).ok ? 'up' : 'down');
 
 /** A profile service that is not running has no DNS name on the platform network: off, not down. */
-export const profileProbe = (service: 'postgres' | 'coturn', port: number): Probe => async () =>
+export const profileProbe = (service: 'postgres' | 'coturn' | 'runner', port: number): Probe => async () =>
   ((await resolvesOnNetwork(service)) ? tcpProbe(service, port)() : 'off');
 
 export async function hostSample(dataDir: string): Promise<HostSample> {

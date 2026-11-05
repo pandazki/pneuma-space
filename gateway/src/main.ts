@@ -5,10 +5,11 @@ import { emit, events } from './events.ts';
 import { loadOrCreateSecret, LocalIdentity } from './identity.ts';
 import { Ingress } from './ingress.ts';
 import { hostSample, httpProbe, Metrics, profileProbe, tcpProbe } from './metrics.ts';
-import { ADMIN_PORT, INGRESS_PORT, type AppId } from './model.ts';
+import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId } from './model.ts';
 import { composeProject, DockerInfra } from './infra.ts';
 import { createProviders, providerConfig, S3BundleStore } from './providers.ts';
 import { PlatformRegistry } from './registry.ts';
+import { IsolateRuntime, RUNNER_PORT } from './isolate.ts';
 import { DockerRuntime } from './runtime.ts';
 import { Runtimes } from './runtimes.ts';
 import { requests } from './requests.ts';
@@ -30,8 +31,9 @@ const docker = new Docker();
 const infra = new DockerInfra(docker, await composeProject(docker));
 const specFor = (app: AppId) => registry.runSpec(app);
 const container = new DockerRuntime({ docker, network, specFor });
-const runtime = new Runtimes({ runtimes: [container], specFor, events });
 const bundles = new S3BundleStore(config.object);
+const isolate = new IsolateRuntime({ runner: `http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`, bundleUrl: (id) => bundles.presignTar(id), specFor });
+const runtime = new Runtimes({ runtimes: [container, isolate], specFor, events });
 const registry = await PlatformRegistry.open({
   store, runtime, guard: runtime, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => ingress.snapshot(),
 });
@@ -52,6 +54,7 @@ const metrics = new Metrics({
     object: httpProbe(`${config.object.endpoint}/health`),
     postgres: profileProbe('postgres', 5432),
     coturn: profileProbe('coturn', 3478),
+    runner: profileProbe('runner', RUNNER_PORT),
   },
   host: () => hostSample(data),
 });
@@ -82,6 +85,7 @@ process.once('SIGTERM', async () => {
   clearInterval(flusher);
   scheduler.stop();
   container.close();
+  isolate.close();
   admin.closeAllConnections();
   await Promise.all([ingress.close(), new Promise((resolve) => admin.close(resolve))]);
   await ingress.flush();
