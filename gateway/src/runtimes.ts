@@ -117,6 +117,11 @@ export class Runtimes implements Omit<Runtime, 'kind'>, Guard {
     return [...new Set(this.#all().flatMap((runtime) => runtime.health()))];
   }
 
+  /** What one runtime detects; empty for a kind with no registered implementation. */
+  healthOf(kind: RuntimeKind): readonly HealthCheck[] {
+    return this.#byKind.get(kind)?.health() ?? [];
+  }
+
   quarantine(app: AppId): Quarantine | null {
     return this.#current(app)?.quarantine ?? null;
   }

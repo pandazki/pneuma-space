@@ -4,11 +4,12 @@ import { test } from 'node:test';
 import { startAdmin } from './admin.ts';
 import { EventLog } from './events.ts';
 import { Metrics } from './metrics.ts';
-import { appName, parseManifest, subject, type AppId } from './model.ts';
+import { appName, DEFAULT_POLICY, parseManifest, subject, type AppId, type HealthCheck, type Runtime, type RuntimeKind } from './model.ts';
 import { RequestLog } from './requests.ts';
+import { Runtimes } from './runtimes.ts';
 import { world } from './registry.fakes.ts';
 
-async function admin() {
+async function admin(runtime?: Runtimes) {
   const w = world();
   const { registry, store } = await w.open();
   const metrics = new Metrics({
@@ -21,7 +22,8 @@ async function admin() {
     host: async () => ({ cpus: 1, load: [0, 0, 0], memory: { totalBytes: 1, freeBytes: 1 }, data: null }),
   });
   const requests = new RequestLog();
-  const server = await startAdmin({ registry, bundles: w.bundles, runtime: w.runtime, guard: w.runtime, metrics, requests, ingressPort: 18080 }, { port: 0 });
+  const logs = { logs: (app: AppId, tail: number) => w.runtime.logs(app, tail), healthOf: () => [] };
+  const server = await startAdmin({ registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, requests, ingressPort: 18080 }, { port: 0 });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
     const raw = typeof body === 'string' ? body : body === undefined ? undefined : JSON.stringify(body);
@@ -36,7 +38,8 @@ const kvApp = { image: 'example:1', manifest: { contract: 1, capabilities: { kv:
 test('every contract endpoint answers 200 on valid input', async (t) => {
   const { call, server } = await admin();
   t.after(() => server.close());
-  assert.deepEqual(await call('GET', '/api/health'), { status: 200, body: { ok: true, ingressPort: 18080 } });
+  const health = await call('GET', '/api/health');
+  assert.deepEqual([health.status, health.body.ok, health.body.ingressPort], [200, true, 18080]);
 
   const bundle = await call('POST', '/api/bundles', 'tar bytes');
   assert.equal(bundle.status, 200);
@@ -136,4 +139,21 @@ test('POST /api/apps/<name>/unquarantine lifts the quarantine the listing shows'
   assert.equal((await call('GET', '/api/apps')).body[0].quarantine.failures, 3);
   assert.deepEqual(await call('POST', '/api/apps/survey/unquarantine'), { status: 200, body: { quarantine: null } });
   assert.equal((await call('GET', '/api/apps')).body[0].quarantine, null);
+});
+
+test('GET /api/health lists every runtime kind with its checks and the global policy, without a Docker call', async (t) => {
+  const reporting = (kind: RuntimeKind, checks: HealthCheck[]) => ({ kind, health: () => checks }) as unknown as Runtime;
+  const runtimes = new Runtimes({
+    runtimes: [reporting('container', ['exit', 'ready']), reporting('isolate', ['exit', 'ready', 'hang', 'memory'])], specFor: () => null, events: new EventLog(() => {}),
+  });
+  const { call, server, w } = await admin(runtimes);
+  t.after(() => server.close());
+  w.runtime.calls.length = 0;
+  const { body } = await call('GET', '/api/health');
+  assert.deepEqual(body.runtimes, {
+    container: { service: null, profile: null, health: ['exit', 'ready'] },
+    isolate: { service: 'runner', profile: 'isolate', health: ['exit', 'ready', 'hang', 'memory'] },
+  });
+  assert.deepEqual(body.policy, DEFAULT_POLICY);
+  assert.deepEqual(w.runtime.calls, []);
 });
