@@ -109,6 +109,7 @@ Loopback port 8081, JSON. The console renders these pages:
 | --- | --- |
 | Overview | Polled from gateway memory while the tab is visible: services, seats against the awake cap, an awake timeline, wakes, traffic, deliveries, host, an attention inbox, an event tail |
 | Realtime | A request stream and the event stream side by side, one filter over both; rows expand to every field |
+| Topology | Two views of how a request reaches each runtime and what each app depends on: lanes by runtime with capability edges, and a graph with one node per app; a service that is down colours the apps it affects; a quarantine is lifted in place (ADR 0018) |
 | Projects | List, publish with an owner field on first publish, releases, capability bindings, per-app policy, state and leases, last access, counts, trigger deliveries, logs, remove, purge |
 
 Global policy, tokens and owner changes are `appctl` commands. `appctl publish <name> <dir|image> --owner user:<name>` sends the owner; `--owner` defaults to `PNEUMA_SPACE_OWNER` in the environment.
