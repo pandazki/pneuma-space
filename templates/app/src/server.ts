@@ -72,12 +72,20 @@ const server = serve(async (ctx) => {
 }, { triggers: { tick } });
 
 // Every container subscribes and fans out locally, so the room works with one container or many.
+// The last 50 messages live in KV, so a new tab or a reconnect after the app slept sees them.
 const room = new Set<Socket>();
+const log = store.key('room:log');
 await store.subscribe('room', (message) => room.forEach((socket) => socket.send(message)));
-ws(server, (socket) => {
+ws(server, async (socket) => {
   if (socket.url.pathname !== '/room') return socket.close(1008, 'unknown path');
-  room.add(socket);
-  socket.onmessage = (data) =>
-    void store.publish('room', JSON.stringify({ from: socket.identity?.name ?? 'anonymous', text: String(data) }));
   socket.onclose = () => room.delete(socket);
+  for (const message of (await store.redis.lRange(log, 0, 49)).reverse()) socket.send(message);
+  room.add(socket);
+  socket.onmessage = async (data) => {
+    const text = String(data).trim().slice(0, 500);
+    if (!text) return;
+    const message = JSON.stringify({ from: socket.identity?.name ?? 'anonymous', text, at: new Date().toISOString() });
+    await store.redis.multi().lPush(log, message).lTrim(log, 0, 49).exec();
+    await store.publish('room', message);
+  };
 });
