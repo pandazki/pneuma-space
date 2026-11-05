@@ -38,12 +38,15 @@ before(async () => {
 after(() => server.close());
 beforeEach(() => (requests = []));
 
-function stubDocker(script: string): string {
+function stub(tools: Record<string, string>): string {
   const bin = mkdtempSync(join(tmpdir(), 'appctl-bin-'));
-  writeFileSync(join(bin, 'docker'), `#!/bin/sh\n${script}\n`);
-  chmodSync(join(bin, 'docker'), 0o755);
+  for (const [tool, script] of Object.entries(tools)) {
+    writeFileSync(join(bin, tool), `#!/bin/sh\n${script}\n`);
+    chmodSync(join(bin, tool), 0o755);
+  }
   return bin;
 }
+const stubDocker = (script: string) => stub({ docker: script });
 const dockerMustNotRun = stubDocker('echo "docker must not be invoked: $*" >&2; exit 99');
 
 function appctl(args: string[], { bin = dockerMustNotRun, cli = join(repo, 'cli/appctl.ts') } = {}) {
@@ -137,6 +140,7 @@ test('token create prints the one-time secret exactly once', async () => {
 test('init copies the template next to the CLI into a new dir and refuses a non-empty one', async () => {
   const root = mkdtempSync(join(tmpdir(), 'appctl-repo-'));
   cpSync(join(repo, 'cli/appctl.ts'), join(root, 'cli/appctl.ts'));
+  cpSync(join(repo, 'cli/scaffold.ts'), join(root, 'cli/scaffold.ts'));
   cpSync(join(repo, 'gateway/src/model.ts'), join(root, 'gateway/src/model.ts'));
   mkdirSync(join(root, 'templates/static'), { recursive: true });
   writeFileSync(join(root, 'templates/static/pneuma-space.json'), '{"contract":1}');
@@ -149,4 +153,51 @@ test('init copies the template next to the CLI into a new dir and refuses a non-
   assert.equal(again.code, 1);
   assert.match(again.stderr, /not empty/);
   assert.ok(existsSync(join(target, 'pneuma-space.json')));
+});
+
+const tarList = (body: Buffer) => {
+  const file = join(mkdtempSync(join(tmpdir(), 'appctl-tar-')), 'b.tar');
+  writeFileSync(file, body);
+  return execFileSync('tar', ['-tf', file], { encoding: 'utf8' }).trim().split('\n');
+};
+
+test('publish of an isolate dir uploads the app with freshly installed node_modules and releases it with no image, without docker', async () => {
+  const manifest = { contract: 1, runtime: 'isolate', capabilities: { db: {} } };
+  const dir = source(manifest, {
+    'package.json': '{"dependencies": {"dep": "1.0.0"}}',
+    'package-lock.json': '{}',
+    'src/server.ts': 'export {}',
+    'src/server.test.ts': 'not shipped',
+    'node_modules/stale/index.js': 'not shipped',
+    'data/app.sqlite3': 'not shipped',
+    '.git/HEAD': 'not shipped',
+  });
+  const log = join(dir, '..', `${Date.now()}-npm-args`);
+  const bin = stub({ docker: 'exit 99', npm: `echo "$*" > ${log}; mkdir -p node_modules/dep && echo x > node_modules/dep/index.js` });
+  const result = await appctl(['publish', 'notes', dir, '--owner', 'user:ann'], { bin });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(readFileSync(log, 'utf8').trim(), 'ci --omit=dev --ignore-scripts');
+  const [upload, release] = requests;
+  assert.deepEqual(tarList(upload.body), ['node_modules/dep/index.js', 'package-lock.json', 'package.json', 'pneuma-space.json', 'src/server.ts']);
+  assert.deepEqual(json(release), {
+    image: null, manifest: { ...manifest, entry: 'src/server.ts' }, bundle: createHash('sha256').update(upload.body).digest('hex'), owner: 'user:ann',
+  });
+});
+
+const manifestOf = (dir: string) => JSON.parse(readFileSync(join(dir, 'pneuma-space.json'), 'utf8'));
+
+test('init writes the isolate scaffold: runtime isolate, the SDK, no Dockerfile', async () => {
+  const target = join(mkdtempSync(join(tmpdir(), 'appctl-init-')), 'app');
+  assert.equal((await appctl(['init', target])).code, 0);
+  assert.equal(manifestOf(target).runtime, 'isolate');
+  assert.ok(existsSync(join(target, 'sdk/serve.ts')));
+  assert.ok(!existsSync(join(target, 'Dockerfile')));
+});
+
+test('init --container writes the same SDK with runtime container and a Dockerfile', async () => {
+  const target = join(mkdtempSync(join(tmpdir(), 'appctl-init-')), 'app');
+  assert.equal((await appctl(['init', target, '--container'])).code, 0);
+  assert.equal(manifestOf(target).runtime, 'container');
+  assert.ok(existsSync(join(target, 'sdk/serve.ts')));
+  assert.match(readFileSync(join(target, 'Dockerfile'), 'utf8'), /CMD \["node", "src\/server.ts"\]/);
 });

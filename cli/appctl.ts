@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { cpSync, createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { cpSync, createReadStream, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
   ADMIN_PATHS, ADMIN_PORT, APPS_PATH, CAPABILITIES, InputError, ManifestError, appName, declaredKinds, parseManifest, subject,
-  type Manifest,
+  type Manifest, type RuntimeKind,
 } from '../gateway/src/model.ts';
+import { assemble } from './scaffold.ts';
 
 const EXIT = { usage: 1, manifest: 2, api: 3, build: 4 } as const;
 
@@ -22,10 +24,11 @@ class Failure extends Error {
 
 const USAGE = `usage:
   appctl publish <name> <dir|image> [--owner <subject>] [--tag <tag>] [--manifest <file>]
-  appctl init <dir> [--static]
+  appctl init <dir> [--container|--static]
   appctl list
   appctl show <name>
   appctl logs <name> [--tail <lines>]
+  appctl unquarantine <name>
   appctl remove <name>
   appctl purge <name> [--yes]
   appctl policy [<name>] key=value ...
@@ -36,7 +39,7 @@ admin API: PNEUMA_SPACE_ADMIN (default http://127.0.0.1:${ADMIN_PORT})`;
 const usage = (why: string) => new Failure(EXIT.usage, `${why}\n${USAGE}`);
 const admin = (process.env.PNEUMA_SPACE_ADMIN ?? `http://127.0.0.1:${ADMIN_PORT}`).replace(/\/$/, '');
 
-type Options = { owner?: string; tag?: string; manifest?: string; static?: boolean; yes?: boolean; tail?: string };
+type Options = { owner?: string; tag?: string; manifest?: string; container?: boolean; static?: boolean; yes?: boolean; tail?: string };
 
 async function api(method: string, path: string, body?: unknown): Promise<any> {
   const tar = body instanceof ReadableStream;
@@ -70,8 +73,37 @@ function readManifest(file: string): Manifest {
   return parseManifest(raw);
 }
 
-function needsImage(manifest: Manifest): boolean {
+function needsRuntime(manifest: Manifest): boolean {
   return declaredKinds(manifest).some((kind) => CAPABILITIES[kind].needsImage);
+}
+
+// Without a declared runtime, a Dockerfile keeps a directory scaffolded before ADR 0017 on the container runtime and its volumes.
+function runtimeOf(manifest: Manifest, dir: string): RuntimeKind | null {
+  if (manifest.runtime) return manifest.runtime;
+  if (!needsRuntime(manifest)) return null;
+  return existsSync(join(dir, 'Dockerfile')) ? 'container' : 'isolate';
+}
+
+const NOT_SHIPPED = new Set(['.git', 'node_modules', '.audit']);
+const TEST_FILE = /\.test\.[cm]?[jt]sx?$/;
+
+/** A copy of `dir` as the runner loads it: no local state or tests, production dependencies installed without their scripts. */
+function codeBundle(dir: string): string {
+  const out = mkdtempSync(join(tmpdir(), 'appctl-bundle-'));
+  cpSync(dir, out, {
+    recursive: true,
+    filter: (src) => !NOT_SHIPPED.has(basename(src)) && !TEST_FILE.test(basename(src)) && relative(dir, src) !== 'data',
+  });
+  const pkg = join(out, 'package.json');
+  if (existsSync(pkg) && Object.keys(JSON.parse(readFileSync(pkg, 'utf8')).dependencies ?? {}).length) {
+    try {
+      execFileSync('npm', ['ci', '--omit=dev', '--ignore-scripts'], { cwd: out, stdio: ['ignore', 2, 'inherit'] });
+    } catch (error) {
+      rmSync(out, { recursive: true, force: true });
+      throw new Failure(EXIT.build, `npm ci for ${dir} failed (package-lock.json must match package.json): ${(error as Error).message}`);
+    }
+  }
+  return out;
 }
 
 function build(name: string, dir: string, tag: string | undefined): string {
@@ -103,7 +135,7 @@ function splitPath(path: string): [prefix: string, name: string] {
     const name = path.slice(i + 1);
     if (Buffer.byteLength(prefix) <= 155 && Buffer.byteLength(name) <= 100) return [prefix, name];
   }
-  throw new ManifestError(`static file path too long for a bundle: ${path}`);
+  throw new ManifestError(`file path too long for a bundle: ${path}`);
 }
 
 function header(path: string, size: number): Buffer {
@@ -148,20 +180,39 @@ async function publish([rawName, target, ...extra]: string[], options: Options):
   const staticRoot = manifest.capabilities.static ? join(root, manifest.capabilities.static.dir) : null;
   const files = staticRoot ? bundleFiles(staticRoot) : null;
 
-  const image = !fromDir ? target : needsImage(manifest) ? build(name, target, options.tag) : null;
-  let bundle: string | null = null;
-  if (staticRoot && files) bundle = (await api('POST', ADMIN_PATHS.bundles, ReadableStream.from(tar(staticRoot, files)))).bundle;
-  const release = await api('PUT', ADMIN_PATHS.release(name), { image, manifest, bundle, ...(owner && { owner }) });
-  console.log(`${name}  ${APPS_PATH}/${name}/  release ${release.number}`);
+  const runtime = fromDir ? runtimeOf(manifest, target) : 'container';
+  const image = runtime !== 'container' ? null : fromDir ? build(name, target, options.tag) : target;
+  const code = runtime === 'isolate' ? codeBundle(target) : null;
+  try {
+    const [bundleRoot, bundled] = code ? [code, bundleFiles(code)] : [staticRoot, files];
+    const bundle = bundleRoot && bundled ? (await api('POST', ADMIN_PATHS.bundles, ReadableStream.from(tar(bundleRoot, bundled)))).bundle : null;
+    const release = await api('PUT', ADMIN_PATHS.release(name), { image, manifest, bundle, ...(owner && { owner }) });
+    console.log(`${name}  ${APPS_PATH}/${name}/  release ${release.number}`);
+  } finally {
+    if (code) rmSync(code, { recursive: true, force: true });
+  }
 }
+
+const TEMPLATES = fileURLToPath(new URL('../templates/', import.meta.url));
 
 function init([dir, ...extra]: string[], options: Options): void {
   if (!dir || extra.length) throw usage('init takes <dir>');
-  const template = fileURLToPath(new URL(`../templates/${options.static ? 'static' : 'app'}/`, import.meta.url));
-  if (!existsSync(template)) throw new Failure(EXIT.usage, `template ${template} not found`);
+  if (options.container && options.static) throw usage('init takes --container or --static, not both');
+  const scaffold = join(TEMPLATES, options.static ? 'static' : 'app');
+  const overlay = options.container ? join(TEMPLATES, 'container') : null;
+  for (const template of [scaffold, overlay]) if (template && !existsSync(template)) throw new Failure(EXIT.usage, `template ${template} not found`);
   if (existsSync(dir) && readdirSync(dir).length) throw new Failure(EXIT.usage, `${dir} is not empty`);
-  cpSync(template, dir, { recursive: true });
-  console.log(`created ${dir} from ${template}`);
+  assemble(dir, scaffold, overlay);
+  console.log(`created ${dir} from ${[scaffold, overlay].filter(Boolean).join(' + ')}`);
+}
+
+async function show(args: string[]): Promise<void> {
+  const name = one(args, 'show');
+  const detail = await api('GET', ADMIN_PATHS.app(name));
+  const runtime = detail.releases.find((r: { number: number }) => r.number === detail.app.current)?.runtime ?? 'none';
+  const q = detail.quarantine;
+  console.error(`runtime ${runtime}${q ? `; quarantined since ${new Date(q.since).toISOString()} after ${q.failures} failures (${q.reason}); appctl unquarantine ${name} lifts it` : ''}`);
+  console.log(JSON.stringify(detail, null, 2));
 }
 
 function one(args: string[], what: string): string {
@@ -224,10 +275,15 @@ const COMMANDS: Record<string, (args: string[], options: Options) => unknown> = 
   publish,
   init,
   list,
-  show: async (args) => console.log(JSON.stringify(await api('GET', ADMIN_PATHS.app(one(args, 'show'))), null, 2)),
+  show,
   logs: async (args, options) => {
     const query = options.tail === undefined ? '' : `?tail=${encodeURIComponent(options.tail)}`;
     process.stdout.write(await api('GET', ADMIN_PATHS.logs(one(args, 'logs')) + query));
+  },
+  unquarantine: async (args) => {
+    const name = one(args, 'unquarantine');
+    await api('POST', ADMIN_PATHS.unquarantine(name));
+    console.log(`${name} unquarantined; the next request wakes it`);
   },
   remove: async (args) => {
     const name = one(args, 'remove');
@@ -250,6 +306,7 @@ async function main(argv: string[]): Promise<void> {
         owner: { type: 'string' },
         tag: { type: 'string' },
         manifest: { type: 'string' },
+        container: { type: 'boolean' },
         static: { type: 'boolean' },
         yes: { type: 'boolean' },
         tail: { type: 'string' },

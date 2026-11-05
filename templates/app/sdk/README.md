@@ -1,6 +1,6 @@
 # SDK
 
-A wrapper over the PneumaSpace app contract (`docs/app-contract.md`), vendored as plain TypeScript so this directory is a self-contained Docker build context. Node 24 runs it directly; there is no build step. The surface and the rules are in `../AGENTS.md`.
+A wrapper over the PneumaSpace app contract (`docs/app-contract.md`), vendored as plain TypeScript so the app directory is self-contained, as a code bundle or as a Docker build context. Node 24 runs it directly; there is no build step. The surface and the rules are in `../AGENTS.md`.
 
 Each file wraps one part of the contract and is safe to delete if you do not use it:
 

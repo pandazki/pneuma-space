@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, rmSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assemble } from '../cli/scaffold.ts';
 
 const [name, ...args] = process.argv.slice(2);
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -12,12 +13,9 @@ if (!name || !existsSync(join(overlay, 'pneuma-space.json'))) {
 }
 
 const kind = existsSync(join(overlay, 'site')) ? 'static' : 'app';
-const scaffold = join(here, '../templates', kind);
 const build = join(here, '.build', name);
 rmSync(build, { recursive: true, force: true });
-cpSync(scaffold, build, { recursive: true, filter: (src) => !['node_modules', 'data'].includes(relative(scaffold, src)) });
-for (const business of ['pneuma-space.json', kind === 'static' ? 'site' : 'src']) rmSync(join(build, business), { recursive: true, force: true });
-cpSync(overlay, build, { recursive: true });
+assemble(build, join(here, '../templates', kind), overlay, ['pneuma-space.json', kind === 'static' ? 'site' : 'src']);
 console.log(`assembled ${build}`);
 
 if (!args.includes('--assemble-only')) {
