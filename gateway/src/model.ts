@@ -423,6 +423,8 @@ export type AppSummary = {
   /** Epoch ms the instance entered its state; null when none. */
   readonly since: number | null;
   readonly leases: Readonly<Record<LeaseKind, number>>;
+  /** Epoch ms the reaper stops an awake instance that holds no lease; null while a lease is held or when not awake. */
+  readonly sleepsAt: number | null;
   readonly lastAccessAt: number | null;
   readonly requests: number;
   readonly errors: number;
@@ -518,6 +520,7 @@ export interface Runtime {
   /** Epoch ms of the instance's last state change; null when none. */
   since(app: AppId): number | null;
   leases(app: AppId): Readonly<Record<LeaseKind, number>>;
+  sleepsAt(app: AppId): number | null;
   /** The last `tail` lines of stdout and stderr of the app's current or last container; empty when it has none. */
   logs(app: AppId, tail: number): Promise<string>;
   runJob(job: Job): Promise<JobResult>;
