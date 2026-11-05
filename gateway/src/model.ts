@@ -488,6 +488,7 @@ export interface StoreOps {
   insertDelivery(delivery: Delivery): Promise<Delivery>;
   updateDelivery(delivery: Delivery): Promise<void>;
   deliveries(filter: DeliveryFilter): Promise<Delivery[]>;
+  deliveryCounts(): Promise<Record<DeliveryState, number>>;
   lastScheduledFor(app: AppId, trigger: TriggerName): Promise<number | null>;
   deleteDeliveries(app: AppId): Promise<void>;
 
