@@ -556,7 +556,7 @@ const I18N = {
     'att.wake': '唤醒失败', 'att.service': '{name} 不可达', 'att.serviceDetail': '网关的探测连不上它。',
     'att.p95': '唤醒 p95 超过门槛', 'att.p95Detail': '最近 1 小时 p95 {p95}，门槛 3 秒',
     'att.seen': '标为已读', 'att.allSeen': '全部已读', 'att.showSeen': '已读 {n} 条', 'att.hideSeen': '收起已读',
-    'tail.restart': '网关重启，序号从 1 重新开始。', 'tail.gap': '两次轮询之间超过 100 条事件，有 {n} 条没有显示。', 'tail.new': '{n} 条新事件', 'tail.paused': '已暂停跟随',
+    'tail.restart': '网关重启，序号从 1 重新开始。', 'tail.gap': '两次轮询之间超过 100 条事件，有 {n} 条没有显示。', 'tail.new': '{n} 条新事件', 'tail.paused': '已暂停跟随', 'tail.dropped': '暂停期间丢弃 {n} 条',
     'd.recent': '最近的状态变化',
     'dur.d': '{n} 天', 'dur.h': '{n} 小时', 'dur.m': '{n} 分', 'dur.s': '{n} 秒',
     'nav.realtime': '实时', 'ov.toRealtime': '实时页', 'tl.cut': '只画最近有变化的 {n} 个，共 {total} 个',
@@ -645,7 +645,7 @@ const I18N = {
     'att.wake': 'Wake failed', 'att.service': '{name} is down', 'att.serviceDetail': 'The gateway probe cannot reach it.',
     'att.p95': 'Wake p95 over the gate', 'att.p95Detail': 'p95 {p95} in the last hour against 3 s',
     'att.seen': 'Mark seen', 'att.allSeen': 'Mark all seen', 'att.showSeen': '{n} seen', 'att.hideSeen': 'Hide seen',
-    'tail.restart': 'Gateway restarted; seq starts again at 1.', 'tail.gap': '{n} events not shown: more than 100 arrived between two polls.', 'tail.new': '{n} new', 'tail.paused': 'following paused',
+    'tail.restart': 'Gateway restarted; seq starts again at 1.', 'tail.gap': '{n} events not shown: more than 100 arrived between two polls.', 'tail.new': '{n} new', 'tail.paused': 'following paused', 'tail.dropped': '{n} dropped while paused',
     'd.recent': 'recent state changes',
     'dur.d': '{n} d', 'dur.h': '{n} h', 'dur.m': '{n} min', 'dur.s': '{n} s',
     'nav.realtime': 'Realtime', 'ov.toRealtime': 'Realtime page', 'tl.cut': 'the {n} most recently changed of {total}',
@@ -837,6 +837,7 @@ const SPAN_MS = 15 * 60_000;
 const AHEAD_MS = 60_000;
 const KEEP_EVENTS = 600;
 const TAIL_ROWS = 300;
+const EVENT_RING = 100;
 const FRESH_ROWS = 40;
 /** The awake timeline draws only the apps whose state changed most recently (ADR 0016). */
 const TIMELINE_ROWS = 10;
@@ -1489,14 +1490,16 @@ const eventMarks = (diff) => [diff.restarted && t('tail.restart'), diff.missed >
 
 /**
  * A newest-on-top stream that follows arrivals (ADR 0015): while the pointer is over it or it is scrolled down, new
- * entries wait behind a pill. An entry is `{ item }` or `{ mark }`; a mark (a gap, a restart) shows whatever the filter.
+ * entries wait behind a pill, at most `hold` of them, the gateway's ring for that stream. An entry is `{ item }` or
+ * `{ mark }`; a mark (a gap, a restart) shows whatever the filter.
  */
-function follow({ line, keep, limit, empty, newKey, attrs = {}, head = null }) {
+function follow({ line, keep, limit, hold, empty, newKey, attrs = {}, head = null }) {
   const rows = h('div', { class: 'rows' });
   const pill = h('button', { class: 'pill', type: 'button', hidden: true, onclick: () => { rows.scrollTo({ top: 0 }); hovering = false; flush(); } });
   const el = h('div', { ...attrs, class: `card tailbox ${attrs.class ?? ''}` }, pill, head, rows);
-  const entries = [];
+  let entries = [];
   const pending = [];
+  let dropped = 0;
   let match = () => true;
   let hovering = false;
   let changed = () => {};
@@ -1514,9 +1517,11 @@ function follow({ line, keep, limit, empty, newKey, attrs = {}, head = null }) {
   };
   const flush = () => {
     pill.hidden = true;
+    if (dropped) pending.unshift({ mark: t('tail.dropped', { n: nf(dropped) }) });
+    dropped = 0;
     if (pending.length) {
       const batch = pending.splice(0).reverse();
-      entries.unshift(...batch);
+      entries = batch.concat(entries);
       entries.splice(keep);
       for (const old of rows.querySelectorAll('.fresh')) old.classList.remove('fresh');
       const shown = batch.filter(shows).slice(0, limit);
@@ -1549,18 +1554,20 @@ function follow({ line, keep, limit, empty, newKey, attrs = {}, head = null }) {
       rebuild();
     },
     push(marks, items) {
-      pending.push(...marks.map((mark) => ({ mark })), ...items.map((item) => ({ item })));
+      for (const mark of marks) pending.push({ mark });
+      for (const item of items) pending.push({ item });
       if (!paused()) return flush();
+      for (const old of pending.splice(0, Math.max(0, pending.length - hold))) if (old.item) dropped += 1;
       const n = pending.filter((p) => p.item && match(p.item)).length;
-      pill.hidden = !n;
-      pill.textContent = `↑ ${t(newKey, { n: nf(n) })}`;
+      pill.hidden = !n && !dropped;
+      pill.textContent = [`↑ ${t(newKey, { n: nf(n) })}`, dropped && t('tail.dropped', { n: nf(dropped) })].filter(Boolean).join(' · ');
       changed();
     },
   };
 }
 
 function eventTail() {
-  const stream = follow({ line: eventLine, keep: TAIL_ROWS, limit: TAIL_ROWS, empty: 'empty.events', newKey: 'tail.new', attrs: { 'data-section': 'tail' } });
+  const stream = follow({ line: eventLine, keep: TAIL_ROWS, limit: TAIL_ROWS, hold: EVENT_RING, empty: 'empty.events', newKey: 'tail.new', attrs: { 'data-section': 'tail' } });
   const filter = h('input', { type: 'search', name: 'filter', placeholder: t('ev.filter'), 'aria-label': t('ev.filter'), oninput: () => {
     const needle = filter.value.trim().toLowerCase();
     stream.setMatch((e) => !needle || eventText(e).includes(needle));
@@ -1660,6 +1667,7 @@ async function overview() {
 // Realtime (ADR 0016): the request ring and the event ring, read by cursor, under one filter.
 
 const REQUESTS_MS = 1000;
+const REQUEST_RING = 1000;
 const REQUEST_PAGE = 1000;
 const KEEP_REQUESTS = 5000;
 const REQUEST_ROWS = 1000;
@@ -1837,7 +1845,7 @@ function pulseStrip() {
 function realtime() {
   const filter = filterState();
   const model = liveModel();
-  const page = { cursor: 0, seeded: false, skip: new Set(), records: [], parsed: parseFilter(filter.text) };
+  const page = { cursor: 0, generation: 0, seeded: false, skip: new Set(), records: [], parsed: parseFilter(filter.text) };
   const match = { request: () => true, event: () => true };
   const header = liveHeader('live.lastRequest', () => first());
   const pulse = pulseStrip();
@@ -1895,8 +1903,8 @@ function realtime() {
     return wrap;
   };
 
-  const requests = follow({ line: requestLine, keep: KEEP_REQUESTS, limit: REQUEST_ROWS, empty: 'empty.requests', newKey: 'rt.new', head: requestHead, attrs: { class: 'reqs', 'data-section': 'requests' } });
-  const events = follow({ line: eventLine, keep: KEEP_EVENTS, limit: TAIL_ROWS, empty: 'empty.events', newKey: 'tail.new', attrs: { 'data-section': 'events' } });
+  const requests = follow({ line: requestLine, keep: KEEP_REQUESTS, limit: REQUEST_ROWS, hold: REQUEST_RING, empty: 'empty.requests', newKey: 'rt.new', head: requestHead, attrs: { class: 'reqs', 'data-section': 'requests' } });
+  const events = follow({ line: eventLine, keep: KEEP_EVENTS, limit: TAIL_ROWS, hold: EVENT_RING, empty: 'empty.events', newKey: 'tail.new', attrs: { 'data-section': 'realtime-events' } });
   const count = (stream) => {
     const el = h('span', { class: 'cnt' });
     stream.onChange(() => {
@@ -1960,15 +1968,18 @@ function realtime() {
 
   const pollRequests = async () => {
     for (let round = 0; round < 3; round++) {
+      const generation = page.generation;
       const batch = await api('GET', `/api/requests?after=${page.cursor}&limit=${REQUEST_PAGE}`);
-      const missed = page.seeded && page.cursor > 0 && batch.length ? batch[0].seq - page.cursor - 1 : 0;
+      // Asked of the process before the restart was seen: its seqs mean nothing to the new cursor.
+      if (generation !== page.generation) return;
+      const missed = page.seeded && batch.length ? batch[0].seq - page.cursor - 1 : 0;
       if (batch.length) page.cursor = batch.at(-1).seq;
       const fresh = batch.filter((r) => !page.skip.has(r.seq));
       page.records.push(...fresh);
       page.records.splice(0, Math.max(0, page.records.length - KEEP_REQUESTS));
       if (!page.seeded) requests.seed(fresh);
       else if (fresh.length || missed > 0) {
-        requests.push(missed > 0 ? [t('rt.gap', { n: nf(missed), ring: nf(REQUEST_PAGE) })] : [], fresh);
+        requests.push(missed > 0 ? [t('rt.gap', { n: nf(missed), ring: nf(REQUEST_RING) })] : [], fresh);
         header.beat();
       }
       page.seeded = true;
@@ -1985,6 +1996,7 @@ function realtime() {
       // Records already read from the new process come again once the cursor starts over.
       page.skip = new Set(page.records.filter((r) => r.t >= m.gateway.startedAt).map((r) => r.seq));
       page.cursor = 0;
+      page.generation += 1;
       requests.push([t('rt.restart')], []);
     }
     if (diff.reset) absorbApps(model, await api('GET', '/api/apps'), Date.now());

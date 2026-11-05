@@ -181,13 +181,14 @@ test('AC-P-15', { timeout: 120_000 }, async (t) => {
   const beforeTrigger = (await requests(0)).at(-1).seq;
   const invoked = await fetch(appUrl(app.name, '/_pneuma-space/trigger/report'), { method: 'POST', headers: { authorization: `Bearer ${await serviceToken(uniqueName('svc'))}` } });
   assert.equal(invoked.status, 202);
-  const trigger = await newer(beforeTrigger, 'trigger');
-  assert.deepEqual([trigger.status, trigger.path], [200, '/_pneuma-space/trigger/report'], 'the app\'s answer');
+  await newer(beforeTrigger, 'trigger');
+  const triggers = (await requests(beforeTrigger)).filter((r: any) => r.app === app.name && r.kind === 'trigger');
+  assert.deepEqual(triggers.map((r: any) => [r.status, r.path]), [[200, '/_pneuma-space/trigger/report']], 'one trigger record with the app\'s answer');
 
   const page = await (await fetch(adminUrl + '/')).text();
-  for (const section of ['filter', 'requests', 'events']) assert.ok(page.includes(`'data-section': '${section}'`), `realtime page has ${section}`);
+  for (const section of ['filter', 'requests', 'realtime-events']) assert.ok(page.includes(`'data-section': '${section}'`), `realtime page has ${section}`);
   assert.ok(page.includes('#/realtime') && page.includes('/api/requests?after='), 'the realtime page polls the request cursor');
-  assert.ok(page.includes('const TIMELINE_ROWS = 10;'), 'the overview timeline draws at most 10 apps');
+  assert.ok(page.includes('const TIMELINE_ROWS = 10;') && page.includes('timeline({ cap: TIMELINE_ROWS })') && page.includes('.splice(cap)'), 'the overview timeline draws at most 10 apps');
 });
 
 test('AC-P-7', { timeout: 90_000 }, async (t) => {

@@ -48,7 +48,7 @@ export function connect(address: string): Promise<net.Socket> {
 /** Path A. Streams both bodies with back-pressure; Node picks Content-Length or chunked framing on each leg. */
 export function forward(
   req: http.IncomingMessage, res: http.ServerResponse, socket: net.Socket,
-  path: string, headers: readonly string[], hold: Hold,
+  path: string, headers: readonly string[], hold: Hold, failed: (reason: string) => void,
 ): void {
   let stream = false;
   const up = http.request({ createConnection: () => socket, method: req.method, path, headers: endToEnd(headers) }, (ur) => {
@@ -67,7 +67,8 @@ export function forward(
   const done = () => --open === 0 && hold.release();
   up.once('close', done);
   res.once('close', done);
-  up.on('error', () => {
+  up.on('error', (error) => {
+    failed(String(error));
     if (!res.headersSent && !res.destroyed) res.writeHead(502, { 'content-type': 'application/json' }).end('{"error":"the app closed the connection"}');
     else res.destroy();
   });
@@ -126,7 +127,7 @@ class FrameCursor {
  */
 export function tunnel(
   req: http.IncomingMessage, client: net.Socket, head: Buffer, up: net.Socket,
-  path: string, headers: readonly string[], hold: Hold,
+  path: string, headers: readonly string[], hold: Hold, answered: (status: number) => void,
 ): void {
   const lines = [`${req.method} ${path} HTTP/${req.httpVersion}`];
   for (let i = 0; i < headers.length; i += 2) lines.push(`${headers[i]}: ${headers[i + 1]}`);
@@ -168,7 +169,9 @@ export function tunnel(
       const end = all.indexOf('\r\n\r\n');
       if (end < 0) return void (responseHead = all);
       responseHead = null;
-      if (!/^HTTP\/1\.[01] 101/.test(all.toString('latin1', 0, 12))) return send(all);
+      const status = Number(/^HTTP\/1\.[01] (\d{3})/.exec(all.toString('latin1', 0, all.indexOf('\r\n')))?.[1] ?? 0);
+      answered(status);
+      if (status !== 101) return send(all);
       send(all.subarray(0, end + 4));
       hold.channel(close);
       client.setTimeout(hold.idleMs, () => (frames.atBoundary ? goAway() : client.destroy()));
