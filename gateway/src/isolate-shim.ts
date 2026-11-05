@@ -1,7 +1,7 @@
 // The main script of every isolate worker: it stands where a --import preload would, since a worker's execArgv ignores --import.
 import dc from 'node:diagnostics_channel';
 import module, { syncBuiltinESMExports } from 'node:module';
-import { createServer, type AddressInfo, type ListenOptions, type Server } from 'node:net';
+import type { ListenOptions, Server } from 'node:net';
 import { Readable, Writable } from 'node:stream';
 import v8 from 'node:v8';
 import threads, { parentPort, workerData } from 'node:worker_threads';
@@ -16,8 +16,11 @@ Object.setPrototypeOf(port, chain.reduceRight((parent, proto) => Object.create(p
 const post: (message: WorkerMessage) => void = port.postMessage.bind(port);
 port.on('message', (message: { type: 'ping'; seq: number } | { type: 'drain' }) => {
   if (message.type === 'ping') post({ type: 'pong', seq: message.seq, external: memoryUsage().external });
-  // Signals never reach a worker, so the app's SIGTERM handler is the one shutdown path in both runtimes.
-  else process.emit('SIGTERM');
+  else {
+    flush();
+    // Signals never reach a worker, so the app's SIGTERM handler is the one shutdown path in both runtimes.
+    process.emit('SIGTERM');
+  }
 });
 port.unref();
 threads.parentPort = null;
@@ -47,8 +50,10 @@ const LOG_BUDGET = 64 * 2 ** 10;
 const LINE_COST = 64;
 const budget = { at: performance.now(), spent: 0, dropped: 0, notice: false };
 const EMPTY = Buffer.alloc(0);
-/** The start of a line whose newline is not written yet, already cut to LINE_BYTES. */
-let held = EMPTY;
+const NEWLINE = Buffer.from('\n');
+/** Per stream, the start of a line whose newline is not written yet, already cut to LINE_BYTES. */
+type Capture = { held: Buffer };
+const captures: Capture[] = [];
 
 function refill(): void {
   const now = performance.now();
@@ -57,15 +62,16 @@ function refill(): void {
   Object.assign(budget, { at: now, spent: 0, dropped: 0 });
 }
 
-function logged(bytes: Buffer): void {
+function logged(capture: Capture, bytes: Buffer): void {
   refill();
   const lines: string[] = [];
   // A loop over bytes, not indexOf per line: 64 MiB of newlines takes about 50 ms here instead of a second.
   for (let start = 0, i = 0; i <= bytes.length; i++) {
     if (i < bytes.length && bytes[i] !== 10) continue;
+    const { held } = capture;
     const end = Math.min(i, start + LINE_BYTES - held.length);
     if (i === bytes.length) {
-      if (end > start) held = Buffer.concat([held, bytes.subarray(start, end)]);
+      if (end > start) capture.held = Buffer.concat([held, bytes.subarray(start, end)]);
       break;
     }
     const length = held.length + end - start;
@@ -73,11 +79,16 @@ function logged(bytes: Buffer): void {
       budget.spent += length + LINE_COST;
       lines.push(held.length ? Buffer.concat([held, bytes.subarray(start, end)]).toString('utf8') : bytes.toString('utf8', start, end));
     } else budget.dropped++;
-    held = EMPTY;
+    capture.held = EMPTY;
     start = i + 1;
   }
   if (lines.length) post({ type: 'log', lines });
   if (budget.dropped) noticeLater();
+}
+
+/** A held tail is sent as a line: when the worker exits or drains, and when the budget refills. */
+function flush(): void {
+  for (const capture of captures) if (capture.held.length) logged(capture, NEWLINE);
 }
 
 /** The drop count is sent when the budget refills, even if the app writes nothing more. */
@@ -87,6 +98,7 @@ function noticeLater(): void {
   setTimeout(() => {
     budget.notice = false;
     refill();
+    flush();
     if (budget.dropped) noticeLater();
   }, Math.max(0, budget.at + 1000 - performance.now())).unref();
 }
@@ -94,20 +106,20 @@ function noticeLater(): void {
 // Node's own stdio streams each hold an internal port whose unknown messages fail an assertion on the runner's main thread.
 // Node's worker bootstrap calls this on process.stdout and process.stderr, by name, whenever the runner reads their native stream.
 const wantsMore = Object.getOwnPropertySymbols(Object.getPrototypeOf(process.stdout)).find((key) => key.description === 'kStdioWantsMoreDataCallback')!;
-const sink = () => Object.assign(new Writable({ write(chunk: Buffer, _encoding, done) { logged(chunk); done(); } }), { [wantsMore]: () => {} });
+const sink = () => {
+  const capture: Capture = { held: EMPTY };
+  captures.push(capture);
+  return Object.assign(new Writable({ write(chunk: Buffer, _encoding, done) { logged(capture, chunk); done(); } }), { [wantsMore]: () => {} });
+};
 const [stdout, stderr] = [sink(), sink()];
 const stdin = new Readable({ read() { this.push(null); } });
 for (const [name, value] of Object.entries({ stdout, stderr, stdin })) Object.defineProperty(process, name, { value, enumerable: true });
 // The global console keeps the streams it first wrote to.
 Object.assign(console, { _stdout: stdout, _stderr: stderr });
+process.on('exit', flush);
 
-// A port fixed before the app runs tells its server from any other it listens with.
-const appPort = await new Promise<number>((resolve, reject) => {
-  const probe = createServer().once('error', reject).listen(0, () => {
-    const { port } = probe.address() as AddressInfo;
-    probe.close(() => resolve(port));
-  });
-});
+// The runner allocates the port and accepts `listening` for it alone; it also tells the app's server from any other it listens with.
+const appPort: number = workerData.port;
 process.env.PNEUMA_SPACE_PORT = String(appPort);
 
 const asked = new WeakSet<Server>();

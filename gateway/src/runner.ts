@@ -2,6 +2,7 @@
 // It judges nothing: hangs, exits and memory overruns are reported as events and the gateway's Guard decides.
 import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { Server, type AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
@@ -68,12 +69,15 @@ type Instance = {
   readonly worker: string;
   readonly thread: Worker;
   readonly since: number;
-  port: number | null;
+  /** Allocated by the runner, so a forged `listening` cannot name another app's port. */
+  readonly port: number;
+  listening: boolean;
   ping: { readonly seq: number; deadline: number } | null;
   /** Set by the first terminal event; later ones for this worker are dropped. The instance stays in the map until its thread is gone. */
   ended: boolean;
   stopping: boolean;
   error: string | null;
+  oom: boolean;
   forged: number;
   readonly exited: Promise<void>;
   terminating: Promise<void> | null;
@@ -155,13 +159,20 @@ const appDir = (app: string) => join(DATA, 'apps', app);
 const storageDir = (app: string, id: string) => join(appDir(app), 'storage', id);
 const isRelease = (name: string) => /^\d+$/.test(name);
 
+/** By index, since `every` skips holes and `for…of` yields them as undefined. */
+function strings(raw: unknown): boolean {
+  if (!Array.isArray(raw)) return false;
+  for (let i = 0; i < raw.length; i++) if (typeof raw[i] !== 'string' || raw[i].length > LINE_UNITS) return false;
+  return true;
+}
+
 function parse(raw: unknown): WorkerMessage | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const m = raw as Record<string, unknown>;
   const valid =
     m.type === 'pong' ? typeof m.seq === 'number' && typeof m.external === 'number'
-    : m.type === 'listening' ? Number.isInteger(m.port) && (m.port as number) > 0 && (m.port as number) < 65536
-    : m.type === 'log' ? Array.isArray(m.lines) && m.lines.every((line) => typeof line === 'string' && line.length <= LINE_UNITS)
+    : m.type === 'listening' ? Number.isInteger(m.port)
+    : m.type === 'log' ? strings(m.lines)
     : m.type === 'dropped' ? Number.isInteger(m.count)
     : false;
   return valid ? (m as WorkerMessage) : null;
@@ -174,6 +185,23 @@ function reject(inst: Instance): void {
   if (++inst.forged < FORGED_LIMIT) return;
   end(inst, 'exit', { reason: 'forged' });
   void terminate(inst);
+}
+
+async function freePort(): Promise<number> {
+  const probe = new Server();
+  await new Promise<void>((ok, fail) => probe.once('error', fail).listen(0, ok));
+  const { port } = probe.address() as AddressInfo;
+  await new Promise((ok) => probe.close(ok));
+  return port;
+}
+
+/** An uncaught value from the app, or a forged one; it may be anything, `undefined` included. */
+function describe(error: unknown): string {
+  try {
+    return String((error as Error | undefined)?.stack ?? error);
+  } catch {
+    return 'an error that cannot be printed';
+  }
 }
 
 /** The release's code, downloaded and unpacked once; other releases of the app are dropped. */
@@ -207,7 +235,7 @@ async function code(app: string, release: number, url: string, deadline: number)
 
 async function start(app: string, request: StartRequest): Promise<Started> {
   const current = instances.get(app);
-  if (current && !current.ended && current.port && current.release === request.release && current.spec === request.spec) return { worker: current.worker, port: current.port };
+  if (current && !current.ended && current.listening && current.release === request.release && current.spec === request.spec) return { worker: current.worker, port: current.port };
   if (current) await stop(current, 0);
   const deadline = Date.now() + request.readyMs;
   const dir = await code(app, request.release, request.bundleUrl, deadline);
@@ -218,9 +246,10 @@ async function start(app: string, request: StartRequest): Promise<Started> {
     await mkdir(target, { recursive: true });
     for (const [key, value] of Object.entries(binding.env)) storage[key] = value.replaceAll('{dir}', target);
   }
+  const port = await freePort();
   // No execArgv: any value replaces the inherited --permission, and with it the bans on child_process and addons.
   const thread = new Worker(SHIM, {
-    workerData: { entry: pathToFileURL(join(dir, request.entry)).href },
+    workerData: { entry: pathToFileURL(join(dir, request.entry)).href, port },
     env: { ...request.env, ...storage },
     resourceLimits: { maxOldGenerationSizeMb: HEAP_MB, maxYoungGenerationSizeMb: Math.max(8, Math.round(HEAP_MB / 8)) },
     stdout: true,
@@ -229,23 +258,23 @@ async function start(app: string, request: StartRequest): Promise<Started> {
   const exited = Promise.withResolvers<void>();
   const inst: Instance = {
     app, release: request.release, spec: request.spec, worker: `${startedAt}:${++workers}`, thread, since: Date.now(),
-    port: null, ping: null, ended: false, stopping: false, error: null, forged: 0, exited: exited.promise, terminating: null,
+    port, listening: false, ping: null, ended: false, stopping: false, error: null, oom: false, forged: 0, exited: exited.promise, terminating: null,
   };
   instances.set(app, inst);
   dropNative(app, thread.stdout);
   dropNative(app, thread.stderr);
-  const ready = Promise.withResolvers<number>();
+  const ready = Promise.withResolvers<true>();
   thread.on('message', (raw: unknown) => {
     if (inst.ended) return;
     const message = parse(raw);
-    if (message === null || (message.type === 'listening' && inst.port !== null)) return reject(inst);
+    if (message === null || (message.type === 'listening' && (inst.listening || message.port !== port))) return reject(inst);
     if (message.type === 'log') for (const line of message.lines) append(app, line);
     else if (message.type === 'dropped') append(app, `dropped ${message.count} lines`);
     else if (message.type === 'listening') {
-      inst.port = message.port;
+      inst.listening = true;
       // The hang clock starts here: a ping unanswered during startup belongs to the ready timeout.
       inst.ping = null;
-      ready.resolve(message.port);
+      ready.resolve(true);
     } else if (inst.ping?.seq === message.seq) {
       inst.ping = null;
       if (message.external > OFFHEAP_BYTES && !inst.ended) {
@@ -254,20 +283,22 @@ async function start(app: string, request: StartRequest): Promise<Started> {
       }
     }
   });
-  thread.on('error', (error: Error & { code?: string }) => {
-    if (error.code === 'ERR_WORKER_OUT_OF_MEMORY') end(inst, 'oom', { reason: 'heap' });
-    else inst.error = String(error.stack ?? error);
+  // The message behind this event can be forged on Node's internal port, so it only ever ends the worker; the watchdog runs until the real exit.
+  thread.on('error', (error: unknown) => {
+    void terminate(inst);
+    if ((error as { code?: unknown } | undefined)?.code === 'ERR_WORKER_OUT_OF_MEMORY') inst.oom = true;
+    else inst.error = describe(error);
   });
   thread.on('exit', (exitCode) => {
     exited.resolve();
     if (instances.get(app) === inst) instances.delete(app);
     ready.reject(new Error(`worker exited with code ${exitCode} before it listened${inst.error ? `: ${inst.error}` : ''}`));
-    end(inst, 'exit', { code: exitCode, reason: inst.stopping ? 'stopped' : inst.error ?? undefined });
+    if (inst.oom) end(inst, 'oom', { reason: 'heap' });
+    else end(inst, 'exit', { code: exitCode, reason: inst.stopping ? 'stopped' : inst.error ?? undefined });
   });
   const timer = new AbortController();
   const timeout = sleep(Math.max(0, deadline - Date.now()), null, { signal: timer.signal }).catch(() => null);
-  const port = await Promise.race([ready.promise, timeout]).finally(() => timer.abort());
-  if (port === null) {
+  if ((await Promise.race([ready.promise, timeout]).finally(() => timer.abort())) === null) {
     await stop(inst, 0);
     throw new Error(`worker did not listen on ${RUNTIME_ENV.port} within ${request.readyMs} ms`);
   }
@@ -289,7 +320,7 @@ setInterval(() => {
       continue;
     }
     inst.ping.deadline += late;
-    if (inst.port !== null && now >= inst.ping.deadline) {
+    if (inst.listening && now >= inst.ping.deadline) {
       end(inst, 'hung', { reason: `no answer to the watchdog for ${SILENCE_MS} ms` });
       void terminate(inst);
     }
@@ -328,8 +359,8 @@ async function route(request: IncomingMessage, url: URL): Promise<unknown> {
   if (method === 'GET' && resource === 'health') return { ok: true, startedAt, stuck, forged, internal, workers: instances.size };
   if (method === 'GET' && resource === 'instances' && !a) {
     return [...instances.values()].map((i): Listed => ({
-      app: i.app, release: i.release, spec: i.spec, worker: i.worker, port: i.port, since: i.since,
-      state: i.ended || i.stopping ? 'ending' : i.port === null ? 'starting' : 'listening',
+      app: i.app, release: i.release, spec: i.spec, worker: i.worker, port: i.listening ? i.port : null, since: i.since,
+      state: i.ended || i.stopping ? 'ending' : i.listening ? 'listening' : 'starting',
     }));
   }
   if (method === 'POST' && resource === 'instances') {
