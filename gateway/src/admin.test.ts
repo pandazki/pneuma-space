@@ -142,18 +142,21 @@ test('POST /api/apps/<name>/unquarantine lifts the quarantine the listing shows'
 });
 
 test('GET /api/health lists every runtime kind with its checks and the global policy, without a Docker call', async (t) => {
-  const reporting = (kind: RuntimeKind, checks: HealthCheck[]) => ({ kind, health: () => checks }) as unknown as Runtime;
+  const calls: string[] = [];
+  /** Answers kind and health; records every other Runtime method, each of which may reach Docker. */
+  const reporting = (kind: RuntimeKind, checks: HealthCheck[]) => new Proxy({ kind, health: () => checks }, {
+    get: (target, key) => (key in target ? target[key as keyof typeof target] : (...args: unknown[]) => void calls.push(`${kind}.${String(key)}(${args.join(',')})`)),
+  }) as unknown as Runtime;
   const runtimes = new Runtimes({
     runtimes: [reporting('container', ['exit', 'ready']), reporting('isolate', ['exit', 'ready', 'hang', 'memory'])], specFor: () => null, events: new EventLog(() => {}),
   });
-  const { call, server, w } = await admin(runtimes);
+  const { call, server } = await admin(runtimes);
   t.after(() => server.close());
-  w.runtime.calls.length = 0;
   const { body } = await call('GET', '/api/health');
   assert.deepEqual(body.runtimes, {
     container: { service: null, profile: null, health: ['exit', 'ready'] },
     isolate: { service: 'runner', profile: 'isolate', health: ['exit', 'ready', 'hang', 'memory'] },
   });
   assert.deepEqual(body.policy, DEFAULT_POLICY);
-  assert.deepEqual(w.runtime.calls, []);
+  assert.deepEqual(calls, []);
 });

@@ -449,7 +449,7 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
   .pulse .s, .pulse .l { white-space: normal; }
   .rt-lane { padding-top: 20px; }
 }
-.topo { padding: 12px; overflow-x: auto; overscroll-behavior-x: contain; }
+.topo { position: relative; padding: 12px; overflow-x: auto; overscroll-behavior-x: contain; }
 .topo-svg { display: block; overflow: visible; }
 .topo-svg text { font-family: var(--font); font-size: 12px; fill: var(--ink); white-space: pre; }
 .topo-svg .m { font-family: var(--mono); font-variant-numeric: tabular-nums; }
@@ -470,8 +470,12 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .topo-svg .band { fill: var(--inset); stroke: var(--line); }
 .topo-svg .band.ing { fill: var(--accent-tint); stroke: none; }
 .topo-svg .downwash { fill: var(--red-tint); stroke: var(--red); stroke-dasharray: 5 4; opacity: .8; }
-.topo-svg .act { cursor: pointer; outline: none; }
-.topo-svg .act:focus-visible > rect:first-of-type { stroke: var(--accent); stroke-width: 2; }
+.topo-svg .act { cursor: pointer; }
+.topo-svg .act:focus { outline: none; }
+.topo-svg .act:focus-visible > rect:first-of-type { stroke: var(--accent); stroke-width: 2; stroke-dasharray: none; }
+.topo-svg .hit { fill: transparent; stroke: none; }
+.topo-svg.retired { position: absolute; pointer-events: none; }
+.topo-svg.retired > :not(.flows) { opacity: 0; }
 .topo-svg .lanet:hover .linkt { text-decoration: underline; }
 .topo-svg .edge { fill: none; stroke: var(--line-strong); stroke-width: 1.25; transition: stroke .4s, opacity .3s; }
 .topo-svg .edge.cron, .topo-svg .edge.group { stroke-dasharray: 3 3; }
@@ -499,6 +503,10 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .topo-svg [data-state="quarantined"] .chipr { fill: var(--red-tint); stroke: var(--red); stroke-dasharray: none; }
 .topo-svg [data-state="quarantined"] .sdot { fill: var(--red); }
 .topo-svg [data-state="quarantined"] .chipt { fill: var(--red); }
+.topo-svg [data-state="unpublished"] { opacity: .6; }
+.topo-svg [data-state="unpublished"] .chipr { fill: none; stroke-dasharray: 3 3; }
+.topo-svg .unpub { fill: none; stroke: var(--line-strong); stroke-dasharray: 4 4; }
+.topo-svg .lanet.fault .grp { fill: var(--red); }
 .topo-svg .chipg.hit .chipr { stroke: var(--accent); stroke-width: 2; }
 .topo-svg .chipg.hit { animation: chiphit 1.6s ease-out; opacity: 1; }
 @keyframes chiphit { from { opacity: 1; } 15% { opacity: 1; } }
@@ -529,6 +537,7 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .pickbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; font-size: 12.5px; }
 .pickbar:empty { display: none; }
 .faults { display: grid; gap: 0; padding: 0; margin-bottom: 12px; box-shadow: 0 0 0 1px var(--red), var(--shadow-sm); }
+.faults:empty { display: none; }
 .fault-item { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
 .fault-item:last-child { border-bottom: 0; }
 .fault-item .st { font-size: 12.5px; font-weight: 500; }
@@ -592,7 +601,7 @@ const I18N = {
     'theme.light': '浅色', 'theme.dark': '深色', 'aside.since': '自 {time} 起采样，网关重启后清零。',
     'ov.title': '总览', 'ov.waiting': '等待第一次采样',
     'svc.gateway': '网关', 'svc.redis': 'Redis', 'svc.object': '对象存储', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn', 'svc.runner': 'runner',
-    'svc.gatewaySub': '已运行 {up} · 内存 {rss}', 'svc.off': '未启用 profile', 'svc.down': '不可达',
+    'svc.gatewaySub': '已运行 {up} · 内存 {rss}', 'svc.off': '未启用 profile', 'svc.down': '不可达', 'svc.unknown': '等待第一次采样',
     'sec.fleet': '席位、唤醒与主机', 'sec.fleetDesc': '醒着的实例占一个席位；唤醒对照 3 秒门槛。',
     'k.awakeSub': '唤醒中 {waking} · 排空中 {draining} · 停止中 {stopping}',
     'k.wakes': '唤醒（1 小时）',
@@ -611,13 +620,13 @@ const I18N = {
     'col.attempts': '尝试次数', 'col.scheduledFor': '计划时间', 'col.created': '创建时间', 'col.nextAttempt': '下次尝试',
     'empty.attention': '没有需要关注的事项。', 'empty.events': '还没有事件。', 'empty.filtered': '没有匹配的记录。',
     'att.delivery': '投递失败', 'att.deliveryDetail': '{trigger} · 尝试 {attempts} 次',
-    'apps.title': '项目', 'apps.count': '{n} 个应用', 'apps.filter': '按名称筛选', 'apps.allStates': '全部状态',
+    'apps.title': '项目', 'apps.count.one': '{n} 个应用', 'apps.count.other': '{n} 个应用', 'apps.filter': '按名称筛选', 'apps.allStates': '全部状态',
     'apps.empty': '还没有应用。发布一个即可获得地址。', 'apps.publish': '发布应用',
     'never': '从未', 'routeOnly': '仅路由',
     'st.registered': '已注册', 'st.removed': '已移除', 'st.purging': '清除中', 'st.none': '无实例', 'st.asleep': '休眠',
     'st.waking': '唤醒中', 'st.awake': '运行中', 'st.draining': '排空中', 'st.stopping': '停止中', 'st.active': '启用',
     'st.suspended': '已暂停', 'st.due': '待投递', 'st.delivering': '投递中', 'st.done': '完成', 'st.failed': '失败',
-    'st.cancelled': '已取消', 'st.up': '在线', 'st.down': '不可达', 'st.off': '未启用',
+    'st.cancelled': '已取消', 'st.up': '在线', 'st.down': '不可达', 'st.off': '未启用', 'st.unknown': '未知',
     'd.back': '所有项目', 'd.open': '打开 {address}', 'd.since': '{ago}进入', 'd.owner': '所有者 {owner}',
     'd.publish': '发布新版本', 'd.remove': '移除', 'd.purge': '清除', 'cancel': '取消',
     'd.removeTitle': '移除 {name}？', 'd.removeBody': '地址将返回 404。卷、数据库、键前缀和 bucket 全部保留，再次发布即可恢复。',
@@ -731,15 +740,17 @@ const I18N = {
     'tp.visitor': '访客',
     'tp.operator': '运营者',
     'tp.caller': '服务调用方',
-    'tp.workers': '{n} 个应用', 'tp.apps.one': '{n} 个应用', 'tp.apps.other': '{n} 个应用',
+    'tp.apps.one': '{n} 个应用', 'tp.apps.other': '{n} 个应用',
     'tp.unprobed': '随 Docker 引擎，不探测',
     'tp.unused': '没有应用需要它',
+    'tp.waiting': '等待第一次采样',
+    'tp.noRelease': '无发布', 'tp.unpublished': '未发布', 'tp.unpublishedSub': '首次发布未完成',
     'tp.fixOff': '用 --profile {profile} 启动',
     'tp.fixDown': 'docker compose start {service}',
     'tp.needs': '{name} {status}',
-    'tp.affects': '影响 {n} 个应用',
+    'tp.affects.one': '影响 {n} 个应用', 'tp.affects.other': '影响 {n} 个应用',
     'tp.affectsNone': '没有应用依赖它',
-    'tp.dependents': '{n} 个应用依赖',
+    'tp.dependents.one': '{n} 个应用依赖', 'tp.dependents.other': '{n} 个应用依赖',
     'tp.clear': '取消选择',
     'tp.x.request': '请求怎样到达',
     'tp.x.wake': '唤醒与睡去',
@@ -769,7 +780,7 @@ const I18N = {
     'theme.light': 'Light', 'theme.dark': 'Dark', 'aside.since': 'Sampling since {time}; a gateway restart clears it.',
     'ov.title': 'Overview', 'ov.waiting': 'Waiting for the first sample',
     'svc.gateway': 'Gateway', 'svc.redis': 'Redis', 'svc.object': 'Object store', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn', 'svc.runner': 'runner',
-    'svc.gatewaySub': 'up {up} · RSS {rss}', 'svc.off': 'profile not running', 'svc.down': 'not reachable',
+    'svc.gatewaySub': 'up {up} · RSS {rss}', 'svc.off': 'profile not running', 'svc.down': 'not reachable', 'svc.unknown': 'waiting for the first sample',
     'sec.fleet': 'Seats, wakes and host', 'sec.fleetDesc': 'Each awake instance takes a seat; wakes are measured against the 3 s gate.',
     'k.awakeSub': 'waking {waking} · draining {draining} · stopping {stopping}',
     'k.wakes': 'Wakes, 1 h',
@@ -788,13 +799,13 @@ const I18N = {
     'col.attempts': 'Attempts', 'col.scheduledFor': 'Scheduled for', 'col.created': 'Created', 'col.nextAttempt': 'Next attempt',
     'empty.attention': 'Nothing needs attention.', 'empty.events': 'No events yet.', 'empty.filtered': 'Nothing matches.',
     'att.delivery': 'Delivery failed', 'att.deliveryDetail': '{trigger} · {attempts} attempts',
-    'apps.title': 'Projects', 'apps.count': '{n} apps', 'apps.filter': 'Filter by name', 'apps.allStates': 'All states',
+    'apps.title': 'Projects', 'apps.count.one': '{n} app', 'apps.count.other': '{n} apps', 'apps.filter': 'Filter by name', 'apps.allStates': 'All states',
     'apps.empty': 'No apps yet. Publish one to give it an address.', 'apps.publish': 'Publish an app',
     'never': 'never', 'routeOnly': 'route only',
     'st.registered': 'registered', 'st.removed': 'removed', 'st.purging': 'purging', 'st.none': 'none', 'st.asleep': 'asleep',
     'st.waking': 'waking', 'st.awake': 'awake', 'st.draining': 'draining', 'st.stopping': 'stopping', 'st.active': 'active',
     'st.suspended': 'suspended', 'st.due': 'due', 'st.delivering': 'delivering', 'st.done': 'done', 'st.failed': 'failed',
-    'st.cancelled': 'cancelled', 'st.up': 'up', 'st.down': 'down', 'st.off': 'off',
+    'st.cancelled': 'cancelled', 'st.up': 'up', 'st.down': 'down', 'st.off': 'off', 'st.unknown': 'unknown',
     'd.back': 'All projects', 'd.open': 'Open {address}', 'd.since': 'since {ago}', 'd.owner': 'owner {owner}',
     'd.publish': 'Publish release', 'd.remove': 'Remove', 'd.purge': 'Purge', 'cancel': 'Cancel',
     'd.removeTitle': 'Remove {name}?', 'd.removeBody': 'Its address will answer 404. Every volume, database, key prefix and bucket is kept; publishing again restores it.',
@@ -908,15 +919,17 @@ const I18N = {
     'tp.visitor': 'visitor',
     'tp.operator': 'operator',
     'tp.caller': 'service caller',
-    'tp.workers': '{n} apps', 'tp.apps.one': '{n} app', 'tp.apps.other': '{n} apps',
+    'tp.apps.one': '{n} app', 'tp.apps.other': '{n} apps',
     'tp.unprobed': 'with the Docker engine, not probed',
     'tp.unused': 'no app needs it',
+    'tp.waiting': 'waiting for the first sample',
+    'tp.noRelease': 'no release', 'tp.unpublished': 'unpublished', 'tp.unpublishedSub': 'first publish not finished',
     'tp.fixOff': 'start with --profile {profile}',
     'tp.fixDown': 'docker compose start {service}',
     'tp.needs': '{name} {status}',
-    'tp.affects': '{n} apps affected',
+    'tp.affects.one': '{n} app affected', 'tp.affects.other': '{n} apps affected',
     'tp.affectsNone': 'no app depends on it',
-    'tp.dependents': '{n} apps depend on it',
+    'tp.dependents.one': '{n} app depends on it', 'tp.dependents.other': '{n} apps depend on it',
     'tp.clear': 'Clear',
     'tp.x.request': 'How a request arrives',
     'tp.x.wake': 'Wake and sleep',
@@ -975,6 +988,8 @@ function t(key, vars) {
 }
 const locale = () => (lang === 'zh' ? 'zh-CN' : 'en-US');
 const nf = (n) => new Intl.NumberFormat(locale()).format(n);
+/** A count in the key's plural form: `key.one` or `key.other`. */
+const plural = (key, n) => t(`${key}.${new Intl.PluralRules(locale()).select(n) === 'one' ? 'one' : 'other'}`, { n: nf(n) });
 const pct = (n) => new Intl.NumberFormat(locale(), { style: 'percent', maximumFractionDigits: 1 }).format(n);
 const ms = (v) => (v == null ? '-' : v >= 1000 ? `${new Intl.NumberFormat(locale(), { maximumFractionDigits: 1 }).format(v / 1000)} s` : `${nf(Math.round(v))} ms`);
 const clock = (v, seconds) => new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', second: seconds ? '2-digit' : undefined, hour12: false }).format(v);
@@ -1037,7 +1052,7 @@ const appLink = (name) => h('a', { href: `#/apps/${encodeURIComponent(name)}`, c
 const tone = (state) => Object.keys(TONE).find((k) => TONE[k].includes(state)) ?? '';
 const status = (state) => h('span', { class: `st ${tone(state)}` }, t(`st.${state}`));
 const chip = (text) => h('span', { class: 'chip' }, text);
-const runtimeChip = (a) => h('span', { class: 'chip runtime' }, a.runtime ?? 'static');
+const runtimeChip = (a) => (a.release == null ? h('span', { class: 'chip muted' }, t('tp.noRelease')) : h('span', { class: 'chip runtime' }, a.runtime ?? 'static'));
 const leaseChips = (leases) => h('span', { class: 'chips' }, LEASE_KINDS.filter((k) => leases?.[k] > 0).map((k) => chip(`${k} ${leases[k]}`)));
 
 function sectionHead(index, title, desc, ...end) {
@@ -1291,7 +1306,7 @@ function servicesLine() {
     el,
     render(m) {
       const item = (name) => {
-        const s = m.services[name] ?? { status: 'down', latencyMs: null };
+        const s = m.services[name] ?? { status: 'unknown', latencyMs: null };
         return h('span', { class: `st ${tone(s.status)}`, title: s.status === 'up' ? t('st.up') : t(`svc.${s.status}`) },
           t(`svc.${name}`), h('span', { class: 'num' }, s.status === 'up' ? ms(s.latencyMs) : t(`st.${s.status}`)));
       };
@@ -2309,7 +2324,7 @@ async function projects() {
     h('option', { value: '' }, t('apps.allStates')),
     STATE_FILTERS.map((s) => h('option', { value: s, selected: appsFilter.state === s }, t(`st.${s}`))));
   const render = () => {
-    count.textContent = t('apps.count', { n: nf(apps.length) });
+    count.textContent = plural('apps.count', apps.length);
     const needle = appsFilter.text.trim().toLowerCase();
     const rows = apps.filter((a) => (!needle || a.name.includes(needle)) && (!appsFilter.state || a.status === appsFilter.state || a.instance === appsFilter.state));
     body.replaceChildren(apps.length === 0
@@ -2421,11 +2436,24 @@ async function detail(name) {
       actionMessage.textContent = error.message;
     }
   };
-  const head = h('div', { class: 'grow' });
+  const top = h('div');
+  const qbar = h('div');
+  const strip = h('div');
+  const head = h('div', { class: 'grow' }, top, qbar, strip);
   const tiles = h('div', { class: 'tiles four' });
+  let quarantined = '';
   const renderHead = (row, detailStats, events) => {
     const s = row ?? { instance: d.instance, since: null, leases: null };
-    head.replaceChildren(
+    const q = row?.quarantine ?? null;
+    if (JSON.stringify(q) !== quarantined) {
+      quarantined = JSON.stringify(q);
+      fill(qbar, q ? h('div', { class: 'qbar' },
+        h('b', { role: 'alert' }, t('d.quarantined', { reason: q.reason })),
+        h('span', { class: 'mono', title: stamp(q.since) }, ticking(() => t('d.quarantineMeta', { failures: nf(q.failures), ago: ago(q.since).textContent }))),
+        h('button', { class: 'btn danger', type: 'button', onclick: lift }, t('d.unquarantine'))) : null);
+    }
+    fill(strip, stateStrip(events, app.name));
+    top.replaceChildren(
       h('a', { class: 'back', href: '#/apps' }, `← ${t('d.back')}`),
       h('h1', { class: 'mono', style: 'margin-top:12px' }, app.name),
       h('div', { class: 'meta' },
@@ -2433,12 +2461,7 @@ async function detail(name) {
         app.status === 'registered' ? h('a', { href: ingressOrigin(health.ingressPort) + d.address, target: '_blank', rel: 'noopener', class: 'mono', title: t('d.open', { address: d.address }) }, d.address) : h('span', { class: 'mono muted' }, d.address),
         row ? runtimeChip(row) : null,
         h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(s.instance), s.since != null ? h('span', { class: 'muted' }, t('d.since', { ago: ago(s.since).textContent })) : null, leaseChips(s.leases)),
-        h('span', { class: 'muted' }, t('d.owner', { owner: app.owner }))),
-      row?.quarantine ? h('div', { class: 'qbar', role: 'alert' },
-        h('b', {}, t('d.quarantined', { reason: row.quarantine.reason })),
-        h('span', { class: 'mono', title: stamp(row.quarantine.since) }, t('d.quarantineMeta', { failures: nf(row.quarantine.failures), ago: ago(row.quarantine.since).textContent })),
-        h('button', { class: 'btn danger', type: 'button', onclick: lift }, t('d.unquarantine'))) : null,
-      stateStrip(events, app.name));
+        h('span', { class: 'muted' }, t('d.owner', { owner: app.owner }))));
     tiles.replaceChildren(
       tile(t('d.requests'), nf(detailStats.requests), ''),
       tile(t('d.errors'), nf(detailStats.errors), detailStats.requests ? pct(detailStats.errors / detailStats.requests) : ''),
@@ -2590,9 +2613,11 @@ const STAGES = ['ingress', 'identity', 'static', 'wake'];
 const COMPOSE = { redis: ['redis', null], object: ['rustfs', null], postgres: ['postgres', 'postgres'], coturn: ['coturn', 'rtc'], runner: ['runner', 'isolate'] };
 const GRAPH_CAP = 24;
 const FLOWS_PER_APP = 3;
+const MAX_PARTICLES = 12;
 
-const laneOf = (a) => a.runtime ?? 'static';
-const appCount = (n) => t(`tp.apps.${new Intl.PluralRules(locale()).select(n) === 'one' ? 'one' : 'other'}`, { n: nf(n) });
+/** The runtime lane an app runs in; null while it has no release (a first publish that has not finished). */
+const laneOf = (a) => (a.release == null ? null : a.runtime ?? 'static');
+const groupOf = (a) => laneOf(a) ?? 'unpublished';
 
 /** Each declared capability as its graph node and the service it rests on; null rests inside the gateway. */
 function needs(a) {
@@ -2603,6 +2628,8 @@ function needs(a) {
     return { cap: kind, kind, service: CAP_SERVICE[kind] ?? null };
   });
 }
+
+const passesOf = (a) => (laneOf(a) ? ['ingress', a.capabilities.includes('identity') && 'identity', a.capabilities.includes('static') && 'static', a.runtime && 'wake'].filter(Boolean) : []);
 
 /** Every service an app cannot answer without: its capabilities' services, and the runner for an isolate app. */
 function servicesOf(a) {
@@ -2615,15 +2642,17 @@ function topoModel() {
   return { apps: [], health: null, services: {}, cursor: null, startedAt: null, last: null };
 }
 
-const svcStatus = (model, name) => (name === 'volumes' ? 'up' : model.services[name]?.status ?? 'down');
+/** up, down or off from the last probe sample; unknown before the gateway's first sample, which is no fault. */
+const svcStatus = (model, name) => (name === 'volumes' ? 'up' : model.services[name]?.status ?? 'unknown');
+const unreachable = (model, name) => ['down', 'off'].includes(svcStatus(model, name));
 const dependents = (model, name) => model.apps.filter((a) => servicesOf(a).has(name));
 /** A service that is down, or off while an app needs it; an unused profile service that is off is normal. */
 const svcFault = (model, name) => {
   const s = svcStatus(model, name);
   return s === 'down' || (s === 'off' && dependents(model, name).length > 0);
 };
-const blockedBy = (model, a) => [...servicesOf(a)].filter((s) => svcStatus(model, s) !== 'up');
-const laneDown = (model, lane) => lane === 'isolate' && svcStatus(model, 'runner') !== 'up';
+const blockedBy = (model, a) => [...servicesOf(a)].filter((s) => unreachable(model, s));
+const laneDown = (model, lane) => lane === 'isolate' && unreachable(model, 'runner');
 
 function fixFor(model, name) {
   const [service, profile] = COMPOSE[name];
@@ -2649,11 +2678,12 @@ const curve = (x1, y1, x2, y2) => {
 };
 const titled = (el, text) => { el.prepend(svg('title', {}, text)); return el; };
 
-/** A focusable SVG control: Enter and Space act like a click. */
-function act(el, label, onPick) {
+/** A focusable SVG control: Enter and Space act like a click; its first rect carries the focus ring, its key survives a rebuild. */
+function act(el, label, onPick, key) {
   el.setAttribute('role', 'button');
   el.setAttribute('tabindex', '0');
   el.setAttribute('aria-label', label);
+  el.dataset.key = key;
   el.classList.add('act');
   el.addEventListener('click', (e) => { e.stopPropagation(); onPick(); });
   el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(); } });
@@ -2668,19 +2698,35 @@ function stripeDefs() {
 /** An app as a chip: state dot and name; quarantine and an unreachable service colour it. */
 function appChip(model, a, x, y, w) {
   const blocked = blockedBy(model, a);
-  const state = a.quarantine ? 'quarantined' : a.instance;
+  const unpublished = laneOf(a) === null;
+  const state = a.quarantine ? 'quarantined' : unpublished ? 'unpublished' : a.instance;
+  const note = unpublished ? t('tp.noRelease') : '';
+  const noteW = note ? textWidth(note, 11.5) + 8 : 0;
   const g = svg('g', { class: `chipg${blocked.length ? ' fault' : ''}`, 'data-state': state, 'data-app': a.name },
     svg('rect', { x, y, width: w, height: 22, rx: 6, class: 'chipr' }),
     svg('circle', { cx: x + 10, cy: y + 11, r: 3, class: 'sdot' }),
-    tx(x + 19, y + 15, fit(a.name, 11.5, true, w - 26), 'm chipt'));
-  const why = [t(`st.${a.instance}`), a.quarantine && `${t('att.quarantine')}: ${a.quarantine.reason}`, ...blocked.map((s) => t('tp.needs', { name: t(`svc.${s}`), status: t(`st.${svcStatus(model, s)}`) }))];
+    tx(x + 19, y + 15, fit(a.name, 11.5, true, w - 26 - noteW), 'm chipt'),
+    note ? tx(x + w - 8, y + 15, note, 't3 small', { 'text-anchor': 'end' }) : null);
+  const why = [unpublished ? note : t(`st.${a.instance}`), a.quarantine && `${t('att.quarantine')}: ${a.quarantine.reason}`, ...blocked.map((s) => t('tp.needs', { name: t(`svc.${s}`), status: t(`st.${svcStatus(model, s)}`) }))];
   return titled(g, `${a.name} · ${why.filter(Boolean).join(' · ')}`);
 }
 
-function pillButton(x, y, label, onPick, cls = '') {
+function pillButton(x, y, label, onPick, key, cls = '') {
   const w = textWidth(label, 11.5, false, 500) + 18;
   const g = svg('g', { class: `pillb ${cls}` }, svg('rect', { x, y, width: w, height: 22, rx: 11 }), tx(x + 9, y + 15, label));
-  return { el: act(g, label, onPick), w };
+  return { el: act(g, label, onPick, key), w };
+}
+
+function flowChips(apps, x0, rowW, y0) {
+  let x = x0, y = y0;
+  return apps.map((a) => {
+    const note = laneOf(a) === null ? textWidth(t('tp.noRelease'), 11.5) + 8 : 0;
+    const w = Math.min(rowW, Math.max(84, textWidth(a.name, 11.5, true) + 30 + note));
+    if (x + w > x0 + rowW) { x = x0; y += 30; }
+    const at = { a, x, y, w };
+    x += w + 6;
+    return at;
+  });
 }
 
 function serviceNode(model, name, x, y, w, hgt, label = t(`svc.${name}`)) {
@@ -2697,8 +2743,12 @@ function serviceNode(model, name, x, y, w, hgt, label = t(`svc.${name}`)) {
   const st = t(`st.${status}`);
   const sw = textWidth(st, 11.5) + 12;
   g.append(svg('circle', { cx: x + w - 12 - sw + 3, cy: y + 16, r: 3, class: 'sdot' }), tx(x + w - 12, y + 20, st, 'svcs', { 'text-anchor': 'end' }));
-  const second = status === 'up' ? ms(s?.latencyMs) : status === 'off' && !fault ? t('tp.unused') : fixFor(model, name);
-  g.append(titled(tx(x + 12, y + 36, fit(second, 11, status === 'up', w - 24), `small ${fault ? 'bad' : 't3'}${status === 'up' ? ' m' : ''}`), second));
+  if (status === 'up') {
+    g.append(tx(x + 12, y + 36, ms(s.latencyMs), 'small t3 m', { 'data-latency': name }));
+    return g;
+  }
+  const second = status === 'unknown' ? t('tp.waiting') : status === 'off' && !fault ? t('tp.unused') : fixFor(model, name);
+  g.append(titled(tx(x + 12, y + 36, fit(second, 11, false, w - 24), `small ${fault ? 'bad' : 't3'}`), second));
   return g;
 }
 
@@ -2709,12 +2759,17 @@ function laneScene(model, width, on) {
   const top = 44;
   const gx = 160, gw = 236, sw = 196, sx = W - 16 - sw;
   const lx = gx + gw + 44, lw = sx - 104 - lx;
-  const el = svg('svg', { class: 'topo-svg', width: W, role: 'img', 'aria-label': t('tp.lane.label') });
+  const el = svg('svg', { class: 'topo-svg', width: W, role: 'group', 'aria-label': t('tp.lane.label') });
   const edges = svg('g');
   const nodes = svg('g');
   const labels = svg('g');
   const flows = svg('g', { class: 'flows' });
   const chips = new Map();
+  const chip = (p) => {
+    const el = act(appChip(model, p.a, p.x, p.y, p.w), p.a.name, () => on.open(p.a.name), `app:${p.a.name}`);
+    chips.set(p.a.name, el);
+    return el;
+  };
   const head = (x, s) => tx(x, 20, s, 't3 small');
   nodes.append(head(16, t('tp.col.callers')), head(gx, t('tp.col.gateway')), head(lx, t('tp.col.runtimes')), head(sx, t('tp.col.services')));
 
@@ -2726,15 +2781,8 @@ function laneScene(model, width, on) {
     const down = laneDown(model, lane);
     const g = svg('g', { class: `lane${down ? ' fault' : ''}`, 'data-id': `lane:${lane}` });
     const inner = lx + 14, innerW = lw - 28;
-    let cx = inner, cy = y + 44;
-    const placed = apps.map((a) => {
-      const w = Math.min(innerW, Math.max(84, textWidth(a.name, 11.5, true) + 30));
-      if (cx + w > inner + innerW) { cx = inner; cy += 30; }
-      const at = { a, x: cx, y: cy, w };
-      cx += w + 6;
-      return at;
-    });
-    const chipsBottom = apps.length ? cy + 22 : y + 44 + 20;
+    const placed = flowChips(apps, inner, innerW, y + 44);
+    const chipsBottom = apps.length ? placed.at(-1).y + 22 : y + 44 + 20;
     const quarantined = apps.filter((a) => a.quarantine);
     const qTop = chipsBottom + 10;
     const stripY = qTop + quarantined.length * 46 + (quarantined.length ? 2 : 0);
@@ -2743,23 +2791,20 @@ function laneScene(model, width, on) {
     if (down) g.append(svg('rect', { x: lx, y, width: lw, height: lh, rx: 14, class: 'downwash' }));
     const explainText = `${t('tp.explain')} →`;
     const explainW = textWidth(explainText, 12, false, 500);
-    const countText = down ? t('tp.unreachableShort') : appCount(apps.length);
+    const countText = down ? t('tp.unreachableShort') : plural('tp.apps', apps.length);
     const countW = textWidth(countText, 11.5, !down);
     const nameW = textWidth(lane, 13, false, 600);
     g.append(act(svg('g', { class: 'lanet' },
+      svg('rect', { x: lx + 4, y: y + 4, width: lw - 8, height: 30, rx: 10, class: 'hit' }),
       tx(lx + 14, y + 24, lane, 'lanen'),
       textWidth(t(`tp.lane.${lane}.sub`), 11.5) <= lw - 28 - nameW - 8 - explainW - countW - 36 ? tx(lx + 22 + nameW, y + 24, t(`tp.lane.${lane}.sub`), 't3 small') : null,
-      tx(lx + lw - 14, y + 24, explainText, 'linkt', { 'text-anchor': 'end' })), t('tp.explainFor', { kind: lane }), () => on.explain(lane)),
+      tx(lx + lw - 14, y + 24, explainText, 'linkt', { 'text-anchor': 'end' })), t('tp.explainFor', { kind: lane }), () => on.explain(lane), `lane:${lane}`),
       tx(lx + lw - 26 - explainW, y + 24, countText, down ? 'bad small' : 't3 small m', { 'text-anchor': 'end' }));
     if (!apps.length) g.append(tx(inner, y + 59, t('tp.noApps'), 't3 small'));
-    for (const p of placed) {
-      const chip = act(appChip(model, p.a, p.x, p.y, p.w), p.a.name, () => on.open(p.a.name));
-      chips.set(p.a.name, chip);
-      g.append(chip);
-    }
+    for (const p of placed) g.append(chip(p));
     quarantined.forEach((a, i) => {
       const qy = qTop + i * 46;
-      const button = pillButton(0, qy, t('tp.lift'), () => on.lift(a.name), 'danger');
+      const button = pillButton(0, qy, t('tp.lift'), () => on.lift(a.name), `lift:${a.name}`, 'danger');
       button.el.setAttribute('transform', `translate(${inner + innerW - button.w - 4},0)`);
       const meta = `×${a.quarantine.failures} · ${clock(a.quarantine.since, true)}`;
       g.append(svg('g', { class: 'qrow' },
@@ -2782,6 +2827,16 @@ function laneScene(model, width, on) {
     nodes.append(g);
     laneBoxes[lane] = { y, h: lh, apps };
     y += lh + 16;
+  }
+  const unpublished = model.apps.filter((a) => laneOf(a) === null);
+  if (unpublished.length) {
+    const placed = flowChips(unpublished, lx + 14, lw - 28, y + 34);
+    const uh = placed.at(-1).y + 22 + 12 - y;
+    nodes.append(svg('g', { 'data-id': 'unpublished' }, svg('rect', { x: lx, y, width: lw, height: uh, rx: 14, class: 'unpub' }),
+      tx(lx + 14, y + 22, t('tp.unpublished'), 'strong small t2'),
+      tx(lx + 22 + textWidth(t('tp.unpublished'), 11.5, false, 600), y + 22, fit(t('tp.unpublishedSub'), 11.5, false, lw - 60 - textWidth(t('tp.unpublished'), 11.5, false, 600)), 't3 small')),
+      ...placed.map(chip));
+    y += uh + 16;
   }
   const bottom = y - 16;
 
@@ -2827,13 +2882,13 @@ function laneScene(model, width, on) {
       k.set(n.kind, (k.get(n.kind) ?? 0) + 1);
       kinds.set(n.service, k);
     }
-    if (lane === 'isolate') kinds.set('runner', new Map([['apps', box.apps.length]]));
+    if (lane === 'isolate' && box.apps.length) kinds.set('runner', new Map([['apps', box.apps.length]]));
     const list = SERVICES.filter((s) => kinds.has(s));
     list.forEach((s, i) => {
       const y1 = box.y + 20 + ((i + 1) * (box.h - 40)) / (list.length + 1);
       const y2 = svcY[s] + sh / 2 + (LANES.indexOf(lane) - 1) * 7;
       edge(curve(lx + lw, y1, sx, y2), svcFault(model, s) || laneDown(model, lane) ? 'fault' : '');
-      const label = [...kinds.get(s)].map(([k, n]) => (k === 'apps' ? t('tp.workers', { n }) : `${k} ${n}`)).join(' · ');
+      const label = [...kinds.get(s)].map(([k, n]) => (k === 'apps' ? plural('tp.apps', n) : `${k} ${n}`)).join(' · ');
       const lw2 = textWidth(label, 10.5, true) + 10;
       const mx = lx + lw + 14, my = y1;
       labels.append(svg('g', { class: `elabel${svcFault(model, s) ? ' fault' : ''}` }, svg('rect', { x: mx, y: my - 9, width: lw2, height: 18, rx: 5 }), tx(mx + 5, my + 4, label, 'm')));
@@ -2848,10 +2903,10 @@ function laneScene(model, width, on) {
     el,
     flow(name) {
       const a = model.apps.find((x) => x.name === name);
-      if (!a) return;
-      particle(flows, [visitorPath, lanePaths[laneOf(a)]]);
+      if (!a || !laneOf(a)) return;
+      const moved = particle(flows, [visitorPath, lanePaths[laneOf(a)]]);
       const chip = chips.get(name);
-      if (chip) setTimeout(() => glow(chip, 'hit'), reduced() ? 0 : 900);
+      if (chip) setTimeout(() => glow(chip, 'hit'), moved ? 900 : 0);
     },
   };
 }
@@ -2865,7 +2920,7 @@ function graphScene(model, width, shown, hidden, on) {
   const ax = gx + gw + 28, aw = 172;
   const sw = 164, sx = W - 16 - sw;
   const cw = 138, cx = sx - 64 - cw;
-  const el = svg('svg', { class: 'topo-svg graph', width: W, role: 'img', 'aria-label': t('tp.graph.label') });
+  const el = svg('svg', { class: 'topo-svg graph', width: W, role: 'group', 'aria-label': t('tp.graph.label') });
   const under = svg('g');
   const edges = svg('g');
   const nodes = svg('g');
@@ -2879,8 +2934,9 @@ function graphScene(model, width, shown, hidden, on) {
   const rows = [];
   let y = top + 8;
   const groups = {};
-  for (const lane of LANES) {
-    const apps = shown.filter((a) => laneOf(a) === lane);
+  const groupList = [...LANES, ...(shown.some((a) => !laneOf(a)) ? ['unpublished'] : [])];
+  for (const lane of groupList) {
+    const apps = shown.filter((a) => groupOf(a) === lane);
     groups[lane] = { y, apps };
     y += groupHead;
     for (const a of apps) { rows.push({ a, y: y + row / 2 - 2 }); y += row; }
@@ -2922,11 +2978,37 @@ function graphScene(model, width, shown, hidden, on) {
   const svcSpan = Math.max(appsBottom - top - 50, GRAPH_SERVICES.length * 56);
   const svcY = Object.fromEntries(GRAPH_SERVICES.map((s, i) => [s, top + 8 + (i * svcSpan) / (GRAPH_SERVICES.length - 1)]));
 
+  const byGroup = Object.fromEntries(groupList.map((lane) => [lane, svg('g')]));
+  nodes.append(...Object.values(byGroup));
+  for (const lane of groupList) {
+    const { y: gy, apps } = groups[lane];
+    const extra = hidden[lane] ?? 0;
+    const down = laneDown(model, lane);
+    const hit = down || apps.some((a) => blockedBy(model, a).length);
+    if (lane === 'unpublished') {
+      const label = `${t('tp.unpublished')}  ${nf(apps.length)}${extra ? `  +${nf(extra)}` : ''}`;
+      byGroup[lane].append(tag(svg('g', { class: 'lanet', 'data-id': 'group:unpublished' }, tx(ax, gy + 18, label, 'grp')), { apps: new Set(apps.map((a) => a.name)), group: lane }));
+      continue;
+    }
+    const label = `${lane}  ${nf(apps.length)}${extra ? `  +${nf(extra)}` : ''}`;
+    const title = act(svg('g', { class: `lanet${hit ? ' fault' : ''}`, 'data-id': `group:${lane}` },
+      svg('rect', { x: ax - 6, y: gy + 2, width: aw + 12, height: 24, rx: 8, class: 'hit' }),
+      tx(ax, gy + 18, label, 'grp m'),
+      down ? tx(ax + aw, gy + 18, t('tp.unreachableShort'), 'bad small', { 'text-anchor': 'end' })
+        : tx(ax + aw, gy + 18, fit(t('tp.explain'), 11.5, false, aw - textWidth(label, 11.5, true) - 12, 500), 'linkt small', { 'text-anchor': 'end' })), t('tp.explainFor', { kind: lane }), () => on.explain(lane), `group:${lane}`);
+    byGroup[lane].append(tag(title, { apps: new Set(apps.map((a) => a.name)), group: lane }));
+    if (!apps.length) byGroup[lane].append(tx(ax, gy + groupHead + 6, t('tp.noApps'), 't3 small'));
+  }
   const appPaths = new Map();
   const appNodes = new Map();
   for (const { a, y: ry } of rows) {
+    const g = act(appChip(model, a, ax, ry - 11, aw), a.name, () => on.pick({ app: a.name }), `app:${a.name}`);
+    g.setAttribute('data-id', `app:${a.name}`);
+    appNodes.set(a.name, tag(g, { apps: new Set([a.name]) }));
+    byGroup[groupOf(a)].append(g);
+    if (!laneOf(a)) continue;
     const fault = blockedBy(model, a).length > 0;
-    const passes = ['ingress', a.capabilities.includes('identity') && 'identity', a.capabilities.includes('static') && 'static', a.runtime && 'wake'].filter(Boolean);
+    const passes = passesOf(a);
     const fx = bandX(0) - 10, fy = callerY.visitor;
     const lanePath = path(`M${fx},${fy} C${fx + 14},${fy} ${fx - 4},${ry} ${fx + 14},${ry} H${ax}`, fault ? 'fault' : '', { apps: new Set([a.name]) });
     edges.append(lanePath);
@@ -2936,22 +3018,6 @@ function graphScene(model, width, shown, hidden, on) {
       edges.append(path(`M${bandX(3) + 6},${boxY} V${ry + 6} Q${bandX(3) + 6},${ry} ${bandX(3) + 12},${ry}`, 'cron', { apps: new Set([a.name]) }));
     }
     for (const n of needs(a)) edges.append(path(curve(ax + aw, ry, cx, capY[n.cap]), n.service && svcFault(model, n.service) ? 'fault' : '', { apps: new Set([a.name]), cap: n.cap }));
-    const g = act(appChip(model, a, ax, ry - 11, aw), a.name, () => on.pick({ app: a.name }));
-    g.setAttribute('data-id', `app:${a.name}`);
-    appNodes.set(a.name, tag(g, { apps: new Set([a.name]) }));
-    nodes.append(g);
-  }
-  for (const lane of LANES) {
-    const { y: gy, apps } = groups[lane];
-    const extra = hidden[lane] ?? 0;
-    const down = laneDown(model, lane);
-    const label = `${lane}  ${nf(apps.length)}${extra ? `  +${nf(extra)}` : ''}`;
-    const title = act(svg('g', { class: `lanet${down ? ' fault' : ''}`, 'data-id': `group:${lane}` },
-      tx(ax, gy + 18, label, 'grp m'),
-      down ? tx(ax + aw, gy + 18, t('tp.unreachableShort'), 'bad small', { 'text-anchor': 'end' })
-        : tx(ax + aw, gy + 18, fit(t('tp.explain'), 11.5, false, aw - textWidth(label, 11.5, true) - 12, 500), 'linkt small', { 'text-anchor': 'end' })), t('tp.explainFor', { kind: lane }), () => on.explain(lane));
-    nodes.append(tag(title, { apps: new Set(apps.map((a) => a.name)), group: lane }));
-    if (!apps.length) nodes.append(tx(ax, gy + groupHead + 6, t('tp.noApps'), 't3 small'));
   }
   const isolateApps = new Set(groups.isolate.apps.map((a) => a.name));
   if (isolateApps.size) {
@@ -2969,7 +3035,7 @@ function graphScene(model, width, shown, hidden, on) {
     const label = engine ? `db · ${engine === 'sqlite' ? 'SQLite' : 'PostgreSQL'}` : kind;
     const g = act(svg('g', { class: `capn${fault ? ' fault' : ''}${who.length ? '' : ' idle'}`, 'data-id': `cap:${c}` },
       svg('rect', { x: cx, y: capY[c] - 12, width: cw, height: 24, rx: 6, class: 'chipr' }),
-      tx(cx + 9, capY[c] + 4, label, 'm chipt'), tx(cx + cw - 9, capY[c] + 4, who.length ? nf(who.length) : '·', 'm t3', { 'text-anchor': 'end' })), label, () => on.pick({ cap: c }));
+      tx(cx + 9, capY[c] + 4, label, 'm chipt'), tx(cx + cw - 9, capY[c] + 4, who.length ? nf(who.length) : '·', 'm t3', { 'text-anchor': 'end' })), label, () => on.pick({ cap: c }), `cap:${c}`);
     nodes.append(tag(g, { cap: c, apps: new Set(who.map((a) => a.name)) }));
     for (const s of services) {
       const apps = new Set(who.filter((a) => needs(a).find((n) => n.cap === c).service === s).map((a) => a.name));
@@ -2977,7 +3043,7 @@ function graphScene(model, width, shown, hidden, on) {
     }
   }
   for (const s of GRAPH_SERVICES) {
-    const g = act(serviceNode(model, s, sx, svcY[s], sw, 44), t(`svc.${s}`), () => on.pick({ service: s }));
+    const g = act(serviceNode(model, s, sx, svcY[s], sw, 44), t(`svc.${s}`), () => on.pick({ service: s }), `svc:${s}`);
     nodes.append(tag(g, { service: s, apps: new Set(shown.filter((a) => servicesOf(a).has(s)).map((a) => a.name)) }));
   }
 
@@ -2998,7 +3064,7 @@ function graphScene(model, width, shown, hidden, on) {
     const services = new Set(shown.filter((a) => apps.has(a.name)).flatMap((a) => needs(a).filter((n) => caps.has(n.cap)).map((n) => n.service)).filter(Boolean));
     if (sel.service) services.add(sel.service);
     if (sel.app && laneOf(shown.find((a) => a.name === sel.app) ?? {}) === 'isolate') services.add('runner');
-    const stages = new Set(shown.filter((a) => apps.has(a.name)).flatMap((a) => ['ingress', a.capabilities.includes('identity') && 'identity', a.capabilities.includes('static') && 'static', a.runtime && 'wake']));
+    const stages = new Set(shown.filter((a) => apps.has(a.name)).flatMap(passesOf));
     for (const p of parts) {
       const mine = p.apps && [...p.apps].some((n) => apps.has(n));
       const lit = p.node === 'visitor' || p.node === 'caller' ? apps.size > 0
@@ -3019,9 +3085,9 @@ function graphScene(model, width, shown, hidden, on) {
     flow(name) {
       const lanePath = appPaths.get(name);
       if (!lanePath) return;
-      particle(flows, [visitorPath, lanePath]);
+      const moved = particle(flows, [visitorPath, lanePath]);
       const chip = appNodes.get(name);
-      if (chip) setTimeout(() => glow(chip, 'hit'), reduced() ? 0 : 900);
+      if (chip) setTimeout(() => glow(chip, 'hit'), moved ? 900 : 0);
     },
   };
 }
@@ -3037,10 +3103,11 @@ function glow(el, cls) {
   el.glowed = setTimeout(() => el.classList.remove(cls), 1600);
 }
 
-/** A packet along consecutive paths (ADR 0015: motion only for something that happened); none under reduced motion. */
+/** A packet along consecutive paths (ADR 0015: motion only for something that happened); none under reduced motion or past the cap. */
 function particle(layer, paths, delay = 0) {
+  if (layer.childElementCount >= MAX_PARTICLES) return false;
   for (const p of paths) glow(p, 'hot');
-  if (reduced()) return;
+  if (reduced()) return false;
   const g = svg('g', { class: 'pk', opacity: 0 }, svg('circle', { r: 7, class: 'halo' }), svg('circle', { r: 3.5 }));
   layer.append(g);
   const lengths = paths.map((p) => p.getTotalLength());
@@ -3063,6 +3130,7 @@ function particle(layer, paths, delay = 0) {
     requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
+  return true;
 }
 
 function explainPanel(model, kind) {
@@ -3078,18 +3146,14 @@ function explainPanel(model, kind) {
           : h('p', {}, t('tp.x.noChecks')))));
 }
 
-function faultBanner(model) {
-  const items = [];
-  for (const s of SERVICES) {
-    if (!svcFault(model, s)) continue;
-    const hit = dependents(model, s).map((a) => a.name);
-    items.push(h('div', { class: 'fault-item' },
-      h('span', { class: 'st red' }, t(svcStatus(model, s) === 'off' ? 'tp.svcOff' : 'att.service', { name: t(`svc.${s}`) })),
-      h('span', { class: 'muted' }, hit.length ? t('tp.affects', { n: nf(hit.length) }) : t('tp.affectsNone')),
-      h('span', { class: 'chips' }, hit.slice(0, 8).map((n) => appLink(n)), hit.length > 8 ? chip(`+${hit.length - 8}`) : null),
-      h('span', { class: 'mono fix' }, fixFor(model, s))));
-  }
-  return items.length ? h('div', { class: 'card faults', role: 'alert' }, items) : null;
+const faultsOf = (model) => SERVICES.filter((s) => svcFault(model, s)).map((s) => ({ s, status: svcStatus(model, s), hit: dependents(model, s).map((a) => a.name) }));
+
+function faultItems(model, faults) {
+  return faults.map(({ s, status: st, hit }) => h('div', { class: 'fault-item' },
+    h('span', { class: 'st red' }, t(st === 'off' ? 'tp.svcOff' : 'att.service', { name: t(`svc.${s}`) })),
+    h('span', { class: 'muted' }, hit.length ? plural('tp.affects', hit.length) : t('tp.affectsNone')),
+    h('span', { class: 'chips' }, hit.slice(0, 8).map((n) => appLink(n)), hit.length > 8 ? chip(`+${hit.length - 8}`) : null),
+    h('span', { class: 'mono fix' }, fixFor(model, s))));
 }
 
 let topoView = store.get('pneuma-space-topology') === 'graph' ? 'graph' : 'lane';
@@ -3097,15 +3161,21 @@ let topoView = store.get('pneuma-space-topology') === 'graph' ? 'graph' : 'lane'
 function topology() {
   const model = topoModel();
   const header = liveHeader('live.lastRequest', () => refresh());
-  const banner = h('div');
+  const banner = h('div', { class: 'card faults', role: 'alert' });
   const sceneBox = h('div', { class: 'inset topo', 'data-section': 'topology' });
   const panel = h('div');
   const pickBar = h('div', { class: 'pickbar' });
+  const errBox = h('div', { class: 'msg err pickbar', role: 'alert' });
+  let errTimer = 0;
+  const clearError = () => { clearTimeout(errTimer); fill(errBox); };
+  const showError = (message) => { clearError(); fill(errBox, message); errTimer = setTimeout(clearError, 10_000); };
   let explained = null;
   let selection = null;
   let filter = '';
   let scene = null;
   let painted = '';
+  let faultsPainted = '';
+  const live = () => ({ ...model, apps: model.apps.filter((a) => a.status === 'registered') });
   const filterInput = h('input', { type: 'search', placeholder: t('apps.filter'), 'aria-label': t('apps.filter'), oninput: () => { filter = filterInput.value.trim().toLowerCase(); paint(); } });
   const tools = h('div', { class: 'toolbar topo-tools' });
   const secHead = h('div');
@@ -3117,30 +3187,33 @@ function topology() {
         store.set('pneuma-space-topology', v);
         selection = null;
         renderChrome();
-        paint(true);
+        paint();
       }, t('tp.view'))));
     fill(tools, graph ? [filterInput, h('span', { class: 'muted' }, t('tp.graphHint', { n: GRAPH_CAP }))] : h('span', { class: 'muted' }, t('tp.laneHint')));
   };
   renderChrome();
 
   const lift = async (name) => {
+    clearError();
     try {
       await api('POST', `${appPath(name)}/unquarantine`);
       model.apps = await api('GET', '/api/apps');
-      paint(true);
+      paint();
     } catch (error) {
-      fill(pickBar, h('span', { class: 'msg err' }, error.message));
+      showError(error.message);
     }
   };
   const on = {
     open: (name) => { location.hash = `#/apps/${encodeURIComponent(name)}`; },
     explain: (kind) => {
+      clearError();
       explained = explained === kind ? null : kind;
       fill(panel, explained ? explainPanel(model, explained) : null);
       if (explained) panel.scrollIntoView({ block: 'nearest', behavior: reduced() ? 'auto' : 'smooth' });
     },
     lift,
     pick: (sel) => {
+      clearError();
       const same = selection && JSON.stringify(selection) === JSON.stringify(sel);
       selection = same ? null : sel;
       scene?.select?.(selection);
@@ -3149,66 +3222,92 @@ function topology() {
   };
   const renderPick = () => {
     if (topoView !== 'graph' || !selection) return fill(pickBar);
+    const local = live();
     if (selection.app) {
-      const a = model.apps.find((x) => x.name === selection.app);
+      const a = local.apps.find((x) => x.name === selection.app);
       if (!a) return fill(pickBar);
       return fill(pickBar,
-        appLink(a.name), chip(laneOf(a)), status(a.instance),
+        appLink(a.name), runtimeChip(a), laneOf(a) ? status(a.instance) : null,
         a.quarantine ? [h('span', { class: 'st red' }, `${t('att.quarantine')} · ${a.quarantine.reason}`), h('button', { class: 'btn danger', type: 'button', onclick: () => lift(a.name) }, t('tp.lift'))] : null,
-        blockedBy(model, a).map((s) => h('span', { class: 'st red' }, t('tp.needs', { name: t(`svc.${s}`), status: t(`st.${svcStatus(model, s)}`) }))),
+        blockedBy(local, a).map((s) => h('span', { class: 'st red' }, t('tp.needs', { name: t(`svc.${s}`), status: t(`st.${svcStatus(local, s)}`) }))),
         h('button', { class: 'linkish', type: 'button', onclick: () => on.pick(selection) }, t('tp.clear')));
     }
     const label = selection.cap ?? t(`svc.${selection.service}`);
-    const n = selection.cap ? model.apps.filter((a) => needs(a).some((x) => x.cap === selection.cap)).length : dependents(model, selection.service).length;
-    fill(pickBar, h('b', { class: 'mono' }, label), h('span', { class: 'muted' }, t('tp.dependents', { n: nf(n) })),
+    const n = selection.cap ? local.apps.filter((a) => needs(a).some((x) => x.cap === selection.cap)).length : dependents(local, selection.service).length;
+    fill(pickBar, h('b', { class: 'mono' }, label), h('span', { class: 'muted' }, plural('tp.dependents', n)),
       h('button', { class: 'linkish', type: 'button', onclick: () => on.pick(selection) }, t('tp.clear')));
   };
 
-  const paint = (force = false) => {
-    if (!model.health || !model.apps) return;
-    const registered = model.apps.filter((a) => a.status === 'registered');
+  /** An old scene with packets in flight stays on top, invisible except its packets, until they land. */
+  const retire = (old) => {
+    if (!old.querySelector('.pk')) return old.remove();
+    const at = scene.el.getBoundingClientRect(), box = sceneBox.getBoundingClientRect();
+    old.classList.add('retired');
+    old.setAttribute('inert', '');
+    old.setAttribute('aria-hidden', 'true');
+    old.style.left = `${at.left - box.left + sceneBox.scrollLeft}px`;
+    old.style.top = `${at.top - box.top + sceneBox.scrollTop}px`;
+    setTimeout(() => old.remove(), 2000);
+  };
+
+  /** Rebuilds the scene only when its structure changed; per-sample numbers change in place. */
+  const paint = () => {
+    if (!model.health) return;
+    const local = live();
+    const faults = faultsOf(local);
+    const faultSig = JSON.stringify([faults, model.health.runtimes.isolate.profile]);
+    if (faultSig !== faultsPainted) {
+      faultsPainted = faultSig;
+      fill(banner, faultItems(local, faults));
+    }
+    const registered = local.apps;
     const width = sceneBox.clientWidth - 24;
     let shown = registered;
     const hidden = {};
     if (topoView === 'graph') {
       const matching = registered.filter((a) => !filter || a.name.includes(filter));
       shown = [...matching].sort((a, b) => (b.lastAccessAt ?? 0) - (a.lastAccessAt ?? 0) || a.name.localeCompare(b.name)).slice(0, GRAPH_CAP).sort((a, b) => a.name.localeCompare(b.name));
-      for (const a of registered) if (!shown.includes(a)) hidden[laneOf(a)] = (hidden[laneOf(a)] ?? 0) + 1;
+      for (const a of registered) if (!shown.includes(a)) hidden[groupOf(a)] = (hidden[groupOf(a)] ?? 0) + 1;
     }
-    const signature = JSON.stringify([topoView, width, filter, shown.map((a) => [a.name, a.runtime, a.instance, a.quarantine?.since, a.capabilities, a.dbBackend]), hidden,
-      Object.entries(model.services).map(([k, s]) => [k, s.status, s.status === 'up' ? Math.round((s.latencyMs ?? 0) / 5) : 0])]);
-    fill(banner, faultBanner({ ...model, apps: registered }));
-    if (!force && signature === painted) return;
-    painted = signature;
-    const local = { ...model, apps: registered };
-    scene = topoView === 'graph' ? graphScene(local, width, shown, hidden, on) : laneScene(local, width, on);
-    fill(sceneBox, scene.el);
-    if (selection) scene.select?.(selection);
-    renderPick();
-    if (explained) fill(panel, explainPanel(model, explained));
+    const signature = JSON.stringify([topoView, width, filter, hidden, model.health, SERVICES.map((s) => svcStatus(model, s)),
+      shown.map((a) => [a.name, a.release, a.runtime, a.instance, a.quarantine, a.capabilities, a.dbBackend])]);
+    if (signature !== painted) {
+      painted = signature;
+      const focused = sceneBox.contains(document.activeElement) ? document.activeElement.dataset.key : null;
+      const old = scene?.el;
+      scene = topoView === 'graph' ? graphScene(local, width, shown, hidden, on) : laneScene(local, width, on);
+      sceneBox.prepend(scene.el);
+      if (old) retire(old);
+      if (focused) {
+        const find = (key) => scene.el.querySelector(`[data-key="${CSS.escape(key)}"]`);
+        (find(focused) ?? find(focused.replace(/^lift:/, 'app:')))?.focus({ preventScroll: true });
+      }
+      if (selection) scene.select?.(selection);
+      renderPick();
+      if (explained) fill(panel, explainPanel(model, explained));
+    }
+    for (const el of sceneBox.querySelectorAll('[data-latency]')) el.textContent = ms(model.services[el.dataset.latency]?.latencyMs);
   };
   const resize = new ResizeObserver(() => (sceneBox.isConnected ? paint() : resize.disconnect()));
   resize.observe(sceneBox);
 
   show(
     h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('tp.title')), h('p', { class: 'sub' }, t('tp.sub'))), header.el),
-    h('section', { class: 'topo-sec' }, secHead, banner, tools, pickBar, sceneBox, panel),
+    h('section', { class: 'topo-sec' }, secHead, banner, tools, pickBar, errBox, sceneBox, panel),
   );
 
-  const pollApps = async () => {
+  const loadApps = async () => {
     const [apps, health] = await Promise.all([api('GET', '/api/apps'), api('GET', '/api/health')]);
     model.apps = apps;
     model.health = health;
-    paint();
   };
-  const pollMetrics = async () => {
+  const loadMetrics = async () => {
     const m = await api('GET', '/api/metrics');
     if (model.startedAt !== null && m.gateway.startedAt !== model.startedAt) { model.cursor = null; header.restarted(m.gateway.startedAt); }
     model.startedAt = m.gateway.startedAt;
     model.services = m.services;
-    paint();
   };
-  const pollRequests = async () => {
+  const pollRequests = header.guarded(async () => {
     if (!scene) return;
     const seeding = model.cursor === null;
     const batch = await api('GET', `/api/requests?after=${model.cursor ?? 0}&limit=${REQUEST_RING}`);
@@ -3224,15 +3323,14 @@ function topology() {
     for (const [name, n] of counts) {
       for (let i = 0; i < Math.min(n, FLOWS_PER_APP); i++) setTimeout(() => scene.flow(name), i * 220);
     }
-  };
-  const first = async () => {
-    await Promise.all([pollApps(), pollMetrics()]);
-    paint(true);
+  });
+  const refresh = header.guarded(async () => {
+    await Promise.all([loadApps(), loadMetrics()]);
+    paint();
     await pollRequests();
-  };
-  const refresh = header.guarded(first);
+  });
   return {
-    loops: [[APPS_MS, header.guarded(pollApps)], [METRICS_MS, header.guarded(pollMetrics)], [REQUESTS_MS, header.guarded(pollRequests)]],
+    loops: [[APPS_MS, header.guarded(async () => { await loadApps(); paint(); })], [METRICS_MS, header.guarded(async () => { await loadMetrics(); paint(); })], [REQUESTS_MS, pollRequests]],
     first: refresh,
   };
 }
