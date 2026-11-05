@@ -38,3 +38,6 @@ prototype/01-agent-app/result-derived.txt
 prototype/04-agent-recheck/TRACE.md
 prototype/04-agent-recheck/TRACE.shareable.md
 prototype/04-agent-recheck/run_logged.py
+
+# Assembled examples
+examples/.build/
