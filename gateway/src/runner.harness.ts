@@ -14,7 +14,10 @@ const NET = process.allowedNodeEnvironmentFlags.has('--allow-net') ? ['--allow-n
 /** Every route the runner and IsolateRuntime tests drive; plain JS so a worker starts without type stripping. */
 export const APP = `import { createServer } from 'node:http';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { Worker } from 'node:worker_threads';
 const env = process.env;
+if (env.START_FIFO) readFileSync(env.START_FIFO);
+for (const end = Date.now() + Number(env.START_BUSY_MS ?? 0); Date.now() < end;);
 const routes = {
   '/': () => env.PNEUMA_SPACE_APP + ' ' + env.PNEUMA_SPACE_RELEASE,
   '/hang': () => { for (;;) {} },
@@ -25,6 +28,10 @@ const routes = {
     let child = 'allowed';
     try { process.getBuiltinModule('node:child_process').execFileSync('true'); } catch (error) { child = error.code; }
     return JSON.stringify({ kill: typeof process.kill, abort: typeof process.abort, child });
+  },
+  '/worker': () => {
+    const attempt = (W) => { try { new W('process.kill(process.pid, "SIGKILL")', { eval: true }); return 'started'; } catch (error) { return error.code; } };
+    return JSON.stringify({ imported: attempt(Worker), builtin: attempt(process.getBuiltinModule('node:worker_threads').Worker) });
   },
   '/exit': () => process.exit(3),
   '/files': () => { writeFileSync(env.PNEUMA_SPACE_FILES_DIR + '/kept', 'kept'); return env.PNEUMA_SPACE_FILES_DIR; },
@@ -54,7 +61,8 @@ export async function serveBundle(t: TestContext, files: Record<string, string> 
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}/bundle.tar`;
 }
 
-export type RunnerProcess = { readonly url: string; readonly data: string; stop(): Promise<void> };
+/** `exited` resolves with the signal that ended the runner, or its exit code. */
+export type RunnerProcess = { readonly url: string; readonly data: string; readonly exited: Promise<string | number | null>; stop(): Promise<void> };
 
 /** The runner as compose runs it, with the permission flags, on an ephemeral port and a scratch /data. */
 export async function startRunner(t: TestContext, env: Record<string, string> = {}, data = tempDir(t, 'pneuma-space-runner-')): Promise<RunnerProcess> {
@@ -62,7 +70,7 @@ export async function startRunner(t: TestContext, env: Record<string, string> = 
     '--disable-warning=ExperimentalWarning', '--disable-warning=SecurityWarning',
     '--permission', `--allow-fs-read=${data}`, `--allow-fs-read=${SRC}`, `--allow-fs-write=${data}`, '--allow-worker', ...NET, join(SRC, 'runner.ts'),
   ], { env: { ...process.env, PNEUMA_SPACE_DATA: data, PNEUMA_SPACE_RUNNER_PORT: '0', ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  const exited = new Promise((ok) => child.once('exit', ok));
+  const exited = new Promise<string | number | null>((ok) => child.once('exit', (code, signal) => ok(signal ?? code)));
   const stop = async () => {
     child.kill('SIGKILL');
     await exited;
@@ -72,7 +80,7 @@ export async function startRunner(t: TestContext, env: Record<string, string> = 
     const event = JSON.parse(line);
     if (event.ev === 'runner-ready') {
       child.stdout!.resume();
-      return { url: `http://127.0.0.1:${event.port}`, data, stop };
+      return { url: `http://127.0.0.1:${event.port}`, data, exited, stop };
     }
   }
   throw new Error('runner exited before it was ready');

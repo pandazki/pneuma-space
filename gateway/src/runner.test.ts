@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { connect } from 'node:net';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -36,6 +37,23 @@ async function nextEvent(runner: RunnerProcess, worker: string, timeoutMs: numbe
   }
 }
 
+/** A terminated worker's server stops accepting; a hung or stuck one's still completes the TCP handshake. */
+async function closed(port: number, timeoutMs = 2000): Promise<boolean> {
+  for (const end = performance.now() + timeoutMs; performance.now() < end; await sleep(50)) {
+    const refused = await new Promise<boolean>((ok) => {
+      const socket = connect(port, '127.0.0.1').once('connect', () => { socket.destroy(); ok(false); }).once('error', () => ok(true));
+    });
+    if (refused) return true;
+  }
+  return false;
+}
+
+function fifo(runner: RunnerProcess): string {
+  const path = join(runner.data, 'fifo');
+  execFileSync('mkfifo', [path]);
+  return path;
+}
+
 async function drill(t: TestContext, env: Record<string, string> = {}) {
   const runner = await startRunner(t, { ...HEALTHY, ...env });
   const bundleUrl = await serveBundle(t);
@@ -58,6 +76,7 @@ test('a busy-looping worker is reported hung and terminated within 5 s while oth
   const { event, ms } = await nextEvent(runner, app.worker, 5000);
   assert.equal(event.ev, 'hung');
   t.diagnostic(`hung reported after ${Math.round(ms)} ms`);
+  assert.ok(await closed(app.port), 'the hung worker is terminated');
   assert.deepEqual(await call(runner, 'GET', '/instances').then((list: any) => list.map((i: any) => i.app)), ['witness']);
   assert.equal(await stopWitness(), 0);
 });
@@ -77,6 +96,7 @@ test('a worker holding Buffers past the off-heap budget is reported oom and the 
   assert.equal(await app.get('/buffers'), 'held');
   const { event } = await nextEvent(runner, app.worker, 3000);
   assert.deepEqual([event.ev, event.reason], ['oom', 'offheap']);
+  assert.ok(await closed(app.port), 'the worker over budget is terminated');
   assert.equal((await call<{ ok: boolean }>(runner, 'GET', '/health')).ok, true);
   assert.equal(await stopWitness(), 0);
 });
@@ -84,9 +104,8 @@ test('a worker holding Buffers past the off-heap budget is reported oom and the 
 // Atomics.wait is not this case: terminate() interrupts it in about 1 ms (spike S4, and measured again in node:24-alpine).
 test('a worker blocked in a native call is reported stuck within 10 s and a new worker for the app starts', async (t) => {
   const { runner, bundleUrl, stopWitness } = await drill(t);
-  const fifo = join(runner.data, 'fifo');
-  execFileSync('mkfifo', [fifo]);
-  const app = await start(runner, bundleUrl, 'blocked', { env: { PNEUMA_SPACE_APP: 'blocked', PNEUMA_SPACE_RELEASE: '1', FIFO: fifo } });
+  const env = { PNEUMA_SPACE_APP: 'blocked', PNEUMA_SPACE_RELEASE: '1', FIFO: fifo(runner) };
+  const app = await start(runner, bundleUrl, 'blocked', { env });
   app.fire('/fifo');
   const started = performance.now();
   await nextEvent(runner, app.worker, 5000);
@@ -98,15 +117,48 @@ test('a worker blocked in a native call is reported stuck within 10 s and a new 
   }
   t.diagnostic(`stuck reported after ${Math.round(performance.now() - started)} ms`);
   assert.equal((await call<{ stuck: number }>(runner, 'GET', '/health')).stuck, 1);
-  const again = await start(runner, bundleUrl, 'blocked', { env: { PNEUMA_SPACE_APP: 'blocked', PNEUMA_SPACE_RELEASE: '1', FIFO: fifo } });
+  const again = await start(runner, bundleUrl, 'blocked', { env });
   assert.equal(await again.get('/'), 'blocked 1');
   assert.equal(await stopWitness(), 0);
+});
+
+test('a stuck count past PNEUMA_SPACE_RUNNER_STUCK_LIMIT aborts the runner', async (t) => {
+  const runner = await startRunner(t, { ...HEALTHY, PNEUMA_SPACE_RUNNER_STUCK_LIMIT: '0' });
+  const app = await start(runner, await serveBundle(t), 'blocked', { env: { FIFO: fifo(runner) } });
+  app.fire('/fifo');
+  assert.equal(await Promise.race([runner.exited, sleep(12_000, 'still running')]), 'SIGABRT');
+});
+
+test('a worker blocked before it listens fails its start at the ready timeout and counts once as stuck', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const request: StartRequest = { release: 1, spec: 's', bundleUrl: await serveBundle(t), entry: 'app.mjs', env: { START_FIFO: fifo(runner) }, storage: [], readyMs: 6000 };
+  const response = await fetch(`${runner.url}/instances/blocked`, { method: 'POST', body: JSON.stringify(request) });
+  assert.deepEqual([response.status, (await response.json()).error], [502, 'worker did not listen within 6000 ms']);
+  await sleep(6500);
+  const page = await call<EventPage>(runner, 'GET', '/events?after=0');
+  assert.deepEqual(page.events.map((e) => [e.ev, e.reason]), [['exit', 'stuck']]);
+  assert.equal((await call<{ stuck: number }>(runner, 'GET', '/health')).stuck, 1);
+});
+
+test('a worker that runs 5 s of synchronous startup inside its ready timeout starts and is not reported hung', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'slow', { env: { PNEUMA_SPACE_APP: 'slow', PNEUMA_SPACE_RELEASE: '1', START_BUSY_MS: '5000' }, readyMs: 8000 });
+  assert.equal(await app.get('/'), 'slow 1');
 });
 
 test('process.kill, process.abort and child_process are unavailable inside a worker', async (t) => {
   const runner = await startRunner(t, HEALTHY);
   const app = await start(runner, await serveBundle(t), 'escape');
   assert.deepEqual(JSON.parse(await app.get('/escape')), { kill: 'undefined', abort: 'undefined', child: 'ERR_ACCESS_DENIED' });
+});
+
+// A nested worker gets a fresh process object, so the shim's removal of process.kill would not reach it.
+test('new Worker throws inside a worker and the runner keeps running', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'nested');
+  assert.deepEqual(JSON.parse(await app.get('/worker')), { imported: 'ERR_ACCESS_DENIED', builtin: 'ERR_ACCESS_DENIED' });
+  await sleep(500);
+  assert.equal((await call<{ ok: boolean }>(runner, 'GET', '/health')).ok, true);
 });
 
 test('a storage binding is a directory under the app that {dir} names, and destroy deletes it', async (t) => {
