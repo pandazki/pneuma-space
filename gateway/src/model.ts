@@ -149,10 +149,10 @@ export type Capabilities = { readonly [K in CapabilityKind]?: Declaration<K> };
 export type Manifest = {
   readonly contract: 1;
   readonly capabilities: Capabilities;
-  /** Null means: container when the publish carries an image, isolate when it carries a code bundle. */
-  readonly runtime: RuntimeKind | null;
-  /** Isolate apps only: the module the runner loads, relative to the bundle. */
-  readonly entry: string | null;
+  /** Absent means: container when the publish carries an image, isolate when it carries a code bundle. */
+  readonly runtime?: RuntimeKind;
+  /** Isolate apps only: the module the runner loads, relative to the bundle; DEFAULT_ENTRY when absent. */
+  readonly entry?: string;
 };
 
 type RawObject = Record<string, unknown>;
@@ -256,7 +256,11 @@ export function parseManifest(raw: unknown): Manifest {
     throw new ManifestError(`manifest.entry must be a relative file path, got ${JSON.stringify(entry)}`);
   }
   if (entry !== null && runtime !== 'isolate') throw new ManifestError('manifest.entry is only for runtime "isolate"');
-  return { contract: 1, capabilities: capabilities as Capabilities, runtime: runtime as RuntimeKind | null, entry: runtime === 'isolate' ? entry ?? DEFAULT_ENTRY : null };
+  return {
+    contract: 1, capabilities: capabilities as Capabilities,
+    ...(runtime !== null && { runtime: runtime as RuntimeKind }),
+    ...(runtime === 'isolate' && { entry: entry ?? DEFAULT_ENTRY }),
+  };
 }
 
 export function declaredKinds(manifest: Manifest): CapabilityKind[] {
