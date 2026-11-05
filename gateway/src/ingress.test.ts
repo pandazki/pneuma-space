@@ -11,6 +11,7 @@ import {
   type Principal, type ReleaseNumber, type RouteView, type Stats, type Subject,
 } from './model.ts';
 import { Ingress } from './ingress.ts';
+import { RING, requests } from './requests.ts';
 
 const APP_JS = Buffer.from('console.log("static");');
 
@@ -66,6 +67,7 @@ let retires: (() => void)[] = [];
 let invoked: InvokeRequest[] = [];
 let addresses: string[] = [];
 let flushed: Stats[][] = [];
+let instance: 'asleep' | 'awake' = 'awake';
 
 before(async () => {
   await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
@@ -79,6 +81,7 @@ before(async () => {
         return { app, address: addresses.shift() ?? `127.0.0.1:${upstreamPort}` };
       },
       release: () => void events.push('release'),
+      state: () => instance,
       channel: (_lease, onRetire) => {
         events.push('channel');
         retires.push(onRetire);
@@ -136,6 +139,8 @@ async function waitFor(predicate: () => boolean): Promise<void> {
   for (let i = 0; i < 200 && !predicate(); i++) await sleep(10);
   assert.ok(predicate(), `timed out; events: ${events.join(', ')}`);
 }
+
+const lastSeq = () => requests.after(0, RING).at(-1)?.seq ?? 0;
 
 async function websocket(path: string): Promise<net.Socket> {
   const socket = net.connect(port, '127.0.0.1');
@@ -338,4 +343,27 @@ test('stats count every request to an app, static included, and flush hands them
 
 test('the gateway-root login page is delegated to the identity provider', async () => {
   assert.equal((await request('/_pneuma-space/login?next=/apps/who/')).body, 'login page');
+});
+
+test('a proxied request leaves one record with its status and whether it found the app asleep (AC-P-15)', async () => {
+  const from = lastSeq();
+  instance = 'asleep';
+  await request('/apps/plain/echo?x=1');
+  instance = 'awake';
+  await waitFor(() => requests.after(from, RING).length === 1);
+  const [record] = requests.after(from, RING);
+  assert.deepEqual([record.app, record.kind, record.path, record.status, record.cold], ['id-plain', 'request', '/apps/plain/echo', 200, true]);
+  assert.ok(record.waitMs! <= record.ms);
+});
+
+test('a WebSocket leaves one ws record when it closes, with how long it was open (AC-P-15)', async () => {
+  const from = lastSeq();
+  const socket = await websocket('/apps/chat/');
+  await sleep(120);
+  assert.deepEqual(requests.after(from, RING), []);
+  socket.end();
+  await waitFor(() => requests.after(from, RING).length === 1);
+  const [record] = requests.after(from, RING);
+  assert.deepEqual([record.kind, record.status], ['ws', 101]);
+  assert.ok(record.ms >= 120, `${record.ms} ms`);
 });

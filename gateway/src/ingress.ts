@@ -6,15 +6,16 @@ import {
   APPS_PATH, HEADERS, InputError, LOGIN_PATH, LOGOUT_PATH, NotFound, RESERVED_HEADER_PREFIX, RESERVED_SEGMENT,
   TRIGGER_BODY_LIMIT, appName, effectivePolicy, triggerName,
   type AppId, type BundleStore, type Challenge, type IdentityProvider, type Lease, type Principal, type Registry,
-  type RouteView, type Runtime, type Scheduler, type Stats,
+  type RouteView, type Runtime, type Scheduler, type Stats, type Subject,
 } from './model.ts';
 import { emit } from './events.ts';
 import { connect, forward, tunnel, type Hold } from './proxy.ts';
+import { requests, type RequestKind } from './requests.ts';
 import { serveStatic, staticPath } from './static.ts';
 
 export type IngressDeps = {
   readonly registry: Pick<Registry, 'view' | 'policy'>;
-  readonly runtime: Pick<Runtime, 'acquire' | 'release' | 'channel'>;
+  readonly runtime: Pick<Runtime, 'acquire' | 'release' | 'channel' | 'state'>;
   readonly identity: IdentityProvider;
   readonly bundles: Pick<BundleStore, 'open'>;
   readonly scheduler: Pick<Scheduler, 'invoke'>;
@@ -32,7 +33,10 @@ type Route =
   | { readonly to: 'identity' }
   | { readonly to: 'trigger'; readonly view: RouteView; readonly trigger: string }
   | { readonly to: 'static'; readonly view: RouteView; readonly path: string }
-  | { readonly to: 'app'; readonly view: RouteView; readonly path: string; readonly headers: string[] };
+  | { readonly to: 'app'; readonly view: RouteView; readonly path: string; readonly headers: string[]; readonly subject: Subject | null };
+
+/** What a request record learns on the way through, beyond what the request and response carry. */
+type Trace = { subject: string | null; waitMs: number | null; cold: boolean; error: string | null };
 
 type Counter = { requests: number; errors: number; lastAccessAt: number | null };
 
@@ -149,6 +153,16 @@ export class Ingress {
     this.#stats.set(app, counter);
   }
 
+  #record(app: AppId, kind: RequestKind, req: IncomingMessage, status: number, started: number, trace: Trace): void {
+    requests.record({ app, kind, method: req.method ?? 'GET', path: (req.url ?? '/').split('?')[0], status, ms: performance.now() - started, ...trace });
+  }
+
+  /** The gateway's reason, when it has one, wins over the text the client is shown. */
+  #send(res: ServerResponse, reply: Reply, trace: Trace): void {
+    trace.error ??= reply.error ?? null;
+    send(res, reply);
+  }
+
   #view(name: string): RouteView | null {
     let view: RouteView | null;
     try {
@@ -192,7 +206,7 @@ export class Ingress {
       else if (view.identity.required !== false) return { to: 'reply', app: view.app, reply: challenge(result) };
     }
     if (view.image === null) return reply(view.app, 404, 'no file at this path');
-    return { to: 'app', view, path: rest + search, headers: forwardedHeaders(req, view, who) };
+    return { to: 'app', view, path: rest + search, headers: forwardedHeaders(req, view, who), subject: who?.subject ?? null };
   }
 
   /** Step 8: acquire and connect; a connect failure precedes the request line, so it is retried once with a fresh lease. */
@@ -208,9 +222,12 @@ export class Ingress {
     }
   }
 
-  async #upstream(view: RouteView): Promise<{ hold: Hold; socket: net.Socket } | Reply> {
+  async #upstream(view: RouteView, trace: Trace): Promise<{ hold: Hold; socket: net.Socket } | Reply> {
+    const from = performance.now();
+    trace.cold = this.#deps.runtime.state(view.app) !== 'awake';
     try {
       const { lease, socket } = await this.#open(view.app);
+      trace.waitMs = performance.now() - from;
       const { runtime, registry } = this.#deps;
       return {
         socket,
@@ -221,31 +238,41 @@ export class Ingress {
         },
       };
     } catch (error) {
+      trace.waitMs = performance.now() - from;
       if (error instanceof NotFound) return { status: 404, error: 'no app at this address' };
+      trace.error = String(error);
       log('wake-failed', view.app, { error: String(error) });
       return { status: 502, error: `the app did not start; run appctl logs ${view.name}` };
     }
   }
 
   async #request(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const started = performance.now();
+    const trace: Trace = { subject: null, waitMs: null, cold: false, error: null };
     try {
       const route = await this.#route(req, false);
       if (route.to !== 'identity') {
         const app = route.to === 'reply' ? route.app : route.view.app;
-        if (app) res.once('close', () => this.#count(app, res.statusCode));
+        const kind = route.to === 'static' ? 'static' : 'request';
+        if (route.to === 'app') trace.subject = route.subject;
+        if (app) res.once('close', () => {
+          this.#count(app, res.statusCode);
+          this.#record(app, kind, req, res.statusCode, started, trace);
+        });
       }
       switch (route.to) {
-        case 'reply': return send(res, route.reply);
+        case 'reply': return this.#send(res, route.reply, trace);
         case 'identity': return await this.#deps.identity.serve(req, res);
         case 'static': return await serveStatic(req, res, this.#deps.bundles, route.view.bundle!, route.path);
-        case 'trigger': return await this.#trigger(req, res, route.view, route.trigger);
+        case 'trigger': return await this.#trigger(req, res, route.view, route.trigger, trace);
         case 'app': {
-          const upstream = await this.#upstream(route.view);
-          if ('status' in upstream) return send(res, upstream);
+          const upstream = await this.#upstream(route.view, trace);
+          if ('status' in upstream) return this.#send(res, upstream, trace);
           return forward(req, res, upstream.socket, route.path, route.headers, upstream.hold);
         }
       }
     } catch (error) {
+      trace.error = String(error);
       log('ingress-error', null, { url: req.url, error: String(error) });
       if (!res.headersSent) send(res, { status: 500, error: 'internal error; see the gateway log' });
       else res.destroy();
@@ -253,19 +280,31 @@ export class Ingress {
   }
 
   async #upgrade(req: IncomingMessage, socket: net.Socket, head: Buffer): Promise<void> {
+    const started = performance.now();
     socket.on('error', () => socket.destroy());
     try {
       const route = await this.#route(req, true);
       if (route.to !== 'app') {
         if (route.to === 'reply') {
-          if (route.app) this.#count(route.app, route.reply.status);
+          if (route.app) {
+            this.#count(route.app, route.reply.status);
+            this.#record(route.app, 'ws', req, route.reply.status, started, { subject: null, waitMs: null, cold: false, error: route.reply.error ?? null });
+          }
           return sendRaw(socket, route.reply);
         }
         return sendRaw(socket, { status: 404 });
       }
-      const upstream = await this.#upstream(route.view);
-      this.#count(route.view.app, 'status' in upstream ? upstream.status : 101);
-      if ('status' in upstream) return sendRaw(socket, upstream);
+      const app = route.view.app;
+      const trace: Trace = { subject: route.subject, waitMs: null, cold: false, error: null };
+      const upstream = await this.#upstream(route.view, trace);
+      const status = 'status' in upstream ? upstream.status : 101;
+      this.#count(app, status);
+      if ('status' in upstream) {
+        trace.error ??= upstream.error ?? null;
+        this.#record(app, 'ws', req, status, started, trace);
+        return sendRaw(socket, upstream);
+      }
+      socket.once('close', () => this.#record(app, 'ws', req, status, started, trace));
       tunnel(req, socket, head, upstream.socket, route.path, route.headers, upstream.hold);
     } catch (error) {
       log('ingress-error', null, { url: req.url, error: String(error) });
@@ -273,14 +312,15 @@ export class Ingress {
     }
   }
 
-  async #trigger(req: IncomingMessage, res: ServerResponse, view: RouteView, raw: string): Promise<void> {
+  async #trigger(req: IncomingMessage, res: ServerResponse, view: RouteView, raw: string, trace: Trace): Promise<void> {
     const who = await this.#deps.identity.authenticate(req);
-    if (!('subject' in who)) return send(res, challenge(who));
+    if (!('subject' in who)) return this.#send(res, challenge(who), trace);
+    trace.subject = who.subject;
     if (!who.subject.startsWith('service:') && who.subject !== view.owner) {
-      return send(res, { status: 403, error: 'triggers accept a service token or the owner' });
+      return this.#send(res, { status: 403, error: 'triggers accept a service token or the owner' }, trace);
     }
     const body = await readBody(req, TRIGGER_BODY_LIMIT);
-    if (body === null) return send(res, { status: 413, error: `trigger body exceeds ${TRIGGER_BODY_LIMIT} bytes`, headers: { connection: 'close' } });
+    if (body === null) return this.#send(res, { status: 413, error: `trigger body exceeds ${TRIGGER_BODY_LIMIT} bytes`, headers: { connection: 'close' } }, trace);
     try {
       const key = req.headers[HEADERS.idempotencyKey];
       const delivery = await this.#deps.scheduler.invoke({
@@ -288,7 +328,7 @@ export class Ingress {
       });
       res.writeHead(202, { 'content-type': 'application/json' }).end(JSON.stringify({ delivery }));
     } catch (error) {
-      if (error instanceof NotFound || error instanceof InputError) return send(res, { status: 404, error: `no trigger "${raw}" in the current release` });
+      if (error instanceof NotFound || error instanceof InputError) return this.#send(res, { status: 404, error: `no trigger "${raw}" in the current release` }, trace);
       throw error;
     }
   }

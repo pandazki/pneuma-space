@@ -22,7 +22,7 @@ async function serveIngress(upstreamPort: number): Promise<void> {
       }),
       policy: () => DEFAULT_POLICY,
     },
-    runtime: { acquire: async () => ({ app, address: `127.0.0.1:${upstreamPort}` }), release() {}, channel() {} },
+    runtime: { acquire: async () => ({ app, address: `127.0.0.1:${upstreamPort}` }), release() {}, channel() {}, state: () => 'awake' },
     identity: { authenticate: async () => ({ status: 401 }), serve: async () => {} },
     bundles: { open: async () => { throw new Error('unused'); } },
     scheduler: { invoke: async () => { throw new Error('unused'); } },

@@ -7,6 +7,7 @@ import {
   DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS, NotFound,
   type App, type AppId, type CronExpr, type Delivery, type DeliveryFilter, type Lease, type SchedulerView, type Subject, type TriggerName,
 } from './model.ts';
+import { RING, requests } from './requests.ts';
 import { DeliveryScheduler, latestSlot, nextSlot, type SchedulerDeps } from './scheduler.ts';
 
 type Received = { headers: IncomingMessage['headers']; body: string };
@@ -75,6 +76,7 @@ function harness(triggers: Record<string, string | null> = { run: null }) {
       return { app, address };
     },
     release: (_lease: Lease) => void state.released++,
+    state: () => 'asleep',
   };
   const scheduler = new DeliveryScheduler({ store, runtime, view: () => state.view, now: () => clock.now, log: () => {} });
   const invoke = (key: string | null = null, body = '') =>
@@ -109,6 +111,16 @@ test('a retry after a 500 carries the same delivery id, the next attempt number,
   assert.equal(rows[0].state, 'done');
   assert.deepEqual(received.map((r) => [r.headers['x-pneuma-space-delivery'], r.headers['x-pneuma-space-attempt'], r.headers['x-pneuma-space-subject'], r.body]),
     [[id, '1', caller, 'hello'], [id, '2', caller, 'hello']]);
+});
+
+test('each delivery attempt leaves one trigger record with the app\'s status (AC-P-15)', async () => {
+  const { scheduler, invoke } = harness();
+  handle = (_req, res) => res.writeHead(500).end();
+  const from = requests.after(0, RING).at(-1)?.seq ?? 0;
+  await invoke();
+  await scheduler.tick();
+  const records = requests.after(from, RING);
+  assert.deepEqual(records.map((r) => [r.kind, r.method, r.path, r.status, r.cold, r.subject]), [['trigger', 'POST', '/_pneuma-space/trigger/run', 500, true, caller]]);
 });
 
 test('the fifth failed attempt sets failed after backoffs of 10, 20, 40 and 80 s', async () => {

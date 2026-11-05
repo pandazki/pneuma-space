@@ -9,6 +9,7 @@ import { ADMIN_PORT, INGRESS_PORT } from './model.ts';
 import { createProviders, providerConfig, S3BundleStore } from './providers.ts';
 import { PlatformRegistry } from './registry.ts';
 import { composeProject, DockerRuntime } from './runtime.ts';
+import { requests } from './requests.ts';
 import { DeliveryScheduler } from './scheduler.ts';
 import { SqliteStore } from './store.ts';
 
@@ -63,7 +64,7 @@ await runtime.reconcile();
 void registry.resume();
 await scheduler.resume();
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
-const admin = await startAdmin({ registry, bundles, runtime, metrics, ingressPort }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const admin = await startAdmin({ registry, bundles, runtime, metrics, requests, ingressPort }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {
   ingress.flush().catch((error: Error) => log('flush-failed', { error: error.message }));

@@ -4,7 +4,8 @@ import { test } from 'node:test';
 import { startAdmin } from './admin.ts';
 import { EventLog } from './events.ts';
 import { Metrics } from './metrics.ts';
-import { appName, parseManifest, subject } from './model.ts';
+import { appName, parseManifest, subject, type AppId } from './model.ts';
+import { RequestLog } from './requests.ts';
 import { world } from './registry.fakes.ts';
 
 async function admin() {
@@ -19,14 +20,15 @@ async function admin() {
     probes: { redis: async () => 'up' },
     host: async () => ({ cpus: 1, load: [0, 0, 0], memory: { totalBytes: 1, freeBytes: 1 }, data: null }),
   });
-  const server = await startAdmin({ registry, bundles: w.bundles, runtime: w.runtime, metrics, ingressPort: 18080 }, { port: 0 });
+  const requests = new RequestLog();
+  const server = await startAdmin({ registry, bundles: w.bundles, runtime: w.runtime, metrics, requests, ingressPort: 18080 }, { port: 0 });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
     const raw = typeof body === 'string' ? body : body === undefined ? undefined : JSON.stringify(body);
     const response = await fetch(base + path, { method, body: raw });
     return { status: response.status, body: await response.json() };
   };
-  return { w, registry, store, server, call, base, metrics };
+  return { w, registry, store, server, call, base, metrics, requests };
 }
 
 const kvApp = { image: 'example:1', manifest: { contract: 1, capabilities: { kv: {} } }, owner: 'user:ann' };
@@ -111,5 +113,17 @@ test('GET /api/metrics answers the sampled snapshot without a Docker call', asyn
   w.runtime.calls.length = 0;
   const replies = await Promise.all(Array.from({ length: 20 }, () => call('GET', '/api/metrics')));
   assert.deepEqual(replies.map((r) => [r.status, r.body.fleet.apps.registered, r.body.services.redis.status]), Array(20).fill([200, 1, 'up']));
+  assert.deepEqual(w.runtime.calls, []);
+});
+
+test('GET /api/requests answers the records after the cursor, named, without a Docker call', async (t) => {
+  const { call, server, store, requests, w } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  const id = (await store.app(appName('survey')))!.id as AppId;
+  for (const path of ['/a', '/b', '/c']) requests.record({ app: id, kind: 'request', method: 'GET', path, status: 200, ms: 2, waitMs: 1, cold: false, subject: null, error: null });
+  w.runtime.calls.length = 0;
+  const reply = await call('GET', '/api/requests?after=1&limit=1');
+  assert.deepEqual(reply.body.map((r: { seq: number; app: string; path: string }) => [r.seq, r.app, r.path]), [[2, 'survey', '/b']]);
   assert.deepEqual(w.runtime.calls, []);
 });
