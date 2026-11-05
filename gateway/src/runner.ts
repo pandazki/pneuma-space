@@ -127,17 +127,21 @@ function append(app: string, line: Buffer): void {
   while (log.bytes > LOG_BYTES) log.bytes -= log.lines.shift()!.length;
 }
 
-/** A line longer than LINE_BYTES is cut there; output with no newline is kept only up to that length. */
+/** A line longer than LINE_BYTES is kept up to there and the rest of it, up to the next newline, is dropped. */
 function capture(app: string, stream: NodeJS.ReadableStream): void {
   let partial = Buffer.alloc(0);
+  let cut = false;
   stream.on('data', (chunk: Buffer) => {
     let rest = partial.length ? Buffer.concat([partial, chunk]) : chunk;
     for (let at = rest.indexOf(10); at !== -1; at = rest.indexOf(10)) {
-      append(app, rest.subarray(0, at));
+      if (!cut) append(app, rest.subarray(0, at));
+      cut = false;
       rest = rest.subarray(at + 1);
     }
-    if (rest.length > LINE_BYTES) {
+    if (cut) rest = Buffer.alloc(0);
+    else if (rest.length > LINE_BYTES) {
       append(app, rest);
+      cut = true;
       rest = Buffer.alloc(0);
     }
     partial = Buffer.from(rest);
