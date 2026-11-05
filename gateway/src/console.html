@@ -493,7 +493,7 @@ const I18N = {
     'brand.sub': '控制台', 'nav.group': '平台', 'nav.overview': '总览', 'nav.apps': '项目', 'nav.publish': '发布',
     'theme.light': '浅色', 'theme.dark': '深色', 'aside.since': '自 {time} 起采样，网关重启后清零。',
     'ov.title': '总览', 'ov.waiting': '等待第一次采样',
-    'svc.gateway': '网关', 'svc.redis': 'Redis', 'svc.object': '对象存储', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn',
+    'svc.gateway': '网关', 'svc.redis': 'Redis', 'svc.object': '对象存储', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn', 'svc.runner': 'runner',
     'svc.gatewaySub': '已运行 {up} · 内存 {rss}', 'svc.off': '未启用 profile', 'svc.down': '不可达',
     'sec.fleet': '席位、唤醒与主机', 'sec.fleetDesc': '醒着的实例占一个席位；唤醒对照 3 秒门槛。',
     'k.awakeSub': '唤醒中 {waking} · 排空中 {draining} · 停止中 {stopping}',
@@ -553,7 +553,7 @@ const I18N = {
     'tl.sleepsIn': '{d}后休眠', 'tl.sleepingNow': '即将休眠', 'tl.asleep': '已休眠 {d}', 'tl.rate': '{n} 请求/秒',
     'mk.publish': '发布', 'mk.wake': '唤醒', 'mk.wakeFailed': '唤醒失败', 'mk.deliveryFailed': '投递失败',
     'ch.partial': '本分钟未结束', 'ch.due': '待投递 {due} · 投递中 {delivering}',
-    'att.wake': '唤醒失败', 'att.service': '{name} 不可达', 'att.serviceDetail': '网关的探测连不上它。',
+    'att.wake': '唤醒失败', 'att.quarantine': '已隔离', 'att.service': '{name} 不可达', 'att.serviceDetail': '网关的探测连不上它。',
     'att.p95': '唤醒 p95 超过门槛', 'att.p95Detail': '最近 1 小时 p95 {p95}，门槛 3 秒',
     'att.seen': '标为已读', 'att.allSeen': '全部已读', 'att.showSeen': '已读 {n} 条', 'att.hideSeen': '收起已读',
     'tail.restart': '网关重启，序号从 1 重新开始。', 'tail.gap': '两次轮询之间超过 100 条事件，有 {n} 条没有显示。', 'tail.new': '{n} 条新事件', 'tail.paused': '已暂停跟随', 'tail.dropped': '暂停期间丢弃 {n} 条',
@@ -582,7 +582,7 @@ const I18N = {
     'brand.sub': 'Console', 'nav.group': 'Platform', 'nav.overview': 'Overview', 'nav.apps': 'Projects', 'nav.publish': 'Publish',
     'theme.light': 'Light', 'theme.dark': 'Dark', 'aside.since': 'Sampling since {time}; a gateway restart clears it.',
     'ov.title': 'Overview', 'ov.waiting': 'Waiting for the first sample',
-    'svc.gateway': 'Gateway', 'svc.redis': 'Redis', 'svc.object': 'Object store', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn',
+    'svc.gateway': 'Gateway', 'svc.redis': 'Redis', 'svc.object': 'Object store', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn', 'svc.runner': 'runner',
     'svc.gatewaySub': 'up {up} · RSS {rss}', 'svc.off': 'profile not running', 'svc.down': 'not reachable',
     'sec.fleet': 'Seats, wakes and host', 'sec.fleetDesc': 'Each awake instance takes a seat; wakes are measured against the 3 s gate.',
     'k.awakeSub': 'waking {waking} · draining {draining} · stopping {stopping}',
@@ -642,7 +642,7 @@ const I18N = {
     'tl.sleepsIn': 'sleeps in {d}', 'tl.sleepingNow': 'going to sleep', 'tl.asleep': 'asleep {d}', 'tl.rate': '{n} req/s',
     'mk.publish': 'publish', 'mk.wake': 'wake', 'mk.wakeFailed': 'wake failed', 'mk.deliveryFailed': 'delivery failed',
     'ch.partial': 'minute in progress', 'ch.due': 'due {due} · delivering {delivering}',
-    'att.wake': 'Wake failed', 'att.service': '{name} is down', 'att.serviceDetail': 'The gateway probe cannot reach it.',
+    'att.wake': 'Wake failed', 'att.quarantine': 'Quarantined', 'att.service': '{name} is down', 'att.serviceDetail': 'The gateway probe cannot reach it.',
     'att.p95': 'Wake p95 over the gate', 'att.p95Detail': 'p95 {p95} in the last hour against 3 s',
     'att.seen': 'Mark seen', 'att.allSeen': 'Mark all seen', 'att.showSeen': '{n} seen', 'att.hideSeen': 'Hide seen',
     'tail.restart': 'Gateway restarted; seq starts again at 1.', 'tail.gap': '{n} events not shown: more than 100 arrived between two polls.', 'tail.new': '{n} new', 'tail.paused': 'following paused', 'tail.dropped': '{n} dropped while paused',
@@ -1022,7 +1022,7 @@ function servicesLine() {
       };
       fill(el,
         h('span', { class: 'st green' }, t('svc.gateway'), h('span', { class: 'num' }, t('svc.gatewaySub', { up: duration(Date.now() - m.gateway.startedAt), rss: bytes(m.gateway.rssBytes) }))),
-        ...['redis', 'object', 'postgres', 'coturn'].map(item),
+        ...['redis', 'object', 'postgres', 'coturn', 'runner'].map(item),
         h('span', { class: 'probe' }, m.gateway.lastFlushAt ? ticking(() => t('svc.probed', { ago: since(m.gateway.lastFlushAt) })) : t('ov.waiting')));
     },
   };
@@ -1406,6 +1406,9 @@ function attentionItems(model, downSince) {
     if (e.error === undefined || e.ev === 'wake-failed' || (e.ev === 'asleep' && !model.wakeFailures.has(e))) continue;
     const wake = e.ev === 'asleep';
     items.push({ id: `e:${e.ev}:${e.app}:${e.t}`, group: `e:${e.ev}:${e.app}`, tone: 'red', at: e.t, app: e.app, what: wake ? t('att.wake') : h('span', { class: 'mono' }, e.ev), why: String(e.error) });
+  }
+  for (const a of model.apps) {
+    if (a.quarantine) items.push({ id: `q:${a.name}:${a.quarantine.since}`, group: `q:${a.name}`, tone: 'red', at: a.quarantine.since, app: a.name, what: t('att.quarantine'), why: a.quarantine.reason });
   }
   for (const [name, at] of downSince) items.push({ id: `s:${name}:${at}`, group: `s:${name}`, tone: 'red', at, app: null, what: t('att.service', { name: t(`svc.${name}`) }), why: t('att.serviceDetail') });
   const p95 = m.wakes.last1h.p95Ms;

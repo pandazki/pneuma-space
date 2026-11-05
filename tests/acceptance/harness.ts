@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -57,7 +57,7 @@ export async function composeUp(...profiles: string[]): Promise<void> {
 
 /** Keeps volumes, as an operator's `docker compose down` would. */
 export function composeDown(): void {
-  compose('--profile', 'postgres', '--profile', 'rtc', 'down');
+  compose('--profile', 'postgres', '--profile', 'rtc', '--profile', 'isolate', 'down');
 }
 
 export async function waitFor<T>(probe: () => T | Promise<T>, timeoutMs: number, what = 'condition'): Promise<NonNullable<T>> {
@@ -117,7 +117,7 @@ export function docker(...args: string[]): string {
 /** Starts the stack with both profiles and builds the fixture images, once per process; every test file calls it first. */
 let ready: Promise<void> | undefined;
 export const setupSuite = () => (ready ??= (async () => {
-  await composeUp('postgres', 'rtc');
+  await composeUp('postgres', 'rtc', 'isolate');
   for (const [variant, ref] of [['1', images.echo], ['2', images.echo2]]) {
     docker('build', '-q', '--build-arg', `VARIANT=${variant}`, '-t', ref, fixtureDir('echo'));
   }
@@ -325,3 +325,20 @@ export async function deliveries(name: string, trigger: string): Promise<any[]> 
 }
 
 export const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+
+/** Uploads a directory as a code bundle and publishes it as an isolate app through the admin API; returns the release. */
+export async function publishIsolate(name: string, dir: string, manifest: unknown = JSON.parse(readFileSync(join(dir, 'pneuma-space.json'), 'utf8'))): Promise<any> {
+  const tar = execFileSync('tar', ['--format', 'ustar', '-cf', '-', '-C', dir, '.'], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
+  const upload = await adminClient.uploadBundle(new Uint8Array(tar));
+  if (upload.status >= 300) throw new Error(`POST /api/bundles: ${upload.status} ${JSON.stringify(upload.body)}`);
+  const release = await adminClient.publish(name, { image: null, manifest, bundle: upload.body.bundle, owner: OWNER });
+  if (release.status >= 300) throw new Error(`publish ${name}: ${release.status} ${JSON.stringify(release.body)}`);
+  return release.body;
+}
+
+export async function deployIsolate(t: TestContext, dir = fixtureDir('isolate')): Promise<Deployed> {
+  const name = uniqueName('acc');
+  t.after(() => cleanup(name));
+  await publishIsolate(name, dir);
+  return { name, id: await appId(name) };
+}

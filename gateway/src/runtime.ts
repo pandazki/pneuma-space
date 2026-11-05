@@ -1,51 +1,27 @@
 import { connect } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Docker, DockerError, type ContainerSpec, type DockerEvent } from './docker.ts';
-import { emit, type Emit } from './events.ts';
-import {
-  APP_PORT, canonicalHash, Conflict, NotFound, RUNTIME_ENV,
-  type AppId, type HealthCheck, type InstanceState, type Lease, type LeaseKind, type Runtime, type RunSpec,
-} from './model.ts';
+import type { Emit } from './events.ts';
+import { Lifecycle, specHash, type Adopted, type Driver, type Gone, type Slot } from './lifecycle.ts';
+import { APP_PORT, Conflict, RUNTIME_ENV, type AppId, type HealthCheck, type RunSpec } from './model.ts';
 
 const LABEL = { app: 'pneuma-space.app', release: 'pneuma-space.release', spec: 'pneuma-space.spec', network: 'pneuma-space.network' } as const;
-const MAX_TICK_SECONDS = 10;
 const READY_POLL_MS = 50;
 const STOP_SIGNALS: ReadonlySet<string> = new Set(['15', '9']);
 
 type ContainerRun = RunSpec & { readonly runtime: Extract<RunSpec['runtime'], { kind: 'container' }> };
 
-type Instance = {
-  readonly app: AppId;
-  state: InstanceState;
-  /** The spec the container was created from, or the latest one while asleep without a container. */
-  spec: ContainerRun;
-  container: string | null;
-  address: string;
-  readonly leases: Map<Lease, LeaseRecord>;
-  lastReleaseAt: number;
-  since: number;
-  /** Epoch ms just before the last docker start; an older die event is a replay and is ignored. */
-  startedAt: number;
-  wake: Promise<void>;
-  changed: PromiseWithResolvers<void>;
-};
-
-/** `onRetire` is set only for a channel. */
-type LeaseRecord = { readonly kind: LeaseKind; readonly onRetire: (() => void) | null };
-
 export type RuntimeOptions = {
   readonly docker: Docker;
   /** PNEUMA_SPACE_NETWORK: app containers join it, and only containers labelled with it are this gateway's. */
   readonly network: string;
-  /** The Registry's runSpec; re-read on every wake and reaper tick so policy changes apply without a publish. Specs of other runtimes read as none. */
   readonly specFor: (app: AppId) => RunSpec | null;
   readonly log?: Emit;
 };
 
-const specHash = (spec: RunSpec): string => canonicalHash(spec.injection);
 const sameRun = (a: ContainerRun, b: ContainerRun): boolean =>
   a.release === b.release && a.runtime.image === b.runtime.image && specHash(a) === specHash(b);
-const fill = (env: Readonly<Record<string, string>>, dir: string) =>
+export const fill = (env: Readonly<Record<string, string>>, dir: string) =>
   Object.fromEntries(Object.entries(env).map(([key, value]) => [key, value.replaceAll('{dir}', dir)]));
 
 export function canConnect(host: string, port: number): Promise<boolean> {
@@ -57,197 +33,53 @@ export function canConnect(host: string, port: number): Promise<boolean> {
   });
 }
 
-// JavaScript runs each synchronous stretch to completion, so the code between two awaits is the per-instance lock;
-// `changed` is its condition variable.
-export class DockerRuntime implements Runtime {
+/** Handles are container ids; a stopped container is kept for the next start. */
+class DockerDriver implements Driver<ContainerRun, string> {
   readonly kind = 'container';
-  private readonly docker: Docker;
-  private readonly network: string;
-  private readonly specFor: (app: AppId) => ContainerRun | null;
-  private readonly log: Emit;
-  private readonly instances = new Map<AppId, Instance>();
-  private readonly awake = new Set<Instance>();
+  readonly handleKey = 'container';
+  readonly #docker: Docker;
+  readonly #network: string;
   /** Containers someone sent SIGTERM or SIGKILL; their die is a stop, not a crash. */
-  private readonly signalled = new Set<string>();
-  private readonly events = new AbortController();
-  private timer: NodeJS.Timeout | null = null;
-  private due = 0;
-  private following = false;
+  readonly #signalled = new Set<string>();
+  /** Epoch ms just before each container's last docker start; an older die event is a replay and is ignored. */
+  readonly #startedAt = new Map<string, number>();
+  #since = 0;
 
-  constructor(options: RuntimeOptions) {
-    this.docker = options.docker;
-    this.network = options.network;
-    this.specFor = (app) => {
-      const spec = options.specFor(app);
-      return spec?.runtime.kind === 'container' ? (spec as ContainerRun) : null;
-    };
-    this.log = options.log ?? emit;
+  constructor(docker: Docker, network: string) {
+    this.#docker = docker;
+    this.#network = network;
   }
 
-  async acquire(app: AppId, kind: 'request' | 'trigger'): Promise<Lease> {
-    for (;;) {
-      const spec = this.specFor(app);
-      if (!spec) throw new NotFound(`app ${app} has no registered release with an image`);
-      let inst = this.instances.get(app);
-      if (!inst) {
-        inst = { app, state: 'asleep', spec, container: null, address: '', leases: new Map(), lastReleaseAt: 0, since: Date.now(), startedAt: 0, wake: Promise.resolve(), changed: Promise.withResolvers() };
-        this.instances.set(app, inst);
-      }
-      switch (inst.state) {
-        case 'awake': {
-          const lease: Lease = { app, address: inst.address };
-          inst.leases.set(lease, { kind, onRetire: null });
-          return lease;
-        }
-        case 'asleep':
-          this.transition(inst, 'waking');
-          inst.wake = this.wake(inst, spec);
-          await inst.wake;
-          break;
-        case 'waking':
-          await inst.wake;
-          break;
-        default:
-          await inst.changed.promise;
-      }
-    }
+  accepts(spec: RunSpec): spec is ContainerRun {
+    return spec.runtime.kind === 'container';
   }
 
-  release(lease: Lease): void {
-    const inst = this.instances.get(lease.app);
-    if (!inst?.leases.delete(lease)) return;
-    if (inst.leases.size === 0) {
-      inst.lastReleaseAt = Date.now();
-      this.notify(inst);
-    }
-  }
-
-  channel(lease: Lease, onRetire: () => void): void {
-    const inst = this.instances.get(lease.app);
-    if (!inst?.leases.has(lease)) return;
-    inst.leases.set(lease, { kind: 'channel', onRetire });
-    if (inst.state === 'draining') onRetire();
-  }
-
-  async retire(app: AppId): Promise<void> {
-    for (;;) {
-      const inst = this.instances.get(app);
-      if (!inst) return;
-      switch (inst.state) {
-        case 'awake':
-          return this.drain(inst);
-        case 'asleep':
-          this.transition(inst, 'stopping');
-          return this.remove(inst);
-        case 'waking':
-          await inst.wake.catch(() => {});
-          break;
-        default:
-          await inst.changed.promise;
-      }
-    }
-  }
-
-  async reconcile(): Promise<void> {
-    const since = Math.floor(Date.now() / 1000);
-    const found = await this.docker.list({ label: [LABEL.app, `${LABEL.network}=${this.network}`] });
-    for (const container of found) {
-      const app = container.Labels[LABEL.app] as AppId;
-      if (this.instances.get(app)?.container === container.Id) continue;
-      const spec = this.specFor(app);
-      const current = spec !== null && !this.instances.has(app)
-        && container.Labels[LABEL.release] === String(spec.release) && container.Labels[LABEL.spec] === specHash(spec);
-      if (!current) {
-        await this.docker.stop(container.Id);
-        await this.docker.remove(container.Id);
-        this.emit('removed', app, { container: container.Id });
-        continue;
-      }
-      const ip = container.NetworkSettings.Networks[this.network]?.IPAddress;
-      const running = container.State === 'running' && Boolean(ip);
-      const inst: Instance = {
-        app, state: 'asleep', spec, container: container.Id, address: running ? `${ip}:${APP_PORT}` : '',
-        leases: new Map(), lastReleaseAt: Date.now(), since: Date.now(), startedAt: 0, wake: Promise.resolve(), changed: Promise.withResolvers(),
-      };
-      this.instances.set(app, inst);
-      this.transition(inst, running ? 'awake' : 'asleep', { adopted: true });
-    }
-    if (!this.following) {
-      this.following = true;
-      void this.follow(since);
-    }
-  }
-
-  state(app: AppId): InstanceState | 'none' {
-    return this.instances.get(app)?.state ?? 'none';
-  }
-
-  since(app: AppId): number | null {
-    return this.instances.get(app)?.since ?? null;
-  }
-
-  leases(app: AppId): Record<LeaseKind, number> {
-    const counts = { request: 0, channel: 0, trigger: 0 };
-    for (const { kind } of this.instances.get(app)?.leases.values() ?? []) counts[kind]++;
-    return counts;
-  }
-
-  sleepsAt(app: AppId): number | null {
-    const inst = this.instances.get(app);
-    if (inst?.state !== 'awake' || inst.leases.size > 0) return null;
-    return inst.lastReleaseAt + (this.specFor(app) ?? inst.spec).policy.idle_seconds * 1000;
-  }
-
-  async logs(app: AppId, tail: number): Promise<string> {
-    const container = this.instances.get(app)?.container;
-    return container ? this.docker.logs(container, tail) : '';
-  }
-
-  health(): readonly HealthCheck[] {
-    return ['exit', 'ready'];
-  }
-
-  async destroyStorage(_app: AppId, id: string): Promise<void> {
+  async start(slot: Slot<ContainerRun, string>, spec: ContainerRun): Promise<string> {
+    const docker = this.#docker;
     try {
-      await this.docker.removeVolume(id);
-    } catch (error) {
-      if (error instanceof DockerError && error.status === 409) throw new Conflict(`volume ${id} is still used by a container`);
-      throw error;
-    }
-  }
-
-  /** Stops the reaper and the event subscription; containers keep running for the next reconcile to adopt. */
-  close(): void {
-    this.events.abort();
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = null;
-  }
-
-  private async wake(inst: Instance, spec: ContainerRun): Promise<void> {
-    const started = performance.now();
-    try {
-      if (inst.container && !sameRun(inst.spec, spec)) {
-        await this.docker.stop(inst.container);
-        await this.docker.remove(inst.container);
-        inst.container = null;
+      if (slot.handle && !sameRun(slot.spec, spec)) {
+        await docker.stop(slot.handle);
+        await docker.remove(slot.handle);
+        slot.handle = null;
       }
-      inst.spec = spec;
-      inst.container ??= await this.create(spec);
-      inst.startedAt = Date.now();
-      if (!(await this.docker.start(inst.container))) {
+      slot.spec = spec;
+      slot.handle ??= await this.#create(spec);
+      this.#startedAt.set(slot.handle, Date.now());
+      if (!(await docker.start(slot.handle))) {
         // 404 also means the container outlived its network (compose down recreates it); a same-name create would return it again.
-        await this.docker.remove(inst.container);
-        inst.container = await this.create(spec);
-        await this.docker.start(inst.container);
+        await docker.remove(slot.handle);
+        slot.handle = await this.#create(spec);
+        this.#startedAt.set(slot.handle, Date.now());
+        await docker.start(slot.handle);
       }
-      const ip = (await this.docker.inspect(inst.container))?.NetworkSettings.Networks[this.network]?.IPAddress;
-      if (!ip) throw new Error(`container of app ${spec.app} has no IP on network ${this.network}`);
-      inst.address = `${ip}:${APP_PORT}`;
+      const container = slot.handle;
+      const ip = (await docker.inspect(container))?.NetworkSettings.Networks[this.#network]?.IPAddress;
+      if (!ip) throw new Error(`container of app ${spec.app} has no IP on network ${this.#network}`);
       const deadline = Date.now() + spec.policy.ready_timeout_seconds * 1000;
       // A container that exited frees its IP for the next one started, so the TCP poll alone can reach the wrong container.
       const stillRunning = async () => {
-        const state = await this.docker.inspect(inst.container!);
-        if (!state?.State.Running || state.NetworkSettings.Networks[this.network]?.IPAddress !== ip) {
+        const state = await docker.inspect(container);
+        if (!state?.State.Running || state.NetworkSettings.Networks[this.#network]?.IPAddress !== ip) {
           throw new Error(`container of app ${spec.app} exited before it was ready`);
         }
       };
@@ -263,18 +95,75 @@ export class DockerRuntime implements Runtime {
         await sleep(READY_POLL_MS);
       }
       await stillRunning();
-      inst.lastReleaseAt = Date.now();
-      this.transition(inst, 'awake', { ms: Math.round(performance.now() - started) });
+      return `${ip}:${APP_PORT}`;
     } catch (error) {
-      if (inst.container) await this.docker.stop(inst.container).catch(() => {});
-      this.transition(inst, 'asleep', { error: String(error) });
+      if (slot.handle) await docker.stop(slot.handle).catch(() => {});
       throw error;
     }
   }
 
-  private async create(spec: ContainerRun): Promise<string> {
+  async sleep(_app: AppId, slot: Slot<ContainerRun, string>): Promise<void> {
+    await this.#docker.stop(slot.handle!);
+  }
+
+  async remove(_app: AppId, container: string): Promise<void> {
+    await this.#docker.stop(container);
+    await this.#docker.remove(container);
+    this.#startedAt.delete(container);
+  }
+
+  async adopt(): Promise<readonly Adopted<string>[]> {
+    this.#since ||= Math.floor(Date.now() / 1000);
+    const found = await this.#docker.list({ label: [LABEL.app, `${LABEL.network}=${this.#network}`] });
+    return found.map((container) => {
+      const ip = container.NetworkSettings.Networks[this.#network]?.IPAddress;
+      return {
+        app: container.Labels[LABEL.app] as AppId,
+        handle: container.Id,
+        release: container.Labels[LABEL.release],
+        spec: container.Labels[LABEL.spec],
+        address: container.State === 'running' && ip ? `${ip}:${APP_PORT}` : null,
+      };
+    });
+  }
+
+  follow(gone: Gone<string>, signal: AbortSignal): void {
+    void (async () => {
+      const filters = { event: ['kill', 'die', 'start'], label: [`${LABEL.network}=${this.#network}`] };
+      for await (const event of this.#docker.events(filters, this.#since, signal)) {
+        if (event.action === 'kill' && STOP_SIGNALS.has(event.labels.signal)) this.#signalled.add(event.id);
+        else if (event.action === 'start') this.#signalled.delete(event.id);
+        else if (event.action === 'die') this.#onDie(event, gone);
+      }
+    })();
+  }
+
+  #onDie(event: DockerEvent, gone: Gone<string>): void {
+    const signalled = this.#signalled.delete(event.id);
+    if (event.time < (this.#startedAt.get(event.id) ?? 0)) return;
+    gone(event.labels[LABEL.app] as AppId, event.id, signalled ? null : { ev: 'crashed', reason: `container exited with code ${event.labels.exitCode}` });
+  }
+
+  async logs(_app: AppId, container: string | null, tail: number): Promise<string> {
+    return container ? this.#docker.logs(container, tail) : '';
+  }
+
+  health(): readonly HealthCheck[] {
+    return ['exit', 'ready'];
+  }
+
+  async destroyStorage(_app: AppId, id: string): Promise<void> {
+    try {
+      await this.#docker.removeVolume(id);
+    } catch (error) {
+      if (error instanceof DockerError && error.status === 409) throw new Conflict(`volume ${id} is still used by a container`);
+      throw error;
+    }
+  }
+
+  async #create(spec: ContainerRun): Promise<string> {
     const { storage } = spec.injection;
-    for (const { id } of storage) await this.docker.createVolume(id);
+    for (const { id } of storage) await this.#docker.createVolume(id);
     const container: ContainerSpec = {
       image: spec.runtime.image,
       env: {
@@ -282,120 +171,17 @@ export class DockerRuntime implements Runtime {
         [RUNTIME_ENV.app]: spec.name, [RUNTIME_ENV.release]: String(spec.release), [RUNTIME_ENV.port]: String(APP_PORT),
       },
       labels: {
-        [LABEL.app]: spec.app, [LABEL.release]: String(spec.release), [LABEL.spec]: specHash(spec), [LABEL.network]: this.network,
+        [LABEL.app]: spec.app, [LABEL.release]: String(spec.release), [LABEL.spec]: specHash(spec), [LABEL.network]: this.#network,
       },
       mounts: storage.map(({ id, target }) => ({ volume: id, target })),
-      network: this.network,
+      network: this.#network,
     };
-    return this.docker.create(`pneuma-space-${spec.app}-${spec.release}`, container);
+    return this.#docker.create(`pneuma-space-${spec.app}-${spec.release}`, container);
   }
+}
 
-  private async drain(inst: Instance): Promise<void> {
-    this.transition(inst, 'draining');
-    for (const { onRetire } of inst.leases.values()) {
-      try {
-        onRetire?.();
-      } catch (error) {
-        this.emit('retire-error', inst.app, { error: String(error) });
-      }
-    }
-    const seconds = (this.specFor(inst.app) ?? inst.spec).policy.drain_timeout_seconds;
-    const timer = new AbortController();
-    const timeout = sleep(seconds * 1000, undefined, { signal: timer.signal }).then(() => true, () => true);
-    let expired = false;
-    while (inst.leases.size > 0 && !expired) expired = await Promise.race([timeout, inst.changed.promise.then(() => false)]);
-    timer.abort();
-    this.transition(inst, 'stopping', { leases: inst.leases.size });
-    await this.remove(inst);
-  }
-
-  private async remove(inst: Instance): Promise<void> {
-    try {
-      if (inst.container) {
-        await this.docker.stop(inst.container);
-        await this.docker.remove(inst.container);
-      }
-    } catch (error) {
-      this.transition(inst, 'asleep', { error: String(error) });
-      throw error;
-    }
-    this.instances.delete(inst.app);
-    this.awake.delete(inst);
-    this.notify(inst);
-    this.emit('removed', inst.app, { container: inst.container });
-  }
-
-  private async sleepInstance(inst: Instance): Promise<void> {
-    this.transition(inst, 'stopping');
-    try {
-      await this.docker.stop(inst.container!);
-      this.transition(inst, 'asleep');
-    } catch (error) {
-      inst.lastReleaseAt = Date.now();
-      this.transition(inst, 'awake', { error: String(error) });
-    }
-  }
-
-  private readonly tick = (): void => {
-    this.timer = null;
-    const now = Date.now();
-    let next = MAX_TICK_SECONDS;
-    for (const inst of this.awake) {
-      const idle = (this.specFor(inst.app) ?? inst.spec).policy.idle_seconds;
-      next = Math.min(next, idle);
-      if (inst.leases.size === 0 && now - inst.lastReleaseAt >= idle * 1000) void this.sleepInstance(inst);
-    }
-    if (this.awake.size > 0) this.arm(next);
-  };
-
-  private arm(seconds: number): void {
-    if (this.events.signal.aborted) return;
-    const due = Date.now() + seconds * 1000;
-    if (this.timer && this.due <= due) return;
-    if (this.timer) clearTimeout(this.timer);
-    this.due = due;
-    this.timer = setTimeout(this.tick, seconds * 1000);
-    this.timer.unref();
-  }
-
-  private async follow(since: number): Promise<void> {
-    const filters = { event: ['kill', 'die', 'start'], label: [`${LABEL.network}=${this.network}`] };
-    for await (const event of this.docker.events(filters, since, this.events.signal)) {
-      if (event.action === 'kill' && STOP_SIGNALS.has(event.labels.signal)) this.signalled.add(event.id);
-      else if (event.action === 'start') this.signalled.delete(event.id);
-      else if (event.action === 'die') this.onDie(event);
-    }
-  }
-
-  private onDie(event: DockerEvent): void {
-    const signalled = this.signalled.delete(event.id);
-    const inst = this.instances.get(event.labels[LABEL.app] as AppId);
-    if (inst?.state !== 'awake' || inst.container !== event.id || event.time < inst.startedAt) return;
-    inst.address = '';
-    if (!signalled) this.emit('crashed', inst.app, { reason: `container exited with code ${event.labels.exitCode}` });
-    this.transition(inst, 'asleep', { external: true });
-  }
-
-  private transition(inst: Instance, state: InstanceState, extra: Record<string, unknown> = {}): void {
-    inst.state = state;
-    inst.since = Date.now();
-    if (state === 'awake') {
-      this.awake.add(inst);
-      this.arm(Math.min(MAX_TICK_SECONDS, (this.specFor(inst.app) ?? inst.spec).policy.idle_seconds));
-    } else {
-      this.awake.delete(inst);
-    }
-    this.notify(inst);
-    this.emit(state, inst.app, extra);
-  }
-
-  private notify(inst: Instance): void {
-    const { resolve } = inst.changed;
-    inst.changed = Promise.withResolvers();
-    resolve();
-  }
-
-  private emit(ev: string, app: AppId, extra: Record<string, unknown>): void {
-    this.log(ev, app, extra);
+export class DockerRuntime extends Lifecycle<ContainerRun, string> {
+  constructor(options: RuntimeOptions) {
+    super(new DockerDriver(options.docker, options.network), options);
   }
 }

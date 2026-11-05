@@ -73,6 +73,31 @@ services:
       - postgres-data:/var/lib/postgresql/data
     networks: [pneuma-space]
 
+  # One process for every isolate app (ADR 0017). The OS caps are the backstop for what a worker's resourceLimits do not bound.
+  runner:
+    build: ./gateway
+    profiles: [isolate]
+    restart: unless-stopped
+    command:
+      - node
+      - --disable-warning=ExperimentalWarning
+      - --disable-warning=SecurityWarning
+      - --permission
+      - --allow-fs-read=/data
+      - --allow-fs-read=/gateway
+      - --allow-fs-write=/data
+      - --allow-worker
+      - src/runner.ts
+    mem_limit: ${PNEUMA_SPACE_RUNNER_MEMORY:-2g}
+    pids_limit: ${PNEUMA_SPACE_RUNNER_PIDS:-512}
+    environment:
+      PNEUMA_SPACE_RUNNER_WORKER_HEAP_MB: ${PNEUMA_SPACE_RUNNER_WORKER_HEAP_MB:-256}
+      PNEUMA_SPACE_RUNNER_WORKER_OFFHEAP_MB: ${PNEUMA_SPACE_RUNNER_WORKER_OFFHEAP_MB:-256}
+      PNEUMA_SPACE_RUNNER_STUCK_LIMIT: ${PNEUMA_SPACE_RUNNER_STUCK_LIMIT:-3}
+    volumes:
+      - runner-data:/data
+    networks: [pneuma-space]
+
   coturn:
     image: coturn/coturn:4.6
     profiles: [rtc]
@@ -103,3 +128,4 @@ volumes:
   rustfs-data:
   redis-data:
   postgres-data:
+  runner-data:

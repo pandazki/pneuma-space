@@ -6,3 +6,4 @@ import './collab.test.ts';
 import './game.test.ts';
 import './media.test.ts';
 import './worker.test.ts';
+import './isolate.test.ts';
