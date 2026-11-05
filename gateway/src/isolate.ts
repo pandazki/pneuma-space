@@ -8,7 +8,8 @@ import { Unavailable } from './runtimes.ts';
 
 /** The runner's control port on the platform network; never published to the host. */
 export const RUNNER_PORT = 8082;
-const POLL_MS = 1000;
+// One small read on the platform network; hang detection is the watchdog's 3 to 4 s plus at most this.
+const POLL_MS = 250;
 const CALL_MS = 10_000;
 /** The same grace `docker stop` gives a container. */
 const STOP_MS = 10_000;
