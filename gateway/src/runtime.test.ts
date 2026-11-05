@@ -15,8 +15,10 @@ import { DockerRuntime } from './runtime.ts';
 
 const SERVER = `if (process.env.FIXTURE_EXIT) process.exit(1);
 console.log('fixture ready');
-require('http').createServer((q, s) => s.end(process.env.PNEUMA_SPACE_APP + ' ' + process.env.PNEUMA_SPACE_RELEASE)).listen(8000);
-process.on('SIGTERM', () => process.exit(0));`;
+process.on('SIGTERM', () => process.exit(0));
+process.on('SIGHUP', () => {});
+if (process.env.FIXTURE_SILENT) setInterval(() => {}, 1000);
+else require('http').createServer((q, s) => q.url === '/exit' ? process.exit(3) : s.end(process.env.PNEUMA_SPACE_APP + ' ' + process.env.PNEUMA_SPACE_RELEASE)).listen(8000);`;
 
 if (process.env.PNEUMA_SPACE_TEST_IMAGE) inner(process.env.PNEUMA_SPACE_TEST_IMAGE as ImageId, process.env.PNEUMA_SPACE_NETWORK!);
 else outer();
@@ -85,9 +87,10 @@ function inner(image: ImageId, network: string): void {
     });
     publish(1);
     const runtimes: DockerRuntime[] = [];
+    const events: Record<string, unknown>[] = [];
     const start = () => {
       const docker = new CountingDocker();
-      const runtime = new DockerRuntime({ docker, network, specFor: (id) => specs.get(id) ?? null, log: () => {} });
+      const runtime = new DockerRuntime({ docker, network, specFor: (id) => specs.get(id) ?? null, log: (ev, id, extra) => { if (id === app) events.push({ ev, ...extra }); } });
       runtimes.push(runtime);
       return { docker, runtime };
     };
@@ -97,7 +100,7 @@ function inner(image: ImageId, network: string): void {
         for (const container of await raw.list({ label: [`pneuma-space.app=${id}`] })) await raw.remove(container.Id);
       }
     });
-    return { app, publish, start, specFor: (id: AppId) => specs.get(id) ?? null, ...start() };
+    return { app, events, publish, start, specFor: (id: AppId) => specs.get(id) ?? null, ...start() };
   }
 
   const answer = async (address: string) => (await fetch(`http://${address}/`)).text();
@@ -241,6 +244,59 @@ function inner(image: ImageId, network: string): void {
     t.diagnostic(`wake after external stop (start, ready): ${Math.round(ms)} ms`);
     assert.ok(ms < 3000, `wake took ${Math.round(ms)} ms`);
     assert.equal(await answer(lease.address), 'fixture 1');
+  });
+
+  const failures = (events: Record<string, unknown>[]) => events.filter((e) => e.ev === 'crashed' || e.external);
+
+  test('a container that exits on its own while awake emits crashed, then asleep', async (t) => {
+    const { app, events, runtime } = fixture(t);
+    await runtime.reconcile();
+    const lease = await runtime.acquire(app, 'request');
+    runtime.release(lease);
+    await fetch(`http://${lease.address}/exit`).catch(() => {});
+    await until('die event', () => runtime.state(app) === 'asleep');
+    assert.deepEqual(events.slice(-2), [{ ev: 'crashed', reason: 'container exited with code 3' }, { ev: 'asleep', external: true }]);
+  });
+
+  test('an external docker stop emits asleep marked external and no crashed', async (t) => {
+    const { app, events, runtime } = fixture(t);
+    await runtime.reconcile();
+    runtime.release(await runtime.acquire(app, 'request'));
+    const [container] = await raw.list({ label: [`pneuma-space.app=${app}`] });
+    await raw.stop(container.Id);
+    await until('die event', () => runtime.state(app) === 'asleep');
+    assert.deepEqual(failures(events), [{ ev: 'asleep', external: true }]);
+  });
+
+  test('a signal other than SIGTERM or SIGKILL does not hide a later crash', async (t) => {
+    const { app, events, runtime } = fixture(t);
+    await runtime.reconcile();
+    const lease = await runtime.acquire(app, 'request');
+    runtime.release(lease);
+    const [container] = await raw.list({ label: [`pneuma-space.app=${app}`] });
+    await raw.request('POST', `/containers/${container.Id}/kill?signal=HUP`);
+    await fetch(`http://${lease.address}/exit`).catch(() => {});
+    await until('die event', () => runtime.state(app) === 'asleep');
+    assert.equal(events.filter((e) => e.ev === 'crashed').length, 1);
+  });
+
+  // Docker delivers events within milliseconds; the pause lets a die the platform caused reach the runtime before asserting it was ignored.
+  test('a ready timeout emits neither crashed nor an external asleep', async (t) => {
+    const { app, events, publish, runtime } = fixture(t, { ready_timeout_seconds: 1 });
+    publish(1, { FIXTURE_SILENT: '1' });
+    await runtime.reconcile();
+    await assert.rejects(runtime.acquire(app, 'request'));
+    await sleep(1000);
+    assert.deepEqual(failures(events), []);
+  });
+
+  test('a drain stop emits neither crashed nor an external asleep', async (t) => {
+    const { app, events, runtime } = fixture(t);
+    await runtime.reconcile();
+    runtime.release(await runtime.acquire(app, 'request'));
+    await runtime.retire(app);
+    await sleep(1000);
+    assert.deepEqual(failures(events), []);
   });
 
   test('reconcile adopts a matching running container as awake and removes one whose spec label differs', async (t) => {

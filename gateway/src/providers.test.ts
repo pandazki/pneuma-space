@@ -56,6 +56,27 @@ function assertEnvNames(kind: CapabilityKind, injection: Injection): void {
   assert.deepEqual(Object.keys(injection.env).sort(), [...ENV_BY_KIND[kind]].sort());
 }
 
+for (const [name, kind, prefix] of [['volume', 'files', 'pneuma-space-files-'], ['sqlite', 'db', 'pneuma-space-db-']] as const) {
+  describe(name, () => {
+    const app = newAppId();
+    const target = name === 'volume' ? '/data' : '/pneuma/db';
+
+    test('ensure twice records the same storage and inject binds it with {dir} templates', async () => {
+      const resource = await providers[name].ensure(app, null);
+      assert.deepEqual(await providers[name].ensure(app, resource), resource);
+      const [binding, ...rest] = providers[name].inject(app, resource).storage;
+      assert.deepEqual([binding.id, binding.target, rest.length], [`${prefix}${app}`, target, 0]);
+      assertEnvNames(kind, { env: binding.env, storage: [] });
+      assert.ok(Object.values(binding.env).every((value) => value.includes('{dir}')));
+    });
+
+    test('destroy hands the storage id to the runtime', async () => {
+      await providers[name].destroy(app, {});
+      assert.equal(destroyed.at(-1), `${prefix}${app}`);
+    });
+  });
+}
+
 describe('providers against the real compose services', { skip: !dockerUp && 'Docker is not available' }, () => {
   before(async () => {
     compose('up', '-d', '--wait', 'rustfs', 'redis', 'postgres', 'coturn');
@@ -64,27 +85,6 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
     await until(redisReady, 'redis');
   });
   after(() => compose('down', '-v'));
-
-  for (const [name, kind, prefix] of [['volume', 'files', 'pneuma-space-files-'], ['sqlite', 'db', 'pneuma-space-db-']] as const) {
-    describe(name, () => {
-      const app = newAppId();
-      const target = name === 'volume' ? '/data' : '/pneuma/db';
-
-      test('ensure twice records the same storage and inject binds it with {dir} templates', async () => {
-        const resource = await providers[name].ensure(app, null);
-        assert.deepEqual(await providers[name].ensure(app, resource), resource);
-        const [binding, ...rest] = providers[name].inject(app, resource).storage;
-        assert.deepEqual([binding.id, binding.target, rest.length], [`${prefix}${app}`, target, 0]);
-        assertEnvNames(kind, { env: binding.env, storage: [] });
-        assert.ok(Object.values(binding.env).every((value) => value.includes('{dir}')));
-      });
-
-      test('destroy hands the storage id to the runtime', async () => {
-        await providers[name].destroy(app, {});
-        assert.equal(destroyed.at(-1), `${prefix}${app}`);
-      });
-    });
-  }
 
   describe('postgres', () => {
     const pg = providers.postgres;

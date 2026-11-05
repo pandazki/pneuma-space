@@ -10,15 +10,26 @@ import { Backoff, Quarantined, Runtimes } from './runtimes.ts';
 class FakeRuntime implements Runtime {
   readonly kind: RuntimeKind;
   readonly released: Lease[] = [];
-  constructor(kind: RuntimeKind) {
+  readonly calls: string[];
+  #held = false;
+  constructor(kind: RuntimeKind, calls: string[]) {
     this.kind = kind;
+    this.calls = calls;
   }
-  async acquire(app: AppId): Promise<Lease> { return { app, address: `${this.kind}:8000` }; }
+  async acquire(app: AppId): Promise<Lease> {
+    this.calls.push(`${this.kind} acquire`);
+    this.#held = true;
+    return { app, address: `${this.kind}:8000` };
+  }
   release(lease: Lease): void { this.released.push(lease); }
   channel(): void {}
-  async retire(): Promise<void> {}
+  async retire(): Promise<void> {
+    await Promise.resolve();
+    this.#held = false;
+    this.calls.push(`${this.kind} retired`);
+  }
   async reconcile(): Promise<void> {}
-  state(): 'none' { return 'none'; }
+  state(): 'awake' | 'none' { return this.#held ? 'awake' : 'none'; }
   since(): null { return null; }
   leases() { return { request: 0, channel: 0, trigger: 0 }; }
   sleepsAt(): null { return null; }
@@ -39,10 +50,12 @@ function fixture(kinds: readonly RuntimeKind[], policy: Partial<Policy> = {}) {
     app, name: appName('fixture'), release: 1 as ReleaseNumber, runtime: RUN.container, injection: { env: {}, storage: [] }, policy: { ...DEFAULT_POLICY, ...policy },
   };
   const events = new EventLog(() => {});
-  const fakes = kinds.map((kind) => new FakeRuntime(kind));
+  const calls: string[] = [];
+  const fakes = kinds.map((kind) => new FakeRuntime(kind, calls));
   const runtimes = new Runtimes({ runtimes: fakes, specFor: (id) => (id === app ? spec : null), events, log: events.emit, now: () => clock.now });
   const set = (change: Partial<RunSpec>) => { spec = { ...spec, ...change }; };
-  return { app, clock, events, fakes, runtimes, set };
+  const crash = () => events.emit('crashed', app, { reason: 'exit 1' });
+  return { app, calls, clock, crash, events, fakes, runtimes, set };
 }
 
 test('the facade routes a lease back to the runtime that issued it, even after the app moved runtimes', async () => {
@@ -59,19 +72,33 @@ test('acquire for a runtime without an implementation rejects with the start-the
   await assert.rejects(runtimes.acquire(app, 'request'), (e) => e instanceof Conflict && e.message === 'runtime isolate is not available; start docker compose --profile isolate');
 });
 
-test('the Guard quarantines after max_failures within the window, and acquire then rejects', async () => {
-  const { app, clock, events, runtimes } = fixture(['container'], { max_failures: 3, failure_window_seconds: 60, restart_backoff_seconds: 1 });
-  const crash = () => { clock.now += 2000; events.emit('crashed', app, { reason: 'exit 1' }); };
+test('a wake on the new runtime waits until the old runtime retired its instance (one instance per app)', async () => {
+  const { app, calls, runtimes, set } = fixture(['container', 'isolate']);
+  await runtimes.acquire(app, 'request');
+  set({ runtime: RUN.isolate });
+  await runtimes.acquire(app, 'request');
+  assert.deepEqual(calls, ['container acquire', 'container retired', 'isolate acquire']);
+});
+
+test('failures older than failure_window_seconds do not count toward max_failures', () => {
+  const { app, clock, crash, runtimes } = fixture(['container'], { max_failures: 2, failure_window_seconds: 60 });
   crash();
-  crash();
-  clock.now += 60_000;
-  crash();
+  clock.now += 60_001;
   crash();
   assert.equal(runtimes.quarantine(app), null);
-  clock.now += 1000;
-  await runtimes.acquire(app, 'request');
+});
+
+test('the Guard quarantines on the max_failures-th failure inside the window, recording reason, time and count', () => {
+  const { app, clock, crash, runtimes } = fixture(['container'], { max_failures: 2, failure_window_seconds: 60 });
   crash();
-  assert.deepEqual(runtimes.quarantine(app), { reason: 'exit 1', since: clock.now, failures: 3 });
+  clock.now += 30_000;
+  crash();
+  assert.deepEqual(runtimes.quarantine(app), { reason: 'exit 1', since: clock.now, failures: 2 });
+});
+
+test('acquire on a quarantined app rejects with Quarantined after the backoff has passed', async () => {
+  const { app, clock, crash, runtimes } = fixture(['container'], { max_failures: 1, restart_backoff_seconds: 1 });
+  crash();
   clock.now += 60_000;
   await assert.rejects(runtimes.acquire(app, 'request'), Quarantined);
 });
@@ -87,10 +114,27 @@ test('a failed wake backs off: acquire rejects inside restart_backoff_seconds an
 });
 
 test('a new release clears the quarantine', async () => {
-  const { app, events, runtimes, set } = fixture(['container'], { max_failures: 1, restart_backoff_seconds: 1 });
-  events.emit('crashed', app, { reason: 'exit 1' });
+  const { app, crash, runtimes, set } = fixture(['container'], { max_failures: 1, restart_backoff_seconds: 1 });
+  crash();
   assert.notEqual(runtimes.quarantine(app), null);
   set({ release: 2 as ReleaseNumber });
   assert.equal(runtimes.quarantine(app), null);
   await runtimes.acquire(app, 'request');
+});
+
+test('unquarantine clears the quarantine, the failure history and the backoff', async () => {
+  const { app, crash, runtimes } = fixture(['container'], { max_failures: 2, restart_backoff_seconds: 60 });
+  crash();
+  crash();
+  runtimes.unquarantine(app);
+  await runtimes.acquire(app, 'request');
+  crash();
+  assert.equal(runtimes.quarantine(app), null);
+});
+
+test('removing the instance clears the app\'s Guard state, so republishing the same release starts clean', () => {
+  const { app, crash, events, runtimes } = fixture(['container'], { max_failures: 1 });
+  crash();
+  events.emit('removed', app);
+  assert.equal(runtimes.quarantine(app), null);
 });

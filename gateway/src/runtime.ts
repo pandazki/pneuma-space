@@ -10,6 +10,7 @@ import {
 const LABEL = { app: 'pneuma-space.app', release: 'pneuma-space.release', spec: 'pneuma-space.spec', network: 'pneuma-space.network' } as const;
 const MAX_TICK_SECONDS = 10;
 const READY_POLL_MS = 50;
+const STOP_SIGNALS: ReadonlySet<string> = new Set(['15', '9']);
 
 type ContainerRun = RunSpec & { readonly runtime: Extract<RunSpec['runtime'], { kind: 'container' }> };
 
@@ -66,7 +67,7 @@ export class DockerRuntime implements Runtime {
   private readonly log: Emit;
   private readonly instances = new Map<AppId, Instance>();
   private readonly awake = new Set<Instance>();
-  /** Containers someone sent a signal; their die is a stop, not a crash. */
+  /** Containers someone sent SIGTERM or SIGKILL; their die is a stop, not a crash. */
   private readonly signalled = new Set<string>();
   private readonly events = new AbortController();
   private timer: NodeJS.Timeout | null = null;
@@ -358,10 +359,11 @@ export class DockerRuntime implements Runtime {
   }
 
   private async follow(since: number): Promise<void> {
-    const filters = { event: ['kill', 'die'], label: [`${LABEL.network}=${this.network}`] };
+    const filters = { event: ['kill', 'die', 'start'], label: [`${LABEL.network}=${this.network}`] };
     for await (const event of this.docker.events(filters, since, this.events.signal)) {
-      if (event.action === 'kill') this.signalled.add(event.id);
-      else this.onDie(event);
+      if (event.action === 'kill' && STOP_SIGNALS.has(event.labels.signal)) this.signalled.add(event.id);
+      else if (event.action === 'start') this.signalled.delete(event.id);
+      else if (event.action === 'die') this.onDie(event);
     }
   }
 

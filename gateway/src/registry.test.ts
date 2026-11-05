@@ -248,3 +248,14 @@ test('an isolate publish while the runner is absent is refused with Conflict', a
   const manifest = parseManifest({ contract: 1, runtime: 'isolate', capabilities: {} });
   await assert.rejects(registry.publish({ name: survey, image: null, manifest, bundle, owner: ann }), (e) => e instanceof Conflict && /--profile isolate/.test(e.message));
 });
+
+test('republishing an unchanged isolate app returns the current release while the runner is absent (INV-6)', async () => {
+  const w = world();
+  w.services.add('runner');
+  const { registry } = await w.open();
+  const bundle = await w.bundles.put(Readable.from([Buffer.from('app dir')]));
+  const request = { name: survey, image: null, manifest: parseManifest({ contract: 1, runtime: 'isolate', capabilities: {} }), bundle, owner: ann };
+  const first = await registry.publish(request);
+  w.services.delete('runner');
+  assert.deepEqual(await registry.publish(request), first);
+});

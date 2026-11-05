@@ -14,6 +14,12 @@ export class Backoff extends Error {
   }
 }
 
+export class Unavailable extends Conflict {
+  constructor(kind: RuntimeKind) {
+    super(`runtime ${kind} is not available; start docker compose --profile ${RUNTIMES[kind].profile}`);
+  }
+}
+
 export class Quarantined extends Error {
   readonly quarantine: Quarantine;
   constructor(quarantine: Quarantine) {
@@ -58,8 +64,9 @@ export class Runtimes implements Omit<Runtime, 'kind'>, Guard {
     const spec = this.#specFor(app);
     if (!spec) throw new NotFound(`app ${app} has no registered release with a runtime`);
     const runtime = this.#byKind.get(spec.runtime.kind);
-    if (!runtime) throw new Conflict(`runtime ${spec.runtime.kind} is not available; start docker compose --profile ${RUNTIMES[spec.runtime.kind].profile}`);
+    if (!runtime) throw new Unavailable(spec.runtime.kind);
     this.#admit(spec);
+    for (const other of this.#all()) if (other !== runtime && other.state(app) !== 'none') await other.retire(app);
     const lease = await runtime.acquire(app, kind);
     this.#owners.set(lease, runtime);
     return lease;
@@ -124,12 +131,9 @@ export class Runtimes implements Omit<Runtime, 'kind'>, Guard {
     return [...this.#byKind.values()];
   }
 
-  /** The spec's runtime, unless another one still holds an instance of the app (it moved between runtimes). */
+  /** At most one runtime holds an instance: acquire retires the old runtime's before the new one wakes. */
   #holder(app: AppId): Runtime | null {
-    const kind = this.#specFor(app)?.runtime.kind;
-    const own = kind === undefined ? null : this.#byKind.get(kind) ?? null;
-    if (own && own.state(app) !== 'none') return own;
-    return this.#all().find((runtime) => runtime.state(app) !== 'none') ?? own;
+    return this.#all().find((runtime) => runtime.state(app) !== 'none') ?? null;
   }
 
   #current(app: AppId): Health | null {
@@ -154,7 +158,10 @@ export class Runtimes implements Omit<Runtime, 'kind'>, Guard {
     if (event.app === null) return;
     const before = this.#states.get(event.app);
     if (INSTANCE_STATES.has(event.ev)) this.#states.set(event.app, event.ev);
-    else if (event.ev === 'removed') this.#states.delete(event.app);
+    else if (event.ev === 'removed') {
+      this.#states.delete(event.app);
+      this.#health.delete(event.app as AppId);
+    }
     if (event.ev === 'crashed' || event.ev === 'hung') this.#fail(event.app as AppId, String(event.reason ?? event.ev));
     else if (event.ev === 'asleep' && before === 'waking' && event.error !== undefined) this.#fail(event.app as AppId, String(event.error));
   }

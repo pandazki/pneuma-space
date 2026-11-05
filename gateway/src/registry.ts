@@ -138,10 +138,6 @@ export class PlatformRegistry implements Registry {
     if (runtime === 'isolate' && bundle === null) throw new InputError('runtime "isolate" needs the app directory uploaded with POST /api/bundles, its id as bundle');
     if (kinds.includes('static') && bundle === null) throw new InputError('static is declared; upload the directory with POST /api/bundles and pass its id as bundle');
     if (bundle !== null && runtime !== 'isolate' && !kinds.includes('static')) throw new InputError('bundle given but the manifest declares neither static nor runtime "isolate"');
-    const service = runtime === null ? null : RUNTIMES[runtime].service;
-    if (runtime !== null && service !== null && !(await this.#probe(service))) {
-      throw new Conflict(`runtime "${runtime}" needs the ${service} service; start the platform with --profile ${RUNTIMES[runtime].profile}`);
-    }
     const image = reference === null ? null : await this.#infra.resolveImage(reference);
     if (reference !== null && image === null) throw new NotFound(`image "${reference}" not found on this host; docker build it first`);
     if (bundle !== null && !this.#indexes.has(bundle)) this.#indexes.set(bundle, await this.#bundles.index(bundle));
@@ -151,6 +147,10 @@ export class PlatformRegistry implements Registry {
     if (app?.status === 'purging') throw new Conflict(`app "${name}" is being purged; publish again once purge finishes`);
     const current = app && (await currentRelease(this.#store, app));
     if (app?.status === 'registered' && current?.releaseKey === key) return current;
+    const service = runtime === null ? null : RUNTIMES[runtime].service;
+    if (runtime !== null && service !== null && !(await this.#probe(service))) {
+      throw new Conflict(`runtime "${runtime}" needs the ${service} service; start the platform with --profile ${RUNTIMES[runtime].profile}`);
+    }
 
     const override: PolicyOverride = app?.policyOverride ?? {};
     const pinned = kinds.includes('db') && override.db_backend === undefined ? { ...override, db_backend: this.#policy.db_backend } : override;
