@@ -1,0 +1,10 @@
+{
+  "contract": 1,
+  "capabilities": {
+    "files": {},
+    "db": {},
+    "cron": { "triggers": { "export": { "schedule": "0 2 * * *" } } },
+    "identity": {},
+    "static": { "dir": "public" }
+  }
+}
