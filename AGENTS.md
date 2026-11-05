@@ -11,6 +11,7 @@ PneumaSpace deploys stateful web apps on one trusted host. Read `REQUIREMENTS.md
 ## Structure rules
 
 - A new capability is one row in `CAPABILITIES` and one Provider with `ensure`, `inject`, `suspend`, `destroy`, each safe to run twice (`ensure` on a suspended binding is the resume). If a capability needs changes anywhere else, stop and write an ADR first.
+- A new runtime is one row in `RUNTIMES` and one class implementing `Runtime` (ADR 0017). The `Runtimes` facade dispatches by RunSpec, the Guard alone counts failures and quarantines, Providers never learn which runtime an app uses, and `Infra` (jobs, images) is always Docker.
 - Every wake goes through `Runtime.acquire`. No Docker call outside `Runtime`. No write to a platform table outside its owning component (`DESIGN.md` section 1.2).
 - Names: `PNEUMA_SPACE_*` environment variables, `X-Pneuma-Space-*` headers, `_pneuma-space/` reserved path segment, `pneuma-space-*` Docker resources. Do not introduce a second prefix.
 - A deviation from `DESIGN.md` is recorded as a new ADR in `docs/adr/` before the code lands. Never edit a design doc to match code that drifted.

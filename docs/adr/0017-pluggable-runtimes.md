@@ -1,0 +1,19 @@
+# ADR 0017：可插拔运行时与 isolate 运行时
+
+状态：**M1 决定**。用户 2026-11-05："我想要的反而是类似 V8 isolate 这种方案，就是 app 的逻辑是动态加载的，很轻，但是启动巨快……底线就是一个进程卡死要被 monitor 到，并且可以重启或者杀死，标为不健康禁止再启动等等，不能拖垮其他应用"；"runtime 也变成可插拔的组件，支持 isolate runtime 就要启动这个服务"；"不要跟 gateway 部署到一起，单独拉一个"。
+
+决定：
+
+1. **运行时是可插拔组件。** 代码里一张 `RUNTIMES` 表，每行一个运行时：名字、依赖的服务和 compose profile、实现类、存储怎么落地。M1 两行：`container`（Docker，永远在）和 `isolate`（`runner` 服务，`--profile isolate`）。加运行时就是加一行加一个实现类，和"加能力就是 `CAPABILITIES` 加一行加一个 Provider"并列为结构规则。
+2. **接口拆分。** `Runtime` 只剩应用生命周期（acquire、release、channel、retire、reconcile、state、since、leases、sleepsAt、logs）加两个口：`health()` 声明它能检测什么，失败通过生命周期事件报告。`runJob`、`resolveImage`、`ensureVolume`、`removeVolume` 移到 `Infra` 接口，永远由 Docker 实现，给 Provider 和发布用。一个 `Runtimes` 门面实现 `Runtime`，按 RunSpec 的运行时分发，acquire 时记住 Lease 属于谁，reconcile 和 retire 对每个运行时各做一遍。主服务其余部分只认这一个门面。
+3. **RunSpec 按运行时区分**：`{ runtime: 'container', image }` 或 `{ runtime: 'isolate', bundle, entry }`。注册中心由发布输入决定：镜像即 container，代码包即 isolate；清单里 `runtime` 字段显式声明，缺省为 isolate 脚手架写入的值。
+4. **存储绑定中立。** `Injection` 不再带 Docker volume 名和挂载点，而是"这个应用需要的持久目录"列表（files、db 的 sqlite）；容器运行时把它落成 volume 挂载，isolate 运行时落成 runner 卷里的 `/data/apps/<id>/<kind>/`。Provider 的四个动作不变，由运行时各自实现 ensure 和 destroy 的落地（容器：`Infra.ensureVolume`；isolate：runner 的控制接口建目录和删目录）。
+5. **runner 是独立服务。** 在平台网络上开一个内部端口，不发布到宿主机；网关的 `IsolateRuntime` 通过它起、停、列出实例、取事件。每个应用一个 `worker_threads` Worker，`--no-addons`，`resourceLimits` 封顶内存，各自在 runner 容器里监听一个端口，网关像转发到应用容器一样转发到 `runner:<port>`。起 worker 时网关把 bundle 的预签名 GET 地址交给 runner，runner 自己下载解包到它的卷，不持有对象存储凭据。网关重启向 runner 收养在跑的实例；runner 重启（启动时间变化）后网关把它的实例标回 asleep。runner 未启用时，发布 isolate 应用答 409，总览服务条显示 runner 未启用，和 coturn 一致。
+6. **探活是运行时的事，判定和后果是平台的事。** 容器运行时靠 Docker 事件和就绪探测；isolate 运行时在 runner 里对每个 worker 每秒 MessagePort 心跳，3 s 无应答即 `terminate()`（V8 TerminateExecution，能打断同步死循环；不能打断阻塞的原生调用，见理由），内存超限由 `resourceLimits` 触发退出，uncaught 和 exit 由事件报告。平台一处实现统一策略，进 Policy 可全局和按应用改：重启退避秒数、时间窗内允许的失败次数；超过即隔离。Instance 多一个 `quarantined` 属性（原因、时间），被隔离的应用 acquire 答 503，直到新发布或运营者在后台解除；每次失败和隔离都是生命周期事件，进收件箱，算唤醒失败。五个状态的状态机不变。
+7. **脚手架。** `templates/app` 成为 isolate 脚手架（清单 `runtime: isolate`，入口 `src/server.ts`，监听环境变量给的端口，无 Dockerfile）；`templates/container` 是同一套 SDK 加 Dockerfile；`templates/static` 不变。`appctl init` 默认 isolate，`--container` 和 `--static` 可选。isolate 应用的发布：`appctl` 在开发机上 `npm ci --omit=dev --ignore-scripts`，连 `node_modules` 打成 bundle 上传，和静态站同一条路，网关不跑 npm。示例作为脚手架的覆盖层随之跑在 isolate 上。
+
+理由：spike S4（`spike/isolate/findings.md`，macOS，Node 24 和 25）：一个加载模板 SDK 的 worker 从创建到首次 HTTP 应答中位 42 到 48 ms，子进程 72 到 75 ms，容器实测约 200 ms；每个 worker 使宿主 RSS 增加 17 到 18 MiB，子进程 78 到 84 MiB，容器约 35 MB；loopback 延迟中位 85 到 98 µs；`while(true){}` 在 3 到 4 s 内被心跳发现，`terminate()` 约 1 ms 完成；堆超限约 60 ms 内以 `ERR_WORKER_OUT_OF_MEMORY` 结束；未捕获异常和 `process.exit` 只结束该 worker；所有演练中其他 worker 没有一个请求失败。spike 也量出三条逃逸，决定里的防线对应它们：阻塞的原生调用（如 `execSync`）`terminate()` 要等它返回，所以 runner 以 `--permission` 启动、不授予 child_process，并设第二道期限，terminate 超时则 runner 自行退出由 compose 重启；1 GiB 的 Buffer 不受 `resourceLimits` 约束，所以 runner 容器设操作系统级内存上限；worker 里 `process.kill(process.pid)` 能杀宿主，所以每个 worker 以 `--import` 预载一段代码移除 `process.kill` 和 `process.abort`。两个堆上限（old 和 young）都显式设置，宿主对每个 worker 挂 `error` 和 `exit` 监听。Node 的 worker 就是 V8 isolate，不需要新运行时；发布从构建镜像变成拷目录，是 Agent 开发者最常走的那段路；runner 独立部署，故障域和网关分开，也是 M2 在工作节点上跑的那个东西。
+
+拒绝：进程内 `import()` 到网关（没有隔离，一个应用拖垮全部）；每应用一个子进程的 ProcessRuntime（代价和容器相近，隔离更弱，用户不要）；workerd 作为 M1 运行时（应用契约整个换掉，SDK 重写，多一个二进制；作为未来的第三种运行时保留）；runner 作为网关的子进程（用户要求独立部署）；worker 之间的 fs 和网络限制（可信主机，容器才有）；原生扩展（`--no-addons`，一个段错误会带走整个 runner）。
+
+后果：compose 多一个 profile 服务；`Injection` 和 `RunSpec` 的类型变化要过一遍 Provider、注册中心、CLI；AGENTS.md 多一条结构规则；app-contract 多一节 isolate 应用契约（端口来自 `PNEUMA_SPACE_PORT`，纯 JS 依赖，有文件系统）；验收加 AC-ISO 行。将来 workerd 运行时是同一张表的第三行，它的实例可以在云端，Provider 的落地变成云端绑定，身份若要不经网关直达边缘另立 ADR。

@@ -110,8 +110,19 @@ export const ENV_BY_KIND = {
   rtc:      ['PNEUMA_SPACE_RTC_STUN_URLS', 'PNEUMA_SPACE_RTC_TURN_URLS', 'PNEUMA_SPACE_RTC_TURN_SECRET'],
 } as const satisfies Record<CapabilityKind, readonly string[]>;
 
-/** Set by the Runtime on every app container, declared or not. */
-export const RUNTIME_ENV = { app: 'PNEUMA_SPACE_APP', release: 'PNEUMA_SPACE_RELEASE' } as const;
+/** Set by the Runtime on every app instance, declared or not; `port` is where the app listens (8000 in a container, assigned in an isolate). */
+export const RUNTIME_ENV = { app: 'PNEUMA_SPACE_APP', release: 'PNEUMA_SPACE_RELEASE', port: 'PNEUMA_SPACE_PORT' } as const;
+
+// Runtimes (ADR 0017)
+
+export const RUNTIME_KINDS = ['container', 'isolate'] as const;
+export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
+/** The only runtime list: a kind is one row here and one Runtime implementation. `service` names the compose service and profile it needs; `input` is what a publish must carry. */
+export const RUNTIMES = {
+  container: { service: null,     profile: null,      input: 'image' },
+  isolate:   { service: 'runner', profile: 'isolate', input: 'bundle' },
+} as const satisfies Record<RuntimeKind, { readonly service: string | null; readonly profile: string | null; readonly input: 'image' | 'bundle' }>;
+export const DEFAULT_ENTRY = 'src/server.ts';
 
 function assertCoversKinds(label: string, table: object): void {
   const has = Object.keys(table).sort().join(',');
@@ -135,7 +146,14 @@ export function selectProvider(kind: ResourceKind, policy: Policy): ProviderName
 
 export type Capabilities = { readonly [K in CapabilityKind]?: Declaration<K> };
 /** Parsed once at the publish boundary; downstream code does not validate it again. `route` is implicit and never present. */
-export type Manifest = { readonly contract: 1; readonly capabilities: Capabilities };
+export type Manifest = {
+  readonly contract: 1;
+  readonly capabilities: Capabilities;
+  /** Null means: container when the publish carries an image, isolate when it carries a code bundle. */
+  readonly runtime: RuntimeKind | null;
+  /** Isolate apps only: the module the runner loads, relative to the bundle. */
+  readonly entry: string | null;
+};
 
 type RawObject = Record<string, unknown>;
 
@@ -218,7 +236,7 @@ function parseCron(raw: unknown, where: string): CronDeclaration {
 
 export function parseManifest(raw: unknown): Manifest {
   const manifest = asObject(raw, 'manifest');
-  onlyKeys(manifest, ['contract', 'capabilities'], 'manifest');
+  onlyKeys(manifest, ['contract', 'capabilities', 'runtime', 'entry'], 'manifest');
   if (manifest.contract !== 1) {
     throw new ManifestError(`manifest.contract must be 1, got ${JSON.stringify(manifest.contract) ?? 'nothing'}`);
   }
@@ -229,7 +247,16 @@ export function parseManifest(raw: unknown): Manifest {
     }
     capabilities[kind] = CAPABILITIES[kind as CapabilityKind].parse(declaration, `manifest.capabilities.${kind}`);
   }
-  return { contract: 1, capabilities: capabilities as Capabilities };
+  const runtime = manifest.runtime ?? null;
+  if (runtime !== null && !(RUNTIME_KINDS as readonly unknown[]).includes(runtime)) {
+    throw new ManifestError(`manifest.runtime must be one of ${RUNTIME_KINDS.join(', ')}, got ${JSON.stringify(runtime)}`);
+  }
+  const entry = manifest.entry ?? null;
+  if (entry !== null && (typeof entry !== 'string' || entry === '' || entry.startsWith('/') || entry.includes('..'))) {
+    throw new ManifestError(`manifest.entry must be a relative file path, got ${JSON.stringify(entry)}`);
+  }
+  if (entry !== null && runtime !== 'isolate') throw new ManifestError('manifest.entry is only for runtime "isolate"');
+  return { contract: 1, capabilities: capabilities as Capabilities, runtime: runtime as RuntimeKind | null, entry: runtime === 'isolate' ? entry ?? DEFAULT_ENTRY : null };
 }
 
 export function declaredKinds(manifest: Manifest): CapabilityKind[] {
@@ -276,6 +303,8 @@ export type Release = {
   readonly image: ImageId | null;
   readonly manifest: Manifest;
   readonly bundle: BundleId | null;
+  /** Null for a static-only release. */
+  readonly runtime: RuntimeKind | null;
   readonly releaseKey: string;
   readonly publishedAt: number;
 };
@@ -301,6 +330,10 @@ export type Policy = {
   readonly connection_idle_seconds: number;
   readonly trigger_timeout_seconds: number;
   readonly db_backend: DbBackend;
+  /** Failure handling (ADR 0017): a crash, hang or failed wake is a failure; `max_failures` within `failure_window_seconds` quarantines the app; a wake after a failure waits `restart_backoff_seconds`. */
+  readonly max_failures: number;
+  readonly failure_window_seconds: number;
+  readonly restart_backoff_seconds: number;
   /** Global only; cron schedules are read in it. */
   readonly timezone: string;
 };
@@ -315,6 +348,9 @@ export const DEFAULT_POLICY: Policy = {
   connection_idle_seconds: 21600,
   trigger_timeout_seconds: 600,
   db_backend: 'sqlite',
+  max_failures: 3,
+  failure_window_seconds: 60,
+  restart_backoff_seconds: 5,
   timezone: 'UTC',
 };
 
@@ -369,6 +405,14 @@ export type Stats = {
 };
 
 export type InstanceState = 'asleep' | 'waking' | 'awake' | 'draining' | 'stopping';
+/** What a runtime can detect about an instance (ADR 0017); the Guard judges, the runtime only reports. */
+export type HealthCheck = 'exit' | 'ready' | 'hang' | 'memory';
+export type Quarantine = { readonly reason: string; readonly since: number; readonly failures: number };
+/** Decides from lifecycle events whether an app may wake; one implementation over every runtime. */
+export interface Guard {
+  quarantine(app: AppId): Quarantine | null;
+  unquarantine(app: AppId): void;
+}
 export type LeaseKind = 'request' | 'channel' | 'trigger';
 
 /** A handle the Runtime issued; give it back exactly once with `release`. */
@@ -425,6 +469,8 @@ export type AppSummary = {
   readonly leases: Readonly<Record<LeaseKind, number>>;
   /** Epoch ms the reaper stops an awake instance that holds no lease; null while a lease is held or when not awake. */
   readonly sleepsAt: number | null;
+  readonly runtime: RuntimeKind | null;
+  readonly quarantine: Quarantine | null;
   readonly lastAccessAt: number | null;
   readonly requests: number;
   readonly errors: number;
@@ -649,4 +695,5 @@ export const ADMIN_PATHS = {
   owner: (name: string) => `/api/apps/${name}/owner`,
   remove: (name: string) => `/api/apps/${name}/remove`,
   purge: (name: string) => `/api/apps/${name}/purge`,
+  unquarantine: (name: string) => `/api/apps/${name}/unquarantine`,
 } as const;

@@ -22,7 +22,7 @@ PneumaSpace 把有状态的 web 应用部署到一台可信机器上。应用声
 | Token | `id` | `subject`（`service:<name>`）, 哈希 | 平台库 | Registry；本地 IdentityProvider 只读 |
 | Bundle | `sha256(tar)` | 文件索引 `path -> (size, etag, content_type)`；tar 内路径相对 `static.dir` | 对象存储 `pneuma-space-bundles/<sha256>/` | BundleStore |
 | Stats | `app` | `requests`, `errors`, `last_access_at`（经过网关的请求，含静态路径；对象读不经网关，不计入。闲置判断用的是 Instance 的 `last_release_at`，只看 Lease） | 内存，每 10 s 快照到平台库 | Ingress |
-| Instance | `app` | `release`, `state`, `address`, `leases`, `last_release_at`, 每实例一把锁 | 内存，启动时从容器标签重建 | Runtime |
+| Instance | `app` | `release`, `state`, `address`, `leases`, `last_release_at`, 每实例一把锁；`quarantine`（ADR 0017，由 Guard 持有） | 内存，启动时从各运行时收养：容器按标签，isolate 向 runner 查询 | Runtime |
 | Metrics | 全局一份 | 24 h 的分钟桶（请求、错误、唤醒次数和耗时、休眠、投递结果）、最近 100 条生命周期事件（每条带进程内递增的序号）、最近 1000 条请求记录（ADR 0016）、平台服务探测结果、宿主机负载、内存和 `/data` 所在文件系统 | 内存，不持久，重启清零 | Metrics |
 | Lease | 持有者的线程 | `kind: request / channel / trigger`, `on_retire?` | 内存 | Runtime（Ingress 和 Scheduler 只通过 `acquire` 和 `release` 取得和归还） |
 | 平台密钥 | 单文件 | cookie 签名密钥 | `/data/pneuma-space.secret`，首次启动生成 | Registry |
@@ -30,6 +30,8 @@ PneumaSpace 把有状态的 web 应用部署到一台可信机器上。应用声
 有效 Policy 是全局行覆盖上 App 的 override，读时合并，不存合并结果。全局 Policy 是 Registry 持有的一个内存快照，写入时整体替换，所以全局变更立即对所有 App 生效；RouteView 只存该 App 的 override。一个 App 第一次 `ensure` `db` 时，Registry 把当时的全局 `db_backend` 写进这个 App 的 override，之后该 App 的 `db` Provider 只由 override 决定。所以改全局值只影响还没有 `db` Binding 的 App；改某个 App 的 override 才会为它 `ensure` 另一个 Provider 并退役实例；有 `db` Binding 的 App 不能清掉这个 override。一个 kind 可以有多条 Binding（`db` 切换后端时 SQLite 和 PostgreSQL 各一条）；注入时取 `active` 且 Provider 等于有效 Policy 所选的那条。浏览器会话是平台密钥签名的 cookie，没有 Session 表。本地 IdentityProvider 的主体就是登录页输入的名字，`user:<name>`。
 
 ### 1.3 能力与 Provider
+
+Provider 不知道应用用哪种运行时：`inject` 给出的存储绑定是中立的（存储 id、挂载目标、带 `{dir}` 占位的环境变量模板），容器运行时落成 volume 挂载，isolate 运行时落成 runner 卷里的目录（ADR 0017）。
 
 `CAPABILITIES` 是唯一的能力清单：每个 kind 映射到类别、声明解析器和它的 Provider 实现（`db` 有 SQLite 和 PostgreSQL 两个实现，由有效 Policy 为每个 App 选一个；其余 kind 各一个）。每条 Binding 恰好属于一个 Provider 实现。环境变量、发布时要调用的 Provider、网关读取的标志都从它推导，导入时断言枚举和表一致。
 
@@ -85,7 +87,9 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 | --- | --- | --- |
 | Registry | 平台库和除 Delivery、Stats 外的所有行；每 App 的只读 RouteView，在任何改变该 App 行的命令后重建；publish、remove、purge、policy、owner、token 命令 | 直接调 Docker（镜像引用的解析走 `Runtime.resolve_image`）；连应用 |
 | Ingress | 8080 请求路径：路由、身份头、静态服务、流式和 WebSocket 转发、通过 `acquire` 取得 request 和 channel Lease、Stats | 写平台库（只读 RouteView，只写 Stats 快照） |
-| Runtime | Instance、Lease、reaper、Docker 驱动；`Runtime` Protocol 是 M2 多节点接缝 | 读 Manifest（只接收 Injection 集合） |
+| Runtime | Instance、Lease、reaper；`Runtimes` 门面按 RunSpec 分发到 `RUNTIMES` 表里的实现：`container`（Docker）和 `isolate`（runner 服务，`--profile isolate`）；`Runtime` Protocol 是 M2 多节点接缝（ADR 0017） | 读 Manifest（只接收 Injection 集合）；计失败或隔离（那是 Guard 的事） |
+| Guard | 订阅生命周期事件，按 Policy 计失败、退避和隔离，acquire 前被问；一处实现覆盖所有运行时 | 探活（那是各运行时的事） |
+| Infra | Docker：`runJob`、`resolveImage`，供 Provider 和发布用，与应用的运行时无关 | 应用生命周期 |
 | Scheduler | 读 Trigger，写 Delivery（包括 Ingress 转来的按需 `invoke`），cron 计算，投递 worker | 除 `acquire` 和应用触发端点外的一切 |
 | Providers | 每种资源 kind 一个；`ensure`、`inject`、`suspend`、`destroy`；BundleStore；本地 IdentityProvider | 互相调用；写平台库 |
 | Metrics | 1.2 节的 Metrics 行。订阅生命周期事件流（每行 JSON 日志同时发给订阅者），每 10 s 采样 Ingress 的 Stats 快照、Runtime 的实例和 Lease 计数、Delivery 的状态计数、宿主机和平台服务可达性；`GET /api/metrics` 返回一份快照，每 App 的 Lease 计数、进入状态的时间和休眠时刻随列表返回（ADR 0015）；`GET /api/requests?after=<seq>` 返回游标之后的请求记录，由 Ingress 和 Scheduler 写入内存环（ADR 0016） | 写任何表；在请求路径上调 Docker 或网络（探测只在采样器里） |
@@ -129,6 +133,8 @@ Compose 服务：`gateway`、`rustfs`（S3 兼容对象服务）、`redis`（AOF
 重启：开平台库，`delivering` 回 `due`。先核对容器，再续跑 `purging`（续跑要退役该 App 可能还活着的容器，所以核对在前）。一次 `docker ps` 按标签 `pneuma-space.app` 列出容器：App 不存在、`pneuma-space.release` 不等于 `current`、或 `pneuma-space.spec` 不等于当前推导的 Injection 哈希的移除，其余运行中的采纳为 `awake`（`last_release_at = now`），停止的为 `asleep`。订阅 Docker 事件流，`die` 事件把实例置 `asleep`。Provider 在后台对每条 Binding 按其 `state` 重跑 `ensure` 或 `suspend`，收敛后端可能丢失或与行不一致的状态（例如重建的 Redis 容器，或 ensure 和提交之间的崩溃）。
 
 ### 2.4 发布
+
+运行时由清单的 `runtime` 决定，缺省按发布输入推断：镜像即 container，代码包即 isolate，只有 `static` 的清单没有运行时。isolate 应用的代码包含 `node_modules`，经 bundle 存储，和静态目录同一条路；runner 未启用时发布 isolate 应用答 409（ADR 0017）。
 
 ```
 appctl publish <name> <dir | image>          Registry.publish

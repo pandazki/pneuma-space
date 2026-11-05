@@ -39,7 +39,9 @@ A manifest with only `static` publishes without an image. A manifest with any ot
 
 ## Runtime rules
 
-- Listen on `0.0.0.0:8000`. Be ready to accept TCP within the ready timeout (default 15 s).
+An app runs in one of two runtimes (ADR 0017), chosen by `manifest.runtime` or, when absent, by what the publish carries: an image means `container`, a code bundle means `isolate`. A container app is any image listening on port 8000. An isolate app is a directory of JavaScript or TypeScript run by Node inside the platform's runner service: `entry` (default `src/server.ts`) is loaded in its own worker thread, pure JavaScript dependencies ship in the bundle under `node_modules`, native addons and child processes are unavailable, the filesystem is, and the app listens on the port in `PNEUMA_SPACE_PORT`. The same source works in both; `templates/app` is the isolate scaffold and `templates/container` adds a Dockerfile.
+
+- Listen on `PNEUMA_SPACE_PORT` (8000 in a container). Be ready to accept TCP within the ready timeout (default 15 s).
 - Your address is `/apps/<name>/`. The gateway strips that prefix and sends it as `X-Forwarded-Prefix`. Use it in links, redirects, form actions and asset URLs.
 - Keep state in `/data`, the database, the key-value store or the bucket. Never in memory across requests and never in the container filesystem.
 - The platform stops your container when it has been idle. `SIGTERM` arrives only when no request, stream, WebSocket or trigger is in flight, except when the platform retires the instance: a new release, a removal, or a policy change that alters your environment. Then open WebSockets get close code 1001 first and requests get up to the drain timeout (default 30 s). A WebSocket with no bytes for the connection idle limit (default 6 h) is also closed with 1001; reconnecting wakes the app.
@@ -105,7 +107,7 @@ Loopback port 8081, JSON. The console renders a live overview (polled from gatew
 
 ```
 GET  /api/health                      {ok, ingressPort}: the host port the ingress is published on (PNEUMA_SPACE_HTTP_PORT from compose), which the console uses to link to apps
-GET  /api/apps                        list: name, address, release, capabilities, status (registered|removed|purging), instance (none|asleep|waking|awake|draining|stopping), since (epoch ms the instance entered that state, null when none), leases {request, channel, trigger}, sleepsAt (epoch ms the reaper stops an awake instance holding no lease; null otherwise), last access, requests, errors
+GET  /api/apps                        list: name, address, release, capabilities, status (registered|removed|purging), instance (none|asleep|waking|awake|draining|stopping), since (epoch ms the instance entered that state, null when none), leases {request, channel, trigger}, sleepsAt (epoch ms the reaper stops an awake instance holding no lease; null otherwise), runtime (container|isolate|null), quarantine ({reason, since, failures} or null), last access, requests, errors
 GET  /api/metrics                     one snapshot from gateway memory, never a Docker call: gateway (startedAt, rssBytes, lastFlushAt), host (cpus, load, memory, data filesystem), services (redis, object, postgres, coturn: up|down|off, latencyMs), fleet (apps and instances by state, leases by kind, activeLast24h), wakes (last 1 h and 24 h: count, failures, p50Ms, p95Ms), deliveries (due, delivering, failed, recent failures), series (minute buckets for 24 h: requests, errors, wakes, wakeFailures, sleeps, deliveriesDone, deliveriesFailed, deliveriesRetried), events (last 100 lifecycle events, each with seq, a per-process sequence number). Lost on restart
 GET  /api/requests?after=<seq>&limit=<n>  records newer than seq, default 500, from a memory ring of 1000 lost on restart: seq, t, app, kind (request|static|ws|trigger), method, path (no query), status, ms, waitMs (until the upstream was ready, wake included), cold, subject, error
 GET  /api/apps/<name>                 releases, bindings, policy, state, stats, deliveries
@@ -116,6 +118,7 @@ PUT  /api/policy                      global policy fields
 PUT  /api/apps/<name>/policy          per-app overrides
 PUT  /api/apps/<name>/owner           {"owner": subject}
 POST /api/apps/<name>/remove          address returns 404, data kept
+POST /api/apps/<name>/unquarantine     lifts a quarantine (ADR 0017); the next request wakes the app
 POST /api/apps/<name>/purge           only when removed; data deleted
 POST /api/tokens                      {"name": ...} -> {"token": one-time secret, "subject": "service:<name>"}
 ```
