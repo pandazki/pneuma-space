@@ -1,0 +1,35 @@
+export type LifecycleEvent = { readonly t: number; readonly ev: string; readonly app: string | null; readonly [field: string]: unknown };
+export type Emit = (ev: string, app?: string | null, extra?: Record<string, unknown>) => void;
+
+const RING = 100;
+
+/** The gateway's lifecycle log: each event is one JSON line on stdout, kept in a ring and passed to subscribers. */
+export class EventLog {
+  readonly #ring: LifecycleEvent[] = [];
+  readonly #subscribers = new Set<(event: LifecycleEvent) => void>();
+  readonly #write: (line: string) => void;
+
+  constructor(write: (line: string) => void = console.log) {
+    this.#write = write;
+  }
+
+  readonly emit: Emit = (ev, app = null, extra = {}) => {
+    const event: LifecycleEvent = { t: Date.now(), ev, app, ...extra };
+    this.#write(JSON.stringify(event));
+    this.#ring.push(event);
+    if (this.#ring.length > RING) this.#ring.shift();
+    for (const subscriber of this.#subscribers) subscriber(event);
+  };
+
+  onEvent(subscriber: (event: LifecycleEvent) => void): void {
+    this.#subscribers.add(subscriber);
+  }
+
+  /** Oldest first. */
+  recent(): readonly LifecycleEvent[] {
+    return this.#ring;
+  }
+}
+
+export const events = new EventLog();
+export const emit = events.emit;

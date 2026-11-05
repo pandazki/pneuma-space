@@ -2,6 +2,7 @@ import { connect } from 'node:net';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Docker, DockerError, type ContainerSpec, type DockerEvent } from './docker.ts';
+import { emit, type Emit } from './events.ts';
 import {
   APP_PORT, canonicalHash, Conflict, NotFound, RUNTIME_ENV,
   type AppId, type ImageId, type InstanceState, type Job, type JobResult, type Lease, type LeaseKind, type Runtime, type RunSpec,
@@ -20,6 +21,7 @@ type Instance = {
   address: string;
   readonly leases: Map<Lease, LeaseRecord>;
   lastReleaseAt: number;
+  since: number;
   /** Epoch ms just before the last docker start; an older die event is a replay and is ignored. */
   startedAt: number;
   wake: Promise<void>;
@@ -37,7 +39,7 @@ export type RuntimeOptions = {
   readonly specFor: (app: AppId) => RunSpec | null;
   /** Compose project whose service containers run jobs; see composeProject. */
   readonly project: string;
-  readonly log?: (line: string) => void;
+  readonly log?: Emit;
 };
 
 const specHash = (spec: RunSpec): string => canonicalHash(spec.injection);
@@ -50,7 +52,7 @@ export async function composeProject(docker: Docker): Promise<string> {
     ?? 'pneuma-space';
 }
 
-function canConnect(host: string, port: number): Promise<boolean> {
+export function canConnect(host: string, port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = connect({ host, port, timeout: 1000 });
     socket.once('connect', () => { socket.destroy(); resolve(true); });
@@ -66,7 +68,7 @@ export class DockerRuntime implements Runtime {
   private readonly network: string;
   private readonly specFor: (app: AppId) => RunSpec | null;
   private readonly project: string;
-  private readonly log: (line: string) => void;
+  private readonly log: Emit;
   private readonly instances = new Map<AppId, Instance>();
   private readonly awake = new Set<Instance>();
   private readonly events = new AbortController();
@@ -79,7 +81,7 @@ export class DockerRuntime implements Runtime {
     this.network = options.network;
     this.specFor = options.specFor;
     this.project = options.project;
-    this.log = options.log ?? console.log;
+    this.log = options.log ?? emit;
   }
 
   async acquire(app: AppId, kind: 'request' | 'trigger'): Promise<Lease> {
@@ -88,7 +90,7 @@ export class DockerRuntime implements Runtime {
       if (!spec) throw new NotFound(`app ${app} has no registered release with an image`);
       let inst = this.instances.get(app);
       if (!inst) {
-        inst = { app, state: 'asleep', spec, container: null, address: '', leases: new Map(), lastReleaseAt: 0, startedAt: 0, wake: Promise.resolve(), changed: Promise.withResolvers() };
+        inst = { app, state: 'asleep', spec, container: null, address: '', leases: new Map(), lastReleaseAt: 0, since: Date.now(), startedAt: 0, wake: Promise.resolve(), changed: Promise.withResolvers() };
         this.instances.set(app, inst);
       }
       switch (inst.state) {
@@ -165,7 +167,7 @@ export class DockerRuntime implements Runtime {
       const running = container.State === 'running' && Boolean(ip);
       const inst: Instance = {
         app, state: 'asleep', spec, container: container.Id, address: running ? `${ip}:${APP_PORT}` : '',
-        leases: new Map(), lastReleaseAt: Date.now(), startedAt: 0, wake: Promise.resolve(), changed: Promise.withResolvers(),
+        leases: new Map(), lastReleaseAt: Date.now(), since: Date.now(), startedAt: 0, wake: Promise.resolve(), changed: Promise.withResolvers(),
       };
       this.instances.set(app, inst);
       this.transition(inst, running ? 'awake' : 'asleep', { adopted: true });
@@ -178,6 +180,16 @@ export class DockerRuntime implements Runtime {
 
   state(app: AppId): InstanceState | 'none' {
     return this.instances.get(app)?.state ?? 'none';
+  }
+
+  since(app: AppId): number | null {
+    return this.instances.get(app)?.since ?? null;
+  }
+
+  leases(app: AppId): Record<LeaseKind, number> {
+    const counts = { request: 0, channel: 0, trigger: 0 };
+    for (const { kind } of this.instances.get(app)?.leases.values() ?? []) counts[kind]++;
+    return counts;
   }
 
   async logs(app: AppId, tail: number): Promise<string> {
@@ -363,6 +375,7 @@ export class DockerRuntime implements Runtime {
 
   private transition(inst: Instance, state: InstanceState, extra: Record<string, unknown> = {}): void {
     inst.state = state;
+    inst.since = Date.now();
     if (state === 'awake') {
       this.awake.add(inst);
       this.arm(Math.min(MAX_TICK_SECONDS, (this.specFor(inst.app) ?? inst.spec).policy.idle_seconds));
@@ -380,6 +393,6 @@ export class DockerRuntime implements Runtime {
   }
 
   private emit(ev: string, app: AppId, extra: Record<string, unknown>): void {
-    this.log(JSON.stringify({ t: Date.now(), ev, app, ...extra }));
+    this.log(ev, app, extra);
   }
 }

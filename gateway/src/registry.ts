@@ -9,6 +9,7 @@ import {
   type PublishRequest, type Registry, type Release, type ReleaseNumber, type ResourceKind, type RouteView,
   type RunSpec, type Runtime, type SchedulerView, type Stats, type Store, type StoreOps, type Subject, type Trigger, type TriggerName,
 } from './model.ts';
+import { emit } from './events.ts';
 import { issueToken } from './identity.ts';
 
 export type RegistryDeps = {
@@ -23,9 +24,7 @@ export type RegistryDeps = {
 const SECONDS_FIELDS = ['idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds'] as const;
 const DETAIL_DELIVERIES = 50;
 
-function log(ev: string, app: string | null, extra: Record<string, unknown> = {}): void {
-  console.log(JSON.stringify({ t: Date.now(), ev, app, ...extra }));
-}
+const log = emit;
 
 const isResourceKind = (kind: CapabilityKind): kind is ResourceKind => CAPABILITIES[kind].class === 'resource';
 
@@ -288,6 +287,10 @@ export class PlatformRegistry implements Registry {
     return this.#specs.get(id) ?? null;
   }
 
+  nameOf(id: AppId): AppName | null {
+    return this.#names.get(id) ?? null;
+  }
+
   schedule(id: AppId): SchedulerView | null {
     return this.#schedules.get(id) ?? null;
   }
@@ -303,6 +306,8 @@ export class PlatformRegistry implements Registry {
         capabilities: [...view.kinds],
         status: view.status,
         instance: this.#runtime.state(view.app),
+        since: this.#runtime.since(view.app),
+        leases: this.#runtime.leases(view.app),
         lastAccessAt: s?.lastAccessAt ?? null,
         requests: s?.requests ?? 0,
         errors: s?.errors ?? 0,

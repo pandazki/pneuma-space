@@ -38,7 +38,7 @@ export type ServiceProbe = (service: 'postgres' | 'coturn') => Promise<boolean>;
 
 // Docker's resolver forwards unknown names upstream and waits about 5 s; a 500 ms single try answers within 1 s (spike S2).
 const resolver = new dns.Resolver({ timeout: 500, tries: 1 });
-const resolvesOnNetwork: ServiceProbe = (service) => resolver.resolve4(service).then(() => true, () => false);
+export const resolvesOnNetwork: ServiceProbe = (service) => resolver.resolve4(service).then(() => true, () => false);
 
 async function requireService(probe: ServiceProbe, service: 'postgres' | 'coturn', profile: string, kind: ResourceKind): Promise<void> {
   if (!(await probe(service))) {

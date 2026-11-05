@@ -8,6 +8,7 @@ import {
   type AppId, type BundleStore, type Challenge, type IdentityProvider, type Lease, type Principal, type Registry,
   type RouteView, type Runtime, type Scheduler, type Stats,
 } from './model.ts';
+import { emit } from './events.ts';
 import { connect, forward, tunnel, type Hold } from './proxy.ts';
 import { serveStatic, staticPath } from './static.ts';
 
@@ -35,9 +36,7 @@ type Route =
 
 type Counter = { requests: number; errors: number; lastAccessAt: number | null };
 
-function log(ev: string, app: AppId | null, extra: Record<string, unknown> = {}): void {
-  console.log(JSON.stringify({ t: Date.now(), ev, app, ...extra }));
-}
+const log = emit;
 
 function reply(app: AppId | null, status: number, error?: string, headers?: OutgoingHttpHeaders): Route {
   return { to: 'reply', app, reply: { status, error, headers } };

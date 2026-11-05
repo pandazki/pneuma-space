@@ -83,12 +83,42 @@ test('AC-P-6', { timeout: 30_000 }, async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /^text\/html/);
   const page = await response.text();
-  for (const field of ['/api/apps', '/release', '/policy', '/remove', '/purge', 'releases', 'bindings', 'deliveries', 'requests', 'errors']) {
+  for (const field of ['/api/apps', '/api/metrics', 'leases', 'logs', '/release', '/policy', "act('remove')", "act('purge')", 'releases', 'bindings', 'deliveries', 'requests', 'errors']) {
     assert.ok(page.includes(field), `console has ${field}`);
   }
   assert.doesNotMatch(page, /\/api\/tokens/, 'no token page');
   assert.doesNotMatch(page, /\/api\/policy\b/, 'no global policy page');
   assert.doesNotMatch(page, /\/owner\b/, 'no owner change');
+});
+
+test('AC-P-13', { timeout: 60_000 }, async (t) => {
+  const app = await deploy(t, plain);
+  const metrics = async () => (await fetch(adminUrl + '/api/metrics')).json();
+  const total = (series: number[]) => series.reduce((sum, n) => sum + n, 0);
+  for (let i = 0; i < 2; i++) await metrics();
+  const since = Date.now() / 1000;
+  const timings: number[] = [];
+  for (let i = 0; i < 7; i++) {
+    const start = performance.now();
+    await metrics();
+    timings.push(performance.now() - start);
+  }
+  const until = Date.now() / 1000 + 1;
+  const events = docker('events', '--since', since.toFixed(3), '--until', until.toFixed(3), '--filter', `label=pneuma-space.network=${stack.network}`, '--format', '{{.Type}} {{.Action}}');
+  t.diagnostic(`GET /api/metrics: median ${median(timings).toFixed(1)} ms, all ${timings.map((v) => v.toFixed(1)).join(' ')} ms`);
+  assert.ok(median(timings) < 50, `median ${median(timings).toFixed(1)} ms, gate 50 ms`);
+  assert.equal(events, '', 'no Docker activity while answering metrics');
+
+  const before = await metrics();
+  await appJson(app.name, '/');
+  const after = await metrics();
+  assert.equal(after.wakes.last24h.count - before.wakes.last24h.count, 1, 'one wake');
+  assert.equal(typeof after.events.findLast((e: any) => e.ev === 'awake' && e.app === app.name)?.ms, 'number', 'the wake carries its latency');
+  assert.equal(total(after.series.requests) - total(before.series.requests), 1, 'one request');
+
+  const page = await (await fetch(adminUrl + '/')).text();
+  for (const section of ['services', 'fleet', 'wakes', 'traffic', 'deliveries', 'host', 'events']) assert.ok(page.includes(`'data-section': '${section}'`), `overview has ${section}`);
+  for (const marker of ['zh: {', 'en: {', 'data-theme']) assert.ok(page.includes(marker), `console has ${marker}`);
 });
 
 test('AC-P-7', { timeout: 90_000 }, async (t) => {

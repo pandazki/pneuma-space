@@ -1,8 +1,10 @@
 import { join } from 'node:path';
 import { startAdmin } from './admin.ts';
 import { Docker } from './docker.ts';
+import { emit, events } from './events.ts';
 import { loadOrCreateSecret, LocalIdentity } from './identity.ts';
 import { Ingress } from './ingress.ts';
+import { hostSample, httpProbe, Metrics, profileProbe, tcpProbe } from './metrics.ts';
 import { ADMIN_PORT, INGRESS_PORT } from './model.ts';
 import { createProviders, providerConfig, S3BundleStore } from './providers.ts';
 import { PlatformRegistry } from './registry.ts';
@@ -10,9 +12,9 @@ import { composeProject, DockerRuntime } from './runtime.ts';
 import { DeliveryScheduler } from './scheduler.ts';
 import { SqliteStore } from './store.ts';
 
-const STATS_FLUSH_MS = 10_000;
+const SAMPLE_MS = 10_000;
 
-const log = (ev: string, extra: Record<string, unknown> = {}) => console.log(JSON.stringify({ t: Date.now(), ev, app: null, ...extra }));
+const log = (ev: string, extra: Record<string, unknown> = {}) => emit(ev, null, extra);
 
 const data = process.env.PNEUMA_SPACE_DATA ?? '/data';
 const network = process.env.PNEUMA_SPACE_NETWORK ?? 'pneuma-space';
@@ -31,6 +33,21 @@ const ingress = new Ingress({
   registry, runtime, identity, bundles, scheduler, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
 });
 
+const metrics = new Metrics({
+  events,
+  stats: () => ingress.snapshot(),
+  apps: () => registry.listing(),
+  deliveries: { counts: () => store.deliveryCounts(), failed: (limit) => store.deliveries({ state: 'failed', limit }) },
+  nameOf: (app) => registry.nameOf(app),
+  probes: {
+    redis: tcpProbe('redis', 6379),
+    object: httpProbe(`${config.object.endpoint}/health`),
+    postgres: profileProbe('postgres', 5432),
+    coturn: profileProbe('coturn', 3478),
+  },
+  host: () => hostSample(data),
+});
+
 process.on('unhandledRejection', (error) => log('unhandled-rejection', { error: String(error) }));
 
 registry.onAppChanged((app) => {
@@ -44,8 +61,13 @@ await runtime.reconcile();
 void registry.resume();
 await scheduler.resume();
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
-const admin = await startAdmin({ registry, bundles, runtime }, { port: ADMIN_PORT, host: '0.0.0.0' });
-const flusher = setInterval(() => ingress.flush().catch((error: Error) => log('flush-failed', { error: error.message })), STATS_FLUSH_MS);
+const admin = await startAdmin({ registry, bundles, runtime, metrics }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
+const flusher = setInterval(() => {
+  ingress.flush().catch((error: Error) => log('flush-failed', { error: error.message }));
+  void sample();
+}, SAMPLE_MS);
+void sample();
 log('gateway-ready', { network, data });
 
 process.once('SIGTERM', async () => {
