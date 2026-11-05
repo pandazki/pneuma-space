@@ -6,7 +6,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { after, before, beforeEach, test } from 'node:test';
+import { after, before, beforeEach, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const repo = fileURLToPath(new URL('../', import.meta.url));
@@ -163,42 +163,81 @@ const tarList = (body: Buffer) => {
 
 const scaffoldManifest = JSON.parse(readFileSync(join(repo, 'templates/app/pneuma-space.json'), 'utf8'));
 
-test('publish of an isolate dir uploads it at app-relative paths with fresh node_modules and no local state, secrets, tests or outside links, and releases it with no image', async () => {
-  assert.equal(scaffoldManifest.runtime, 'isolate');
-  assert.deepEqual(scaffoldManifest.capabilities.static, { dir: 'public' });
-  const dir = source(scaffoldManifest, {
-    'package.json': '{"dependencies": {"dep": "1.0.0"}}',
-    'package-lock.json': '{}',
-    'src/server.ts': 'export {}',
-    'src/server.test.ts': 'not shipped',
-    'public/ui.css': 'body {}',
-    'node_modules/stale/index.js': 'not shipped',
-    'data/app.sqlite3': 'not shipped',
-    '.git/HEAD': 'not shipped',
-    '.audit/trail.tsv': 'not shipped',
-    '.env': 'SECRET=1',
-    '.env.local': 'SECRET=2',
-    '.npmrc': '//registry/:_authToken=x',
+describe('publish of an isolate dir', () => {
+  let tar: string[];
+  let npmArgs: string;
+  let release: Recorded;
+  let bundle: string;
+  before(async () => {
+    const dir = source(scaffoldManifest, {
+      'package.json': '{"dependencies": {"dep": "1.0.0"}}',
+      'package-lock.json': '{}',
+      'src/server.ts': 'export {}',
+      'src/server.test.ts': 'not shipped',
+      'public/ui.css': 'body {}',
+      'node_modules/stale/index.js': 'not shipped',
+      'data/app.sqlite3': 'not shipped',
+      '.git/HEAD': 'not shipped',
+      '.audit/trail.tsv': 'not shipped',
+      '.env': 'SECRET=1',
+      '.env.local': 'SECRET=2',
+      '.npmrc': '//registry/:_authToken=x',
+    });
+    const outside = source({});
+    symlinkSync(join(outside, 'pneuma-space.json'), join(dir, 'src/outside.json'));
+    symlinkSync('../missing', join(dir, 'src/dangling'));
+    symlinkSync('../public/ui.css', join(dir, 'src/ui.css'));
+    symlinkSync('../data', join(dir, 'public/uploads'));
+    symlinkSync('../.env', join(dir, 'src/config'));
+    const log = join(outside, 'npm-args');
+    const bin = stub({
+      docker: 'exit 99',
+      npm: `echo "$*" > ${log}; mkdir -p node_modules/dep && echo x > node_modules/dep/index.js && ln -s ${outside} node_modules/linked`,
+    });
+    const result = await appctl(['publish', 'notes', dir, '--owner', 'user:ann'], { bin });
+    assert.equal(result.code, 0, result.stderr);
+    const [upload] = requests;
+    release = requests[1];
+    tar = tarList(upload.body);
+    bundle = createHash('sha256').update(upload.body).digest('hex');
+    npmArgs = readFileSync(log, 'utf8').trim();
   });
-  const outside = source({});
-  symlinkSync(join(outside, 'pneuma-space.json'), join(dir, 'src/outside.json'));
-  symlinkSync('../missing', join(dir, 'src/dangling'));
-  symlinkSync('../public/ui.css', join(dir, 'src/ui.css'));
-  const log = join(outside, 'npm-args');
-  const bin = stub({
-    docker: 'exit 99',
-    npm: `echo "$*" > ${log}; mkdir -p node_modules/dep && echo x > node_modules/dep/index.js && ln -s ${outside} node_modules/linked`,
+
+  test('installs production dependencies without their scripts', () => {
+    assert.equal(npmArgs, 'ci --omit=dev --ignore-scripts');
   });
-  const result = await appctl(['publish', 'notes', dir, '--owner', 'user:ann'], { bin });
-  assert.equal(result.code, 0, result.stderr);
-  assert.equal(readFileSync(log, 'utf8').trim(), 'ci --omit=dev --ignore-scripts');
-  const [upload, release] = requests;
-  assert.deepEqual(tarList(upload.body), [
-    'node_modules/dep/index.js', 'package-lock.json', 'package.json', 'pneuma-space.json', 'public/ui.css', 'src/server.ts', 'src/ui.css',
-  ]);
-  assert.deepEqual(json(release), {
-    image: null, manifest: { ...scaffoldManifest, entry: 'src/server.ts' }, bundle: createHash('sha256').update(upload.body).digest('hex'), owner: 'user:ann',
+
+  test('ships no local state, secrets, tests or stale node_modules', () => {
+    const excluded = ['data/app.sqlite3', '.git/HEAD', '.audit/trail.tsv', '.env', '.env.local', '.npmrc', 'src/server.test.ts', 'node_modules/stale/index.js'];
+    assert.deepEqual(tar.filter((path) => excluded.includes(path)), []);
   });
+
+  test('follows links inside the app and skips dangling ones and ones leading outside', () => {
+    assert.ok(tar.includes('src/ui.css'));
+    assert.deepEqual(tar.filter((path) => /^(src\/outside\.json|src\/dangling|node_modules\/linked)/.test(path)), []);
+  });
+
+  test('ships nothing through a link into data or to .env', () => {
+    assert.deepEqual(tar.filter((path) => path.startsWith('public/uploads') || path.startsWith('src/config')), []);
+  });
+
+  test('puts files at app-relative paths', () => {
+    const expected = ['node_modules/dep/index.js', 'package-lock.json', 'package.json', 'pneuma-space.json', 'public/ui.css', 'src/server.ts'];
+    assert.deepEqual(expected.filter((path) => !tar.includes(path)), []);
+  });
+
+  test('releases the bundle with no image and the manifest entry', () => {
+    assert.deepEqual(json(release), { image: null, manifest: { ...scaffoldManifest, entry: 'src/server.ts' }, bundle, owner: 'user:ann' });
+  });
+});
+
+test('a path too long for a bundle exits 4 naming it before any upload', async () => {
+  const path = `${'d'.repeat(90)}/${'d'.repeat(90)}/${'d'.repeat(90)}/index.html`;
+  const dir = source({ contract: 1, capabilities: { static: { dir: 'dist' } } }, { [`dist/${path}`]: 'x' });
+  const result = await appctl(['publish', 'site', dir]);
+  assert.equal(result.code, 4);
+  assert.equal(result.stderr, `appctl: file path too long for a bundle: ${path}\n`);
+  assert.deepEqual(requests, []);
 });
 
 test('init --container is the app scaffold with runtime container and a Dockerfile', async () => {

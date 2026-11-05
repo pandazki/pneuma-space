@@ -2,7 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { cpSync, createReadStream, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -84,9 +84,10 @@ function runtimeOf(manifest: Manifest, dir: string): RuntimeKind | null {
   return existsSync(join(dir, 'Dockerfile')) ? 'container' : 'isolate';
 }
 
-// `.audit` holds the pstack decision trail a developer leaves in a scaffold.
+// `.audit` is the decision-trail folder developer tooling leaves in a project.
 const NOT_SHIPPED = new Set(['.git', 'node_modules', '.audit', '.npmrc']);
 const notShipped = (name: string) => NOT_SHIPPED.has(name) || name.startsWith('.env') || /\.test\.[cm]?[jt]sx?$/.test(name);
+const shipped = (rel: string) => !rel.split(sep).some(notShipped) && rel.split(sep)[0] !== 'data';
 
 /** Where `path` really is, or null with a warning when it is a dangling link or leads outside `base`. */
 function inside(base: string, path: string, shown: string): string | null {
@@ -114,7 +115,13 @@ function codeBundle(dir: string, out: string): void {
       dereference: true,
       filter: (src) => {
         const rel = relative(dir, src);
-        return rel === '' || (!notShipped(basename(src)) && rel !== 'data' && inside(base, src, rel) !== null);
+        if (rel === '') return true;
+        const real = shipped(rel) && inside(base, src, rel);
+        if (!real) return false;
+        const target = relative(base, real);
+        if (shipped(target)) return true;
+        console.error(`appctl: skipping ${rel}: links to ${target}`);
+        return false;
       },
     });
     const pkg = join(out, 'package.json');
@@ -143,36 +150,37 @@ function build(name: string, dir: string, tag: string | undefined): string {
 
 const BLOCK = 512;
 
-function bundleFiles(root: string): { path: string; size: number }[] {
+type Entry = { path: string; size: number; name: [prefix: string, name: string] };
+
+function bundleFiles(root: string): Entry[] {
   if (!existsSync(root) || !statSync(root).isDirectory()) throw new ManifestError(`static.dir ${root} is not a directory`);
   const base = realpathSync(root);
-  const files: { path: string; size: number }[] = [];
+  const files: Entry[] = [];
   const walk = (dir: string) => {
     for (const name of readdirSync(join(root, dir))) {
       const path = dir ? `${dir}/${name}` : name;
       const real = inside(base, join(root, path), path);
       const stat = real && statSync(real);
       if (stat && stat.isDirectory()) walk(path);
-      else if (stat && stat.isFile()) files.push({ path, size: stat.size });
+      else if (stat && stat.isFile()) files.push({ path, size: stat.size, name: splitPath(path) });
     }
   };
   walk('');
   return files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
-function splitPath(path: string): [prefix: string, name: string] {
+function splitPath(path: string): Entry['name'] {
   if (Buffer.byteLength(path) <= 100) return ['', path];
   for (let i = path.indexOf('/'); i !== -1; i = path.indexOf('/', i + 1)) {
     const prefix = path.slice(0, i);
     const name = path.slice(i + 1);
     if (Buffer.byteLength(prefix) <= 155 && Buffer.byteLength(name) <= 100) return [prefix, name];
   }
-  throw new ManifestError(`file path too long for a bundle: ${path}`);
+  throw new Failure(EXIT.build, `file path too long for a bundle: ${path}`);
 }
 
-function header(path: string, size: number): Buffer {
+function header([prefix, name]: Entry['name'], size: number): Buffer {
   const block = Buffer.alloc(BLOCK);
-  const [prefix, name] = splitPath(path);
   const field = (offset: number, length: number, value: string) => block.write(value, offset, length, 'utf8');
   const octal = (offset: number, length: number, value: number) => field(offset, length, value.toString(8).padStart(length - 1, '0'));
   field(0, 100, name);
@@ -191,9 +199,9 @@ function header(path: string, size: number): Buffer {
   return block;
 }
 
-async function* tar(root: string, files: { path: string; size: number }[]): AsyncGenerator<Uint8Array> {
-  for (const { path, size } of files) {
-    yield header(path, size);
+async function* tar(root: string, files: Entry[]): AsyncGenerator<Uint8Array> {
+  for (const { path, size, name } of files) {
+    yield header(name, size);
     yield* createReadStream(join(root, path));
     if (size % BLOCK) yield Buffer.alloc(BLOCK - (size % BLOCK));
   }
