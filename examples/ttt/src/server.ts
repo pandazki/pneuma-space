@@ -200,10 +200,15 @@ async function enter(id: string, socket: Socket) {
   let room = rooms.get(id);
   if (!room) {
     rooms.set(id, (room = new Set()));
-    await store.subscribe('game:' + id, (message) => {
-      const game: Game = JSON.parse(message);
-      for (const s of rooms.get(id) ?? []) s.send(JSON.stringify(view(game, s.identity)));
-    });
+    try {
+      await store.subscribe('game:' + id, (message) => {
+        const game: Game = JSON.parse(message);
+        for (const s of rooms.get(id) ?? []) s.send(JSON.stringify(view(game, s.identity)));
+      });
+    } catch (e) {
+      rooms.delete(id);
+      throw e;
+    }
   }
   room.add(socket);
 }
@@ -222,10 +227,12 @@ ws(server, async (socket) => {
       socket.send(JSON.stringify({ error: e instanceof Rejected ? e.message : 'bad-message' }));
     }
   };
-  await enter(id, socket);
+  // 1008 is final for the client; anything but a missing game closes with 1011 so it reconnects.
   try {
+    await enter(id, socket);
     socket.send(JSON.stringify(view(await update(id, (g) => seat(g, identity)), identity)));
-  } catch {
-    socket.close(1008, 'no such game');
+  } catch (e) {
+    if (e instanceof Rejected && e.message === 'no-game') socket.close(1008, 'no such game');
+    else socket.close(1011, 'try again');
   }
 });
