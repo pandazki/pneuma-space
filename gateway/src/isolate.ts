@@ -17,8 +17,8 @@ const RECOVER_MS = 5000;
 /** The same grace `docker stop` gives a container. */
 const STOP_MS = 10_000;
 const UNCLAIMED = 100;
-/** Consecutive failed polls after which awake isolate instances are marked asleep as unavailable. */
-const UNREACHABLE_POLLS = 3;
+/** How long polls must keep failing before awake isolate instances are marked asleep as unavailable; one app can stall the runner's main thread for seconds. */
+const UNREACHABLE_MS = 15_000;
 
 type IsolateRun = RunSpec & { readonly runtime: Extract<RunSpec['runtime'], { kind: 'isolate' }> };
 
@@ -34,13 +34,9 @@ export type IsolateOptions = {
 };
 
 class RunnerError extends Error {}
-/** The request reached the runner and no answer came. */
-class Unanswered extends RunnerError {}
 
 /** Failures before the request is sent; anything later may be the request's doing. */
 const UNREACHED: ReadonlySet<string> = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
-
-type Health = { readonly startedAt: number };
 
 const ending = (event: RunnerEvent): Ending => {
   if (event.ev === 'hung') return { ev: 'hung', reason: event.reason ?? 'hung' };
@@ -92,16 +88,12 @@ class IsolateDriver implements Driver<IsolateRun, string> {
       readyMs,
     };
     const address = await this.#resolve();
-    const before = await this.#call<Health>('GET', '/health', undefined, PROBE_MS).catch(() => { throw new Unavailable('isolate'); });
+    // No app code has run yet, so a runner that does not answer this is never the app's fault.
+    await this.#call('GET', '/health', undefined, readyMs).catch(() => { throw new Unavailable('isolate'); });
     this.#starting.add(spec.app);
     let started: Started;
     try {
       started = await this.#call<Started>('POST', `/instances/${spec.app}`, request, readyMs + CALL_MS);
-    } catch (error) {
-      if (!(error instanceof Unanswered)) throw error;
-      const after = await this.#call<Health>('GET', '/health', undefined, PROBE_MS).catch(() => null);
-      if (after && after.startedAt !== before.startedAt) throw new RunnerError(`runner-restarted while it started app ${spec.app}`);
-      throw error;
     } finally {
       this.#starting.delete(spec.app);
     }
@@ -149,13 +141,16 @@ class IsolateDriver implements Driver<IsolateRun, string> {
       this.#log('runner-unreachable', null, { error: String(error) });
       return [];
     }
-    for (const { worker, app } of listed) this.#live.set(worker, app as AppId);
-    return listed.map(({ app, worker, release, spec, port }) => ({ app: app as AppId, handle: worker, release: String(release), spec, address: `${address}:${port}` }));
+    const listening = listed.filter(({ state }) => state === 'listening');
+    // A worker still starting or ending belongs to no gateway now; the recovery poll stops it.
+    if (listening.length < listed.length) this.#suspect = true;
+    for (const { worker, app } of listening) this.#live.set(worker, app as AppId);
+    return listening.map(({ app, worker, release, spec, port }) => ({ app: app as AppId, handle: worker, release: String(release), spec, address: `${address}:${port}` }));
   }
 
   follow(gone: Gone<string>, signal: AbortSignal): void {
     void (async () => {
-      let failed = 0;
+      let failingSince: number | null = null;
       let probed = 0;
       while (!signal.aborted) {
         await sleep(POLL_MS, undefined, { ref: false });
@@ -166,10 +161,11 @@ class IsolateDriver implements Driver<IsolateRun, string> {
         if (this.#live.size === 0) continue;
         try {
           await this.#poll(gone);
-          failed = 0;
+          failingSince = null;
         } catch (error) {
-          if (++failed < UNREACHABLE_POLLS) continue;
-          failed = 0;
+          failingSince ??= performance.now();
+          if (performance.now() - failingSince < UNREACHABLE_MS) continue;
+          failingSince = null;
           this.#log('runner-unreachable', null, { error: String(error), instances: this.#live.size });
           // The next wake starts again through the runner, which answers with the worker if it is still running.
           for (const [worker, app] of this.#live) gone(app, worker, { ev: 'unavailable' });
@@ -182,7 +178,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
 
   /** Once the runner answers again, stops the workers it kept that no lease can reach; the next request wakes the app in tens of ms. */
   async #recover(): Promise<void> {
-    await this.#call<Health>('GET', '/health', undefined, PROBE_MS);
+    await this.#call('GET', '/health', undefined, PROBE_MS);
     if (this.#startedAt === null) await this.#cursor();
     const listed = await this.#call<Listed[]>('GET', '/instances', undefined, PROBE_MS);
     const untracked = listed.filter(({ worker, app }) => !this.#live.has(worker) && !this.#starting.has(app as AppId));
@@ -249,7 +245,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     })).address;
   }
 
-  /** Throws Unavailable when the request never reached the runner, Unanswered when no answer came, RunnerError when it answered with an error. */
+  /** Throws Unavailable when the request never reached the runner, else RunnerError: no answer came, or an error did. */
   async #call<T>(method: string, path: string, body?: unknown, timeoutMs = CALL_MS): Promise<T> {
     let response: Response;
     let text: string;
@@ -264,7 +260,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
       this.#suspect = true;
       const code = (error as { cause?: { code?: string } }).cause?.code;
       if (code !== undefined && UNREACHED.has(code)) throw new Unavailable('isolate');
-      throw new Unanswered(`runner ${method} ${path}: ${(error as Error).name === 'TimeoutError' ? `no answer within ${timeoutMs} ms` : String((error as Error).cause ?? error)}`);
+      throw new RunnerError(`runner ${method} ${path}: ${(error as Error).name === 'TimeoutError' ? `no answer within ${timeoutMs} ms` : String((error as Error).cause ?? error)}`);
     }
     if (!response.ok) throw new RunnerError(`runner ${method} ${path}: ${response.status} ${text}`);
     if (response.status === 204) return undefined as T;

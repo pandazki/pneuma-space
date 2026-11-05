@@ -21,7 +21,11 @@ export type StartRequest = {
   readonly readyMs: number;
 };
 export type Started = { readonly worker: string; readonly port: number };
-export type Listed = { readonly app: string; readonly release: number; readonly spec: string; readonly worker: string; readonly port: number; readonly since: number };
+/** `starting` has not listened yet and has no port; `ending` is stopping or ended and its thread not yet gone. */
+export type Listed = {
+  readonly app: string; readonly release: number; readonly spec: string; readonly worker: string;
+  readonly state: 'starting' | 'listening' | 'ending'; readonly port: number | null; readonly since: number;
+};
 export type RunnerEvent = {
   readonly seq: number; readonly t: number; readonly ev: 'ready' | 'exit' | 'hung' | 'oom';
   readonly app: string; readonly release: number; readonly worker: string; readonly code?: number; readonly reason?: string; readonly port?: number;
@@ -41,7 +45,6 @@ const TERMINATE_MS = 5000;
 // Inside compose's 10 s stop grace, with room for a terminate.
 const SHUTDOWN_DRAIN_MS = 3000;
 const EVENT_RING = 1000;
-const LINE_BYTES = 4 * 2 ** 10;
 const LOG_BYTES = 256 * 2 ** 10;
 const LOG_LINES = 1000;
 /** Counted per line on top of its bytes, so empty lines are bounded too. */
@@ -57,7 +60,7 @@ type Instance = {
   readonly thread: Worker;
   readonly since: number;
   port: number | null;
-  ping: { readonly seq: number; readonly sentAt: number } | null;
+  ping: { readonly seq: number; deadline: number } | null;
   /** Set by the first terminal event; later ones for this worker are dropped. The instance stays in the map until its thread is gone. */
   ended: boolean;
   stopping: boolean;
@@ -69,7 +72,7 @@ type Instance = {
 const startedAt = Date.now();
 const instances = new Map<string, Instance>();
 const ring: RunnerEvent[] = [];
-const logs = new Map<string, { readonly lines: Buffer[]; bytes: number }>();
+const logs = new Map<string, { readonly lines: string[]; bytes: number }>();
 /** One start or stop at a time per app, so a retried start joins the one in flight instead of racing its rename. */
 const queues = new Map<string, Promise<unknown>>();
 let seq = 0;
@@ -120,35 +123,20 @@ async function stop(inst: Instance, drainMs: number): Promise<void> {
   if (!(await Promise.race([inst.exited.then(() => true), sleep(drainMs, false)]))) await terminate(inst);
 }
 
-function append(app: string, line: Buffer): void {
+/** Lines come from the shim, already cut at 4 KiB and held to its per-second budget. */
+function append(app: string, line: string): void {
   let log = logs.get(app);
   if (!log) logs.set(app, (log = { lines: [], bytes: 0 }));
-  const kept = Buffer.from(line.subarray(0, LINE_BYTES));
-  log.lines.push(kept);
-  log.bytes += kept.length + LINE_OVERHEAD;
-  while (log.bytes > LOG_BYTES || log.lines.length > LOG_LINES) log.bytes -= log.lines.shift()!.length + LINE_OVERHEAD;
+  log.lines.push(line);
+  log.bytes += Buffer.byteLength(line) + LINE_OVERHEAD;
+  while (log.bytes > LOG_BYTES || log.lines.length > LOG_LINES) log.bytes -= Buffer.byteLength(log.lines.shift()!) + LINE_OVERHEAD;
 }
 
-/** A line longer than LINE_BYTES is kept up to there and the rest of it, up to the next newline, is dropped. */
-function capture(app: string, stream: NodeJS.ReadableStream): void {
-  let partial = Buffer.alloc(0);
-  let cut = false;
-  stream.on('data', (chunk: Buffer) => {
-    let rest = partial.length ? Buffer.concat([partial, chunk]) : chunk;
-    for (let at = rest.indexOf(10); at !== -1; at = rest.indexOf(10)) {
-      if (!cut) append(app, rest.subarray(0, at));
-      cut = false;
-      rest = rest.subarray(at + 1);
-    }
-    if (cut) rest = Buffer.alloc(0);
-    else if (rest.length > LINE_BYTES) {
-      append(app, rest);
-      cut = true;
-      rest = Buffer.alloc(0);
-    }
-    partial = Buffer.from(rest);
-  });
-  stream.once('end', () => { if (partial.length) append(app, partial); });
+/** Output that went around the shim's process.stdout.write is counted, never split, so a 64 MiB chunk costs the main thread one message. */
+function dropNative(app: string, stream: NodeJS.ReadableStream): void {
+  let bytes = 0;
+  stream.on('data', (chunk: Buffer) => { bytes += chunk.length; });
+  stream.once('end', () => { if (bytes) append(app, `dropped ${bytes} bytes written around the log capture`); });
 }
 
 const appDir = (app: string) => join(DATA, 'apps', app);
@@ -211,11 +199,12 @@ async function start(app: string, request: StartRequest): Promise<Started> {
     port: null, ping: null, ended: false, stopping: false, error: null, exited: exited.promise, terminating: null,
   };
   instances.set(app, inst);
-  capture(app, thread.stdout);
-  capture(app, thread.stderr);
+  dropNative(app, thread.stdout);
+  dropNative(app, thread.stderr);
   const ready = Promise.withResolvers<number>();
-  thread.on('message', (message: { type: 'listening'; port: number } | { type: 'pong'; seq: number; external: number }) => {
-    if (message.type === 'listening') {
+  thread.on('message', (message: { type: 'listening'; port: number } | { type: 'pong'; seq: number; external: number } | { type: 'log'; lines: string[] }) => {
+    if (message.type === 'log') for (const line of message.lines) append(app, line);
+    else if (message.type === 'listening') {
       inst.port = message.port;
       // The hang clock starts here: a ping unanswered during startup belongs to the ready timeout.
       inst.ping = null;
@@ -252,16 +241,18 @@ async function start(app: string, request: StartRequest): Promise<Started> {
 let tickedAt = performance.now();
 setInterval(() => {
   const now = performance.now();
-  // A runner that was itself paused gave no worker a chance to answer.
-  const paused = now - tickedAt > 2 * PING_MS;
+  // A late tick means this thread was busy or paused and read no pong meanwhile; the delay is not the worker's silence.
+  const late = Math.max(0, now - tickedAt - PING_MS);
   tickedAt = now;
   for (const inst of instances.values()) {
     if (inst.ended || inst.stopping) continue;
-    if (paused) inst.ping = null;
     if (!inst.ping) {
-      inst.ping = { seq: ++pings, sentAt: now };
+      inst.ping = { seq: ++pings, deadline: now + SILENCE_MS };
       inst.thread.postMessage({ type: 'ping', seq: inst.ping.seq });
-    } else if (inst.port !== null && now - inst.ping.sentAt >= SILENCE_MS) {
+      continue;
+    }
+    inst.ping.deadline += late;
+    if (inst.port !== null && now >= inst.ping.deadline) {
       end(inst, 'hung', { reason: `no answer to the watchdog for ${SILENCE_MS} ms` });
       void terminate(inst);
     }
@@ -299,7 +290,10 @@ async function route(request: IncomingMessage, url: URL): Promise<unknown> {
   const method = request.method;
   if (method === 'GET' && resource === 'health') return { ok: true, startedAt, stuck, workers: instances.size };
   if (method === 'GET' && resource === 'instances' && !a) {
-    return [...instances.values()].filter((i) => !i.ended && i.port !== null).map((i): Listed => ({ app: i.app, release: i.release, spec: i.spec, worker: i.worker, port: i.port!, since: i.since }));
+    return [...instances.values()].map((i): Listed => ({
+      app: i.app, release: i.release, spec: i.spec, worker: i.worker, port: i.port, since: i.since,
+      state: i.ended || i.stopping ? 'ending' : i.port === null ? 'starting' : 'listening',
+    }));
   }
   if (method === 'POST' && resource === 'instances') {
     const app = segment(a);
