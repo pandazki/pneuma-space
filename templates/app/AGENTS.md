@@ -102,37 +102,16 @@ curl -b alice.jar $ORIGIN/apps/<name>/
 ```
 
 
-## Scenario: company survey (`files`, `db`, `identity`, `cron`)
+## Examples
 
-1. In `pneuma-space.json` add `files`, `db` and `cron` with one trigger `{"export": {"schedule": "0 2 * * *"}}`, and make `identity` `{}`.
-2. In `src/server.ts` create `answer (subject TEXT PRIMARY KEY, q1 TEXT, q2 TEXT, q3 TEXT, submitted_at TEXT)`, one column per question.
-3. `GET /` renders the questions, prefilled from `SELECT q1, q2, q3 FROM answer WHERE subject = ?` with `identity.subject`.
-4. `POST /answer` reads the form with `body(req)` and upserts with `ON CONFLICT (subject) DO UPDATE SET q1 = excluded.q1, q2 = excluded.q2, q3 = excluded.q3`, so each person has one answer and can edit it.
-5. `GET /results` answers 403 unless `identity.owner`; otherwise it shows `SELECT q1, CAST(count(*) AS INTEGER) AS n FROM answer GROUP BY q1` for each question.
-6. Trigger `export` writes every row as CSV to `need('files').dir + '/export.csv'` (quote fields; prefix a leading `=`, `+`, `-` or `@` with `'` so spreadsheets do not run it); `GET /export.csv` streams that file to the owner with `content-disposition: attachment`, 404 before the first export.
-7. Every form action and link uses `prefix`.
-8. Test with curl as two subjects and as the owner (see Publish), then once with `PNEUMA_SPACE_DB_URL=postgresql://...` when Docker is available to you.
-9. `appctl publish survey . --owner user:<you>` and share `/apps/survey/`; run the export now with `appctl token create exporter` and a `POST .../_pneuma-space/trigger/export`.
+Each origin scenario is an overlay on this template under `examples/` in the PneumaSpace repository; `node examples/publish.ts <name> --owner user:<you>` assembles and publishes one. Read the one closest to your app before writing yours.
 
-## Scenario: two-player board game (`kv`, `ws`, `identity`, optional `rtc`)
+| Example | Capabilities | Shows |
+| --- | --- | --- |
+| `examples/survey` | `files`, `db`, `identity`, `cron` | one answer per subject by upsert, owner-only results, a nightly CSV export to `/data` with a spreadsheet-safe quote rule |
+| `examples/ttt` | `kv`, `ws`, `identity` | a game stored in KV, moves by compare-and-set, one subscription per game id fanned out to local sockets, reconnect after close 1001, a bot through a service token |
+| `examples/widget` | `cron`, `db`, `static`, `identity` | a trigger upserting one row by slot so a redelivery is harmless, a public `card.json` with `max-age` and CORS, owner-only writes, a minute schedule that keeps the app awake |
+| `examples/chat` | `kv`, `ws`, `identity` | the smallest realtime app |
+| `examples/site-docs` | `static` | a site with no container |
 
-1. In `pneuma-space.json` add `kv` and `ws`, and make `identity` `{}`.
-2. `POST /new` creates `id = randomUUID()`, stores `{board: '.........', turn: 'X', players: []}` at `kv.key('game:' + id)` and redirects to `${prefix}/g/${id}`.
-3. `GET /g/<id>` serves the board page; `public/game.js` opens `${prefix}/g/<id>/live`.
-4. In `ws(server, ...)`, parse the id from `socket.url.pathname`, seat `socket.identity.subject` as X or O if a seat is free (a third subject is a spectator; the same subject in two tabs keeps one seat), and keep sockets in a `Map<id, Set<Socket>>`.
-5. On a move message, load the game from KV, check it is that subject's turn and the cell is empty, apply it, check for a winner, save it with a compare-and-set (`redis.eval` or `WATCH`), then `kv.publish('game:' + id, json)`.
-6. Subscribe once per game id (remember which ids you subscribed) and send each published state to the local sockets, as `examples/chat` in the PneumaSpace repository does, so it works with one container or many. A bot plays through a normal route with a service token, which answers synchronously; a trigger only returns 202.
-7. On connect and on reconnect after close code 1001, send the stored state; the server never keeps the game in memory.
-8. For voice or a direct data channel, add `rtc`, serve `GET /ice` with `iceServers(identity.subject, 3600)`, and relay offer, answer and candidates over the same WebSocket.
-9. Test with two browsers or two curl subjects, then publish.
-
-## Scenario: personal dashboard widget (`cron`, `db`, `static`, `identity`)
-
-1. In `pneuma-space.json` add `db` and `cron` with `{"refresh": {"schedule": "0 * * * *"}}`; keep `identity` `{"required": false}`, so the card is public and the owner still gets `identity.owner`. Every delivery wakes the app, so a minute schedule keeps it awake most of the time.
-2. `public/card.html` and `public/card.js` render the card; `card.js` fetches `${prefix}/api/card`. Do not add `public/index.html` if `GET /` is dynamic.
-3. Create `reading (slot TEXT PRIMARY KEY, value TEXT, fetched_at TEXT)`.
-4. Trigger `refresh` computes the numbers (from the database, or from a `fetch()` of an external source) and upserts one row with slot `latest` and `ON CONFLICT (slot) DO UPDATE`; an append-only history uses slot `delivery.scheduledFor ?? delivery.id` and `DO NOTHING` instead.
-5. `GET /api/card` returns the latest row as JSON with `cache-control: max-age=60`.
-6. Test the trigger with curl twice with the same `X-Pneuma-Space-Delivery` and check one row.
-7. Publish, then embed `/apps/<name>/card.html` in the dashboard.
-8. Refresh on demand with a service token: `POST /apps/<name>/_pneuma-space/trigger/refresh`.
+For a direct data channel between two players, add `rtc`, serve `GET /ice` with `iceServers(identity.subject, 3600)`, and relay offer, answer and candidates over the WebSocket.

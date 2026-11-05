@@ -7,6 +7,18 @@ import { fileURLToPath } from 'node:url';
 import { ADMIN_PATHS, LOGIN_PATH } from '../../gateway/src/model.ts';
 import { presign } from './fixtures/echo/server.ts';
 
+// A sync docker call can block the loop past the gateway's 5 s keep-alive; undici then reuses a socket the server already closed.
+const nativeFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  try {
+    return await nativeFetch(input, init);
+  } catch (error) {
+    const idempotent = !init?.method || init.method === 'GET' || init.method === 'HEAD';
+    if (!idempotent || (error as { cause?: { code?: string } }).cause?.code !== 'UND_ERR_SOCKET') throw error;
+    return nativeFetch(input, init);
+  }
+};
+
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
 export const scratch = join(root, '.audit', 'tmp');

@@ -20,7 +20,10 @@ async function connect(): Promise<Kv> {
     channel: (name) => prefix + name,
     publish: (channel, message) => redis.publish(prefix + channel, message),
     async subscribe(channel, listener) {
-      subscriber ??= redis.duplicate().on('error', (e) => console.error('kv', e)).connect();
+      subscriber ??= redis.duplicate().on('error', (e) => console.error('kv', e)).connect().catch((error) => {
+        subscriber = undefined;
+        throw error;
+      });
       await (await subscriber).subscribe(prefix + channel, listener);
     },
   };

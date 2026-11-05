@@ -99,6 +99,7 @@ footer { border-top: 1px dashed var(--line); padding: 16px 32px; font-size: 12px
   .top { padding: 16px 20px; }
   main > section { padding: 24px 20px; }
   footer { padding: 16px 20px; }
+  body:has(.badge) .frame { padding-bottom: 48px; }
 }
 
 .seg { display: inline-flex; padding: 2px; border-radius: 999px; background: var(--field); }
