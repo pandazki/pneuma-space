@@ -76,10 +76,7 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, ingressP
         .map((r) => ({ ...r, app: registry.nameOf(r.app) ?? r.app })),
     },
     {
-      method: 'GET', path: at(ADMIN_PATHS.app('<name>')), handle: async (_, name) => {
-        const detail = found(await registry.detail(app(name)), name);
-        return { ...detail, quarantine: guard.quarantine(detail.app.id) };
-      },
+      method: 'GET', path: at(ADMIN_PATHS.app('<name>')), handle: async (_, name) => found(await registry.detail(app(name)), name),
     },
     { method: 'GET', path: at(ADMIN_PATHS.logs('<name>')), handle: (request, name) => runtime.logs(found(registry.view(app(name)), name).app, wholeParam(request, 'tail', 200, 1, MAX_TAIL)) },
     {

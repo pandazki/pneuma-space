@@ -398,7 +398,7 @@ export type Token = {
 };
 
 export type BundleFile = { readonly size: number; readonly etag: string; readonly contentType: string };
-/** Paths are relative to `static.dir`, without a leading slash. */
+/** Paths without a leading slash, relative to `static.dir` in a static bundle and to the app root in a code bundle. */
 export type BundleIndex = { readonly id: BundleId; readonly files: Readonly<Record<string, BundleFile>> };
 
 export type Stats = {
@@ -445,8 +445,13 @@ export type RouteView = {
   readonly owner: Subject;
   readonly release: ReleaseNumber | null;
   readonly image: ImageId | null;
+  /** Null for a static-only release: nothing to wake. */
+  readonly runtime: RuntimeKind | null;
   readonly kinds: ReadonlySet<CapabilityKind>;
+  /** Null unless the release declares `static`. */
   readonly bundle: BundleIndex | null;
+  /** Prefix a static request resolves under inside `bundle`: '' for a static bundle, `<static.dir>/` for a code bundle. */
+  readonly staticRoot: string;
   /** Null when the release does not declare identity. */
   readonly identity: IdentityDeclaration | null;
   readonly policyOverride: PolicyOverride;
@@ -490,6 +495,7 @@ export type AppDetail = {
   readonly instance: InstanceState | 'none';
   readonly stats: Stats;
   readonly deliveries: readonly Delivery[];
+  readonly quarantine: Quarantine | null;
 };
 
 export type Principal = { readonly subject: Subject; readonly name: string };

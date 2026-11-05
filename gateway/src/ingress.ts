@@ -202,7 +202,7 @@ export class Ingress {
       return { to: 'trigger', view, trigger: trigger[1] };
     }
     if (!upgrade && view.bundle && (req.method === 'GET' || req.method === 'HEAD')) {
-      const path = staticPath(view.bundle, rest);
+      const path = staticPath(view.bundle, rest, view.staticRoot);
       if (path !== null) {
         trace.kind = 'static';
         return { to: 'static', view, path };
@@ -217,7 +217,7 @@ export class Ingress {
       else if (view.identity.required !== false) return { to: 'reply', reply: challenge(result) };
     }
     trace.subject = who?.subject ?? null;
-    if (view.image === null) return reply(404, 'no file at this path');
+    if (view.runtime === null) return reply(404, 'no file at this path');
     return { to: 'app', view, path: rest + search, headers: forwardedHeaders(req, view, who) };
   }
 

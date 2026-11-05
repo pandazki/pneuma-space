@@ -19,7 +19,7 @@ const APP_JS = Buffer.from('console.log("static");');
 function view(name: string, kinds: CapabilityKind[], extra: Partial<RouteView> = {}): RouteView {
   return {
     app: `id-${name}` as AppId, name: name as AppName, status: 'registered', owner: 'user:alice' as Subject,
-    release: 1 as ReleaseNumber, image: 'sha256:x' as ImageId, kinds: new Set(['route', ...kinds]), bundle: null,
+    release: 1 as ReleaseNumber, image: 'sha256:x' as ImageId, runtime: 'container', kinds: new Set(['route', ...kinds]), bundle: null, staticRoot: '',
     identity: kinds.includes('identity') ? {} : null, policyOverride: {}, ...extra,
   };
 }

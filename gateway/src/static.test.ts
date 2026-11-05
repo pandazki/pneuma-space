@@ -41,6 +41,21 @@ function get(headers: http.OutgoingHttpHeaders, path = '/'): Promise<{ status: n
   });
 }
 
+test('a code bundle serves only the files under its static root', () => {
+  const code: BundleIndex = {
+    id: 'c'.repeat(64) as BundleId,
+    files: {
+      'public/ui.css': { size: 1, etag: 'e', contentType: 'text/css' },
+      'public/index.html': { size: 1, etag: 'e', contentType: 'text/html' },
+      'src/server.ts': { size: 1, etag: 'e', contentType: 'text/plain' },
+    },
+  };
+  assert.equal(staticPath(code, '/ui.css', 'public/'), 'public/ui.css');
+  assert.equal(staticPath(code, '/', 'public/'), 'public/index.html');
+  assert.equal(staticPath(code, '/src/server.ts', 'public/'), null);
+  assert.equal(staticPath(code, '/../src/server.ts', 'public/'), null);
+});
+
 test('a directory path serves its index.html with the content sha as ETag', async () => {
   const got = await get({});
   assert.equal(got.status, 200);

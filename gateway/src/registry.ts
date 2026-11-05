@@ -26,7 +26,7 @@ export type RegistryDeps = {
   readonly statsSource?: () => Promise<Stats[]>;
 };
 
-const SECONDS_FIELDS = ['idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds'] as const;
+const SECONDS_FIELDS = ['idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds', 'failure_window_seconds', 'restart_backoff_seconds'] as const;
 const DETAIL_DELIVERIES = 50;
 
 const log = emit;
@@ -41,7 +41,7 @@ function desiredState(app: App, manifest: Manifest | null, policy: Policy, bindi
 
 function parsePolicyPatch(raw: unknown, scope: 'global' | 'app'): Record<string, unknown> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new InputError('policy must be a JSON object');
-  const allowed: readonly string[] = [...SECONDS_FIELDS, 'db_backend', ...(scope === 'global' ? ['timezone'] : [])];
+  const allowed: readonly string[] = [...SECONDS_FIELDS, 'max_failures', 'db_backend', ...(scope === 'global' ? ['timezone'] : [])];
   for (const [key, value] of Object.entries(raw)) {
     if (!allowed.includes(key)) {
       const hint = key === 'timezone' ? 'timezone is global only; set it with PUT /api/policy' : `allowed: ${allowed.join(', ')}`;
@@ -50,6 +50,9 @@ function parsePolicyPatch(raw: unknown, scope: 'global' | 'app'): Record<string,
     if (value === null && scope === 'app') continue;
     if ((SECONDS_FIELDS as readonly string[]).includes(key) && !(Number.isInteger(value) && (value as number) > 0)) {
       throw new InputError(`${key} must be a positive integer number of seconds, got ${JSON.stringify(value)}`);
+    }
+    if (key === 'max_failures' && !(Number.isInteger(value) && (value as number) > 0)) {
+      throw new InputError(`max_failures must be a positive integer, got ${JSON.stringify(value)}`);
     }
     if (key === 'db_backend' && !(CAPABILITIES.db.providers as readonly unknown[]).includes(value)) {
       throw new InputError(`db_backend must be one of ${CAPABILITIES.db.providers.join(', ')}, got ${JSON.stringify(value)}`);
@@ -353,6 +356,7 @@ export class PlatformRegistry implements Registry {
         instance: this.#runtime.state(app.id),
         stats: stats.find((s) => s.app === app.id) ?? { app: app.id, requests: 0, errors: 0, lastAccessAt: null },
         deliveries: await tx.deliveries({ app: app.id, limit: DETAIL_DELIVERIES }),
+        quarantine: this.#guard.quarantine(app.id),
       };
     });
   }
@@ -441,8 +445,10 @@ export class PlatformRegistry implements Registry {
         owner: app.owner,
         release: release?.number ?? null,
         image: release?.image ?? null,
+        runtime: release?.runtime ?? null,
         kinds: new Set(release ? declaredKinds(release.manifest) : []),
-        bundle: (release?.bundle && this.#indexes.get(release.bundle)) || null,
+        bundle: (release?.manifest.capabilities.static && release.bundle && this.#indexes.get(release.bundle)) || null,
+        staticRoot: release?.runtime === 'isolate' && release.manifest.capabilities.static ? `${release.manifest.capabilities.static.dir}/` : '',
         identity: release?.manifest.capabilities.identity ?? null,
         policyOverride: Object.freeze({ ...app.policyOverride }),
       });

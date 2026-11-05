@@ -2,11 +2,11 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { pipeline } from 'node:stream';
 import type { BundleIndex, BundleStore, ByteRange } from './model.ts';
 
-/** The bundle file a request path names, with a directory meaning its index.html; null when the bundle has none. */
-export function staticPath(index: BundleIndex, rest: string): string | null {
+/** The bundle file a request path names under `root`, with a directory meaning its index.html; null when the bundle has none. */
+export function staticPath(index: BundleIndex, rest: string, root = ''): string | null {
   let path: string;
   try {
-    path = decodeURIComponent(rest.slice(1));
+    path = root + decodeURIComponent(rest.slice(1));
   } catch {
     return null;
   }
