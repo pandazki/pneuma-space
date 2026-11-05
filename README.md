@@ -24,6 +24,8 @@ node ../cli/appctl.ts publish myapp . --owner user:me
 open http://127.0.0.1:8080/apps/myapp/
 ```
 
+Examples built on the same scaffold, and how to publish them, are in [`examples/`](examples/README.md).
+
 `appctl publish <name> <dir>` reads the manifest, builds the image with Docker when the app needs a container, uploads the static directory when the manifest declares `static`, and registers the release. Publishing the same inputs again changes nothing; a new image or manifest makes a new release and keeps every volume, database, key prefix and bucket.
 
 Other commands: `list`, `show <name>`, `logs <name>` (the app container's recent output), `remove <name>` (address returns 404, data kept), `purge <name>` (deletes data, only after remove), `policy [<name>] key=value` (idle, ready, drain, connection-idle and trigger timeouts, `db_backend`, global `timezone`), `owner <name> <subject>`, `token create <name>` (a service token for invoking triggers from outside). `PNEUMA_SPACE_ADMIN` points the CLI at another admin port.

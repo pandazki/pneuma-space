@@ -1,6 +1,6 @@
 # PneumaSpace app template
 
-You are building a web app for PneumaSpace. The app is one container behind the address `/apps/<name>/`. The platform starts it on the first request, stops it when idle, and provides the infrastructure the app declares in `pneuma-space.json`. This file, `src/server.ts` and `sdk/` are all you need. The full contract is `docs/app-contract.md` in the PneumaSpace repository.
+You are building a web app for PneumaSpace. The app is one container behind the address `/apps/<name>/`. The platform starts it on the first request, stops it when idle, and provides the infrastructure the app declares in `pneuma-space.json`. This file, `src/server.ts`, `ui/` and `sdk/` are all you need. The default `src/server.ts` greets the visitor by name, or offers a sign-in link, in a finished page. The full contract is `docs/app-contract.md` in the PneumaSpace repository.
 
 ## Start
 
@@ -43,6 +43,22 @@ Plain TypeScript in `sdk/`, run by Node 24 with no build step. A helper whose ca
 | `iceServers(userId, ttlSeconds)` | `rtc.ts` | `RTCPeerConnection` `iceServers` with a short-lived TURN credential |
 | `env()`, `need(kind)` | `env.ts` | The `PNEUMA_SPACE_*` variables as a typed object; `need('files').dir` is the `/data` path, so a file a trigger wrote there is served by reading it from that directory |
 
+## UI
+
+`ui/` gives every page the PneumaSpace look, light and dark themes, and Chinese and English, with no CSS of your own.
+
+| Call | File | What it does |
+| --- | --- | --- |
+| `page({prefix, lang, dict, title, body, head?, nav?, badge?})` | `page.ts` | The whole HTML document: frame, title, language and theme switches, footer. `body` is inserted as given, so wrap every value in `esc()`. `head` adds tags, such as your own `public/` script with `defer`; `nav` is `[{href, label, current?}]`; `badge: 'example'` shows the example-site badge, so drop it in a real app |
+| `switchLang(ctx)` | `i18n.ts` | Answers `?lang=zh` or `?lang=en` by setting the `lang` cookie for your address and redirecting to the same path; call it first and return when it returns `true` |
+| `pickLang(req)` | `i18n.ts` | `zh` or `en` from the cookie, else `Accept-Language` |
+| `translate(dict, lang)` | `i18n.ts` | `t(key, {name})` fills `{name}`; throws when a key is missing from either language |
+| `window.ui` | `public/ui.js` | In the browser: `t`, `lang`, `prefix`, `theme`, `setTheme`, `setLang` over the same page's dictionary |
+
+- Every visible string, on the server and in the browser, is a key in one `dict = {en: {...}, zh: {...}}`.
+- Content goes in `<section><header><h2>Title</h2><p>One line</p></header>...</section>`; sections are numbered for you. Classes: `card`, `inset`, `row`, `primary` and `danger` on buttons (`btn` makes a link a button), `chip`, `status green|orange|red`, `num`, `empty`.
+- Keep `public/ui.css`, `public/ui.js` and `static` in the manifest: the platform serves them without waking the app. Put your own browser files next to them.
+
 ## Rules
 
 - Keep state only in `/data`, the database, the KV store or the bucket. Memory and the container filesystem are lost when the app sleeps and on every release.
@@ -64,8 +80,10 @@ docker run -d --name dev-redis -p 127.0.0.1:6379:6379 redis:7-alpine   # only wi
 PNEUMA_SPACE_APP=dev PNEUMA_SPACE_RELEASE=0 PNEUMA_SPACE_FILES_DIR=./data PNEUMA_SPACE_DB_URL=sqlite://$PWD/data/app.sqlite3 \
   PNEUMA_SPACE_KV_URL=redis://127.0.0.1:6379 PNEUMA_SPACE_KV_PREFIX=dev: node src/server.ts
 curl -H 'X-Forwarded-Prefix: /apps/dev' -H 'X-Pneuma-Space-Subject: user:ann' -H 'X-Pneuma-Space-Name: Ann' -H 'X-Pneuma-Space-Owner: 1' http://127.0.0.1:8000/
-curl -X POST -H 'X-Pneuma-Space-Delivery: d1' -H 'X-Pneuma-Space-Attempt: 1' http://127.0.0.1:8000/_pneuma-space/trigger/tick
+curl -X POST -H 'X-Pneuma-Space-Delivery: d1' -H 'X-Pneuma-Space-Attempt: 1' http://127.0.0.1:8000/_pneuma-space/trigger/tick   # with a trigger named tick
 ```
+
+Locally nothing serves `public/`, so pages arrive without `ui.css` and `ui.js`; publish to see them styled.
 
 Set only the variables of capabilities you declare; without `kv`, skip Redis and `PNEUMA_SPACE_KV_*`. Locally `identity` is `null` unless you send `X-Pneuma-Space-Subject`; on the platform a declared `identity` guarantees one unless it says `"required": false`. For the PostgreSQL path run `docker run -d --name dev-pg -p 127.0.0.1:5432:5432 -e POSTGRES_PASSWORD=pw postgres:16-alpine` and use `PNEUMA_SPACE_DB_URL=postgresql://postgres:pw@127.0.0.1:5432/postgres`. `docker build .` checks the image. Unused `sdk/*` files and their tests may be deleted. If the published app answers 502 "did not start", `appctl logs <name>` shows the container's output, and the local run above shows the same startup error.
 
@@ -86,7 +104,7 @@ curl -b alice.jar $ORIGIN/apps/<name>/
 
 ## Scenario: company survey (`files`, `db`, `identity`, `cron`)
 
-1. In `pneuma-space.json` keep `files`, `db`, `identity` and `cron` with one trigger `{"export": {"schedule": "0 2 * * *"}}`; delete `kv` and `ws`, the room code in `src/server.ts`, and `public/app.js`. Replace the `form`/`input` rules in `public/style.css`, which are laid out for one text field.
+1. In `pneuma-space.json` add `files`, `db` and `cron` with one trigger `{"export": {"schedule": "0 2 * * *"}}`, and make `identity` `{}`.
 2. In `src/server.ts` create `answer (subject TEXT PRIMARY KEY, q1 TEXT, q2 TEXT, q3 TEXT, submitted_at TEXT)`, one column per question.
 3. `GET /` renders the questions, prefilled from `SELECT q1, q2, q3 FROM answer WHERE subject = ?` with `identity.subject`.
 4. `POST /answer` reads the form with `body(req)` and upserts with `ON CONFLICT (subject) DO UPDATE SET q1 = excluded.q1, q2 = excluded.q2, q3 = excluded.q3`, so each person has one answer and can edit it.
@@ -98,24 +116,23 @@ curl -b alice.jar $ORIGIN/apps/<name>/
 
 ## Scenario: two-player board game (`kv`, `ws`, `identity`, optional `rtc`)
 
-1. In `pneuma-space.json` keep `kv`, `ws` and `identity`; delete `files`, `db` and `cron`.
+1. In `pneuma-space.json` add `kv` and `ws`, and make `identity` `{}`.
 2. `POST /new` creates `id = randomUUID()`, stores `{board: '.........', turn: 'X', players: []}` at `kv.key('game:' + id)` and redirects to `${prefix}/g/${id}`.
 3. `GET /g/<id>` serves the board page; `public/game.js` opens `${prefix}/g/<id>/live`.
 4. In `ws(server, ...)`, parse the id from `socket.url.pathname`, seat `socket.identity.subject` as X or O if a seat is free (a third subject is a spectator; the same subject in two tabs keeps one seat), and keep sockets in a `Map<id, Set<Socket>>`.
 5. On a move message, load the game from KV, check it is that subject's turn and the cell is empty, apply it, check for a winner, save it with a compare-and-set (`redis.eval` or `WATCH`), then `kv.publish('game:' + id, json)`.
-6. Subscribe once per game id (remember which ids you subscribed) and send each published state to the local sockets, as the template's room does, so it works with one container or many. A bot plays through a normal route with a service token, which answers synchronously; a trigger only returns 202.
+6. Subscribe once per game id (remember which ids you subscribed) and send each published state to the local sockets, as `examples/chat` in the PneumaSpace repository does, so it works with one container or many. A bot plays through a normal route with a service token, which answers synchronously; a trigger only returns 202.
 7. On connect and on reconnect after close code 1001, send the stored state; the server never keeps the game in memory.
 8. For voice or a direct data channel, add `rtc`, serve `GET /ice` with `iceServers(identity.subject, 3600)`, and relay offer, answer and candidates over the same WebSocket.
 9. Test with two browsers or two curl subjects, then publish.
 
 ## Scenario: personal dashboard widget (`cron`, `db`, `static`, `identity`)
 
-1. In `pneuma-space.json` declare `db`, `static` with `{"dir": "public"}`, `cron` with `{"refresh": {"schedule": "0 * * * *"}}` and `identity` with `{"required": false}`, so the card is public and the owner still gets `identity.owner`. Every delivery wakes the app, so a minute schedule keeps it awake most of the time.
-2. Delete the asset handler in `src/server.ts`; the platform now serves `public/` without waking the app.
-3. `public/card.html` and `public/card.js` render the card; `card.js` fetches `${prefix}/api/card`. Do not add `public/index.html` if `GET /` is dynamic.
-4. Create `reading (slot TEXT PRIMARY KEY, value TEXT, fetched_at TEXT)`.
-5. Trigger `refresh` computes the numbers (from the database, or from a `fetch()` of an external source) and upserts one row with slot `latest` and `ON CONFLICT (slot) DO UPDATE`; an append-only history uses slot `delivery.scheduledFor ?? delivery.id` and `DO NOTHING` instead.
-6. `GET /api/card` returns the latest row as JSON with `cache-control: max-age=60`.
-7. Test the trigger with curl twice with the same `X-Pneuma-Space-Delivery` and check one row.
-8. Publish, then embed `/apps/<name>/card.html` in the dashboard.
-9. Refresh on demand with a service token: `POST /apps/<name>/_pneuma-space/trigger/refresh`.
+1. In `pneuma-space.json` add `db` and `cron` with `{"refresh": {"schedule": "0 * * * *"}}`; keep `identity` `{"required": false}`, so the card is public and the owner still gets `identity.owner`. Every delivery wakes the app, so a minute schedule keeps it awake most of the time.
+2. `public/card.html` and `public/card.js` render the card; `card.js` fetches `${prefix}/api/card`. Do not add `public/index.html` if `GET /` is dynamic.
+3. Create `reading (slot TEXT PRIMARY KEY, value TEXT, fetched_at TEXT)`.
+4. Trigger `refresh` computes the numbers (from the database, or from a `fetch()` of an external source) and upserts one row with slot `latest` and `ON CONFLICT (slot) DO UPDATE`; an append-only history uses slot `delivery.scheduledFor ?? delivery.id` and `DO NOTHING` instead.
+5. `GET /api/card` returns the latest row as JSON with `cache-control: max-age=60`.
+6. Test the trigger with curl twice with the same `X-Pneuma-Space-Delivery` and check one row.
+7. Publish, then embed `/apps/<name>/card.html` in the dashboard.
+8. Refresh on demand with a service token: `POST /apps/<name>/_pneuma-space/trigger/refresh`.
