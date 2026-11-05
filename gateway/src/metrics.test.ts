@@ -55,3 +55,9 @@ test('the events ring keeps the last 100, newest last', () => {
   assert.equal(ring.length, 100);
   assert.equal(ring.at(-1)!.n, 119);
 });
+
+test('each event carries a seq one above the previous', () => {
+  const { events, metrics } = fixture();
+  for (let i = 0; i < 3; i++) events.emit('delivery.due', app, { attempt: 0 });
+  assert.deepEqual(metrics.snapshot().events.map((e) => e.seq), [1, 2, 3]);
+});

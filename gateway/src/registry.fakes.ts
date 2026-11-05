@@ -76,6 +76,7 @@ export class FakeRuntime implements Runtime {
   state(): 'none' { return 'none'; }
   since(): null { return null; }
   leases() { return { request: 0, channel: 0, trigger: 0 }; }
+  sleepsAt(): null { return null; }
   async runJob(): Promise<never> { throw new Error('not used'); }
   async resolveImage(reference: string): Promise<ImageId | null> {
     this.calls.push(`resolveImage ${reference}`);
