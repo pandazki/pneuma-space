@@ -534,6 +534,7 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .topo-svg.picking [data-id="admin"], .topo-svg.picking [data-id="operator"] { opacity: .2; }
 .topo-tools { align-items: center; font-size: 12.5px; }
 .topo-tools .muted { font-size: 12px; }
+.topo-view { justify-content: flex-end; }
 .pickbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; font-size: 12.5px; }
 .pickbar:empty { display: none; }
 .faults { display: grid; gap: 0; padding: 0; margin-bottom: 12px; box-shadow: 0 0 0 1px var(--red), var(--shadow-sm); }
@@ -702,7 +703,7 @@ const I18N = {
     'tp.sec.laneDesc': '每个已注册应用在它的运行时泳道里；泳道到服务的边标出声明该能力的应用数。',
     'tp.sec.graph': '每个应用的连线',
     'tp.sec.graphDesc': '应用经过的网关阶段、声明的能力和能力背后的服务；点一个节点只看它的路径。',
-    'tp.laneHint': '点应用打开详情，点泳道标题看这个运行时怎么跑。',
+    'tp.laneHint': '每条泳道最多画 {n} 个应用，醒着的和最近访问的优先。点应用打开详情，点泳道标题看这个运行时怎么跑。',
     'tp.graphHint': '默认画最近访问的 {n} 个应用。',
     'tp.col.callers': '调用方',
     'tp.col.gateway': '网关',
@@ -724,6 +725,7 @@ const I18N = {
     'tp.explain': '怎么跑',
     'tp.explainFor': '{kind} 运行时说明',
     'tp.noApps': '没有应用',
+    'tp.more': '+{n}', 'tp.moreTitle': '还有 {n} 个应用没画出来；项目页列出全部',
     'tp.svcOff': '{name} 未启用',
     'tp.unreachableShort': '不可达',
     'tp.lift': '解除隔离',
@@ -881,7 +883,7 @@ const I18N = {
     'tp.sec.laneDesc': 'Every registered app sits in the lane of its runtime; an edge to a service counts the apps declaring that capability.',
     'tp.sec.graph': 'Every app’s edges',
     'tp.sec.graphDesc': 'The gateway stages an app passes, the capabilities it declares and the services behind them; pick a node to read its path.',
-    'tp.laneHint': 'Click an app to open it, a lane title to see how that runtime works.',
+    'tp.laneHint': 'Each lane draws at most {n} apps, awake and recently accessed first. Click an app to open it, a lane title to see how that runtime works.',
     'tp.graphHint': 'Draws the {n} most recently accessed apps.',
     'tp.col.callers': 'callers',
     'tp.col.gateway': 'gateway',
@@ -903,6 +905,7 @@ const I18N = {
     'tp.explain': 'How it runs',
     'tp.explainFor': 'How the {kind} runtime works',
     'tp.noApps': 'No apps',
+    'tp.more': '+{n}', 'tp.moreTitle': '{n} more apps not drawn; the Projects page lists them all',
     'tp.svcOff': '{name} is off',
     'tp.unreachableShort': 'unreachable',
     'tp.lift': 'Unquarantine',
@@ -2612,12 +2615,21 @@ const STAGES = ['ingress', 'identity', 'static', 'wake'];
 /** The compose service and profile behind each probed service; the runner's profile comes from /api/health. */
 const COMPOSE = { redis: ['redis', null], object: ['rustfs', null], postgres: ['postgres', 'postgres'], coturn: ['coturn', 'rtc'], runner: ['runner', 'isolate'] };
 const GRAPH_CAP = 24;
+const LANE_CAP = 12;
 const FLOWS_PER_APP = 3;
 const MAX_PARTICLES = 12;
 
 /** The runtime lane an app runs in; null while it has no release (a first publish that has not finished). */
 const laneOf = (a) => (a.release == null ? null : a.runtime ?? 'static');
 const groupOf = (a) => laneOf(a) ?? 'unpublished';
+
+/** The apps a lane draws: awake and transitional first, then quarantined, then by last access; the rest fold into one +N chip. */
+const ACTIVE_STATES = new Set(['awake', 'waking', 'draining', 'stopping']);
+const laneRank = (a) => (ACTIVE_STATES.has(a.instance) ? 0 : a.quarantine ? 1 : 2);
+const laneShown = (apps) => [...apps]
+  .sort((a, b) => laneRank(a) - laneRank(b) || (b.lastAccessAt ?? 0) - (a.lastAccessAt ?? 0) || a.name.localeCompare(b.name))
+  .slice(0, LANE_CAP)
+  .sort((a, b) => a.name.localeCompare(b.name));
 
 /** Each declared capability as its graph node and the service it rests on; null rests inside the gateway. */
 function needs(a) {
@@ -2754,7 +2766,7 @@ function serviceNode(model, name, x, y, w, hgt, label = t(`svc.${name}`)) {
 
 // Lane view: callers, the gateway, one lane per runtime, the platform services.
 
-function laneScene(model, width, on) {
+function laneScene(model, width, shown, on) {
   const W = Math.max(1040, width);
   const top = 44;
   const gx = 160, gw = 236, sw = 196, sx = W - 16 - sw;
@@ -2774,15 +2786,27 @@ function laneScene(model, width, on) {
   nodes.append(head(16, t('tp.col.callers')), head(gx, t('tp.col.gateway')), head(lx, t('tp.col.runtimes')), head(sx, t('tp.col.services')));
 
   const byLane = Object.fromEntries(LANES.map((l) => [l, model.apps.filter((a) => laneOf(a) === l)]));
+  const drawable = Object.fromEntries(LANES.map((l) => [l, shown.filter((a) => laneOf(a) === l)]));
   const laneBoxes = {};
   let y = top;
   for (const lane of LANES) {
-    const apps = byLane[lane];
+    const all = byLane[lane];
+    const apps = laneShown(drawable[lane]);
+    const hidden = all.length - apps.length;
     const down = laneDown(model, lane);
     const g = svg('g', { class: `lane${down ? ' fault' : ''}`, 'data-id': `lane:${lane}` });
     const inner = lx + 14, innerW = lw - 28;
     const placed = flowChips(apps, inner, innerW, y + 44);
-    const chipsBottom = apps.length ? placed.at(-1).y + 22 : y + 44 + 20;
+    const more = hidden ? (() => {
+      const label = t('tp.more', { n: nf(hidden) });
+      const w = textWidth(label, 11.5, true) + 20;
+      const last = placed.at(-1);
+      if (!last) return { label, w, x: inner, y: y + 44 };
+      const fits = last.x + last.w + 6 + w <= inner + innerW;
+      return { label, w, x: fits ? last.x + last.w + 6 : inner, y: fits ? last.y : last.y + 30 };
+    })() : null;
+    const lastChip = more ?? placed.at(-1);
+    const chipsBottom = lastChip ? lastChip.y + 22 : y + 44 + 20;
     const quarantined = apps.filter((a) => a.quarantine);
     const qTop = chipsBottom + 10;
     const stripY = qTop + quarantined.length * 46 + (quarantined.length ? 2 : 0);
@@ -2791,7 +2815,7 @@ function laneScene(model, width, on) {
     if (down) g.append(svg('rect', { x: lx, y, width: lw, height: lh, rx: 14, class: 'downwash' }));
     const explainText = `${t('tp.explain')} →`;
     const explainW = textWidth(explainText, 12, false, 500);
-    const countText = down ? t('tp.unreachableShort') : plural('tp.apps', apps.length);
+    const countText = down ? t('tp.unreachableShort') : plural('tp.apps', all.length);
     const countW = textWidth(countText, 11.5, !down);
     const nameW = textWidth(lane, 13, false, 600);
     g.append(act(svg('g', { class: 'lanet' },
@@ -2800,8 +2824,14 @@ function laneScene(model, width, on) {
       textWidth(t(`tp.lane.${lane}.sub`), 11.5) <= lw - 28 - nameW - 8 - explainW - countW - 36 ? tx(lx + 22 + nameW, y + 24, t(`tp.lane.${lane}.sub`), 't3 small') : null,
       tx(lx + lw - 14, y + 24, explainText, 'linkt', { 'text-anchor': 'end' })), t('tp.explainFor', { kind: lane }), () => on.explain(lane), `lane:${lane}`),
       tx(lx + lw - 26 - explainW, y + 24, countText, down ? 'bad small' : 't3 small m', { 'text-anchor': 'end' }));
-    if (!apps.length) g.append(tx(inner, y + 59, t('tp.noApps'), 't3 small'));
+    if (!apps.length && !more) g.append(tx(inner, y + 59, t('tp.noApps'), 't3 small'));
     for (const p of placed) g.append(chip(p));
+    if (more) {
+      const title = t('tp.moreTitle', { n: nf(hidden), cap: nf(LANE_CAP) });
+      g.append(act(titled(svg('g', { class: 'chipg', 'data-state': 'more' },
+        svg('rect', { x: more.x, y: more.y, width: more.w, height: 22, rx: 6, class: 'chipr' }),
+        tx(more.x + more.w / 2, more.y + 15, more.label, 'm chipt', { 'text-anchor': 'middle' })), title), title, () => { location.hash = '#/apps'; }, `more:${lane}`));
+    }
     quarantined.forEach((a, i) => {
       const qy = qTop + i * 46;
       const button = pillButton(0, qy, t('tp.lift'), () => on.lift(a.name), `lift:${a.name}`, 'danger');
@@ -2816,7 +2846,7 @@ function laneScene(model, width, on) {
         titled(tx(inner + 21, qy + 32, fit(a.quarantine.reason, 11, false, innerW - 44 - textWidth(meta, 11.5, true)), 'small t2'), a.quarantine.reason)), button.el);
     });
     const kept = lane === 'static' ? t('tp.keep.static') : [t(`tp.keep.${lane}`), ...['files', 'db:sqlite'].map((cap) => {
-      const n = apps.filter((a) => needs(a).some((x) => x.cap === cap)).length;
+      const n = all.filter((a) => needs(a).some((x) => x.cap === cap)).length;
       return n ? `${cap === 'files' ? 'files' : 'sqlite'} ${n}` : null;
     })].filter(Boolean).join(' · ');
     const engine = t(`tp.engine.${lane}`);
@@ -2825,7 +2855,7 @@ function laneScene(model, width, on) {
       tx(inner + 10, stripY + 19, engine, 't2 small strong'),
       tx(inner + innerW - 10, stripY + 19, fit(kept, 11, true, innerW - engineW - 20), 'm t3 small', { 'text-anchor': 'end' }));
     nodes.append(g);
-    laneBoxes[lane] = { y, h: lh, apps };
+    laneBoxes[lane] = { y, h: lh, apps: all };
     y += lh + 16;
   }
   const unpublished = model.apps.filter((a) => laneOf(a) === null);
@@ -3178,18 +3208,19 @@ function topology() {
   const live = () => ({ ...model, apps: model.apps.filter((a) => a.status === 'registered') });
   const filterInput = h('input', { type: 'search', placeholder: t('apps.filter'), 'aria-label': t('apps.filter'), oninput: () => { filter = filterInput.value.trim().toLowerCase(); paint(); } });
   const tools = h('div', { class: 'toolbar topo-tools' });
+  const viewRow = h('div', { class: 'toolbar topo-view' });
   const secHead = h('div');
   const renderChrome = () => {
     const graph = topoView === 'graph';
-    fill(secHead, sectionHead(1, graph ? 'tp.sec.graph' : 'tp.sec.lane', graph ? 'tp.sec.graphDesc' : 'tp.sec.laneDesc',
-      segmented([['lane', t('tp.view.lane')], ['graph', t('tp.view.graph')]], topoView, (v) => {
-        topoView = v;
-        store.set('pneuma-space-topology', v);
-        selection = null;
-        renderChrome();
-        paint();
-      }, t('tp.view'))));
-    fill(tools, graph ? [filterInput, h('span', { class: 'muted' }, t('tp.graphHint', { n: GRAPH_CAP }))] : h('span', { class: 'muted' }, t('tp.laneHint')));
+    fill(secHead, sectionHead(1, graph ? 'tp.sec.graph' : 'tp.sec.lane', graph ? 'tp.sec.graphDesc' : 'tp.sec.laneDesc'));
+    fill(tools, [filterInput, h('span', { class: 'muted' }, graph ? t('tp.graphHint', { n: GRAPH_CAP }) : t('tp.laneHint', { n: LANE_CAP }))]);
+    fill(viewRow, segmented([['lane', t('tp.view.lane')], ['graph', t('tp.view.graph')]], topoView, (v) => {
+      topoView = v;
+      store.set('pneuma-space-topology', v);
+      selection = null;
+      renderChrome();
+      paint();
+    }, t('tp.view')));
   };
   renderChrome();
 
@@ -3262,10 +3293,10 @@ function topology() {
     }
     const registered = local.apps;
     const width = sceneBox.clientWidth - 24;
-    let shown = registered;
+    const matching = registered.filter((a) => !filter || a.name.includes(filter));
+    let shown = matching;
     const hidden = {};
     if (topoView === 'graph') {
-      const matching = registered.filter((a) => !filter || a.name.includes(filter));
       shown = [...matching].sort((a, b) => (b.lastAccessAt ?? 0) - (a.lastAccessAt ?? 0) || a.name.localeCompare(b.name)).slice(0, GRAPH_CAP).sort((a, b) => a.name.localeCompare(b.name));
       for (const a of registered) if (!shown.includes(a)) hidden[groupOf(a)] = (hidden[groupOf(a)] ?? 0) + 1;
     }
@@ -3275,7 +3306,7 @@ function topology() {
       painted = signature;
       const focused = sceneBox.contains(document.activeElement) ? document.activeElement.dataset.key : null;
       const old = scene?.el;
-      scene = topoView === 'graph' ? graphScene(local, width, shown, hidden, on) : laneScene(local, width, on);
+      scene = topoView === 'graph' ? graphScene(local, width, shown, hidden, on) : laneScene(local, width, shown, on);
       sceneBox.prepend(scene.el);
       if (old) retire(old);
       if (focused) {
@@ -3293,7 +3324,7 @@ function topology() {
 
   show(
     h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('tp.title')), h('p', { class: 'sub' }, t('tp.sub'))), header.el),
-    h('section', { class: 'topo-sec' }, secHead, banner, tools, pickBar, errBox, sceneBox, panel),
+    h('section', { class: 'topo-sec' }, secHead, banner, tools, viewRow, pickBar, errBox, sceneBox, panel),
   );
 
   const loadApps = async () => {
