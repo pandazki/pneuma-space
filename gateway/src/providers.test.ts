@@ -31,17 +31,15 @@ function exec(service: string, argv: readonly string[], stdin = ''): Promise<Job
 }
 
 const docker = (...args: string[]) => execFileSync('docker', args, { encoding: 'utf8' });
-const runtime = {
-  runJob: (job: { service: string; argv: readonly string[]; stdin?: string }) => exec(job.service, job.argv, job.stdin),
-  ensureVolume: async (name: string) => void docker('volume', 'create', name),
-  removeVolume: async (name: string) => void docker('volume', 'rm', '-f', name),
-};
+const infra = { runJob: (job: { service: string; argv: readonly string[]; stdin?: string }) => exec(job.service, job.argv, job.stdin) };
+const destroyed: string[] = [];
+const storage = { destroyStorage: async (_app: string, id: string) => void destroyed.push(id) };
 const config = providerConfig({
   PNEUMA_SPACE_OBJECT_ENDPOINT: `http://127.0.0.1:${objectPort}`,
   PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT: `http://127.0.0.1:${objectPort}`,
   PNEUMA_SPACE_RTC_SECRET: 'pneuma-local-rtc',
 });
-const providers = createProviders(runtime, config, async () => true);
+const providers = createProviders(infra, storage, config, async () => true);
 
 async function until(probe: () => Promise<boolean>, what: string): Promise<void> {
   for (let i = 0; i < 100; i++) {
@@ -70,21 +68,20 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
   for (const [name, kind, prefix] of [['volume', 'files', 'pneuma-space-files-'], ['sqlite', 'db', 'pneuma-space-db-']] as const) {
     describe(name, () => {
       const app = newAppId();
-      const volumes = () => docker('volume', 'ls', '-q', '--filter', `name=^${prefix}${app}$`).split('\n').filter(Boolean);
+      const target = name === 'volume' ? '/data' : '/pneuma/db';
 
-      test('ensure twice leaves one volume and inject mounts it', async () => {
+      test('ensure twice records the same storage and inject binds it with {dir} templates', async () => {
         const resource = await providers[name].ensure(app, null);
         assert.deepEqual(await providers[name].ensure(app, resource), resource);
-        assert.equal(volumes().length, 1);
-        const injection = providers[name].inject(app, resource);
-        assertEnvNames(kind, injection);
-        assert.deepEqual(injection.mounts, [{ volume: `${prefix}${app}`, target: name === 'volume' ? '/data' : '/pneuma/db' }]);
+        const [binding, ...rest] = providers[name].inject(app, resource).storage;
+        assert.deepEqual([binding.id, binding.target, rest.length], [`${prefix}${app}`, target, 0]);
+        assertEnvNames(kind, { env: binding.env, storage: [] });
+        assert.ok(Object.values(binding.env).every((value) => value.includes('{dir}')));
       });
 
-      test('destroy twice removes the volume', async () => {
+      test('destroy hands the storage id to the runtime', async () => {
         await providers[name].destroy(app, {});
-        await providers[name].destroy(app, {});
-        assert.equal(volumes().length, 0);
+        assert.equal(destroyed.at(-1), `${prefix}${app}`);
       });
     });
   }
@@ -265,7 +262,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
     });
 
     test('ensure refuses an empty secret', async () => {
-      const unset = createProviders(runtime, providerConfig({}), async () => true).coturn;
+      const unset = createProviders(infra, storage, providerConfig({}), async () => true).coturn;
       await assert.rejects(unset.ensure(app, null), Conflict);
     });
 
@@ -320,7 +317,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
     const probe = () => {
       const script = `
         import { createProviders, providerConfig } from '/src/providers.ts';
-        const p = createProviders({ runJob: async () => ({ exitCode: 0, stdout: '', stderr: '' }) }, providerConfig({ PNEUMA_SPACE_RTC_SECRET: 's' }));
+        const p = createProviders({ runJob: async () => ({ exitCode: 0, stdout: '', stderr: '' }) }, { destroyStorage: async () => {} }, providerConfig({ PNEUMA_SPACE_RTC_SECRET: 's' }));
         for (const name of ['postgres', 'coturn']) {
           const t = Date.now();
           const outcome = await p[name].ensure('${newAppId()}', null).then(() => 'up', (e) => e.constructor.name);

@@ -2,9 +2,9 @@ import { argon2Sync, createCipheriv, createHash, createHmac, randomBytes } from 
 import { promises as dns } from 'node:dns';
 import { Readable } from 'node:stream';
 import {
-  CAPABILITIES, Conflict, FILES_DIR, InputError, NotFound, RESERVED_SEGMENT,
+  CAPABILITIES, Conflict, FILES_DIR, InputError, NotFound, RESERVED_SEGMENT, RUNTIMES,
   type AppId, type BundleFile, type BundleId, type BundleIndex, type BundleStore, type ByteRange, type CapabilityProvider,
-  type InfraService, type Injection, type ProviderName, type Resource, type ResourceKind, type Runtime,
+  type Infra, type InfraService, type Injection, type ProviderName, type Resource, type ResourceKind, type Runtime, type RuntimeKind,
 } from './model.ts';
 
 export type Credential = { readonly accessKey: string; readonly secretKey: string };
@@ -32,9 +32,10 @@ export function providerConfig(env: Readonly<Record<string, string | undefined>>
   };
 }
 
-type ProviderRuntime = Pick<Runtime, 'runJob' | 'ensureVolume' | 'removeVolume'>;
+type ProviderInfra = Pick<Infra, 'runJob'>;
+type Storage = Pick<Runtime, 'destroyStorage'>;
 /** True when a profiled Compose service is on the network. */
-export type ServiceProbe = (service: 'postgres' | 'coturn') => Promise<boolean>;
+export type ServiceProbe = (service: 'postgres' | 'coturn' | NonNullable<(typeof RUNTIMES)[RuntimeKind]['service']>) => Promise<boolean>;
 
 // Docker's resolver forwards unknown names upstream and waits about 5 s; a 500 ms single try answers within 1 s (spike S2).
 const resolver = new dns.Resolver({ timeout: 500, tries: 1 });
@@ -46,62 +47,61 @@ async function requireService(probe: ServiceProbe, service: 'postgres' | 'coturn
   }
 }
 
-async function job(runtime: ProviderRuntime, service: InfraService, argv: readonly string[], stdin: string): Promise<string> {
-  const result = await runtime.runJob({ service, argv, stdin });
+async function job(infra: ProviderInfra, service: InfraService, argv: readonly string[], stdin: string): Promise<string> {
+  const result = await infra.runJob({ service, argv, stdin });
   if (result.exitCode !== 0) throw new Error(`${service} job ${argv[0]} exited ${result.exitCode}: ${result.stderr.trim()}`);
   return result.stdout;
 }
 
 const secret = () => randomBytes(24).toString('hex');
 
-class VolumeProvider implements CapabilityProvider {
+/** A persistent directory; the app's runtime realizes it when it creates the instance (ADR 0017). */
+class StorageProvider implements CapabilityProvider {
   readonly kind: ResourceKind;
   readonly name: ProviderName;
-  readonly #runtime: ProviderRuntime;
+  readonly #storage: Storage;
   readonly #prefix: string;
   readonly #target: string;
   readonly #env: Readonly<Record<string, string>>;
 
-  constructor(kind: ResourceKind, name: ProviderName, runtime: ProviderRuntime, prefix: string, target: string, env: Record<string, string>) {
+  constructor(kind: ResourceKind, name: ProviderName, storage: Storage, prefix: string, target: string, env: Record<string, string>) {
     this.kind = kind;
     this.name = name;
-    this.#runtime = runtime;
+    this.#storage = storage;
     this.#prefix = prefix;
     this.#target = target;
     this.#env = env;
   }
 
   async ensure(app: AppId): Promise<Resource> {
-    const volume = this.#prefix + app;
-    await this.#runtime.ensureVolume(volume);
-    return { volume };
+    return { id: this.#prefix + app, target: this.#target };
   }
 
   inject(app: AppId): Injection {
-    return { env: this.#env, mounts: [{ volume: this.#prefix + app, target: this.#target }] };
+    return { env: {}, storage: [{ id: this.#prefix + app, target: this.#target, env: this.#env }] };
   }
 
   async suspend(): Promise<void> {}
 
   async destroy(app: AppId): Promise<void> {
-    await this.#runtime.removeVolume(this.#prefix + app);
+    await this.#storage.destroyStorage(app, this.#prefix + app);
   }
 }
 
 class PostgresProvider implements CapabilityProvider {
   readonly kind = 'db';
   readonly name = 'postgres';
-  readonly #runtime: ProviderRuntime;
+  readonly #infra: ProviderInfra;
   readonly #probe: ServiceProbe;
 
-  constructor(runtime: ProviderRuntime, probe: ServiceProbe) {
-    this.#runtime = runtime;
+  constructor(infra: ProviderInfra, probe: ServiceProbe) {
+    this.#infra = infra;
     this.#probe = probe;
   }
 
   // CREATE DATABASE cannot run in a DO block, so both creates go through \gexec guards; psql reads them from stdin.
   #psql(sql: string): Promise<string> {
-    return job(this.#runtime, 'postgres', ['psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], sql);
+    return job(this.#infra, 'postgres', ['psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], sql);
   }
 
   async ensure(app: AppId, current: Resource | null): Promise<Resource> {
@@ -118,7 +118,7 @@ REVOKE CONNECT ON DATABASE ${role} FROM PUBLIC;
   }
 
   inject(_app: AppId, resource: Resource): Injection {
-    return { env: { PNEUMA_SPACE_DB_URL: `postgresql://${resource.role}:${resource.password}@postgres:5432/${resource.database}` }, mounts: [] };
+    return { env: { PNEUMA_SPACE_DB_URL: `postgresql://${resource.role}:${resource.password}@postgres:5432/${resource.database}` }, storage: [] };
   }
 
   async suspend(app: AppId): Promise<void> {
@@ -140,17 +140,17 @@ const UNLINK_PREFIX =
 class RedisProvider implements CapabilityProvider {
   readonly kind = 'kv';
   readonly name = 'redis';
-  readonly #runtime: ProviderRuntime;
+  readonly #infra: ProviderInfra;
   readonly #password: string;
 
-  constructor(runtime: ProviderRuntime, password: string) {
-    this.#runtime = runtime;
+  constructor(infra: ProviderInfra, password: string) {
+    this.#infra = infra;
     this.#password = password;
   }
 
   // redis-cli exits 0 on error replies when reading stdin, and every command here answers OK or an integer.
   async #cli(...commands: string[]): Promise<void> {
-    const out = await job(this.#runtime, 'redis', ['redis-cli'], [`AUTH ${this.#password}`, ...commands, 'ACL SAVE', ''].join('\n'));
+    const out = await job(this.#infra, 'redis', ['redis-cli'], [`AUTH ${this.#password}`, ...commands, 'ACL SAVE', ''].join('\n'));
     const unexpected = out.split('\n').find((line) => line !== '' && !/^(OK|\d+)$/.test(line));
     if (unexpected !== undefined) throw new Error(`redis: ${unexpected}`);
   }
@@ -165,7 +165,7 @@ class RedisProvider implements CapabilityProvider {
   inject(_app: AppId, resource: Resource): Injection {
     return {
       env: { PNEUMA_SPACE_KV_URL: `redis://${resource.user}:${resource.password}@redis:6379`, PNEUMA_SPACE_KV_PREFIX: resource.prefix },
-      mounts: [],
+      storage: [],
     };
   }
 
@@ -209,7 +209,7 @@ class S3Provider implements CapabilityProvider {
         PNEUMA_SPACE_OBJECT_ACCESS_KEY: resource.accessKey,
         PNEUMA_SPACE_OBJECT_SECRET_KEY: resource.secretKey,
       },
-      mounts: [],
+      storage: [],
     };
   }
 
@@ -260,7 +260,7 @@ class CoturnProvider implements CapabilityProvider {
         PNEUMA_SPACE_RTC_TURN_URLS: `turn:${host}:3478?transport=udp`,
         PNEUMA_SPACE_RTC_TURN_SECRET: this.#config.rtcSecret,
       },
-      mounts: [],
+      storage: [],
     };
   }
 
@@ -270,12 +270,12 @@ class CoturnProvider implements CapabilityProvider {
 
 export type Providers = { readonly [N in ProviderName]: CapabilityProvider };
 
-export function createProviders(runtime: ProviderRuntime, config: ProviderConfig, probe: ServiceProbe = resolvesOnNetwork): Providers {
+export function createProviders(infra: ProviderInfra, storage: Storage, config: ProviderConfig, probe: ServiceProbe = resolvesOnNetwork): Providers {
   const providers: Providers = {
-    volume: new VolumeProvider('files', 'volume', runtime, 'pneuma-space-files-', FILES_DIR, { PNEUMA_SPACE_FILES_DIR: FILES_DIR }),
-    sqlite: new VolumeProvider('db', 'sqlite', runtime, 'pneuma-space-db-', '/pneuma/db', { PNEUMA_SPACE_DB_URL: 'sqlite:///pneuma/db/app.sqlite3' }),
-    postgres: new PostgresProvider(runtime, probe),
-    redis: new RedisProvider(runtime, config.redisPassword),
+    volume: new StorageProvider('files', 'volume', storage, 'pneuma-space-files-', FILES_DIR, { PNEUMA_SPACE_FILES_DIR: '{dir}' }),
+    sqlite: new StorageProvider('db', 'sqlite', storage, 'pneuma-space-db-', '/pneuma/db', { PNEUMA_SPACE_DB_URL: 'sqlite://{dir}/app.sqlite3' }),
+    postgres: new PostgresProvider(infra, probe),
+    redis: new RedisProvider(infra, config.redisPassword),
     s3: new S3Provider(config.object, config.objectPublicEndpoint),
     coturn: new CoturnProvider(config, probe),
   };

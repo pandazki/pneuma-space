@@ -21,7 +21,7 @@ async function admin() {
     host: async () => ({ cpus: 1, load: [0, 0, 0], memory: { totalBytes: 1, freeBytes: 1 }, data: null }),
   });
   const requests = new RequestLog();
-  const server = await startAdmin({ registry, bundles: w.bundles, runtime: w.runtime, metrics, requests, ingressPort: 18080 }, { port: 0 });
+  const server = await startAdmin({ registry, bundles: w.bundles, runtime: w.runtime, guard: w.runtime, metrics, requests, ingressPort: 18080 }, { port: 0 });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
     const raw = typeof body === 'string' ? body : body === undefined ? undefined : JSON.stringify(body);
@@ -126,4 +126,14 @@ test('GET /api/requests answers the records after the cursor, named, without a D
   const reply = await call('GET', '/api/requests?after=1&limit=1');
   assert.deepEqual(reply.body.map((r: { seq: number; app: string; path: string }) => [r.seq, r.app, r.path]), [[2, 'survey', '/b']]);
   assert.deepEqual(w.runtime.calls, []);
+});
+
+test('POST /api/apps/<name>/unquarantine lifts the quarantine the listing shows', async (t) => {
+  const { call, server, store, w } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  w.runtime.quarantined.set((await store.app(appName('survey')))!.id, { reason: 'exit 1', since: 1, failures: 3 });
+  assert.equal((await call('GET', '/api/apps')).body[0].quarantine.failures, 3);
+  assert.deepEqual(await call('POST', '/api/apps/survey/unquarantine'), { status: 200, body: { quarantine: null } });
+  assert.equal((await call('GET', '/api/apps')).body[0].quarantine, null);
 });

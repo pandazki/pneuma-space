@@ -7,7 +7,10 @@ import { resolve } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { demux, Docker, type ContainerInfo } from './docker.ts';
-import { appName, DEFAULT_POLICY, newAppId, NotFound, type AppId, type ImageId, type Lease, type Policy, type ReleaseNumber, type RunSpec } from './model.ts';
+import { DockerInfra } from './infra.ts';
+import {
+  appName, DEFAULT_POLICY, newAppId, NotFound, type AppId, type ImageId, type Lease, type Policy, type ReleaseNumber, type RunSpec, type StorageBinding,
+} from './model.ts';
 import { DockerRuntime } from './runtime.ts';
 
 const SERVER = `if (process.env.FIXTURE_EXIT) process.exit(1);
@@ -77,14 +80,14 @@ function inner(image: ImageId, network: string): void {
   function fixture(t: TestContext, policy: Partial<Policy> = {}) {
     const app = newAppId();
     const specs = new Map<AppId, RunSpec>();
-    const publish = (release: number, env: Record<string, string> = {}, id: AppId = app) => specs.set(id, {
-      app: id, name: appName('fixture'), release: release as ReleaseNumber, image, injection: { env, mounts: [] }, policy: { ...DEFAULT_POLICY, ...policy },
+    const publish = (release: number, env: Record<string, string> = {}, id: AppId = app, storage: StorageBinding[] = []) => specs.set(id, {
+      app: id, name: appName('fixture'), release: release as ReleaseNumber, runtime: { kind: 'container', image }, injection: { env, storage }, policy: { ...DEFAULT_POLICY, ...policy },
     });
     publish(1);
     const runtimes: DockerRuntime[] = [];
     const start = () => {
       const docker = new CountingDocker();
-      const runtime = new DockerRuntime({ docker, network, project: network, specFor: (id) => specs.get(id) ?? null, log: () => {} });
+      const runtime = new DockerRuntime({ docker, network, specFor: (id) => specs.get(id) ?? null, log: () => {} });
       runtimes.push(runtime);
       return { docker, runtime };
     };
@@ -129,7 +132,7 @@ function inner(image: ImageId, network: string): void {
       reused = false;
     }
     publish(1, { FIXTURE_EXIT: '1' });
-    const runtime = new DockerRuntime({ docker: new ReusedAddress(), network, project: network, specFor, log: () => {} });
+    const runtime = new DockerRuntime({ docker: new ReusedAddress(), network, specFor, log: () => {} });
     t.after(() => runtime.close());
     await assert.rejects(runtime.acquire(app, 'request'));
     assert.equal(runtime.state(app), 'asleep');
@@ -266,21 +269,32 @@ function inner(image: ImageId, network: string): void {
     await raw.start(Id);
   }
 
+  const infra = new DockerInfra(raw, network);
+
   test('runJob runs in the compose service container and returns its output', async (t) => {
-    const { runtime } = fixture(t);
     await helper(t);
-    assert.deepEqual(await runtime.runJob({ service: 'redis', argv: ['echo', 'hi'] }), { exitCode: 0, stdout: 'hi\n', stderr: '' });
+    assert.deepEqual(await infra.runJob({ service: 'redis', argv: ['echo', 'hi'] }), { exitCode: 0, stdout: 'hi\n', stderr: '' });
   });
 
   test('runJob feeds stdin to the job', async (t) => {
-    const { runtime } = fixture(t);
     await helper(t);
-    assert.deepEqual(await runtime.runJob({ service: 'redis', argv: ['sh'], stdin: 'echo hi' }), { exitCode: 0, stdout: 'hi\n', stderr: '' });
+    assert.deepEqual(await infra.runJob({ service: 'redis', argv: ['sh'], stdin: 'echo hi' }), { exitCode: 0, stdout: 'hi\n', stderr: '' });
   });
 
-  test('resolveImage returns the id of an existing image and null for a missing one', async (t) => {
-    const { runtime } = fixture(t);
-    assert.equal(await runtime.resolveImage(image), image);
-    assert.equal(await runtime.resolveImage('pneuma-space-u3-missing:none'), null);
+  test('resolveImage returns the id of an existing image and null for a missing one', async () => {
+    assert.equal(await infra.resolveImage(image), image);
+    assert.equal(await infra.resolveImage('pneuma-space-u3-missing:none'), null);
+  });
+
+  test('a storage binding is mounted from its id at its target, and {dir} in its env reads as the target', async (t) => {
+    const { app, publish, runtime } = fixture(t);
+    const volume = `pneuma-space-u3-test-${randomBytes(4).toString('hex')}`;
+    t.after(async () => { await runtime.retire(app); await raw.removeVolume(volume); });
+    publish(1, {}, app, [{ id: volume, target: '/data', env: { FIXTURE_DB: 'sqlite://{dir}/app.sqlite3' } }]);
+    runtime.release(await runtime.acquire(app, 'request'));
+    const [container] = await raw.list({ label: [`pneuma-space.app=${app}`] });
+    const info = JSON.parse((await raw.request('GET', `/containers/${container.Id}/json`)).body.toString());
+    assert.ok(info.Config.Env.includes('FIXTURE_DB=sqlite:///data/app.sqlite3'));
+    assert.deepEqual(info.Mounts.map((m: { Name: string; Destination: string }) => [m.Name, m.Destination]), [[volume, '/data']]);
   });
 }

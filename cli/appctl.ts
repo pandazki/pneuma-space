@@ -70,8 +70,8 @@ function readManifest(file: string): Manifest {
   return parseManifest(raw);
 }
 
-function needsImage(manifest: Manifest): boolean {
-  return declaredKinds(manifest).some((kind) => CAPABILITIES[kind].needsImage);
+function needsRuntime(manifest: Manifest): boolean {
+  return declaredKinds(manifest).some((kind) => CAPABILITIES[kind].needsRuntime);
 }
 
 function build(name: string, dir: string, tag: string | undefined): string {
@@ -148,7 +148,7 @@ async function publish([rawName, target, ...extra]: string[], options: Options):
   const staticRoot = manifest.capabilities.static ? join(root, manifest.capabilities.static.dir) : null;
   const files = staticRoot ? bundleFiles(staticRoot) : null;
 
-  const image = !fromDir ? target : needsImage(manifest) ? build(name, target, options.tag) : null;
+  const image = !fromDir ? target : needsRuntime(manifest) ? build(name, target, options.tag) : null;
   let bundle: string | null = null;
   if (staticRoot && files) bundle = (await api('POST', ADMIN_PATHS.bundles, ReadableStream.from(tar(staticRoot, files)))).bundle;
   const release = await api('PUT', ADMIN_PATHS.release(name), { image, manifest, bundle, ...(owner && { owner }) });

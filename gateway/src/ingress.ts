@@ -11,6 +11,7 @@ import {
 import { emit } from './events.ts';
 import { connect, forward, tunnel, type Hold } from './proxy.ts';
 import { requests, type RequestKind } from './requests.ts';
+import { Backoff, Quarantined } from './runtimes.ts';
 import { serveStatic, staticPath } from './static.ts';
 
 export type IngressDeps = {
@@ -251,6 +252,8 @@ export class Ingress {
       trace.waitMs = performance.now() - from;
       if (error instanceof NotFound) return { status: 404, error: 'no app at this address' };
       trace.error = String(error);
+      if (error instanceof Backoff) return { status: 503, error: error.message, headers: { 'retry-after': String(error.retryAfterSeconds) } };
+      if (error instanceof Quarantined) return { status: 503, error: error.message };
       log('wake-failed', view.app, { error: String(error) });
       return { status: 502, error: `the app did not start; run appctl logs ${view.name}` };
     }

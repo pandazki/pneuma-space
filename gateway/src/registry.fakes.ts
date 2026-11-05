@@ -7,8 +7,8 @@ import { PlatformRegistry } from './registry.ts';
 import { SqliteStore } from './store.ts';
 import {
   CAPABILITIES, Conflict, NotFound,
-  type AppId, type BundleId, type BundleIndex, type BundleStore, type CapabilityProvider, type ImageId,
-  type ProviderName, type Resource, type ResourceKind, type Runtime,
+  type AppId, type BundleId, type BundleIndex, type BundleStore, type CapabilityProvider, type Guard, type ImageId, type Infra,
+  type ProviderName, type Quarantine, type Resource, type ResourceKind, type Runtime,
 } from './model.ts';
 
 export type Call = readonly [verb: 'ensure' | 'suspend' | 'destroy', provider: ProviderName, app: AppId];
@@ -42,7 +42,7 @@ export class FakeProvider implements CapabilityProvider {
   }
 
   inject(_app: AppId, resource: Resource) {
-    return { env: { [`FAKE_${this.name.toUpperCase()}`]: resource.name }, mounts: [] };
+    return { env: { [`FAKE_${this.name.toUpperCase()}`]: resource.name }, storage: [] };
   }
 
   async suspend(app: AppId): Promise<void> {
@@ -59,7 +59,9 @@ export class FakeProvider implements CapabilityProvider {
  * Images are resolved from a fixed table; counts every call so tests can prove listing makes none besides `state`.
  * `containers` are the apps with a container; until `reconcile` after a restart, retire does not know them.
  */
-export class FakeRuntime implements Runtime {
+export class FakeRuntime implements Runtime, Infra, Guard {
+  readonly kind = 'container';
+  readonly quarantined = new Map<AppId, Quarantine>();
   readonly images = new Map<string, ImageId>([['example:1', 'sha256:one' as ImageId], ['example:2', 'sha256:two' as ImageId]]);
   readonly calls: string[] = [];
   readonly containers = new Set<AppId>();
@@ -77,13 +79,15 @@ export class FakeRuntime implements Runtime {
   since(): null { return null; }
   leases() { return { request: 0, channel: 0, trigger: 0 }; }
   sleepsAt(): null { return null; }
+  health() { return []; }
+  async destroyStorage(): Promise<void> {}
+  quarantine(app: AppId): Quarantine | null { return this.quarantined.get(app) ?? null; }
+  unquarantine(app: AppId): void { this.quarantined.delete(app); }
   async runJob(): Promise<never> { throw new Error('not used'); }
   async resolveImage(reference: string): Promise<ImageId | null> {
     this.calls.push(`resolveImage ${reference}`);
     return this.images.get(reference) ?? null;
   }
-  async ensureVolume(): Promise<void> {}
-  async removeVolume(): Promise<void> {}
 }
 
 export class FakeBundles implements BundleStore {
@@ -111,6 +115,8 @@ export type World = {
   readonly providers: Map<ProviderName, FakeProvider>;
   readonly runtime: FakeRuntime;
   readonly bundles: FakeBundles;
+  /** Compose services the registry's probe finds; none by default. */
+  readonly services: Set<string>;
   /** Opens a fresh store and registry over the same file, as a gateway restart would. */
   open(): Promise<{ store: SqliteStore; registry: PlatformRegistry }>;
 };
@@ -128,11 +134,14 @@ export function world(): World {
     for (const name of spec.providers) providers.set(name, new FakeProvider(kind as ResourceKind, name, calls, runtime.containers));
   }
   const bundles = new FakeBundles();
+  const services = new Set<string>();
   return {
-    dir, calls, providers, runtime, bundles,
+    dir, calls, providers, runtime, bundles, services,
     async open() {
       const store = new SqliteStore(join(dir, 'pneuma-space.sqlite3'));
-      const registry = await PlatformRegistry.open({ store, runtime, bundles, providers: [...providers.values()] });
+      const registry = await PlatformRegistry.open({
+        store, runtime, guard: runtime, infra: runtime, bundles, providers: [...providers.values()], probe: async (service) => services.has(service),
+      });
       return { store, registry };
     },
   };

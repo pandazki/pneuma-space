@@ -1,22 +1,23 @@
 import { connect } from 'node:net';
-import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Docker, DockerError, type ContainerSpec, type DockerEvent } from './docker.ts';
 import { emit, type Emit } from './events.ts';
 import {
   APP_PORT, canonicalHash, Conflict, NotFound, RUNTIME_ENV,
-  type AppId, type ImageId, type InstanceState, type Job, type JobResult, type Lease, type LeaseKind, type Runtime, type RunSpec,
+  type AppId, type HealthCheck, type InstanceState, type Lease, type LeaseKind, type Runtime, type RunSpec,
 } from './model.ts';
 
 const LABEL = { app: 'pneuma-space.app', release: 'pneuma-space.release', spec: 'pneuma-space.spec', network: 'pneuma-space.network' } as const;
 const MAX_TICK_SECONDS = 10;
 const READY_POLL_MS = 50;
 
+type ContainerRun = RunSpec & { readonly runtime: Extract<RunSpec['runtime'], { kind: 'container' }> };
+
 type Instance = {
   readonly app: AppId;
   state: InstanceState;
   /** The spec the container was created from, or the latest one while asleep without a container. */
-  spec: RunSpec;
+  spec: ContainerRun;
   container: string | null;
   address: string;
   readonly leases: Map<Lease, LeaseRecord>;
@@ -35,22 +36,16 @@ export type RuntimeOptions = {
   readonly docker: Docker;
   /** PNEUMA_SPACE_NETWORK: app containers join it, and only containers labelled with it are this gateway's. */
   readonly network: string;
-  /** The Registry's runSpec; re-read on every wake and reaper tick so policy changes apply without a publish. */
+  /** The Registry's runSpec; re-read on every wake and reaper tick so policy changes apply without a publish. Specs of other runtimes read as none. */
   readonly specFor: (app: AppId) => RunSpec | null;
-  /** Compose project whose service containers run jobs; see composeProject. */
-  readonly project: string;
   readonly log?: Emit;
 };
 
 const specHash = (spec: RunSpec): string => canonicalHash(spec.injection);
-const sameRun = (a: RunSpec, b: RunSpec): boolean => a.release === b.release && a.image === b.image && specHash(a) === specHash(b);
-
-/** PNEUMA_SPACE_COMPOSE_PROJECT, else the compose project label of the container this process runs in, else `pneuma-space`. */
-export async function composeProject(docker: Docker): Promise<string> {
-  return process.env.PNEUMA_SPACE_COMPOSE_PROJECT
-    ?? (await docker.inspect(hostname()))?.Config.Labels['com.docker.compose.project']
-    ?? 'pneuma-space';
-}
+const sameRun = (a: ContainerRun, b: ContainerRun): boolean =>
+  a.release === b.release && a.runtime.image === b.runtime.image && specHash(a) === specHash(b);
+const fill = (env: Readonly<Record<string, string>>, dir: string) =>
+  Object.fromEntries(Object.entries(env).map(([key, value]) => [key, value.replaceAll('{dir}', dir)]));
 
 export function canConnect(host: string, port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -64,13 +59,15 @@ export function canConnect(host: string, port: number): Promise<boolean> {
 // JavaScript runs each synchronous stretch to completion, so the code between two awaits is the per-instance lock;
 // `changed` is its condition variable.
 export class DockerRuntime implements Runtime {
+  readonly kind = 'container';
   private readonly docker: Docker;
   private readonly network: string;
-  private readonly specFor: (app: AppId) => RunSpec | null;
-  private readonly project: string;
+  private readonly specFor: (app: AppId) => ContainerRun | null;
   private readonly log: Emit;
   private readonly instances = new Map<AppId, Instance>();
   private readonly awake = new Set<Instance>();
+  /** Containers someone sent a signal; their die is a stop, not a crash. */
+  private readonly signalled = new Set<string>();
   private readonly events = new AbortController();
   private timer: NodeJS.Timeout | null = null;
   private due = 0;
@@ -79,8 +76,10 @@ export class DockerRuntime implements Runtime {
   constructor(options: RuntimeOptions) {
     this.docker = options.docker;
     this.network = options.network;
-    this.specFor = options.specFor;
-    this.project = options.project;
+    this.specFor = (app) => {
+      const spec = options.specFor(app);
+      return spec?.runtime.kind === 'container' ? (spec as ContainerRun) : null;
+    };
     this.log = options.log ?? emit;
   }
 
@@ -203,29 +202,15 @@ export class DockerRuntime implements Runtime {
     return container ? this.docker.logs(container, tail) : '';
   }
 
-  async runJob(job: Job): Promise<JobResult> {
-    const [container] = await this.docker.list({
-      label: [`com.docker.compose.project=${this.project}`, `com.docker.compose.service=${job.service}`], status: ['running'],
-    });
-    if (!container) {
-      throw new Conflict(`service ${job.service} of compose project ${this.project} is not running; start it with docker compose (it may sit behind a profile)`);
-    }
-    return this.docker.exec(container.Id, job.argv, job.stdin);
+  health(): readonly HealthCheck[] {
+    return ['exit', 'ready'];
   }
 
-  resolveImage(reference: string): Promise<ImageId | null> {
-    return this.docker.imageId(reference);
-  }
-
-  ensureVolume(name: string): Promise<void> {
-    return this.docker.createVolume(name);
-  }
-
-  async removeVolume(name: string): Promise<void> {
+  async destroyStorage(_app: AppId, id: string): Promise<void> {
     try {
-      await this.docker.removeVolume(name);
+      await this.docker.removeVolume(id);
     } catch (error) {
-      if (error instanceof DockerError && error.status === 409) throw new Conflict(`volume ${name} is still used by a container`);
+      if (error instanceof DockerError && error.status === 409) throw new Conflict(`volume ${id} is still used by a container`);
       throw error;
     }
   }
@@ -237,7 +222,7 @@ export class DockerRuntime implements Runtime {
     this.timer = null;
   }
 
-  private async wake(inst: Instance, spec: RunSpec): Promise<void> {
+  private async wake(inst: Instance, spec: ContainerRun): Promise<void> {
     const started = performance.now();
     try {
       if (inst.container && !sameRun(inst.spec, spec)) {
@@ -286,14 +271,19 @@ export class DockerRuntime implements Runtime {
     }
   }
 
-  private create(spec: RunSpec): Promise<string> {
+  private async create(spec: ContainerRun): Promise<string> {
+    const { storage } = spec.injection;
+    for (const { id } of storage) await this.docker.createVolume(id);
     const container: ContainerSpec = {
-      image: spec.image,
-      env: { ...spec.injection.env, [RUNTIME_ENV.app]: spec.name, [RUNTIME_ENV.release]: String(spec.release) },
+      image: spec.runtime.image,
+      env: {
+        ...spec.injection.env, ...Object.assign({}, ...storage.map((s) => fill(s.env, s.target))),
+        [RUNTIME_ENV.app]: spec.name, [RUNTIME_ENV.release]: String(spec.release), [RUNTIME_ENV.port]: String(APP_PORT),
+      },
       labels: {
         [LABEL.app]: spec.app, [LABEL.release]: String(spec.release), [LABEL.spec]: specHash(spec), [LABEL.network]: this.network,
       },
-      mounts: spec.injection.mounts,
+      mounts: storage.map(({ id, target }) => ({ volume: id, target })),
       network: this.network,
     };
     return this.docker.create(`pneuma-space-${spec.app}-${spec.release}`, container);
@@ -368,14 +358,19 @@ export class DockerRuntime implements Runtime {
   }
 
   private async follow(since: number): Promise<void> {
-    const filters = { event: ['die'], label: [`${LABEL.network}=${this.network}`] };
-    for await (const event of this.docker.events(filters, since, this.events.signal)) this.onDie(event);
+    const filters = { event: ['kill', 'die'], label: [`${LABEL.network}=${this.network}`] };
+    for await (const event of this.docker.events(filters, since, this.events.signal)) {
+      if (event.action === 'kill') this.signalled.add(event.id);
+      else this.onDie(event);
+    }
   }
 
   private onDie(event: DockerEvent): void {
+    const signalled = this.signalled.delete(event.id);
     const inst = this.instances.get(event.labels[LABEL.app] as AppId);
     if (inst?.state !== 'awake' || inst.container !== event.id || event.time < inst.startedAt) return;
     inst.address = '';
+    if (!signalled) this.emit('crashed', inst.app, { reason: `container exited with code ${event.labels.exitCode}` });
     this.transition(inst, 'asleep', { external: true });
   }
 

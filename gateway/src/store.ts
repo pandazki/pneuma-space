@@ -28,6 +28,8 @@ const MIGRATIONS = [
    CREATE INDEX delivery_key ON delivery (app, trigger, idempotency_key);
    CREATE TABLE stats (app TEXT PRIMARY KEY, requests INTEGER NOT NULL, errors INTEGER NOT NULL, last_access_at INTEGER);`,
   'ALTER TABLE app ADD COLUMN registered_at INTEGER NOT NULL DEFAULT 0',
+  `ALTER TABLE release ADD COLUMN runtime TEXT;
+   UPDATE release SET runtime = 'container' WHERE image IS NOT NULL;`,
 ];
 
 type Row = Record<string, SQLInputValue>;
@@ -48,6 +50,7 @@ const toRelease = (r: Row): Release => ({
   image: r.image as Release['image'],
   manifest: JSON.parse(r.manifest as string),
   bundle: r.bundle as Release['bundle'],
+  runtime: r.runtime as Release['runtime'],
   releaseKey: r.release_key as string,
   publishedAt: r.published_at as number,
 });
@@ -160,8 +163,8 @@ class Statements implements Sync<StoreOps> {
 
   putRelease(r: Release): void {
     this.#run(
-      'INSERT INTO release (app, number, image, manifest, bundle, release_key, published_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      r.app, r.number, r.image, JSON.stringify(r.manifest), r.bundle, r.releaseKey, r.publishedAt,
+      'INSERT INTO release (app, number, image, manifest, bundle, runtime, release_key, published_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      r.app, r.number, r.image, JSON.stringify(r.manifest), r.bundle, r.runtime, r.releaseKey, r.publishedAt,
     );
   }
 
