@@ -1,0 +1,9 @@
+{
+  "contract": 1,
+  "capabilities": {
+    "kv": {},
+    "ws": {},
+    "identity": {},
+    "static": { "dir": "public" }
+  }
+}
