@@ -5,10 +5,12 @@ import { emit, events } from './events.ts';
 import { loadOrCreateSecret, LocalIdentity } from './identity.ts';
 import { Ingress } from './ingress.ts';
 import { hostSample, httpProbe, Metrics, profileProbe, tcpProbe } from './metrics.ts';
-import { ADMIN_PORT, INGRESS_PORT } from './model.ts';
+import { ADMIN_PORT, INGRESS_PORT, type AppId } from './model.ts';
+import { composeProject, DockerInfra } from './infra.ts';
 import { createProviders, providerConfig, S3BundleStore } from './providers.ts';
 import { PlatformRegistry } from './registry.ts';
-import { composeProject, DockerRuntime } from './runtime.ts';
+import { DockerRuntime } from './runtime.ts';
+import { Runtimes } from './runtimes.ts';
 import { requests } from './requests.ts';
 import { DeliveryScheduler } from './scheduler.ts';
 import { SqliteStore } from './store.ts';
@@ -25,10 +27,13 @@ const config = providerConfig(process.env);
 
 const store = new SqliteStore(join(data, 'pneuma-space.sqlite3'));
 const docker = new Docker();
-const runtime = new DockerRuntime({ docker, network, project: await composeProject(docker), specFor: (app) => registry.runSpec(app) });
+const infra = new DockerInfra(docker, await composeProject(docker));
+const specFor = (app: AppId) => registry.runSpec(app);
+const container = new DockerRuntime({ docker, network, specFor });
+const runtime = new Runtimes({ runtimes: [container], specFor, events });
 const bundles = new S3BundleStore(config.object);
 const registry = await PlatformRegistry.open({
-  store, runtime, bundles, providers: Object.values(createProviders(runtime, config)), statsSource: async () => ingress.snapshot(),
+  store, runtime, guard: runtime, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => ingress.snapshot(),
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app) });
 const identity = new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), (hash) => store.token(hash));
@@ -64,7 +69,7 @@ await runtime.reconcile();
 void registry.resume();
 await scheduler.resume();
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
-const admin = await startAdmin({ registry, bundles, runtime, metrics, requests, ingressPort }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const admin = await startAdmin({ registry, bundles, runtime, guard: runtime, metrics, requests, ingressPort }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {
   ingress.flush().catch((error: Error) => log('flush-failed', { error: error.message }));
@@ -76,7 +81,7 @@ log('gateway-ready', { network, data });
 process.once('SIGTERM', async () => {
   clearInterval(flusher);
   scheduler.stop();
-  runtime.close();
+  container.close();
   admin.closeAllConnections();
   await Promise.all([ingress.close(), new Promise((resolve) => admin.close(resolve))]);
   await ingress.flush();

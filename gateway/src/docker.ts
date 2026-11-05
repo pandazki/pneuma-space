@@ -1,7 +1,7 @@
 // Docker Engine API 1.52 over the unix socket (spike/node/findings.md). The only module that talks to Docker.
 import http from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { ImageId, JobResult, Mount } from './model.ts';
+import type { ImageId, JobResult } from './model.ts';
 
 export class DockerError extends Error {
   readonly status: number;
@@ -27,6 +27,7 @@ export type ContainerInfo = {
   readonly Config: { readonly Labels: Labels };
   readonly NetworkSettings: { readonly Networks: Networks };
 };
+export type Mount = { readonly volume: string; readonly target: string };
 export type ContainerSpec = {
   readonly image: string;
   readonly env: Readonly<Record<string, string>>;

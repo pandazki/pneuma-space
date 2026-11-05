@@ -7,13 +7,14 @@ import { RING, type RequestLog } from './requests.ts';
 import {
   ADMIN_PATHS, ADMIN_PORT, Conflict, InputError, NotFound,
   appName, bundleId, parseManifest, subject,
-  type BundleStore, type Registry, type Runtime,
+  type BundleStore, type Guard, type Registry, type Runtime,
 } from './model.ts';
 
 export type AdminDeps = {
   readonly registry: Registry;
   readonly bundles: BundleStore;
   readonly runtime: Pick<Runtime, 'logs'>;
+  readonly guard: Guard;
   readonly metrics: Pick<Metrics, 'snapshot'>;
   readonly requests: Pick<RequestLog, 'after'>;
   readonly ingressPort: number;
@@ -58,7 +59,7 @@ function wholeParam(request: IncomingMessage, name: string, fallback: number, mi
   return value;
 }
 
-function routes({ registry, bundles, runtime, metrics, requests, ingressPort }: AdminDeps): Route[] {
+function routes({ registry, bundles, runtime, guard, metrics, requests, ingressPort }: AdminDeps): Route[] {
   const app = (name: string | undefined) => appName(name!);
   const found = <T>(value: T | null, name: string | undefined): T => {
     if (value === null) throw new NotFound(`no app named "${name}"`);
@@ -74,7 +75,12 @@ function routes({ registry, bundles, runtime, metrics, requests, ingressPort }: 
         .after(wholeParam(request, 'after', 0, 0, Number.MAX_SAFE_INTEGER), wholeParam(request, 'limit', 500, 1, RING))
         .map((r) => ({ ...r, app: registry.nameOf(r.app) ?? r.app })),
     },
-    { method: 'GET', path: at(ADMIN_PATHS.app('<name>')), handle: async (_, name) => found(await registry.detail(app(name)), name) },
+    {
+      method: 'GET', path: at(ADMIN_PATHS.app('<name>')), handle: async (_, name) => {
+        const detail = found(await registry.detail(app(name)), name);
+        return { ...detail, quarantine: guard.quarantine(detail.app.id) };
+      },
+    },
     { method: 'GET', path: at(ADMIN_PATHS.logs('<name>')), handle: (request, name) => runtime.logs(found(registry.view(app(name)), name).app, wholeParam(request, 'tail', 200, 1, MAX_TAIL)) },
     {
       method: 'PUT', path: at(ADMIN_PATHS.release('<name>')), handle: async (request, name) => {
@@ -99,6 +105,12 @@ function routes({ registry, bundles, runtime, metrics, requests, ingressPort }: 
       },
     },
     { method: 'POST', path: at(ADMIN_PATHS.remove('<name>')), handle: async (_, name) => (await registry.remove(app(name)), { status: 'removed' }) },
+    {
+      method: 'POST', path: at(ADMIN_PATHS.unquarantine('<name>')), handle: (_, name) => {
+        guard.unquarantine(found(registry.view(app(name)), name).app);
+        return { quarantine: null };
+      },
+    },
     { method: 'POST', path: at(ADMIN_PATHS.purge('<name>')), handle: async (_, name) => (await registry.purge(app(name)), { status: 'purged' }) },
     {
       method: 'POST', path: at(ADMIN_PATHS.tokens), handle: async (request) => {

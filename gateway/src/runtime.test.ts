@@ -7,13 +7,18 @@ import { resolve } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { demux, Docker, type ContainerInfo } from './docker.ts';
-import { appName, DEFAULT_POLICY, newAppId, NotFound, type AppId, type ImageId, type Lease, type Policy, type ReleaseNumber, type RunSpec } from './model.ts';
+import { DockerInfra } from './infra.ts';
+import {
+  appName, DEFAULT_POLICY, newAppId, NotFound, type AppId, type ImageId, type Lease, type Policy, type ReleaseNumber, type RunSpec, type StorageBinding,
+} from './model.ts';
 import { DockerRuntime } from './runtime.ts';
 
 const SERVER = `if (process.env.FIXTURE_EXIT) process.exit(1);
 console.log('fixture ready');
-require('http').createServer((q, s) => s.end(process.env.PNEUMA_SPACE_APP + ' ' + process.env.PNEUMA_SPACE_RELEASE)).listen(8000);
-process.on('SIGTERM', () => process.exit(0));`;
+process.on('SIGTERM', () => process.exit(0));
+process.on('SIGHUP', () => {});
+if (process.env.FIXTURE_SILENT) setInterval(() => {}, 1000);
+else require('http').createServer((q, s) => q.url === '/exit' ? process.exit(3) : s.end(process.env.PNEUMA_SPACE_APP + ' ' + process.env.PNEUMA_SPACE_RELEASE)).listen(8000);`;
 
 if (process.env.PNEUMA_SPACE_TEST_IMAGE) inner(process.env.PNEUMA_SPACE_TEST_IMAGE as ImageId, process.env.PNEUMA_SPACE_NETWORK!);
 else outer();
@@ -77,14 +82,15 @@ function inner(image: ImageId, network: string): void {
   function fixture(t: TestContext, policy: Partial<Policy> = {}) {
     const app = newAppId();
     const specs = new Map<AppId, RunSpec>();
-    const publish = (release: number, env: Record<string, string> = {}, id: AppId = app) => specs.set(id, {
-      app: id, name: appName('fixture'), release: release as ReleaseNumber, image, injection: { env, mounts: [] }, policy: { ...DEFAULT_POLICY, ...policy },
+    const publish = (release: number, env: Record<string, string> = {}, id: AppId = app, storage: StorageBinding[] = []) => specs.set(id, {
+      app: id, name: appName('fixture'), release: release as ReleaseNumber, runtime: { kind: 'container', image }, injection: { env, storage }, policy: { ...DEFAULT_POLICY, ...policy },
     });
     publish(1);
     const runtimes: DockerRuntime[] = [];
+    const events: Record<string, unknown>[] = [];
     const start = () => {
       const docker = new CountingDocker();
-      const runtime = new DockerRuntime({ docker, network, project: network, specFor: (id) => specs.get(id) ?? null, log: () => {} });
+      const runtime = new DockerRuntime({ docker, network, specFor: (id) => specs.get(id) ?? null, log: (ev, id, extra) => { if (id === app) events.push({ ev, ...extra }); } });
       runtimes.push(runtime);
       return { docker, runtime };
     };
@@ -94,7 +100,7 @@ function inner(image: ImageId, network: string): void {
         for (const container of await raw.list({ label: [`pneuma-space.app=${id}`] })) await raw.remove(container.Id);
       }
     });
-    return { app, publish, start, specFor: (id: AppId) => specs.get(id) ?? null, ...start() };
+    return { app, events, publish, start, specFor: (id: AppId) => specs.get(id) ?? null, ...start() };
   }
 
   const answer = async (address: string) => (await fetch(`http://${address}/`)).text();
@@ -129,7 +135,7 @@ function inner(image: ImageId, network: string): void {
       reused = false;
     }
     publish(1, { FIXTURE_EXIT: '1' });
-    const runtime = new DockerRuntime({ docker: new ReusedAddress(), network, project: network, specFor, log: () => {} });
+    const runtime = new DockerRuntime({ docker: new ReusedAddress(), network, specFor, log: () => {} });
     t.after(() => runtime.close());
     await assert.rejects(runtime.acquire(app, 'request'));
     assert.equal(runtime.state(app), 'asleep');
@@ -240,6 +246,59 @@ function inner(image: ImageId, network: string): void {
     assert.equal(await answer(lease.address), 'fixture 1');
   });
 
+  const failures = (events: Record<string, unknown>[]) => events.filter((e) => e.ev === 'crashed' || e.external);
+
+  test('a container that exits on its own while awake emits crashed, then asleep', async (t) => {
+    const { app, events, runtime } = fixture(t);
+    await runtime.reconcile();
+    const lease = await runtime.acquire(app, 'request');
+    runtime.release(lease);
+    await fetch(`http://${lease.address}/exit`).catch(() => {});
+    await until('die event', () => runtime.state(app) === 'asleep');
+    assert.deepEqual(events.slice(-2), [{ ev: 'crashed', reason: 'container exited with code 3' }, { ev: 'asleep', external: true }]);
+  });
+
+  test('an external docker stop emits asleep marked external and no crashed', async (t) => {
+    const { app, events, runtime } = fixture(t);
+    await runtime.reconcile();
+    runtime.release(await runtime.acquire(app, 'request'));
+    const [container] = await raw.list({ label: [`pneuma-space.app=${app}`] });
+    await raw.stop(container.Id);
+    await until('die event', () => runtime.state(app) === 'asleep');
+    assert.deepEqual(failures(events), [{ ev: 'asleep', external: true }]);
+  });
+
+  test('a signal other than SIGTERM or SIGKILL does not hide a later crash', async (t) => {
+    const { app, events, runtime } = fixture(t);
+    await runtime.reconcile();
+    const lease = await runtime.acquire(app, 'request');
+    runtime.release(lease);
+    const [container] = await raw.list({ label: [`pneuma-space.app=${app}`] });
+    await raw.request('POST', `/containers/${container.Id}/kill?signal=HUP`);
+    await fetch(`http://${lease.address}/exit`).catch(() => {});
+    await until('die event', () => runtime.state(app) === 'asleep');
+    assert.equal(events.filter((e) => e.ev === 'crashed').length, 1);
+  });
+
+  // Docker delivers events within milliseconds; the pause lets a die the platform caused reach the runtime before asserting it was ignored.
+  test('a ready timeout emits neither crashed nor an external asleep', async (t) => {
+    const { app, events, publish, runtime } = fixture(t, { ready_timeout_seconds: 1 });
+    publish(1, { FIXTURE_SILENT: '1' });
+    await runtime.reconcile();
+    await assert.rejects(runtime.acquire(app, 'request'));
+    await sleep(1000);
+    assert.deepEqual(failures(events), []);
+  });
+
+  test('a drain stop emits neither crashed nor an external asleep', async (t) => {
+    const { app, events, runtime } = fixture(t);
+    await runtime.reconcile();
+    runtime.release(await runtime.acquire(app, 'request'));
+    await runtime.retire(app);
+    await sleep(1000);
+    assert.deepEqual(failures(events), []);
+  });
+
   test('reconcile adopts a matching running container as awake and removes one whose spec label differs', async (t) => {
     const { app, publish, start, runtime: before } = fixture(t);
     const stale = newAppId();
@@ -266,21 +325,32 @@ function inner(image: ImageId, network: string): void {
     await raw.start(Id);
   }
 
+  const infra = new DockerInfra(raw, network);
+
   test('runJob runs in the compose service container and returns its output', async (t) => {
-    const { runtime } = fixture(t);
     await helper(t);
-    assert.deepEqual(await runtime.runJob({ service: 'redis', argv: ['echo', 'hi'] }), { exitCode: 0, stdout: 'hi\n', stderr: '' });
+    assert.deepEqual(await infra.runJob({ service: 'redis', argv: ['echo', 'hi'] }), { exitCode: 0, stdout: 'hi\n', stderr: '' });
   });
 
   test('runJob feeds stdin to the job', async (t) => {
-    const { runtime } = fixture(t);
     await helper(t);
-    assert.deepEqual(await runtime.runJob({ service: 'redis', argv: ['sh'], stdin: 'echo hi' }), { exitCode: 0, stdout: 'hi\n', stderr: '' });
+    assert.deepEqual(await infra.runJob({ service: 'redis', argv: ['sh'], stdin: 'echo hi' }), { exitCode: 0, stdout: 'hi\n', stderr: '' });
   });
 
-  test('resolveImage returns the id of an existing image and null for a missing one', async (t) => {
-    const { runtime } = fixture(t);
-    assert.equal(await runtime.resolveImage(image), image);
-    assert.equal(await runtime.resolveImage('pneuma-space-u3-missing:none'), null);
+  test('resolveImage returns the id of an existing image and null for a missing one', async () => {
+    assert.equal(await infra.resolveImage(image), image);
+    assert.equal(await infra.resolveImage('pneuma-space-u3-missing:none'), null);
+  });
+
+  test('a storage binding is mounted from its id at its target, and {dir} in its env reads as the target', async (t) => {
+    const { app, publish, runtime } = fixture(t);
+    const volume = `pneuma-space-u3-test-${randomBytes(4).toString('hex')}`;
+    t.after(async () => { await runtime.retire(app); await raw.removeVolume(volume); });
+    publish(1, {}, app, [{ id: volume, target: '/data', env: { FIXTURE_DB: 'sqlite://{dir}/app.sqlite3' } }]);
+    runtime.release(await runtime.acquire(app, 'request'));
+    const [container] = await raw.list({ label: [`pneuma-space.app=${app}`] });
+    const info = JSON.parse((await raw.request('GET', `/containers/${container.Id}/json`)).body.toString());
+    assert.ok(info.Config.Env.includes('FIXTURE_DB=sqlite:///data/app.sqlite3'));
+    assert.deepEqual(info.Mounts.map((m: { Name: string; Destination: string }) => [m.Name, m.Destination]), [[volume, '/data']]);
   });
 }
