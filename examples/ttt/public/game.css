@@ -1,0 +1,20 @@
+.game { display: grid; justify-items: start; gap: 16px; margin-top: 16px; }
+.seats { flex-wrap: wrap; }
+.seat { gap: 6px; font-family: var(--font); color: var(--ink-2); }
+.seat b { font: 700 12px var(--font); }
+.seat[data-mark="X"] b, .board [data-mark="X"] { color: var(--accent-ink); }
+.seat[data-mark="O"] b, .board [data-mark="O"] { color: var(--orange); }
+.seat.open { color: var(--ink-3); }
+.seat.turn { color: var(--ink); box-shadow: 0 0 0 1px var(--accent), 0 0 0 3px var(--accent-tint); }
+.board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: min(100%, 336px); }
+.board button {
+  height: auto; aspect-ratio: 1; padding: 0; justify-content: center; border-radius: 10px;
+  font: 600 44px var(--font); background: var(--surface); box-shadow: var(--shadow-card);
+}
+.board button:hover:not(:disabled) { background: var(--hover); }
+.board button:disabled { opacity: 1; }
+.board button:disabled[data-mark="."] { cursor: default; }
+.board button.won { background: var(--green-tint); box-shadow: 0 0 0 1px var(--green); }
+.share { flex-wrap: wrap; margin-bottom: 12px; }
+.share code { height: auto; min-height: 22px; padding: 2px 7px; overflow-wrap: anywhere; user-select: all; }
+.join { max-width: 480px; }
