@@ -213,8 +213,8 @@ test('100 000 empty lines leave at most 1000 log entries', async (t) => {
   const app = await start(runner, await serveBundle(t), 'blank');
   assert.equal(await app.get('/blank'), 'printed');
   let logs = '';
-  for (const end = performance.now() + 5000; !logs.endsWith('done'); await sleep(50)) {
-    assert.ok(performance.now() < end, 'the last line arrived');
+  for (const end = performance.now() + 5000; !/dropped \d+ lines$/.test(logs); await sleep(50)) {
+    assert.ok(performance.now() < end, 'the drop notice arrived');
     logs = await call<string>(runner, 'GET', '/logs/blank?tail=200000');
   }
   assert.ok(logs.split('\n').length <= 1000, `${logs.split('\n').length} entries`);
@@ -243,4 +243,81 @@ test('two starts of one app at once get the same worker', async (t) => {
   const bundleUrl = await serveBundle(t);
   const [a, b] = await Promise.all([start(runner, bundleUrl, 'twice'), start(runner, bundleUrl, 'twice')]);
   assert.equal(a.worker, b.worker);
+});
+
+test('v8.setFlagsFromString throws inside a worker and the runner keeps running', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'flags');
+  assert.equal(await app.get('/flags'), 'ERR_ACCESS_DENIED');
+  await sleep(500);
+  assert.equal((await call<{ ok: boolean }>(runner, 'GET', '/health')).ok, true);
+});
+
+test('parentPort is null inside a worker', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'parent');
+  assert.equal(await app.get('/parent'), 'null');
+});
+
+/** The slowest answer to /health while `work` runs: the delay the runner's main thread adds to every worker's pong. */
+async function stall(runner: RunnerProcess, work: Promise<unknown>): Promise<number> {
+  let done = false;
+  void work.finally(() => { done = true; });
+  let worst = 0;
+  for (const end = performance.now() + 3000; !done || performance.now() < end; await sleep(20)) {
+    const sent = performance.now();
+    await call(runner, 'GET', '/health');
+    worst = Math.max(worst, performance.now() - sent);
+  }
+  return worst;
+}
+
+test('a worker writing 64 MiB to stdout in one call delays the runner\'s main thread by under 500 ms', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'burst');
+  const worst = await stall(runner, app.get('/burst'));
+  t.diagnostic(`slowest /health during the burst: ${Math.round(worst)} ms`);
+  assert.ok(worst < 500, `${Math.round(worst)} ms`);
+});
+
+test('a worker writing 64 MiB to stdout in one call leaves at most 256 KiB in its log', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'burst');
+  assert.equal(await app.get('/burst'), 'written');
+  await sleep(1500);
+  const logs = await call<string>(runner, 'GET', '/logs/burst?tail=1000000');
+  assert.ok(Buffer.byteLength(logs) <= 256 * 2 ** 10, `${Buffer.byteLength(logs)} bytes`);
+});
+
+// Each stall delays a 1 s tick by more than 1 s whatever its phase, which reset every ping under the earlier pause-gap rule.
+test('a hung worker is reported within 10 s while the runner stalls 2.05 s every 4.5 s', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'loop');
+  let stalling = true;
+  const stalls = (async () => {
+    while (stalling) {
+      await sleep(2450);
+      process.kill(runner.pid, 'SIGSTOP');
+      await sleep(2050);
+      process.kill(runner.pid, 'SIGCONT');
+    }
+  })();
+  app.fire('/hang');
+  const { event, ms } = await nextEvent(runner, app.worker, 10_000).finally(() => { stalling = false; return stalls; });
+  t.diagnostic(`hung reported after ${Math.round(ms)} ms`);
+  assert.equal(event.ev, 'hung');
+});
+
+test('a runner stopped for 10 s while a worker is 1.5 s busy reports no worker hung once it continues', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'paused');
+  app.fire('/busy');
+  // Past one tick, so a ping is outstanding when the runner stops.
+  await sleep(1100);
+  process.kill(runner.pid, 'SIGSTOP');
+  await sleep(10_000);
+  process.kill(runner.pid, 'SIGCONT');
+  await sleep(4000);
+  const page = await call<EventPage>(runner, 'GET', '/events?after=0');
+  assert.deepEqual(page.events.filter((e) => e.worker === app.worker && e.ev !== 'ready'), []);
 });

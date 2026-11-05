@@ -15,7 +15,8 @@ const NET = process.allowedNodeEnvironmentFlags.has('--allow-net') ? ['--allow-n
 export const APP = `import { createServer } from 'node:http';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { register } from 'node:module';
-import { Worker } from 'node:worker_threads';
+import v8 from 'node:v8';
+import { parentPort, Worker } from 'node:worker_threads';
 const env = process.env;
 if (env.START_FIFO) readFileSync(env.START_FIFO);
 for (const end = Date.now() + Number(env.START_BUSY_MS ?? 0); Date.now() < end;);
@@ -27,6 +28,12 @@ if (env.DECOY) createServer((q, s) => s.end('decoy')).listen(0);
 const routes = {
   '/': () => env.PNEUMA_SPACE_APP + ' ' + env.PNEUMA_SPACE_RELEASE,
   '/hang': () => { for (;;) {} },
+  // 1.5 s of CPU time, not wall time, so a stopped process does not shorten it.
+  '/busy': () => {
+    const cpu = () => { const { user, system } = process.threadCpuUsage(); return user + system; };
+    for (const end = cpu() + 1.5e6; cpu() < end;);
+    return 'busy';
+  },
   '/heap': () => { const a = []; for (;;) a.push(new Array(1e5).fill(Math.random())); },
   '/buffers': () => { globalThis.held = [0, 1, 2, 3].map(() => Buffer.alloc(64 * 2 ** 20, 1)); return 'held'; },
   '/fifo': () => readFileSync(env.FIFO),
@@ -42,7 +49,13 @@ const routes = {
   '/register': () => {
     try { register('data:text/javascript,' + encodeURIComponent('process.kill(process.pid, "SIGKILL")')); return 'registered'; } catch (error) { return error.code; }
   },
-  '/blank': () => { for (let i = 0; i < 1e5; i++) console.log(''); console.log('done'); return 'printed'; },
+  '/flags': () => {
+    try { v8.setFlagsFromString('--allow-natives-syntax'); } catch (error) { return error.code; }
+    return new Function('%AbortJS("flags")')();
+  },
+  '/parent': () => String(parentPort),
+  '/blank': () => { for (let i = 0; i < 1e5; i++) console.log(''); return 'printed'; },
+  '/burst': () => { process.stdout.write(Buffer.alloc(64 * 2 ** 20, 10)); return 'written'; },
   '/exit': () => process.exit(3),
   '/files': () => { writeFileSync(env.PNEUMA_SPACE_FILES_DIR + '/kept', 'kept'); return env.PNEUMA_SPACE_FILES_DIR; },
 };

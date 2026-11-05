@@ -18,11 +18,14 @@ async function fixture(t: TestContext, policy: Partial<Policy> = {}, storage: re
   const app = newAppId();
   const specs = new Map<AppId, RunSpec>();
   const specFor = (id: AppId) => specs.get(id) ?? null;
-  const publish = (release: number) => specs.set(app, {
-    app, name: appName('fixture'), release: release as ReleaseNumber, runtime: { kind: 'isolate', bundle: 'b' as BundleId, entry: 'app.mjs' },
+  const publish = (release: number, id = app) => specs.set(id, {
+    app: id, name: appName('fixture'), release: release as ReleaseNumber, runtime: { kind: 'isolate', bundle: 'b' as BundleId, entry: 'app.mjs' },
     injection: { env, storage }, policy: { ...DEFAULT_POLICY, ...policy },
   });
   publish(1);
+  /** A second app on the same runner. */
+  const other = newAppId();
+  publish(1, other);
   const bundleUrl = await serveBundle(t);
   let runner = await startRunner(t);
   const port = new URL(runner.url).port;
@@ -54,7 +57,7 @@ async function fixture(t: TestContext, policy: Partial<Policy> = {}, storage: re
   const runnerEvents = async () => ((await (await fetch(`${runner.url}/events?after=0`)).json()) as EventPage).events;
   const runtime = start();
   const guarded = () => new Runtimes({ runtimes: [runtime], specFor, events: bus, log: bus.emit });
-  return { app, events, publish, start, stopRunner, pauseRunner, resumeRunner, startRunnerAgain, restartRunner, workers, runnerEvents, guarded, runtime };
+  return { app, other, events, publish, start, stopRunner, pauseRunner, resumeRunner, startRunnerAgain, restartRunner, workers, runnerEvents, guarded, runtime };
 }
 
 const answer = async (address: string) => (await fetch(`http://${address}/`)).text();
@@ -146,7 +149,7 @@ test('an awake isolate app whose runner stops answering goes asleep as unavailab
   await runtime.reconcile();
   runtime.release(await runtime.acquire(app, 'request'));
   await stopRunner();
-  await until('asleep while the runner is down', () => runtime.state(app) === 'asleep', 5000);
+  await until('asleep while the runner is down', () => runtime.state(app) === 'asleep', 20_000);
   assert.deepEqual(events.at(-1), { ev: 'asleep', unavailable: true });
   assert.equal(events.some((e) => e.ev === 'crashed' || e.ev === 'hung'), false);
 });
@@ -178,36 +181,83 @@ test('a start during which the runner dies counts as a failed wake', async (t) =
   assert.notEqual(runtimes.quarantine(app), null);
 });
 
-test('a worker left running while the runner did not answer is stopped once it answers, and the next wake succeeds', async (t) => {
-  const { app, pauseRunner, resumeRunner, runtime, workers } = await fixture(t);
+async function leftRunning(t: TestContext) {
+  const fixed = await fixture(t);
+  const { app, pauseRunner, resumeRunner, runtime } = fixed;
   await runtime.reconcile();
   runtime.release(await runtime.acquire(app, 'request'));
   pauseRunner();
-  await until('asleep while the runner is paused', () => runtime.state(app) === 'asleep', 15_000);
+  await until('asleep while the runner is paused', () => runtime.state(app) === 'asleep', 25_000);
   resumeRunner();
+  return fixed;
+}
+
+test('a worker left running while the runner did not answer is stopped once it answers', async (t) => {
+  const { workers } = await leftRunning(t);
   for (const end = Date.now() + 12_000; (await workers()).length > 0; await sleep(100)) assert.ok(Date.now() < end, 'the untracked worker is stopped');
+});
+
+test('the first wake after the runner answers again succeeds', async (t) => {
+  const { app, runtime } = await leftRunning(t);
   assert.equal(await answer((await runtime.acquire(app, 'request')).address), 'fixture 1');
 });
 
-test('a gateway starts against a runner that lists a stale worker but fails to remove it, and removes it later', async (t) => {
+// Longer than the three 2 s poll timeouts, interleaved with recovery probes, that once gave up on the runner.
+test('a runner whose main thread stalls 12 s marks no instance unavailable', async (t) => {
+  const { app, events, pauseRunner, resumeRunner, runtime } = await fixture(t);
+  await runtime.reconcile();
+  runtime.release(await runtime.acquire(app, 'request'));
+  pauseRunner();
+  await sleep(12_000);
+  resumeRunner();
+  await sleep(2000);
+  assert.equal(runtime.state(app), 'awake');
+  assert.equal(events.some((e) => e.unavailable), false);
+});
+
+test('one app writing 64 MiB to stdout leaves it and the other app awake and available', async (t) => {
+  const { app, other, events, runtime } = await fixture(t);
+  await runtime.reconcile();
+  const [burst] = await Promise.all([app, other].map(async (id) => {
+    const lease = await runtime.acquire(id, 'request');
+    runtime.release(lease);
+    return lease;
+  }));
+  assert.equal(await (await fetch(`http://${burst.address}/burst`)).text(), 'written');
+  await sleep(12_000);
+  assert.deepEqual([runtime.state(app), runtime.state(other)], ['awake', 'awake']);
+  assert.equal(events.some((e) => e.unavailable), false);
+});
+
+const staleRunner = async (t: TestContext) => {
   let deletes = 0;
-  let listed = [{ app: 'stale', release: 1, spec: 's', worker: '1:1', port: 1, since: 0 }];
+  const runner = { listed: [{ app: 'stale', release: 1, spec: 's', worker: '1:1', state: 'listening', port: 1, since: 0 }] };
   const fake = createServer((q, s) => {
     const json = (body: unknown) => s.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(body));
     if (q.method === 'DELETE') {
       if (++deletes === 1) return s.writeHead(500).end('{"error":"failed"}');
-      listed = [];
+      runner.listed = [];
       return s.writeHead(204).end();
     }
     if (q.url!.startsWith('/events')) return json({ startedAt: 1, seq: 0, events: [] });
-    if (q.url === '/instances') return json(listed);
-    json({ ok: true, startedAt: 1, stuck: 0, workers: listed.length });
+    if (q.url === '/instances') return json(runner.listed);
+    json({ ok: true, startedAt: 1, stuck: 0, workers: runner.listed.length });
   }).listen(0, '127.0.0.1');
   await once(fake, 'listening');
   const runtime = new IsolateRuntime({ runner: `http://127.0.0.1:${(fake.address() as AddressInfo).port}`, bundleUrl: () => '', specFor: () => null, hasRun: async () => true, log: () => {} });
   t.after(() => { runtime.close(); fake.close(); });
+  return { runner, runtime };
+};
+
+test('a gateway starts against a runner that lists a stale worker but fails to remove it', async (t) => {
+  const { runtime } = await staleRunner(t);
   await runtime.reconcile();
-  for (const end = Date.now() + 8000; listed.length > 0; await sleep(100)) assert.ok(Date.now() < end, 'the stale worker is removed by the recovery poll');
+});
+
+test('a stale worker whose removal failed at gateway start is removed by the recovery poll', async (t) => {
+  const { runner, runtime } = await staleRunner(t);
+  await runtime.reconcile();
+  for (const end = Date.now() + 8000; runner.listed.length > 0; await sleep(100)) assert.ok(Date.now() < end, 'the stale worker is removed');
 });
 
 // A stopped compose service has no name on the platform network; `.invalid` never resolves (RFC 6761).
