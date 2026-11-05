@@ -24,5 +24,6 @@ setInterval(async () => {
   updated.textContent = ago(updated.dateTime);
 }, 30000);
 
-const clock = new Intl.DateTimeFormat(ui.lang, { hour: '2-digit', minute: '2-digit' });
+// Days are counted in UTC on the server, so the times shown use the same clock.
+const clock = new Intl.DateTimeFormat(ui.lang, { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
 document.querySelectorAll('.notes time').forEach((el) => { el.textContent = clock.format(new Date(el.dateTime)); });

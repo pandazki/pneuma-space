@@ -9,14 +9,14 @@ import { esc, page } from '../ui/page.ts';
 const dict = {
   en: {
     title: 'Daily notes', card: 'Note count', about: 'Recounted every minute, which keeps this app awake.',
-    today: 'Today', week: '7 days', total: 'All', updated: 'Updated {ago}', never: 'Not counted yet',
+    today: 'Today (UTC)', week: '7 days', total: 'All', updated: 'Updated {ago}', never: 'Not counted yet',
     justNow: 'just now', minutes: '{n} min ago', hours: '{n} h ago', days: '{n} d ago',
     placeholder: 'Write a note', add: 'Add', signIn: 'Sign in to add notes',
     ownerOnly: 'Only the owner adds notes.', todayNotes: 'Today\'s notes', empty: 'No notes today.',
   },
   zh: {
     title: '每日笔记', card: '笔记计数', about: '每分钟重新统计一次，所以这个应用会一直保持唤醒。',
-    today: '今天', week: '近 7 天', total: '全部', updated: '更新于{ago}', never: '尚未统计',
+    today: '今天（UTC）', week: '近 7 天', total: '全部', updated: '更新于{ago}', never: '尚未统计',
     justNow: '刚刚', minutes: '{n} 分钟前', hours: '{n} 小时前', days: '{n} 天前',
     placeholder: '写一条笔记', add: '添加', signIn: '登录后添加笔记',
     ownerOnly: '只有所有者可以添加笔记。', todayNotes: '今天的笔记', empty: '今天还没有笔记。',
