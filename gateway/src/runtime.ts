@@ -58,8 +58,7 @@ class DockerDriver implements Driver<ContainerRun, string> {
     const docker = this.#docker;
     try {
       if (slot.handle && !sameRun(slot.spec, spec)) {
-        await docker.stop(slot.handle);
-        await docker.remove(slot.handle);
+        await this.remove(spec.app, slot.handle);
         slot.handle = null;
       }
       slot.spec = spec;
@@ -68,6 +67,7 @@ class DockerDriver implements Driver<ContainerRun, string> {
       if (!(await docker.start(slot.handle))) {
         // 404 also means the container outlived its network (compose down recreates it); a same-name create would return it again.
         await docker.remove(slot.handle);
+        this.#startedAt.delete(slot.handle);
         slot.handle = await this.#create(spec);
         this.#startedAt.set(slot.handle, Date.now());
         await docker.start(slot.handle);
@@ -112,6 +112,12 @@ class DockerDriver implements Driver<ContainerRun, string> {
     this.#startedAt.delete(container);
   }
 
+  /** Docker is the gateway's own dependency: a failure here fails the start. */
+  async discard(app: AppId, container: string): Promise<boolean> {
+    await this.remove(app, container);
+    return true;
+  }
+
   async adopt(): Promise<readonly Adopted<string>[]> {
     this.#since ||= Math.floor(Date.now() / 1000);
     const found = await this.#docker.list({ label: [LABEL.app, `${LABEL.network}=${this.#network}`] });
@@ -141,7 +147,7 @@ class DockerDriver implements Driver<ContainerRun, string> {
   #onDie(event: DockerEvent, gone: Gone<string>): void {
     const signalled = this.#signalled.delete(event.id);
     if (event.time < (this.#startedAt.get(event.id) ?? 0)) return;
-    gone(event.labels[LABEL.app] as AppId, event.id, signalled ? null : { ev: 'crashed', reason: `container exited with code ${event.labels.exitCode}` });
+    gone(event.labels[LABEL.app] as AppId, event.id, signalled ? { ev: 'stopped' } : { ev: 'crashed', reason: `container exited with code ${event.labels.exitCode}` });
   }
 
   async logs(_app: AppId, container: string | null, tail: number): Promise<string> {

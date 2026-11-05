@@ -4,6 +4,7 @@ import {
   canonicalHash, NotFound,
   type AppId, type HealthCheck, type InstanceState, type Lease, type LeaseKind, type Runtime, type RunSpec, type RuntimeKind,
 } from './model.ts';
+import { Unavailable } from './runtimes.ts';
 
 const MAX_TICK_SECONDS = 10;
 
@@ -13,11 +14,14 @@ export type Slot<S extends RunSpec, H> = { spec: S; handle: H | null };
 /** An instance found at startup; `address` null means it exists but is not running. */
 export type Adopted<H> = { readonly app: AppId; readonly handle: H; readonly release: string; readonly spec: string; readonly address: string | null };
 
-/** How a running instance ended without the lifecycle asking; null failure means it was stopped from outside. */
-export type Failure = { readonly ev: 'crashed' | 'hung'; readonly reason: string } | null;
-export type Gone<H> = (app: AppId, handle: H, failure: Failure) => void;
+/**
+ * How a running instance ended without the lifecycle asking: a failure the Guard counts, a stop from outside,
+ * or its runtime no longer answering, which is the platform's fault and not the app's.
+ */
+export type Ending = { readonly ev: 'crashed' | 'hung'; readonly reason: string } | { readonly ev: 'stopped' } | { readonly ev: 'unavailable' };
+export type Gone<H> = (app: AppId, handle: H, ending: Ending) => void;
 
-/** How one runtime starts, stops and observes instances; the lifecycle owns states, leases and the reaper. */
+/** How one runtime starts, stops and observes instances; the lifecycle owns states, leases and the reaper. Throws Unavailable when its service cannot be reached. */
 export interface Driver<S extends RunSpec, H> {
   readonly kind: RuntimeKind;
   /** The key a handle is logged under in lifecycle events. */
@@ -28,6 +32,8 @@ export interface Driver<S extends RunSpec, H> {
   /** Idle stop; the driver may keep the handle for the next start. */
   sleep(app: AppId, slot: Slot<S, H>): Promise<void>;
   remove(app: AppId, handle: H): Promise<void>;
+  /** Removes an instance reconcile found stale; false when the driver deferred it to its own retry instead of failing the gateway's start. */
+  discard(app: AppId, handle: H): Promise<boolean>;
   adopt(): Promise<readonly Adopted<H>[]>;
   /** Reports instances that end on their own until `signal` aborts. */
   follow(gone: Gone<H>, signal: AbortSignal): void;
@@ -57,6 +63,9 @@ export type LifecycleOptions = {
 };
 
 export const specHash = (spec: RunSpec): string => canonicalHash(spec.injection);
+
+/** Why an instance fell back to asleep: an Unavailable runtime carries no error, so neither the Guard nor the metrics count it. */
+const cause = (error: unknown): Record<string, unknown> => (error instanceof Unavailable ? { unavailable: true } : { error: String(error) });
 
 // JavaScript runs each synchronous stretch to completion, so the code between two awaits is the per-instance lock;
 // `changed` is its condition variable.
@@ -152,8 +161,7 @@ export class Lifecycle<S extends RunSpec, H> implements Runtime {
       if (this.#instances.get(app)?.handle === handle) continue;
       const spec = this.#specFor(app);
       if (!spec || this.#instances.has(app) || found.release !== String(spec.release) || found.spec !== specHash(spec)) {
-        await this.#driver.remove(app, handle);
-        this.#emit('removed', app, { [this.#driver.handleKey]: handle });
+        if (await this.#driver.discard(app, handle)) this.#emit('removed', app, { [this.#driver.handleKey]: handle });
         continue;
       }
       const inst: Instance<S, H> = {
@@ -220,7 +228,7 @@ export class Lifecycle<S extends RunSpec, H> implements Runtime {
       inst.lastReleaseAt = Date.now();
       this.#transition(inst, 'awake', { ms: Math.round(performance.now() - started) });
     } catch (error) {
-      this.#transition(inst, 'asleep', { error: String(error) });
+      this.#transition(inst, 'asleep', cause(error));
       throw error;
     }
   }
@@ -248,7 +256,7 @@ export class Lifecycle<S extends RunSpec, H> implements Runtime {
     try {
       if (inst.handle !== null) await this.#driver.remove(inst.app, inst.handle);
     } catch (error) {
-      this.#transition(inst, 'asleep', { error: String(error) });
+      this.#transition(inst, 'asleep', cause(error));
       throw error;
     }
     this.#instances.delete(inst.app);
@@ -263,16 +271,18 @@ export class Lifecycle<S extends RunSpec, H> implements Runtime {
       await this.#driver.sleep(inst.app, inst);
       this.#transition(inst, 'asleep');
     } catch (error) {
+      if (error instanceof Unavailable) return this.#transition(inst, 'asleep', cause(error));
       inst.lastReleaseAt = Date.now();
       this.#transition(inst, 'awake', { error: String(error) });
     }
   }
 
-  readonly #gone: Gone<H> = (app, handle, failure) => {
+  readonly #gone: Gone<H> = (app, handle, ending) => {
     const inst = this.#instances.get(app);
     if (inst?.state !== 'awake' || inst.handle !== handle) return;
     inst.address = '';
-    if (failure) this.#emit(failure.ev, app, { reason: failure.reason });
+    if (ending.ev === 'unavailable') return this.#transition(inst, 'asleep', { unavailable: true });
+    if (ending.ev !== 'stopped') this.#emit(ending.ev, app, { reason: ending.reason });
     this.#transition(inst, 'asleep', { external: true });
   };
 

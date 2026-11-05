@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { after, before, test, type TestContext } from 'node:test';
 import {
-  adminClient, adminUrl, appId, appJson, appUrl, cleanup, compose, containerFor, deploy, deployIsolate, fixtureDir, images, publishIsolate,
-  setIdle, setupSuite, sleep, summary, teardownSuite, uniqueName, waitFor, waitInstance,
+  adminClient, adminUrl, appctl, appId, appJson, appUrl, cleanup, compose, containerFor, deploy, deployIsolate, docker, fixtureDir, images, OWNER, publishIsolate,
+  scratch, setIdle, setupSuite, sleep, summary, teardownSuite, uniqueName, waitFor, waitInstance,
 } from './harness.ts';
 
 before(setupSuite);
@@ -48,19 +49,23 @@ async function awakeWitness(t: TestContext): Promise<() => Promise<string[]>> {
   return stop;
 }
 
-test('AC-ISO-1', { timeout: 60_000 }, async (t) => {
+test('AC-ISO-1', { timeout: 120_000 }, async (t) => {
   const name = uniqueName('acc');
+  const dir = join(mkdtempSync(join(scratch, 'pneuma-space-acc-')), 'app');
+  t.after(() => rmSync(join(dir, '..'), { recursive: true, force: true }));
   t.after(() => cleanup(name));
-  const release = await publishIsolate(name, fixture);
-  assert.equal(release.number, 1);
-  assert.equal(release.image, null);
+  appctl('init', dir);
+  assert.match(appctl('publish', name, dir, '--owner', OWNER), /release 1$/m);
+  assert.equal(docker('images', '-q', `pneuma-space-app/${name}`), '', 'no image was built');
   const listed = await summary(name);
-  assert.deepEqual([listed.status, listed.runtime], ['registered', 'isolate']);
+  assert.deepEqual([listed.status, listed.release, listed.runtime], ['registered', 1, 'isolate']);
   const started = performance.now();
-  const body = await (await fetch(appUrl(name))).text();
+  const response = await fetch(appUrl(name));
+  const body = await response.text();
   const ms = performance.now() - started;
   t.diagnostic(`isolate cold start, first request: ${ms.toFixed(0)} ms`);
-  assert.equal(body, `${name} 1`);
+  assert.equal(response.status, 200);
+  assert.match(body, /src\/server\.ts/, 'the scaffold page answers');
   assert.ok(ms < 1000, `first request ${ms.toFixed(0)} ms, gate 1000 ms`);
   assert.equal(containerFor(await appId(name)), null, 'docker ps -a shows no container for an isolate app');
 });

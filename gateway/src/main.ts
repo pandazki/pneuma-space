@@ -32,7 +32,10 @@ const infra = new DockerInfra(docker, await composeProject(docker));
 const specFor = (app: AppId) => registry.runSpec(app);
 const container = new DockerRuntime({ docker, network, specFor });
 const bundles = new S3BundleStore(config.object);
-const isolate = new IsolateRuntime({ runner: `http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`, bundleUrl: (id) => bundles.presignTar(id), specFor });
+const isolate = new IsolateRuntime({
+  runner: `http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`, bundleUrl: (id) => bundles.presignTar(id), specFor,
+  hasRun: async (app) => (await store.releases(app)).some((release) => release.runtime === 'isolate'),
+});
 const runtime = new Runtimes({ runtimes: [container, isolate], specFor, events });
 const registry = await PlatformRegistry.open({
   store, runtime, guard: runtime, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => ingress.snapshot(),
