@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { existsSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { EventLog } from './events.ts';
@@ -11,13 +14,13 @@ import type { EventPage } from './runner.ts';
 import { serveBundle, startRunner, type RunnerProcess } from './runner.harness.ts';
 import { Runtimes, Unavailable } from './runtimes.ts';
 
-async function fixture(t: TestContext, policy: Partial<Policy> = {}, storage: readonly StorageBinding[] = []) {
+async function fixture(t: TestContext, policy: Partial<Policy> = {}, storage: readonly StorageBinding[] = [], env: Record<string, string> = {}) {
   const app = newAppId();
   const specs = new Map<AppId, RunSpec>();
   const specFor = (id: AppId) => specs.get(id) ?? null;
   const publish = (release: number) => specs.set(app, {
     app, name: appName('fixture'), release: release as ReleaseNumber, runtime: { kind: 'isolate', bundle: 'b' as BundleId, entry: 'app.mjs' },
-    injection: { env: {}, storage }, policy: { ...DEFAULT_POLICY, ...policy },
+    injection: { env, storage }, policy: { ...DEFAULT_POLICY, ...policy },
   });
   publish(1);
   const bundleUrl = await serveBundle(t);
@@ -45,11 +48,13 @@ async function fixture(t: TestContext, policy: Partial<Policy> = {}, storage: re
     await stopRunner();
     return startRunnerAgain();
   };
+  const pauseRunner = () => process.kill(runner.pid, 'SIGSTOP');
+  const resumeRunner = () => process.kill(runner.pid, 'SIGCONT');
   const workers = async () => (await (await fetch(`${runner.url}/instances`)).json()) as { app: string; release: number }[];
   const runnerEvents = async () => ((await (await fetch(`${runner.url}/events?after=0`)).json()) as EventPage).events;
   const runtime = start();
   const guarded = () => new Runtimes({ runtimes: [runtime], specFor, events: bus, log: bus.emit });
-  return { app, events, publish, start, stopRunner, startRunnerAgain, restartRunner, workers, runnerEvents, guarded, runtime };
+  return { app, events, publish, start, stopRunner, pauseRunner, resumeRunner, startRunnerAgain, restartRunner, workers, runnerEvents, guarded, runtime };
 }
 
 const answer = async (address: string) => (await fetch(`http://${address}/`)).text();
@@ -147,13 +152,62 @@ test('an awake isolate app whose runner stops answering goes asleep as unavailab
 });
 
 test('a wake while the runner is down is refused as Unavailable and counts no failure toward quarantine', async (t) => {
-  const { app, guarded, startRunnerAgain, stopRunner } = await fixture(t, { max_failures: 1 });
+  const { app, guarded, stopRunner } = await fixture(t, { max_failures: 1 });
   const runtimes = guarded();
   await stopRunner();
   await assert.rejects(runtimes.acquire(app, 'request'), Unavailable);
   assert.equal(runtimes.quarantine(app), null);
+});
+
+test('the first wake after the runner is back answers', async (t) => {
+  const { app, guarded, startRunnerAgain, stopRunner } = await fixture(t, { max_failures: 1 });
+  const runtimes = guarded();
+  await stopRunner();
+  await runtimes.acquire(app, 'request').catch(() => {});
   await startRunnerAgain();
   assert.equal(await answer((await runtimes.acquire(app, 'request')).address), 'fixture 1');
+});
+
+test('a start during which the runner dies counts as a failed wake', async (t) => {
+  const { app, guarded, stopRunner } = await fixture(t, { max_failures: 1 }, [], { START_BUSY_MS: '3000' });
+  const runtimes = guarded();
+  const wake = runtimes.acquire(app, 'request');
+  await sleep(1000);
+  await stopRunner();
+  await assert.rejects(wake);
+  assert.notEqual(runtimes.quarantine(app), null);
+});
+
+test('a worker left running while the runner did not answer is stopped once it answers, and the next wake succeeds', async (t) => {
+  const { app, pauseRunner, resumeRunner, runtime, workers } = await fixture(t);
+  await runtime.reconcile();
+  runtime.release(await runtime.acquire(app, 'request'));
+  pauseRunner();
+  await until('asleep while the runner is paused', () => runtime.state(app) === 'asleep', 15_000);
+  resumeRunner();
+  for (const end = Date.now() + 12_000; (await workers()).length > 0; await sleep(100)) assert.ok(Date.now() < end, 'the untracked worker is stopped');
+  assert.equal(await answer((await runtime.acquire(app, 'request')).address), 'fixture 1');
+});
+
+test('a gateway starts against a runner that lists a stale worker but fails to remove it, and removes it later', async (t) => {
+  let deletes = 0;
+  let listed = [{ app: 'stale', release: 1, spec: 's', worker: '1:1', port: 1, since: 0 }];
+  const fake = createServer((q, s) => {
+    const json = (body: unknown) => s.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(body));
+    if (q.method === 'DELETE') {
+      if (++deletes === 1) return s.writeHead(500).end('{"error":"failed"}');
+      listed = [];
+      return s.writeHead(204).end();
+    }
+    if (q.url!.startsWith('/events')) return json({ startedAt: 1, seq: 0, events: [] });
+    if (q.url === '/instances') return json(listed);
+    json({ ok: true, startedAt: 1, stuck: 0, workers: listed.length });
+  }).listen(0, '127.0.0.1');
+  await once(fake, 'listening');
+  const runtime = new IsolateRuntime({ runner: `http://127.0.0.1:${(fake.address() as AddressInfo).port}`, bundleUrl: () => '', specFor: () => null, hasRun: async () => true, log: () => {} });
+  t.after(() => { runtime.close(); fake.close(); });
+  await runtime.reconcile();
+  for (const end = Date.now() + 8000; listed.length > 0; await sleep(100)) assert.ok(Date.now() < end, 'the stale worker is removed by the recovery poll');
 });
 
 // A stopped compose service has no name on the platform network; `.invalid` never resolves (RFC 6761).

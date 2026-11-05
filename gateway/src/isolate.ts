@@ -10,7 +10,10 @@ import { Unavailable } from './runtimes.ts';
 export const RUNNER_PORT = 8082;
 // One small read on the platform network; hang detection is the watchdog's 3 to 4 s plus at most this.
 const POLL_MS = 250;
+/** A paused runner still accepts connections, so a poll gives up on its answer well before CALL_MS. */
+const PROBE_MS = 2000;
 const CALL_MS = 10_000;
+const RECOVER_MS = 5000;
 /** The same grace `docker stop` gives a container. */
 const STOP_MS = 10_000;
 const UNCLAIMED = 100;
@@ -31,6 +34,13 @@ export type IsolateOptions = {
 };
 
 class RunnerError extends Error {}
+/** The request reached the runner and no answer came. */
+class Unanswered extends RunnerError {}
+
+/** Failures before the request is sent; anything later may be the request's doing. */
+const UNREACHED: ReadonlySet<string> = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
+
+type Health = { readonly startedAt: number };
 
 const ending = (event: RunnerEvent): Ending => {
   if (event.ev === 'hung') return { ev: 'hung', reason: event.reason ?? 'hung' };
@@ -51,8 +61,12 @@ class IsolateDriver implements Driver<IsolateRun, string> {
   readonly #live = new Map<string, AppId>();
   /** Terminal events of workers not yet known: a start whose worker ended before its POST answered fails. */
   readonly #unclaimed = new Map<string, RunnerEvent>();
+  /** Apps whose start is in flight: the runner lists their worker before the start answers. */
+  readonly #starting = new Set<AppId>();
   #startedAt: number | null = null;
   #after = 0;
+  /** A control call failed or instances went asleep unavailable: the runner may hold workers nobody tracks. */
+  #suspect = false;
 
   constructor(options: IsolateOptions) {
     this.#runner = new URL(options.runner);
@@ -78,7 +92,19 @@ class IsolateDriver implements Driver<IsolateRun, string> {
       readyMs,
     };
     const address = await this.#resolve();
-    const started = await this.#call<Started>('POST', `/instances/${spec.app}`, request, readyMs + CALL_MS);
+    const before = await this.#call<Health>('GET', '/health', undefined, PROBE_MS).catch(() => { throw new Unavailable('isolate'); });
+    this.#starting.add(spec.app);
+    let started: Started;
+    try {
+      started = await this.#call<Started>('POST', `/instances/${spec.app}`, request, readyMs + CALL_MS);
+    } catch (error) {
+      if (!(error instanceof Unanswered)) throw error;
+      const after = await this.#call<Health>('GET', '/health', undefined, PROBE_MS).catch(() => null);
+      if (after && after.startedAt !== before.startedAt) throw new RunnerError(`runner-restarted while it started app ${spec.app}`);
+      throw error;
+    } finally {
+      this.#starting.delete(spec.app);
+    }
     const ended = this.#unclaimed.get(started.worker);
     if (ended) throw new RunnerError(`worker of app ${spec.app} ended as soon as it listened: ${ended.reason ?? ended.ev}`);
     slot.handle = started.worker;
@@ -97,17 +123,29 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     this.#live.delete(worker);
   }
 
+  /** The runner is its own failure domain: an untracked worker it cannot stop now is stopped by the recovery poll. */
+  async discard(app: AppId, worker: string): Promise<boolean> {
+    this.#live.delete(worker);
+    try {
+      await this.remove(app, worker);
+      return true;
+    } catch (error) {
+      this.#suspect = true;
+      this.#log('runner-unreachable', app, { worker, error: String(error) });
+      return false;
+    }
+  }
+
   /** A runner that is off or does not answer holds nothing to adopt; the gateway starts without it. */
   async adopt(): Promise<readonly Adopted<string>[]> {
     const address = await lookup(this.#runner.hostname).then(({ address }) => address, () => null);
     if (address === null) return [];
     let listed: Listed[];
     try {
-      const page = await this.#call<EventPage>('GET', '/events?after=latest');
-      this.#startedAt = page.startedAt;
-      this.#after = page.seq;
+      await this.#cursor();
       listed = await this.#call<Listed[]>('GET', '/instances');
     } catch (error) {
+      this.#suspect = true;
       this.#log('runner-unreachable', null, { error: String(error) });
       return [];
     }
@@ -118,8 +156,13 @@ class IsolateDriver implements Driver<IsolateRun, string> {
   follow(gone: Gone<string>, signal: AbortSignal): void {
     void (async () => {
       let failed = 0;
+      let probed = 0;
       while (!signal.aborted) {
         await sleep(POLL_MS, undefined, { ref: false });
+        if (this.#suspect && performance.now() - probed >= RECOVER_MS) {
+          probed = performance.now();
+          await this.#recover().catch(() => {});
+        }
         if (this.#live.size === 0) continue;
         try {
           await this.#poll(gone);
@@ -131,13 +174,33 @@ class IsolateDriver implements Driver<IsolateRun, string> {
           // The next wake starts again through the runner, which answers with the worker if it is still running.
           for (const [worker, app] of this.#live) gone(app, worker, { ev: 'unavailable' });
           this.#live.clear();
+          this.#suspect = true;
         }
       }
     })();
   }
 
+  /** Once the runner answers again, stops the workers it kept that no lease can reach; the next request wakes the app in tens of ms. */
+  async #recover(): Promise<void> {
+    await this.#call<Health>('GET', '/health', undefined, PROBE_MS);
+    if (this.#startedAt === null) await this.#cursor();
+    const listed = await this.#call<Listed[]>('GET', '/instances', undefined, PROBE_MS);
+    const untracked = listed.filter(({ worker, app }) => !this.#live.has(worker) && !this.#starting.has(app as AppId));
+    this.#suspect = false;
+    const stops = await Promise.allSettled(untracked.map(({ app, worker }) => this.#call('DELETE', `/instances/${app}?drain=${STOP_MS}&worker=${worker}`, undefined, STOP_MS + CALL_MS)));
+    const failed = stops.filter((stop) => stop.status === 'rejected').length;
+    if (failed > 0) this.#suspect = true;
+    this.#log('runner-recovered', null, { stopped: untracked.length - failed, failed });
+  }
+
+  async #cursor(): Promise<void> {
+    const page = await this.#call<EventPage>('GET', '/events?after=latest', undefined, PROBE_MS);
+    this.#startedAt = page.startedAt;
+    this.#after = page.seq;
+  }
+
   async #poll(gone: Gone<string>): Promise<void> {
-    let page = await this.#call<EventPage>('GET', `/events?after=${this.#after}`);
+    let page = await this.#call<EventPage>('GET', `/events?after=${this.#after}`, undefined, PROBE_MS);
     if (page.startedAt !== this.#startedAt) {
       // A restarted runner holds none of the workers its predecessor ran.
       for (const [worker, app] of this.#live) {
@@ -147,7 +210,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
       }
       this.#startedAt = page.startedAt;
       this.#after = 0;
-      page = await this.#call<EventPage>('GET', '/events?after=0');
+      page = await this.#call<EventPage>('GET', '/events?after=0', undefined, PROBE_MS);
     }
     for (const event of page.events) {
       this.#after = Math.max(this.#after, event.seq);
@@ -180,10 +243,13 @@ class IsolateDriver implements Driver<IsolateRun, string> {
 
   /** A stopped compose service has no name on the platform network. */
   async #resolve(): Promise<string> {
-    return (await lookup(this.#runner.hostname).catch(() => { throw new Unavailable('isolate'); })).address;
+    return (await lookup(this.#runner.hostname).catch(() => {
+      this.#suspect = true;
+      throw new Unavailable('isolate');
+    })).address;
   }
 
-  /** Throws Unavailable when the runner cannot be reached or does not answer in time, RunnerError when it answers with an error. */
+  /** Throws Unavailable when the request never reached the runner, Unanswered when no answer came, RunnerError when it answered with an error. */
   async #call<T>(method: string, path: string, body?: unknown, timeoutMs = CALL_MS): Promise<T> {
     let response: Response;
     let text: string;
@@ -194,8 +260,11 @@ class IsolateDriver implements Driver<IsolateRun, string> {
         ...(body !== undefined && { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }),
       });
       text = await response.text();
-    } catch {
-      throw new Unavailable('isolate');
+    } catch (error) {
+      this.#suspect = true;
+      const code = (error as { cause?: { code?: string } }).cause?.code;
+      if (code !== undefined && UNREACHED.has(code)) throw new Unavailable('isolate');
+      throw new Unanswered(`runner ${method} ${path}: ${(error as Error).name === 'TimeoutError' ? `no answer within ${timeoutMs} ms` : String((error as Error).cause ?? error)}`);
     }
     if (!response.ok) throw new RunnerError(`runner ${method} ${path}: ${response.status} ${text}`);
     if (response.status === 204) return undefined as T;

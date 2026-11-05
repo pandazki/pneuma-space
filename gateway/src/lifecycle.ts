@@ -32,6 +32,8 @@ export interface Driver<S extends RunSpec, H> {
   /** Idle stop; the driver may keep the handle for the next start. */
   sleep(app: AppId, slot: Slot<S, H>): Promise<void>;
   remove(app: AppId, handle: H): Promise<void>;
+  /** Removes an instance reconcile found stale; false when the driver deferred it to its own retry instead of failing the gateway's start. */
+  discard(app: AppId, handle: H): Promise<boolean>;
   adopt(): Promise<readonly Adopted<H>[]>;
   /** Reports instances that end on their own until `signal` aborts. */
   follow(gone: Gone<H>, signal: AbortSignal): void;
@@ -159,8 +161,7 @@ export class Lifecycle<S extends RunSpec, H> implements Runtime {
       if (this.#instances.get(app)?.handle === handle) continue;
       const spec = this.#specFor(app);
       if (!spec || this.#instances.has(app) || found.release !== String(spec.release) || found.spec !== specHash(spec)) {
-        await this.#driver.remove(app, handle);
-        this.#emit('removed', app, { [this.#driver.handleKey]: handle });
+        if (await this.#driver.discard(app, handle)) this.#emit('removed', app, { [this.#driver.handleKey]: handle });
         continue;
       }
       const inst: Instance<S, H> = {

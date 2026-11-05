@@ -112,6 +112,12 @@ class DockerDriver implements Driver<ContainerRun, string> {
     this.#startedAt.delete(container);
   }
 
+  /** Docker is the gateway's own dependency: a failure here fails the start. */
+  async discard(app: AppId, container: string): Promise<boolean> {
+    await this.remove(app, container);
+    return true;
+  }
+
   async adopt(): Promise<readonly Adopted<string>[]> {
     this.#since ||= Math.floor(Date.now() / 1000);
     const found = await this.#docker.list({ label: [LABEL.app, `${LABEL.network}=${this.#network}`] });
