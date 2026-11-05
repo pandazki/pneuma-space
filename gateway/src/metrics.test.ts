@@ -42,12 +42,16 @@ test('the growth of the ingress counters between two reads becomes requests and 
   assert.deepEqual([last(snapshot.series.requests), last(snapshot.series.errors)], [3, 1]);
 });
 
-test('a failed delivery lands in the deliveries series and the events ring keeps the last 100', () => {
+test('a failed delivery lands in the deliveries series', () => {
   const { events, metrics, last } = fixture();
-  for (let i = 0; i < 120; i++) events.emit('delivery.due', app, { attempt: 0, n: i });
   events.emit('delivery.failed', app, { trigger: 'nightly', delivery: 'd1', attempt: 5, reason: 'HTTP 500' });
-  const snapshot = metrics.snapshot();
-  assert.equal(last(snapshot.series.deliveriesFailed), 1);
-  assert.equal(snapshot.events.length, 100);
-  assert.equal(snapshot.events.at(-1)!.ev, 'delivery.failed');
+  assert.equal(last(metrics.snapshot().series.deliveriesFailed), 1);
+});
+
+test('the events ring keeps the last 100, newest last', () => {
+  const { events, metrics } = fixture();
+  for (let i = 0; i < 120; i++) events.emit('delivery.due', app, { attempt: 0, n: i });
+  const { events: ring } = metrics.snapshot();
+  assert.equal(ring.length, 100);
+  assert.equal(ring.at(-1)!.n, 119);
 });
