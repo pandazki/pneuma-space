@@ -457,42 +457,46 @@ export type DeliveryFilter = {
 
 // Protocols
 
-/** Hides the platform library (SQLite in M1). Synchronous; one writer per table is a convention the Registry and Scheduler keep, not a type. */
-export interface Store {
-  transaction<T>(fn: () => T): T;
-
-  app(name: AppName): App | null;
-  apps(): App[];
-  putApp(app: App): void;
+/** The platform library's rows; one writer per table is a convention the Registry and Scheduler keep, not a type. */
+export interface StoreOps {
+  app(name: AppName): Promise<App | null>;
+  apps(): Promise<App[]>;
+  putApp(app: App): Promise<void>;
   /** Deletes the app and its Registry rows (release, trigger, binding); the end of purge. */
-  deleteApp(app: AppId): void;
+  deleteApp(app: AppId): Promise<void>;
 
-  release(app: AppId, number: ReleaseNumber): Release | null;
-  releases(app: AppId): Release[];
-  putRelease(release: Release): void;
+  release(app: AppId, number: ReleaseNumber): Promise<Release | null>;
+  releases(app: AppId): Promise<Release[]>;
+  putRelease(release: Release): Promise<void>;
 
-  triggers(): Trigger[];
-  replaceTriggers(app: AppId, triggers: readonly Trigger[]): void;
+  triggers(): Promise<Trigger[]>;
+  replaceTriggers(app: AppId, triggers: readonly Trigger[]): Promise<void>;
 
-  bindings(app?: AppId): Binding[];
-  putBinding(binding: Binding): void;
+  bindings(app?: AppId): Promise<Binding[]>;
+  putBinding(binding: Binding): Promise<void>;
 
-  policy(): Policy;
-  putPolicy(policy: Policy): void;
+  policy(): Promise<Policy>;
+  putPolicy(policy: Policy): Promise<void>;
 
-  token(hash: string): Token | null;
-  putToken(token: Token): void;
+  token(hash: string): Promise<Token | null>;
+  putToken(token: Token): Promise<void>;
 
   /** Returns the stored row: an existing one for the same scheduled slot, or the same (app, trigger, idempotencyKey) within IDEMPOTENCY_WINDOW_MS. */
-  insertDelivery(delivery: Delivery): Delivery;
-  updateDelivery(delivery: Delivery): void;
-  deliveries(filter: DeliveryFilter): Delivery[];
-  lastScheduledFor(app: AppId, trigger: TriggerName): number | null;
-  deleteDeliveries(app: AppId): void;
+  insertDelivery(delivery: Delivery): Promise<Delivery>;
+  updateDelivery(delivery: Delivery): Promise<void>;
+  deliveries(filter: DeliveryFilter): Promise<Delivery[]>;
+  lastScheduledFor(app: AppId, trigger: TriggerName): Promise<number | null>;
+  deleteDeliveries(app: AppId): Promise<void>;
 
-  stats(): Stats[];
-  putStats(stats: readonly Stats[]): void;
-  deleteStats(app: AppId): void;
+  stats(): Promise<Stats[]>;
+  putStats(stats: readonly Stats[]): Promise<void>;
+  deleteStats(app: AppId): Promise<void>;
+}
+
+/** Hides the platform library (SQLite in M1). */
+export interface Store extends StoreOps {
+  /** `fn` reads and writes only through `tx`; it commits when `fn` resolves and rolls back when it rejects. Nothing else runs meanwhile, so `fn` must not await network or Docker. */
+  transaction<T>(fn: (tx: StoreOps) => Promise<T>): Promise<T>;
 }
 
 /** Hides Docker: instances, leases, the reaper and container lifecycle. The M2 multi-node seam. */
@@ -552,11 +556,11 @@ export type InvokeRequest = {
 /** Hides cron and delivery: every trigger call is a durable Delivery before any attempt. */
 export interface Scheduler {
   /** Throws NotFound when the app's current release does not declare the trigger. */
-  invoke(request: InvokeRequest): DeliveryId;
+  invoke(request: InvokeRequest): Promise<DeliveryId>;
   /** Re-reads the app's triggers; cancels deliveries of undeclared triggers and of removed apps, and deletes those of purged apps. */
-  reload(app: AppId): void;
+  reload(app: AppId): Promise<void>;
   /** Startup: delivering rows return to due, then the loop and worker start. */
-  resume(): void;
+  resume(): Promise<void>;
 }
 
 /** What the Scheduler reads about one app. */
@@ -575,18 +579,18 @@ export interface Registry {
   remove(name: AppName): Promise<void>;
   /** Only from removed; otherwise Conflict. */
   purge(name: AppName): Promise<void>;
-  setGlobalPolicy(patch: Partial<Policy>): Policy;
+  setGlobalPolicy(patch: Partial<Policy>): Promise<Policy>;
   setAppPolicy(name: AppName, patch: PolicyPatch): Promise<PolicyOverride>;
-  setOwner(name: AppName, owner: Subject): void;
-  issueToken(name: string): { readonly token: string; readonly subject: Subject };
+  setOwner(name: AppName, owner: Subject): Promise<void>;
+  issueToken(name: string): Promise<{ readonly token: string; readonly subject: Subject }>;
   view(name: AppName): RouteView | null;
   /** The global snapshot; merge with a RouteView's override via effectivePolicy. */
   policy(): Policy;
   runSpec(app: AppId): RunSpec | null;
   /** Null once the app is purged. */
   schedule(app: AppId): SchedulerView | null;
-  listing(): AppSummary[];
-  detail(name: AppName): AppDetail | null;
+  listing(): Promise<AppSummary[]>;
+  detail(name: AppName): Promise<AppDetail | null>;
   /** Called after every committed change to an app, the end of purge included; main wires it to Runtime.retire, Scheduler.reload and Ingress.forget. */
   onAppChanged(listener: (app: AppId) => void): void;
   /** Startup: continues interrupted purges and re-runs ensure or suspend on every binding per its state (DESIGN 2.3 重启). */

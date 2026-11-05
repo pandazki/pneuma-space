@@ -19,8 +19,8 @@ export type IngressDeps = {
   readonly scheduler: Pick<Scheduler, 'invoke'>;
   /** The last snapshot, loaded at startup (INV-7). */
   readonly stats: readonly Stats[];
-  readonly flushStats: (stats: Stats[]) => void;
-  readonly deleteStats: (app: AppId) => void;
+  readonly flushStats: (stats: Stats[]) => Promise<void>;
+  readonly deleteStats: (app: AppId) => Promise<void>;
 };
 
 type Reply = { readonly status: number; readonly headers?: OutgoingHttpHeaders; readonly error?: string };
@@ -132,14 +132,14 @@ export class Ingress {
     return [...this.#stats].map(([app, counter]) => ({ app, ...counter }));
   }
 
-  flush(): void {
-    this.#deps.flushStats(this.snapshot());
+  flush(): Promise<void> {
+    return this.#deps.flushStats(this.snapshot());
   }
 
   /** For a purged app: its counter and row go, so no later flush brings the row back. */
-  forget(app: AppId): void {
+  forget(app: AppId): Promise<void> {
     this.#stats.delete(app);
-    this.#deps.deleteStats(app);
+    return this.#deps.deleteStats(app);
   }
 
   #count(app: AppId, status: number): void {
@@ -284,7 +284,7 @@ export class Ingress {
     if (body === null) return send(res, { status: 413, error: `trigger body exceeds ${TRIGGER_BODY_LIMIT} bytes`, headers: { connection: 'close' } });
     try {
       const key = req.headers[HEADERS.idempotencyKey];
-      const delivery = this.#deps.scheduler.invoke({
+      const delivery = await this.#deps.scheduler.invoke({
         app: view.app, trigger: triggerName(raw), caller: who.subject, idempotencyKey: typeof key === 'string' ? key : null, body,
       });
       res.writeHead(202, { 'content-type': 'application/json' }).end(JSON.stringify({ delivery }));

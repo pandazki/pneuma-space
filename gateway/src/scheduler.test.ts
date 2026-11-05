@@ -47,8 +47,8 @@ function harness(triggers: Record<string, string | null> = { run: null }) {
   };
   const state = { view: view as SchedulerView | null, acquired: 0, released: 0, refuse: false, failWrite: false };
   const store: SchedulerDeps['store'] = {
-    apps: () => [{ id: APP, status: 'registered' } as App],
-    insertDelivery: (d) => {
+    apps: async () => [{ id: APP, status: 'registered' } as App],
+    insertDelivery: async (d) => {
       const existing = rows.find((r) => r.app === d.app && r.trigger === d.trigger && (
         (d.scheduledFor !== null && r.scheduledFor === d.scheduledFor) ||
         (d.idempotencyKey !== null && r.idempotencyKey === d.idempotencyKey && d.createdAt - r.createdAt < IDEMPOTENCY_WINDOW_MS)));
@@ -56,14 +56,14 @@ function harness(triggers: Record<string, string | null> = { run: null }) {
       rows.push(d);
       return d;
     },
-    updateDelivery: (d) => {
+    updateDelivery: async (d) => {
       if (state.failWrite) throw new Error('database is locked');
       rows.splice(rows.findIndex((r) => r.id === d.id), 1, d);
     },
-    deliveries: (f: DeliveryFilter) => rows.filter((r) => (f.app === undefined || r.app === f.app) &&
+    deliveries: async (f: DeliveryFilter) => rows.filter((r) => (f.app === undefined || r.app === f.app) &&
       (f.state === undefined || r.state === f.state) && (f.dueBefore === undefined || r.nextAttemptAt <= f.dueBefore)),
-    deleteDeliveries: (app) => void rows.splice(0, rows.length, ...rows.filter((r) => r.app !== app)),
-    lastScheduledFor: (app, trigger) => {
+    deleteDeliveries: async (app) => void rows.splice(0, rows.length, ...rows.filter((r) => r.app !== app)),
+    lastScheduledFor: async (app, trigger) => {
       const slots = rows.filter((r) => r.app === app && r.trigger === trigger && r.scheduledFor !== null).map((r) => r.scheduledFor!);
       return slots.length ? Math.max(...slots) : null;
     },
@@ -101,7 +101,7 @@ test('a retry after a 500 carries the same delivery id, the next attempt number,
   const { scheduler, rows, clock, invoke } = harness();
   let calls = 0;
   handle = (_req, res) => res.writeHead(++calls === 1 ? 500 : 200).end();
-  const id = invoke(null, 'hello');
+  const id = await invoke(null, 'hello');
   await scheduler.tick();
   assert.equal(rows[0].state, 'due');
   clock.now += 10_000;
@@ -114,7 +114,7 @@ test('a retry after a 500 carries the same delivery id, the next attempt number,
 test('the fifth failed attempt sets failed after backoffs of 10, 20, 40 and 80 s', async () => {
   const { scheduler, rows, clock, state, invoke } = harness();
   handle = (_req, res) => res.writeHead(503).end();
-  invoke();
+  await invoke();
   const waits: number[] = [];
   for (let i = 0; i < 5; i++) {
     await scheduler.tick();
@@ -131,7 +131,7 @@ test('an upstream slower than trigger_timeout_seconds has its connection closed 
   state.view = { ...state.view!, policy: { ...DEFAULT_POLICY, trigger_timeout_seconds: 0.2 } };
   const closed: Promise<unknown>[] = [];
   handle = (req) => void closed.push(once(req.socket, 'close'));
-  invoke();
+  await invoke();
   await scheduler.tick();
   await closed[0];
   assert.deepEqual([rows[0].state, rows[0].nextAttemptAt - clock.now], ['due', 10_000]);
@@ -148,8 +148,8 @@ test('a second due delivery for an app starts only after the first finishes', as
     if (received.length === 1) finishFirst = () => res.end();
     else res.end();
   };
-  const first = invoke('a');
-  const second = invoke('b');
+  const first = await invoke('a');
+  const second = await invoke('b');
   const firstTick = scheduler.tick();
   while (received.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
   await scheduler.tick();
@@ -160,41 +160,41 @@ test('a second due delivery for an app starts only after the first finishes', as
   assert.deepEqual(received.map((r) => r.headers['x-pneuma-space-delivery']), [first, second]);
 });
 
-test('invoke with the same Idempotency-Key returns the same delivery; different keys create two', () => {
+test('invoke with the same Idempotency-Key returns the same delivery; different keys create two', async () => {
   const { rows, invoke } = harness();
-  assert.equal(invoke('k1'), invoke('k1'));
-  assert.notEqual(invoke('k2'), invoke('k1'));
+  assert.equal(await invoke('k1'), await invoke('k1'));
+  assert.notEqual(await invoke('k2'), await invoke('k1'));
   assert.equal(rows.length, 2);
 });
 
-test('invoke of a trigger the current release does not declare throws NotFound', () => {
+test('invoke of a trigger the current release does not declare throws NotFound', async () => {
   const { scheduler } = harness();
-  assert.throws(() => scheduler.invoke({ app: APP, trigger: 'gone' as TriggerName, caller, idempotencyKey: null, body: new Uint8Array() }), NotFound);
+  await assert.rejects(scheduler.invoke({ app: APP, trigger: 'gone' as TriggerName, caller, idempotencyKey: null, body: new Uint8Array() }), NotFound);
 });
 
 test('reload after the trigger was dropped cancels its due deliveries and keeps done ones', async () => {
   const { scheduler, rows, state, invoke } = harness();
-  invoke('done');
+  await invoke('done');
   await scheduler.tick();
-  invoke('pending');
+  await invoke('pending');
   state.view = { ...state.view!, triggers: state.view!.triggers.filter((t) => t.name !== 'run') };
-  scheduler.reload(APP);
+  await scheduler.reload(APP);
   assert.deepEqual(rows.map((r) => r.state), ['done', 'cancelled']);
 });
 
 test('an acquire refused with NotFound cancels the delivery', async () => {
   const { scheduler, rows, state, invoke } = harness();
   state.refuse = true;
-  invoke();
+  await invoke();
   await scheduler.tick();
   assert.equal(rows[0].state, 'cancelled');
 });
 
 test('resume returns a delivering row to due and redelivers it with the same id', async () => {
   const { scheduler, rows, clock, invoke } = harness();
-  const id = invoke();
+  const id = await invoke();
   rows[0] = { ...rows[0], state: 'delivering', attempts: 1, nextAttemptAt: clock.now + 60_000 };
-  scheduler.resume();
+  await scheduler.resume();
   assert.deepEqual([rows[0].state, rows[0].nextAttemptAt], ['due', clock.now]);
   await scheduler.tick();
   scheduler.stop();
@@ -222,7 +222,7 @@ test('catching up a per-minute trigger after 30 days down finds the latest slot 
 
 test('a store error during a tick is logged and does not reject the tick', async () => {
   const { scheduler, state, invoke } = harness();
-  invoke();
+  await invoke();
   state.failWrite = true;
   await assert.doesNotReject(scheduler.tick());
 });

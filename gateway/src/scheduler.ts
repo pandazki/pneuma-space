@@ -36,27 +36,27 @@ export class DeliveryScheduler implements Scheduler {
     this.#log = deps.log ?? ((line) => process.stdout.write(`${line}\n`));
   }
 
-  invoke(req: InvokeRequest): DeliveryId {
+  async invoke(req: InvokeRequest): Promise<DeliveryId> {
     if (!declares(this.#view(req.app), req.trigger)) {
       throw new NotFound(`trigger "${req.trigger}" is not declared by the app's current release`);
     }
-    return this.#insert({
+    return (await this.#insert({
       app: req.app, trigger: req.trigger, scheduledFor: null, caller: req.caller,
       idempotencyKey: req.idempotencyKey, body: req.body,
-    }).id;
+    })).id;
   }
 
-  reload(app: AppId): void {
+  async reload(app: AppId): Promise<void> {
     const view = this.#view(app);
     if (view === null) return this.#store.deleteDeliveries(app);
-    for (const d of this.#store.deliveries({ app, state: 'due' })) {
-      if (!declares(view, d.trigger)) this.#write({ ...d, state: 'cancelled' }, 'trigger not declared or app not registered');
+    for (const d of await this.#store.deliveries({ app, state: 'due' })) {
+      if (!declares(view, d.trigger)) await this.#write({ ...d, state: 'cancelled' }, 'trigger not declared or app not registered');
     }
   }
 
-  resume(): void {
-    for (const d of this.#store.deliveries({ state: 'delivering' })) {
-      this.#write({ ...d, state: 'due', nextAttemptAt: this.#now() }, 'gateway restarted mid-delivery');
+  async resume(): Promise<void> {
+    for (const d of await this.#store.deliveries({ state: 'delivering' })) {
+      await this.#write({ ...d, state: 'due', nextAttemptAt: this.#now() }, 'gateway restarted mid-delivery');
     }
     this.#timer ??= setInterval(() => void this.tick(), TICK_MS).unref();
   }
@@ -70,9 +70,9 @@ export class DeliveryScheduler implements Scheduler {
   async tick(): Promise<void> {
     try {
       const now = this.#now();
-      this.#materialize(now);
+      await this.#materialize(now);
       const started: Promise<void>[] = [];
-      const due = this.#store.deliveries({ state: 'due', dueBefore: now })
+      const due = (await this.#store.deliveries({ state: 'due', dueBefore: now }))
         .sort((a, b) => a.nextAttemptAt - b.nextAttemptAt || a.createdAt - b.createdAt);
       for (const d of due) {
         if (this.#inFlight.has(d.app)) continue;
@@ -85,28 +85,28 @@ export class DeliveryScheduler implements Scheduler {
     }
   }
 
-  #materialize(now: number): void {
-    for (const app of this.#store.apps()) {
+  async #materialize(now: number): Promise<void> {
+    for (const app of await this.#store.apps()) {
       const view = this.#view(app.id);
       if (view?.status !== 'registered') continue;
       for (const trigger of view.triggers) {
         if (trigger.schedule === null) continue;
-        const after = Math.max(this.#store.lastScheduledFor(app.id, trigger.name) ?? view.publishedAt, view.publishedAt);
+        const after = Math.max((await this.#store.lastScheduledFor(app.id, trigger.name)) ?? view.publishedAt, view.publishedAt);
         const slot = latestSlot(trigger.schedule, after, now, view.policy.timezone);
         if (slot === null) continue;
-        this.#insert({
+        await this.#insert({
           app: app.id, trigger: trigger.name, scheduledFor: slot, caller: null, idempotencyKey: null, body: new Uint8Array(),
         });
       }
     }
   }
 
-  #insert(fields: Pick<Delivery, 'app' | 'trigger' | 'scheduledFor' | 'caller' | 'idempotencyKey' | 'body'>): Delivery {
+  async #insert(fields: Pick<Delivery, 'app' | 'trigger' | 'scheduledFor' | 'caller' | 'idempotencyKey' | 'body'>): Promise<Delivery> {
     const now = this.#now();
     const fresh: Delivery = {
       ...fields, id: randomUUID() as DeliveryId, state: 'due', attempts: 0, nextAttemptAt: now, createdAt: now,
     };
-    const stored = this.#store.insertDelivery(fresh);
+    const stored = await this.#store.insertDelivery(fresh);
     if (stored.id === fresh.id) this.#emit(stored);
     return stored;
   }
@@ -114,16 +114,15 @@ export class DeliveryScheduler implements Scheduler {
   async #deliver(due: Delivery): Promise<void> {
     const view = this.#view(due.app);
     if (!declares(view, due.trigger)) {
-      this.#write({ ...due, state: 'cancelled' }, 'trigger not declared or app not registered');
-      return;
+      return this.#write({ ...due, state: 'cancelled' }, 'trigger not declared or app not registered');
     }
     const d: Delivery = { ...due, state: 'delivering', attempts: due.attempts + 1 };
-    this.#write(d);
+    await this.#write(d);
     const outcome = await this.#attempt(d, view.policy.trigger_timeout_seconds * 1000);
-    if (outcome.ok) this.#write({ ...d, state: 'done' });
-    else if (outcome.cancel || !declares(this.#view(d.app), d.trigger)) this.#write({ ...d, state: 'cancelled' }, outcome.reason);
-    else if (d.attempts >= MAX_ATTEMPTS) this.#write({ ...d, state: 'failed' }, outcome.reason);
-    else this.#write({ ...d, state: 'due', nextAttemptAt: this.#now() + BACKOFF_MS * 2 ** (d.attempts - 1) }, outcome.reason);
+    if (outcome.ok) await this.#write({ ...d, state: 'done' });
+    else if (outcome.cancel || !declares(this.#view(d.app), d.trigger)) await this.#write({ ...d, state: 'cancelled' }, outcome.reason);
+    else if (d.attempts >= MAX_ATTEMPTS) await this.#write({ ...d, state: 'failed' }, outcome.reason);
+    else await this.#write({ ...d, state: 'due', nextAttemptAt: this.#now() + BACKOFF_MS * 2 ** (d.attempts - 1) }, outcome.reason);
   }
 
   async #attempt(d: Delivery, timeoutMs: number): Promise<Outcome> {
@@ -143,8 +142,8 @@ export class DeliveryScheduler implements Scheduler {
     }
   }
 
-  #write(d: Delivery, reason?: string): void {
-    this.#store.updateDelivery(d);
+  async #write(d: Delivery, reason?: string): Promise<void> {
+    await this.#store.updateDelivery(d);
     this.#emit(d, reason);
   }
 

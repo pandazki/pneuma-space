@@ -25,10 +25,10 @@ async function serveIngress(upstreamPort: number): Promise<void> {
     runtime: { acquire: async () => ({ app, address: `127.0.0.1:${upstreamPort}` }), release() {}, channel() {} },
     identity: { authenticate: async () => ({ status: 401 }), serve: async () => {} },
     bundles: { open: async () => { throw new Error('unused'); } },
-    scheduler: { invoke: () => { throw new Error('unused'); } },
+    scheduler: { invoke: async () => { throw new Error('unused'); } },
     stats: [],
-    flushStats() {},
-    deleteStats() {},
+    async flushStats() {},
+    async deleteStats() {},
   });
   const port = await ingress.listen(0, '127.0.0.1');
   process.send!({ port });

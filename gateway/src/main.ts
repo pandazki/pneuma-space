@@ -23,29 +23,29 @@ const docker = new Docker();
 const runtime = new DockerRuntime({ docker, network, project: await composeProject(docker), specFor: (app) => registry.runSpec(app) });
 const bundles = new S3BundleStore(config.object);
 const registry = await PlatformRegistry.open({
-  store, runtime, bundles, providers: Object.values(createProviders(runtime, config)), statsSource: () => ingress.snapshot(),
+  store, runtime, bundles, providers: Object.values(createProviders(runtime, config)), statsSource: async () => ingress.snapshot(),
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app) });
 const identity = new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), (hash) => store.token(hash));
 const ingress = new Ingress({
-  registry, runtime, identity, bundles, scheduler, stats: store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
+  registry, runtime, identity, bundles, scheduler, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
 });
 
 process.on('unhandledRejection', (error) => log('unhandled-rejection', { error: String(error) }));
 
 registry.onAppChanged((app) => {
   runtime.retire(app).catch((error: Error) => log('retire-failed', { app, error: error.message }));
-  scheduler.reload(app);
-  if (registry.schedule(app) === null) ingress.forget(app);
+  scheduler.reload(app).catch((error: Error) => log('reload-failed', { app, error: error.message }));
+  if (registry.schedule(app) === null) ingress.forget(app).catch((error: Error) => log('forget-failed', { app, error: error.message }));
 });
 
 // Reconcile first so a resumed purge retires the containers it finds; Providers converge in the background (DESIGN 2.3).
 await runtime.reconcile();
 void registry.resume();
-scheduler.resume();
+await scheduler.resume();
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
 const admin = await startAdmin({ registry, bundles, runtime }, { port: ADMIN_PORT, host: '0.0.0.0' });
-const flusher = setInterval(() => ingress.flush(), STATS_FLUSH_MS);
+const flusher = setInterval(() => ingress.flush().catch((error: Error) => log('flush-failed', { error: error.message })), STATS_FLUSH_MS);
 log('gateway-ready', { network, data });
 
 process.once('SIGTERM', async () => {
@@ -54,8 +54,8 @@ process.once('SIGTERM', async () => {
   runtime.close();
   admin.closeAllConnections();
   await Promise.all([ingress.close(), new Promise((resolve) => admin.close(resolve))]);
-  ingress.flush();
-  store.close();
+  await ingress.flush();
+  await store.close();
   log('gateway-stopped');
   process.exit(0);
 });

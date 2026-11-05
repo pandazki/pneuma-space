@@ -1,8 +1,9 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
 import {
   DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS,
   type App, type AppId, type AppName, type Binding, type Delivery, type DeliveryFilter, type Policy,
-  type Release, type ReleaseNumber, type Stats, type Store, type Token, type Trigger, type TriggerName,
+  type Release, type ReleaseNumber, type Stats, type Store, type StoreOps, type Token, type Trigger, type TriggerName,
 } from './model.ts';
 
 /** Append only; `PRAGMA user_version` counts the steps applied. */
@@ -80,26 +81,19 @@ const toStats = (r: Row): Stats => ({
   lastAccessAt: r.last_access_at as number | null,
 });
 
-export class SqliteStore implements Store {
+type Sync<T> = { [K in keyof T]: T[K] extends (...args: infer A) => Promise<infer R> ? (...args: A) => R : never };
+
+/** Every method runs synchronously, inside the open transaction if there is one. */
+class Statements implements Sync<StoreOps> {
   readonly #db: DatabaseSync;
   readonly #statements = new Map<string, StatementSync>();
 
-  constructor(path: string) {
-    this.#db = new DatabaseSync(path);
-    this.#db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
-    const { user_version: applied } = this.#get('PRAGMA user_version') as { user_version: number };
-    this.transaction(() => {
-      MIGRATIONS.slice(applied).forEach((step) => this.#db.exec(step));
-      this.#db.exec(`PRAGMA user_version = ${MIGRATIONS.length}`);
-    });
+  constructor(db: DatabaseSync) {
+    this.#db = db;
   }
 
-  close(): void {
-    this.#db.close();
-  }
-
-  /** Nested calls join the outer transaction. */
-  transaction<T>(fn: () => T): T {
+  /** Joins the open transaction or runs `fn` in its own. */
+  atomic<T>(fn: () => T): T {
     if (this.#db.isTransaction) return fn();
     this.#db.exec('BEGIN IMMEDIATE');
     try {
@@ -149,7 +143,7 @@ export class SqliteStore implements Store {
   }
 
   deleteApp(app: AppId): void {
-    this.transaction(() => {
+    this.atomic(() => {
       for (const table of ['release', 'trigger', 'binding']) this.#run(`DELETE FROM ${table} WHERE app = ?`, app);
       this.#run('DELETE FROM app WHERE id = ?', app);
     });
@@ -180,7 +174,7 @@ export class SqliteStore implements Store {
   }
 
   replaceTriggers(app: AppId, triggers: readonly Trigger[]): void {
-    this.transaction(() => {
+    this.atomic(() => {
       this.#run('DELETE FROM trigger WHERE app = ?', app);
       for (const t of triggers) this.#run('INSERT INTO trigger (app, name, schedule) VALUES (?, ?, ?)', app, t.name, t.schedule);
     });
@@ -220,7 +214,7 @@ export class SqliteStore implements Store {
   }
 
   insertDelivery(d: Delivery): Delivery {
-    return this.transaction(() => {
+    return this.atomic(() => {
       const existing = d.scheduledFor !== null
         ? this.#get('SELECT * FROM delivery WHERE app = ? AND trigger = ? AND scheduled_for = ?', d.app, d.trigger, d.scheduledFor)
         : d.idempotencyKey !== null
@@ -267,7 +261,7 @@ export class SqliteStore implements Store {
   }
 
   putStats(stats: readonly Stats[]): void {
-    this.transaction(() => {
+    this.atomic(() => {
       for (const s of stats) {
         this.#run(
           `INSERT INTO stats (app, requests, errors, last_access_at) VALUES (?, ?, ?, ?)
@@ -280,5 +274,104 @@ export class SqliteStore implements Store {
 
   deleteStats(app: AppId): void {
     this.#run('DELETE FROM stats WHERE app = ?', app);
+  }
+}
+
+abstract class Ops implements StoreOps {
+  protected abstract run<T>(work: (s: Statements) => T): Promise<T>;
+
+  app(name: AppName) { return this.run((s) => s.app(name)); }
+  apps() { return this.run((s) => s.apps()); }
+  putApp(app: App) { return this.run((s) => s.putApp(app)); }
+  deleteApp(app: AppId) { return this.run((s) => s.deleteApp(app)); }
+  release(app: AppId, number: ReleaseNumber) { return this.run((s) => s.release(app, number)); }
+  releases(app: AppId) { return this.run((s) => s.releases(app)); }
+  putRelease(release: Release) { return this.run((s) => s.putRelease(release)); }
+  triggers() { return this.run((s) => s.triggers()); }
+  replaceTriggers(app: AppId, triggers: readonly Trigger[]) { return this.run((s) => s.replaceTriggers(app, triggers)); }
+  bindings(app?: AppId) { return this.run((s) => s.bindings(app)); }
+  putBinding(binding: Binding) { return this.run((s) => s.putBinding(binding)); }
+  policy() { return this.run((s) => s.policy()); }
+  putPolicy(policy: Policy) { return this.run((s) => s.putPolicy(policy)); }
+  token(hash: string) { return this.run((s) => s.token(hash)); }
+  putToken(token: Token) { return this.run((s) => s.putToken(token)); }
+  insertDelivery(delivery: Delivery) { return this.run((s) => s.insertDelivery(delivery)); }
+  updateDelivery(delivery: Delivery) { return this.run((s) => s.updateDelivery(delivery)); }
+  deliveries(filter: DeliveryFilter) { return this.run((s) => s.deliveries(filter)); }
+  lastScheduledFor(app: AppId, trigger: TriggerName) { return this.run((s) => s.lastScheduledFor(app, trigger)); }
+  deleteDeliveries(app: AppId) { return this.run((s) => s.deleteDeliveries(app)); }
+  stats() { return this.run((s) => s.stats()); }
+  putStats(stats: readonly Stats[]) { return this.run((s) => s.putStats(stats)); }
+  deleteStats(app: AppId) { return this.run((s) => s.deleteStats(app)); }
+}
+
+/** The handle `transaction` passes to its function: calls run at once, inside the open transaction. */
+class TransactionOps extends Ops {
+  readonly #statements: Statements;
+  open = true;
+
+  constructor(statements: Statements) {
+    super();
+    this.#statements = statements;
+  }
+
+  protected async run<T>(work: (s: Statements) => T): Promise<T> {
+    if (!this.open) throw new Error('tx used after its transaction settled');
+    return work(this.#statements);
+  }
+}
+
+/** Calls and transactions run one at a time in call order; node:sqlite is synchronous and in-process, so there is nothing to overlap. */
+export class SqliteStore extends Ops implements Store {
+  readonly #db: DatabaseSync;
+  readonly #statements: Statements;
+  readonly #inside = new AsyncLocalStorage<TransactionOps>();
+  #tail: Promise<unknown> = Promise.resolve();
+
+  constructor(path: string) {
+    super();
+    this.#db = new DatabaseSync(path);
+    this.#db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
+    this.#statements = new Statements(this.#db);
+    const { user_version: applied } = this.#db.prepare('PRAGMA user_version').get() as { user_version: number };
+    this.#statements.atomic(() => {
+      MIGRATIONS.slice(applied).forEach((step) => this.#db.exec(step));
+      this.#db.exec(`PRAGMA user_version = ${MIGRATIONS.length}`);
+    });
+  }
+
+  /** Closes after every queued call has run. */
+  close(): Promise<void> {
+    return this.#queue(() => this.#db.close());
+  }
+
+  transaction<T>(fn: (tx: StoreOps) => Promise<T>): Promise<T> {
+    return this.#queue(async () => {
+      const tx = new TransactionOps(this.#statements);
+      this.#db.exec('BEGIN IMMEDIATE');
+      try {
+        const result = await this.#inside.run(tx, () => fn(tx));
+        this.#db.exec('COMMIT');
+        return result;
+      } catch (error) {
+        this.#db.exec('ROLLBACK');
+        throw error;
+      } finally {
+        tx.open = false;
+      }
+    });
+  }
+
+  protected run<T>(work: (s: Statements) => T): Promise<T> {
+    return this.#queue(() => work(this.#statements));
+  }
+
+  #queue<T>(work: () => T | Promise<T>): Promise<T> {
+    if (this.#inside.getStore()?.open) {
+      return Promise.reject(new Error('Store called inside its own transaction would wait for it forever; use the tx handle'));
+    }
+    const result = this.#tail.then(work);
+    this.#tail = result.catch(() => undefined);
+    return result;
   }
 }
