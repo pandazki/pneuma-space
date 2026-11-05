@@ -89,5 +89,5 @@ test('GET /api/apps/<name>/logs answers the container output as text/plain for t
   await call('PUT', '/api/apps/survey/release', kvApp);
   const response = await fetch(`${base}/api/apps/survey/logs?tail=5`);
   assert.equal(response.headers.get('content-type'), 'text/plain; charset=utf-8');
-  assert.equal(await response.text(), `last 5 lines of ${store.app(appName('survey'))!.id}\n`);
+  assert.equal(await response.text(), `last 5 lines of ${(await store.app(appName('survey')))!.id}\n`);
 });

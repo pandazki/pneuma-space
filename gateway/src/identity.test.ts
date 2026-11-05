@@ -12,7 +12,7 @@ import type { Token } from './model.ts';
 const secret = randomBytes(32);
 const issued = issueToken('ci');
 const tokens = new Map<string, Token>([[issued.hash, { id: '1', subject: issued.subject, hash: issued.hash, createdAt: 0 }]]);
-const identity = new LocalIdentity(secret, (hash) => tokens.get(hash) ?? null);
+const identity = new LocalIdentity(secret, async (hash) => tokens.get(hash) ?? null);
 
 const server = createServer((request, response) => void identity.serve(request, response)).listen(0);
 after(() => server.close());

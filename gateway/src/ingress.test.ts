@@ -94,15 +94,15 @@ before(async () => {
     },
     bundles: { open: async () => Readable.from([APP_JS]) },
     scheduler: {
-      invoke(request) {
+      async invoke(request) {
         if (request.trigger !== 'report') throw new NotFound('undeclared');
         invoked.push(request);
         return 'd-1' as DeliveryId;
       },
     },
     stats: [],
-    flushStats: (stats) => void flushed.push(stats),
-    deleteStats() {},
+    flushStats: async (stats) => void flushed.push(stats),
+    async deleteStats() {},
   });
   port = await ingress.listen(0, '127.0.0.1');
 });
@@ -330,7 +330,7 @@ test('stats count every request to an app, static included, and flush hands them
   const before = ingress.snapshot().find((s) => s.app === 'id-mixed')?.requests ?? 0;
   await request('/apps/mixed/app.js');
   await request('/apps/mixed/app.js');
-  ingress.flush();
+  await ingress.flush();
   const mixed = flushed[0].find((s) => s.app === 'id-mixed')!;
   assert.equal(mixed.requests, before + 2);
   assert.ok(mixed.lastAccessAt! > Date.now() - 5000);
