@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -16,7 +16,7 @@ export const APP = `import { createServer } from 'node:http';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { register } from 'node:module';
 import v8 from 'node:v8';
-import { parentPort, Worker } from 'node:worker_threads';
+import { MessageChannel, parentPort, Worker } from 'node:worker_threads';
 const env = process.env;
 if (env.START_FIFO) readFileSync(env.START_FIFO);
 for (const end = Date.now() + Number(env.START_BUSY_MS ?? 0); Date.now() < end;);
@@ -54,14 +54,47 @@ const routes = {
     return new Function('%AbortJS("flags")')();
   },
   '/parent': () => String(parentPort),
+  // Every function on the chain, Object.prototype's too, notes a MessagePort it is called on that is not the app's own.
+  '/patched': async () => {
+    const own = new MessageChannel();
+    let handed = false;
+    const restore = [];
+    for (let proto = Object.getPrototypeOf(own.port1); proto; proto = Object.getPrototypeOf(proto)) {
+      for (const key of Reflect.ownKeys(proto)) {
+        const d = Object.getOwnPropertyDescriptor(proto, key);
+        if (key === 'constructor' || key === '__proto__' || typeof d.value !== 'function' || !d.configurable) continue;
+        Object.defineProperty(proto, key, { ...d, value: function (...args) {
+          if (this?.constructor?.name === 'MessagePort' && this !== own.port1 && this !== own.port2) handed = true;
+          return d.value.apply(this, args);
+        } });
+        restore.push(() => Object.defineProperty(proto, key, d));
+      }
+    }
+    console.log('patched');
+    await new Promise((r) => setTimeout(r, 1500));
+    for (const undo of restore) undo();
+    own.port1.close();
+    return String(handed);
+  },
+  '/stdio': () => JSON.stringify([process.stdin, process.stdout, process.stderr, console._stdout, console._stderr].flatMap((s) => Object.getOwnPropertySymbols(s).map(String)).filter((k) => k === 'Symbol(kPort)')),
+  '/partial': () => { process.stdout.write('par'); process.stdout.write('tial\\n'); return 'written'; },
+  '/chatter': () => { for (const end = Date.now() + 1500; Date.now() < end;) console.log('chatter'); return 'printed'; },
+  '/forge': () => { globalThis.reached.shim.postMessage({ type: 'log', lines: 1 }); return 'posted'; },
+  '/bogus': () => { globalThis.reached.stdio.postMessage({ type: 'bogus' }); return 'posted'; },
   '/blank': () => { for (let i = 0; i < 1e5; i++) console.log(''); return 'printed'; },
   '/burst': () => { process.stdout.write(Buffer.alloc(64 * 2 ** 20, 10)); return 'written'; },
   '/exit': () => process.exit(3),
   '/files': () => { writeFileSync(env.PNEUMA_SPACE_FILES_DIR + '/kept', 'kept'); return env.PNEUMA_SPACE_FILES_DIR; },
 };
 console.log('fixture ready');
-createServer((q, s) => s.end(String(routes[q.url]()))).listen(Number(env.PNEUMA_SPACE_PORT), '0.0.0.0');
+createServer(async (q, s) => s.end(String(await routes[q.url]()))).listen(Number(env.PNEUMA_SPACE_PORT), '0.0.0.0');
 process.on('SIGTERM', () => process.exit(0));
+`;
+
+/** Runs in each worker before the shim: what an app would hold had it reached the shim's port and Node's stdio port anyway. */
+export const REACHED = `import { parentPort } from 'node:worker_threads';
+const kPort = Object.getOwnPropertySymbols(process.stdout).find((key) => key.description === 'kPort');
+globalThis.reached = { shim: parentPort, stdio: process.stdout[kPort] };
 `;
 
 export const tempDir = (t: TestContext, prefix: string): string => {
@@ -87,11 +120,18 @@ export async function serveBundle(t: TestContext, files: Record<string, string> 
 /** `exited` resolves with the signal that ended the runner, or its exit code. */
 export type RunnerProcess = { readonly url: string; readonly data: string; readonly pid: number; readonly exited: Promise<string | number | null>; stop(): Promise<void> };
 
-/** The runner as compose runs it, with the permission flags, on an ephemeral port and a scratch /data. */
-export async function startRunner(t: TestContext, env: Record<string, string> = {}, data = tempDir(t, 'pneuma-space-runner-')): Promise<RunnerProcess> {
+/** The runner as compose runs it, with the permission flags, on an ephemeral port and a scratch /data; `preamble` runs in each worker before the shim. */
+export async function startRunner(t: TestContext, env: Record<string, string> = {}, data = tempDir(t, 'pneuma-space-runner-'), preamble?: string): Promise<RunnerProcess> {
+  let src = SRC;
+  if (preamble !== undefined) {
+    src = tempDir(t, 'pneuma-space-src-');
+    cpSync(SRC, src, { recursive: true });
+    renameSync(join(src, 'isolate-shim.ts'), join(src, 'isolate-shim.next.ts'));
+    writeFileSync(join(src, 'isolate-shim.ts'), `${preamble}await import('./isolate-shim.next.ts');\n`);
+  }
   const child = spawn(process.execPath, [
     '--disable-warning=ExperimentalWarning', '--disable-warning=SecurityWarning',
-    '--permission', `--allow-fs-read=${data}`, `--allow-fs-read=${SRC}`, `--allow-fs-write=${data}`, '--allow-worker', ...NET, join(SRC, 'runner.ts'),
+    '--permission', `--allow-fs-read=${data}`, `--allow-fs-read=${src}`, `--allow-fs-write=${data}`, '--allow-worker', ...NET, join(src, 'runner.ts'),
   ], { env: { ...process.env, PNEUMA_SPACE_DATA: data, PNEUMA_SPACE_RUNNER_PORT: '0', ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
   const exited = new Promise<string | number | null>((ok) => child.once('exit', (code, signal) => ok(signal ?? code)));
   const stop = async () => {

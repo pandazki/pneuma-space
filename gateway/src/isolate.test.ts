@@ -57,7 +57,11 @@ async function fixture(t: TestContext, policy: Partial<Policy> = {}, storage: re
   const runnerEvents = async () => ((await (await fetch(`${runner.url}/events?after=0`)).json()) as EventPage).events;
   const runtime = start();
   const guarded = () => new Runtimes({ runtimes: [runtime], specFor, events: bus, log: bus.emit });
-  return { app, other, events, publish, start, stopRunner, pauseRunner, resumeRunner, startRunnerAgain, restartRunner, workers, runnerEvents, guarded, runtime };
+  /** A start from outside this gateway, as one that died mid-start would have left it. */
+  const startElsewhere = (id: AppId, env: Record<string, string>) => void fetch(`${runner.url}/instances/${id}`, {
+    method: 'POST', body: JSON.stringify({ release: 1, spec: 'elsewhere', bundleUrl, entry: 'app.mjs', env, storage: [], readyMs: 8000 }),
+  }).catch(() => {});
+  return { app, other, events, publish, start, startElsewhere, stopRunner, pauseRunner, resumeRunner, startRunnerAgain, restartRunner, workers, runnerEvents, guarded, runtime };
 }
 
 const answer = async (address: string) => (await fetch(`http://${address}/`)).text();
@@ -231,6 +235,7 @@ test('one app writing 64 MiB to stdout leaves it and the other app awake and ava
 
 const staleRunner = async (t: TestContext) => {
   let deletes = 0;
+  const logged: Record<string, unknown>[] = [];
   const runner = { listed: [{ app: 'stale', release: 1, spec: 's', worker: '1:1', state: 'listening', port: 1, since: 0 }] };
   const fake = createServer((q, s) => {
     const json = (body: unknown) => s.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(body));
@@ -244,20 +249,32 @@ const staleRunner = async (t: TestContext) => {
     json({ ok: true, startedAt: 1, stuck: 0, workers: runner.listed.length });
   }).listen(0, '127.0.0.1');
   await once(fake, 'listening');
-  const runtime = new IsolateRuntime({ runner: `http://127.0.0.1:${(fake.address() as AddressInfo).port}`, bundleUrl: () => '', specFor: () => null, hasRun: async () => true, log: () => {} });
+  const runtime = new IsolateRuntime({ runner: `http://127.0.0.1:${(fake.address() as AddressInfo).port}`, bundleUrl: () => '', specFor: () => null, hasRun: async () => true, log: (ev, _app, extra) => logged.push({ ev, ...extra }) });
   t.after(() => { runtime.close(); fake.close(); });
-  return { runner, runtime };
+  return { runner, runtime, logged };
 };
 
-test('a gateway starts against a runner that lists a stale worker but fails to remove it', async (t) => {
-  const { runtime } = await staleRunner(t);
+test('a gateway starts against a runner that lists a stale worker but fails to remove it, and logs it unreachable', async (t) => {
+  const { runtime, logged } = await staleRunner(t);
   await runtime.reconcile();
+  assert.deepEqual(logged.filter((e) => e.ev === 'runner-unreachable').map((e) => e.worker), ['1:1']);
 });
 
 test('a stale worker whose removal failed at gateway start is removed by the recovery poll', async (t) => {
-  const { runner, runtime } = await staleRunner(t);
+  const { runner, runtime, logged } = await staleRunner(t);
   await runtime.reconcile();
   for (const end = Date.now() + 8000; runner.listed.length > 0; await sleep(100)) assert.ok(Date.now() < end, 'the stale worker is removed');
+  assert.deepEqual(logged.find((e) => e.ev === 'runner-recovered'), { ev: 'runner-recovered', stopped: 1, failed: 0 });
+});
+
+test('a worker another gateway started that has not listened yet is stopped by the recovery poll', async (t) => {
+  const { app, runtime, runnerEvents, startElsewhere } = await fixture(t);
+  startElsewhere(app, { START_BUSY_MS: '3000' });
+  // Inside its 3 s of startup, so the gateway finds it starting.
+  await sleep(500);
+  await runtime.reconcile();
+  const stopped = async () => (await runnerEvents()).some((e) => e.app === app && e.ev === 'exit' && e.reason === 'stopped');
+  for (const end = Date.now() + 15_000; !(await stopped()); await sleep(100)) assert.ok(Date.now() < end, 'the untracked worker is stopped');
 });
 
 // A stopped compose service has no name on the platform network; `.invalid` never resolves (RFC 6761).

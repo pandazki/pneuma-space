@@ -7,8 +7,8 @@ import { connect, type AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { EventPage, RunnerEvent, Started, StartRequest } from './runner.ts';
-import { serveBundle, startRunner, witness, type RunnerProcess } from './runner.harness.ts';
+import type { EventPage, Listed, RunnerEvent, Started, StartRequest } from './runner.ts';
+import { REACHED, serveBundle, startRunner, witness, type RunnerProcess } from './runner.harness.ts';
 
 const HEALTHY = { PNEUMA_SPACE_RUNNER_WORKER_HEAP_MB: '64', PNEUMA_SPACE_RUNNER_WORKER_OFFHEAP_MB: '128' };
 
@@ -208,16 +208,24 @@ test('an app that listens on another server first is reached on PNEUMA_SPACE_POR
   assert.equal(await app.get('/'), 'decoy 1');
 });
 
+test('lines past a worker\'s log budget are dropped with one notice', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'blank');
+  assert.equal(await app.get('/blank'), 'printed');
+  for (const end = performance.now() + 5000; ; await sleep(50)) {
+    if (/dropped \d+ lines$/.test(await call<string>(runner, 'GET', '/logs/blank?tail=200000'))) break;
+    assert.ok(performance.now() < end, 'the drop notice arrived');
+  }
+});
+
+// The shim lets 1024 empty lines a second through, and the notice is one more.
 test('100 000 empty lines leave at most 1000 log entries', async (t) => {
   const runner = await startRunner(t, HEALTHY);
   const app = await start(runner, await serveBundle(t), 'blank');
   assert.equal(await app.get('/blank'), 'printed');
-  let logs = '';
-  for (const end = performance.now() + 5000; !/dropped \d+ lines$/.test(logs); await sleep(50)) {
-    assert.ok(performance.now() < end, 'the drop notice arrived');
-    logs = await call<string>(runner, 'GET', '/logs/blank?tail=200000');
-  }
-  assert.ok(logs.split('\n').length <= 1000, `${logs.split('\n').length} entries`);
+  await sleep(2000);
+  const entries = (await call<string>(runner, 'GET', '/logs/blank?tail=200000')).split('\n').length;
+  assert.ok(entries <= 1000, `${entries} entries`);
 });
 
 test('a .tmp- directory a killed extraction left is swept at runner start', async (t) => {
@@ -320,4 +328,80 @@ test('a runner stopped for 10 s while a worker is 1.5 s busy reports no worker h
   await sleep(4000);
   const page = await call<EventPage>(runner, 'GET', '/events?after=0');
   assert.deepEqual(page.events.filter((e) => e.worker === app.worker && e.ev !== 'ready'), []);
+});
+
+test('/instances lists a worker that has not listened yet as starting', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  void post(runner, 'early', { release: 1, spec: 's', bundleUrl: await serveBundle(t), entry: 'app.mjs', env: { START_BUSY_MS: '2000' }, storage: [], readyMs: 5000 }).catch(() => {});
+  let listed: Listed[] = [];
+  for (const end = performance.now() + 3000; listed.length === 0; await sleep(50)) {
+    assert.ok(performance.now() < end, 'the worker is listed');
+    listed = await call<Listed[]>(runner, 'GET', '/instances');
+  }
+  assert.deepEqual(listed.map((i) => [i.state, i.port]), [['starting', null]]);
+});
+
+test('a worker that logs in a 1.5 s console.log loop stays inside its 64 MiB heap', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'chatter');
+  assert.equal(await app.get('/chatter'), 'printed');
+  const page = await call<EventPage>(runner, 'GET', '/events?after=0');
+  assert.deepEqual(page.events.filter((e) => e.ev !== 'ready'), []);
+});
+
+test('a line written in several writes is one log entry', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'partial');
+  assert.equal(await app.get('/partial'), 'written');
+  let logs = '';
+  for (const end = performance.now() + 2000; !logs.includes('tial'); await sleep(50)) {
+    assert.ok(performance.now() < end, 'the line arrived');
+    logs = await call<string>(runner, 'GET', '/logs/partial');
+  }
+  assert.ok(logs.split('\n').includes('partial'), JSON.stringify(logs));
+});
+
+test('an app that patches every MessagePort prototype method is never handed the shim\'s port', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'patched');
+  assert.equal(await app.get('/patched'), 'false');
+});
+
+test('process.stdin, stdout, stderr and the console\'s streams hold no port', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'stdio');
+  assert.equal(await app.get('/stdio'), '[]');
+});
+
+test('a forged message from a worker is ignored and counted', async (t) => {
+  const runner = await startRunner(t, HEALTHY, undefined, REACHED);
+  const app = await start(runner, await serveBundle(t), 'forger');
+  assert.equal(await app.get('/forge'), 'posted');
+  assert.equal((await nextEvent(runner, app.worker, 2000)).event.ev, 'forged');
+  assert.equal((await call<{ forged: number }>(runner, 'GET', '/health')).forged, 1);
+  assert.equal(await app.get('/'), 'forger 1');
+});
+
+test('a worker that sends three forged messages is ended as forged', async (t) => {
+  const runner = await startRunner(t, HEALTHY, undefined, REACHED);
+  const app = await start(runner, await serveBundle(t), 'forger');
+  for (let i = 0; i < 3; i++) await app.get('/forge').catch(() => {});
+  let ends: (string | undefined)[][] = [];
+  for (const end = performance.now() + 3000; !ends.some(([ev]) => ev === 'exit'); await sleep(50)) {
+    assert.ok(performance.now() < end, 'the worker is ended');
+    ends = (await call<EventPage>(runner, 'GET', '/events?after=0')).events.filter((e) => e.ev !== 'ready').map((e) => [e.ev, e.reason]);
+  }
+  assert.deepEqual(ends, [['forged', undefined], ['forged', undefined], ['forged', undefined], ['exit', 'forged']]);
+});
+
+test('a bogus message on a worker\'s stdio port leaves the runner and the other workers running', async (t) => {
+  const runner = await startRunner(t, HEALTHY, undefined, REACHED);
+  const bundleUrl = await serveBundle(t);
+  const other = await start(runner, bundleUrl, 'other');
+  const app = await start(runner, bundleUrl, 'bogus');
+  assert.equal(await app.get('/bogus'), 'posted');
+  for (const end = performance.now() + 2000; (await call<{ internal: number }>(runner, 'GET', '/health')).internal === 0; await sleep(50)) {
+    assert.ok(performance.now() < end, 'the fault was counted');
+  }
+  assert.equal(await other.get('/'), 'other 1');
 });
