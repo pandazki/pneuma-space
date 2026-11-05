@@ -3,17 +3,18 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import { emit } from './events.ts';
 import type { Metrics } from './metrics.ts';
+import type { Runtimes } from './runtimes.ts';
 import { RING, type RequestLog } from './requests.ts';
 import {
-  ADMIN_PATHS, ADMIN_PORT, Conflict, InputError, NotFound,
+  ADMIN_PATHS, ADMIN_PORT, Conflict, InputError, NotFound, RUNTIME_KINDS, RUNTIMES,
   appName, bundleId, parseManifest, subject,
-  type BundleStore, type Guard, type Registry, type Runtime,
+  type BundleStore, type Guard, type Registry,
 } from './model.ts';
 
 export type AdminDeps = {
   readonly registry: Registry;
   readonly bundles: BundleStore;
-  readonly runtime: Pick<Runtime, 'logs'>;
+  readonly runtime: Pick<Runtimes, 'logs' | 'healthOf'>;
   readonly guard: Guard;
   readonly metrics: Pick<Metrics, 'snapshot'>;
   readonly requests: Pick<RequestLog, 'after'>;
@@ -67,7 +68,14 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, ingressP
   };
   const at = (path: string) => new RegExp(`^${path.replace('<name>', '([^/]+)')}$`);
   return [
-    { method: 'GET', path: at(ADMIN_PATHS.health), handle: () => ({ ok: true, ingressPort }) },
+    {
+      method: 'GET', path: at(ADMIN_PATHS.health), handle: () => ({
+        ok: true,
+        ingressPort,
+        runtimes: Object.fromEntries(RUNTIME_KINDS.map((kind) => [kind, { service: RUNTIMES[kind].service, profile: RUNTIMES[kind].profile, health: runtime.healthOf(kind) }])),
+        policy: registry.policy(),
+      }),
+    },
     { method: 'GET', path: at(ADMIN_PATHS.apps), handle: () => registry.listing() },
     { method: 'GET', path: at(ADMIN_PATHS.metrics), handle: () => metrics.snapshot() },
     {

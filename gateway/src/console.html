@@ -449,6 +449,113 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
   .pulse .s, .pulse .l { white-space: normal; }
   .rt-lane { padding-top: 20px; }
 }
+.topo { position: relative; padding: 12px; overflow-x: auto; overscroll-behavior-x: contain; }
+.topo-svg { display: block; overflow: visible; }
+.topo-svg text { font-family: var(--font); font-size: 12px; fill: var(--ink); white-space: pre; }
+.topo-svg .m { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.topo-svg .small { font-size: 11.5px; }
+.topo-svg .t2 { fill: var(--ink-2); }
+.topo-svg .t3 { fill: var(--ink-3); }
+.topo-svg .bad { fill: var(--red); }
+.topo-svg .strong, .topo-svg .lanen { font-weight: 600; }
+.topo-svg .lanen { font-size: 13px; }
+.topo-svg .grp { font-size: 11.5px; font-weight: 500; fill: var(--ink-2); }
+.topo-svg .linkt { font-size: 12px; font-weight: 500; fill: var(--accent-ink); }
+.topo-svg .sbg { fill: var(--stripe-bg); }
+.topo-svg .sln { fill: var(--stripe); }
+.topo-svg .box { fill: var(--surface); stroke: var(--line-strong); }
+.topo-svg .ring { fill: none; stroke: var(--ink-3); stroke-width: 1.2; }
+.topo-svg .stdot { fill: var(--ink-3); }
+.topo-svg .strip { fill: url(#tp-stripe); stroke: var(--line); }
+.topo-svg .band { fill: var(--inset); stroke: var(--line); }
+.topo-svg .band.ing { fill: var(--accent-tint); stroke: none; }
+.topo-svg .downwash { fill: var(--red-tint); stroke: var(--red); stroke-dasharray: 5 4; opacity: .8; }
+.topo-svg .act { cursor: pointer; }
+.topo-svg .act:focus { outline: none; }
+.topo-svg .act:focus-visible > rect:first-of-type { stroke: var(--accent); stroke-width: 2; stroke-dasharray: none; }
+.topo-svg .hit { fill: transparent; stroke: none; }
+.topo-svg.retired { position: absolute; pointer-events: none; }
+.topo-svg.retired > :not(.flows) { opacity: 0; }
+.topo-svg .lanet:hover .linkt { text-decoration: underline; }
+.topo-svg .edge { fill: none; stroke: var(--line-strong); stroke-width: 1.25; transition: stroke .4s, opacity .3s; }
+.topo-svg .edge.cron, .topo-svg .edge.group { stroke-dasharray: 3 3; }
+.topo-svg .edge.fault { stroke: var(--red); stroke-dasharray: 5 4; }
+.topo-svg .edge.hot { stroke: var(--accent); animation: edgehot 1.6s ease-out; }
+@keyframes edgehot { from { stroke-width: 2.25; } }
+.topo-svg .pass { fill: var(--surface); stroke: var(--ink-3); stroke-width: 1.25; }
+.topo-svg .elabel rect { fill: var(--page); stroke: var(--line); }
+.topo-svg .elabel text { font-size: 10.5px; fill: var(--ink-2); }
+.topo-svg .elabel.fault rect { fill: var(--red-tint); stroke: none; }
+.topo-svg .elabel.fault text { fill: var(--red); }
+.topo-svg .chipr { fill: var(--inset); stroke: var(--line); transition: fill .6s, stroke .6s; }
+.topo-svg .chipt { font-size: 11.5px; fill: var(--ink-2); }
+.topo-svg .sdot { fill: var(--ink-3); }
+.topo-svg [data-state="none"], .topo-svg [data-state="asleep"] { opacity: .72; }
+.topo-svg [data-state="awake"] .chipr { fill: var(--green-tint); stroke: var(--green); }
+.topo-svg [data-state="awake"] .sdot, .topo-svg [data-status="up"] .sdot { fill: var(--green); }
+.topo-svg [data-state="awake"] .chipt { fill: var(--ink); }
+.topo-svg [data-state="waking"] .chipr, .topo-svg [data-state="draining"] .chipr, .topo-svg [data-state="stopping"] .chipr { fill: var(--orange-tint); stroke: var(--orange); }
+.topo-svg [data-state="waking"] .sdot, .topo-svg [data-state="draining"] .sdot, .topo-svg [data-state="stopping"] .sdot { fill: var(--orange); }
+.topo-svg [data-state="waking"], .topo-svg [data-state="draining"], .topo-svg [data-state="stopping"] { animation: breathe 1.1s ease-in-out infinite; }
+.topo-svg .fault .chipr { stroke: var(--red); stroke-dasharray: 4 3; }
+.topo-svg .fault .sdot { fill: var(--red); }
+.topo-svg [data-state="quarantined"] { opacity: 1; }
+.topo-svg [data-state="quarantined"] .chipr { fill: var(--red-tint); stroke: var(--red); stroke-dasharray: none; }
+.topo-svg [data-state="quarantined"] .sdot { fill: var(--red); }
+.topo-svg [data-state="quarantined"] .chipt { fill: var(--red); }
+.topo-svg [data-state="unpublished"] { opacity: .6; }
+.topo-svg [data-state="unpublished"] .chipr { fill: none; stroke-dasharray: 3 3; }
+.topo-svg .unpub { fill: none; stroke: var(--line-strong); stroke-dasharray: 4 4; }
+.topo-svg .lanet.fault .grp { fill: var(--red); }
+.topo-svg .chipg.hit .chipr { stroke: var(--accent); stroke-width: 2; }
+.topo-svg .chipg.hit { animation: chiphit 1.6s ease-out; opacity: 1; }
+@keyframes chiphit { from { opacity: 1; } 15% { opacity: 1; } }
+.topo-svg .capn.idle { opacity: .55; }
+.topo-svg .capn.fault .chipr { stroke: var(--red); fill: var(--red-tint); stroke-dasharray: none; }
+.topo-svg .capn.fault .chipt { fill: var(--red); }
+.topo-svg .svcbox { fill: url(#tp-stripe); stroke: var(--line); }
+.topo-svg .svct { font-size: 12.5px; font-weight: 600; fill: var(--ink-2); }
+.topo-svg .svcs { font-size: 11.5px; fill: var(--ink-3); }
+.topo-svg [data-status="up"] .svcs { fill: var(--green); }
+.topo-svg .svcn.fault .svcbox { fill: var(--red-tint); stroke: var(--red); }
+.topo-svg .svcn.fault .sdot { fill: var(--red); }
+.topo-svg .svcn.fault .svcs, .topo-svg .svcn.fault .svct { fill: var(--red); }
+.topo-svg .qdot { fill: var(--red); }
+.topo-svg .qbg { fill: var(--red-tint); }
+.topo-svg .pillb rect { fill: var(--surface); stroke: var(--red); }
+.topo-svg .pillb text { font-size: 11.5px; font-weight: 500; fill: var(--red); }
+.topo-svg .pillb:hover rect { stroke: var(--red); }
+.topo-svg .pk circle { fill: var(--accent); }
+.topo-svg .pk .halo { opacity: .18; }
+.topo-svg.picking [data-id], .topo-svg.picking .edge, .topo-svg.picking .pass, .topo-svg.picking [data-stage] { opacity: .2; transition: opacity .25s; }
+.topo-svg.picking .lit { opacity: 1 !important; }
+.topo-svg.picking .edge.lit:not(.fault) { stroke: var(--accent); stroke-width: 1.75; }
+.topo-svg.picking .pass.lit { stroke: var(--accent); }
+.topo-svg.picking [data-id="admin"], .topo-svg.picking [data-id="operator"] { opacity: .2; }
+.topo-tools { align-items: center; font-size: 12.5px; }
+.topo-tools .muted { font-size: 12px; }
+.pickbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; font-size: 12.5px; }
+.pickbar:empty { display: none; }
+.faults { display: grid; gap: 0; padding: 0; margin-bottom: 12px; box-shadow: 0 0 0 1px var(--red), var(--shadow-sm); }
+.faults:empty { display: none; }
+.fault-item { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.fault-item:last-child { border-bottom: 0; }
+.fault-item .st { font-size: 12.5px; font-weight: 500; }
+.fault-item .fix { margin-left: auto; font-size: 11.5px; color: var(--ink-2); background: var(--inset); box-shadow: 0 0 0 1px var(--line); border-radius: 6px; padding: 2px 7px; }
+.explain { margin-top: 12px; }
+.explain .xh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 12px; font-size: 12.5px; }
+.explain .xh b { font-size: 13px; }
+.explain .xg { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px 20px; }
+.explain h3 { margin: 0 0 4px; font-size: 12.5px; font-weight: 600; }
+.explain p { margin: 0; font-size: 12.5px; line-height: 19px; color: var(--ink-2); }
+.explain .xb.checks { grid-column: 1 / -1; }
+.explain ul { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px 20px; }
+.explain li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; align-items: start; font-size: 12.5px; line-height: 19px; color: var(--ink-2); }
+.explain li .chip { justify-content: center; }
+.runtime { color: var(--accent-ink); }
+.qbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 12px; padding: 10px 14px; border-radius: 10px; background: var(--red-tint); font-size: 12.5px; color: var(--red); }
+.qbar .mono { font-size: 11.5px; color: var(--ink-2); }
+.qbar .btn { margin-left: auto; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .ev.fresh, .item.enter, .tl-row.enter, .rqx.fresh { background: var(--accent-tint); }
@@ -494,7 +601,7 @@ const I18N = {
     'theme.light': '浅色', 'theme.dark': '深色', 'aside.since': '自 {time} 起采样，网关重启后清零。',
     'ov.title': '总览', 'ov.waiting': '等待第一次采样',
     'svc.gateway': '网关', 'svc.redis': 'Redis', 'svc.object': '对象存储', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn', 'svc.runner': 'runner',
-    'svc.gatewaySub': '已运行 {up} · 内存 {rss}', 'svc.off': '未启用 profile', 'svc.down': '不可达',
+    'svc.gatewaySub': '已运行 {up} · 内存 {rss}', 'svc.off': '未启用 profile', 'svc.down': '不可达', 'svc.unknown': '等待第一次采样',
     'sec.fleet': '席位、唤醒与主机', 'sec.fleetDesc': '醒着的实例占一个席位；唤醒对照 3 秒门槛。',
     'k.awakeSub': '唤醒中 {waking} · 排空中 {draining} · 停止中 {stopping}',
     'k.wakes': '唤醒（1 小时）',
@@ -513,13 +620,13 @@ const I18N = {
     'col.attempts': '尝试次数', 'col.scheduledFor': '计划时间', 'col.created': '创建时间', 'col.nextAttempt': '下次尝试',
     'empty.attention': '没有需要关注的事项。', 'empty.events': '还没有事件。', 'empty.filtered': '没有匹配的记录。',
     'att.delivery': '投递失败', 'att.deliveryDetail': '{trigger} · 尝试 {attempts} 次',
-    'apps.title': '项目', 'apps.count': '{n} 个应用', 'apps.filter': '按名称筛选', 'apps.allStates': '全部状态',
+    'apps.title': '项目', 'apps.count.one': '{n} 个应用', 'apps.count.other': '{n} 个应用', 'apps.filter': '按名称筛选', 'apps.allStates': '全部状态',
     'apps.empty': '还没有应用。发布一个即可获得地址。', 'apps.publish': '发布应用',
     'never': '从未', 'routeOnly': '仅路由',
     'st.registered': '已注册', 'st.removed': '已移除', 'st.purging': '清除中', 'st.none': '无实例', 'st.asleep': '休眠',
     'st.waking': '唤醒中', 'st.awake': '运行中', 'st.draining': '排空中', 'st.stopping': '停止中', 'st.active': '启用',
     'st.suspended': '已暂停', 'st.due': '待投递', 'st.delivering': '投递中', 'st.done': '完成', 'st.failed': '失败',
-    'st.cancelled': '已取消', 'st.up': '在线', 'st.down': '不可达', 'st.off': '未启用',
+    'st.cancelled': '已取消', 'st.up': '在线', 'st.down': '不可达', 'st.off': '未启用', 'st.unknown': '未知',
     'd.back': '所有项目', 'd.open': '打开 {address}', 'd.since': '{ago}进入', 'd.owner': '所有者 {owner}',
     'd.publish': '发布新版本', 'd.remove': '移除', 'd.purge': '清除', 'cancel': '取消',
     'd.removeTitle': '移除 {name}？', 'd.removeBody': '地址将返回 404。卷、数据库、键前缀和 bucket 全部保留，再次发布即可恢复。',
@@ -577,13 +684,103 @@ const I18N = {
     'rt.timelineDesc': '最近 15 分钟醒过的每个实例，随过滤条件收窄。点一行只看这个应用，再点一次取消。', 'rt.pick': '只看 {name}', 'rt.unpick': '取消只看 {name}',
     'rt.f.seq': '序号', 'rt.f.app': '应用', 'rt.f.kind': '类别', 'rt.f.request': '请求', 'rt.f.status': '状态码', 'rt.f.ms': '总耗时',
     'rt.f.open': '连接存续', 'rt.f.wait': '等上游就绪', 'rt.f.waitHint': '含唤醒', 'rt.f.cold': '冷启动', 'rt.f.subject': '主体', 'rt.f.error': '错误',
+    'nav.topology': '拓扑',
+    'svc.volumes': 'Docker 卷',
+    'col.runtime': '运行时',
+    'st.quarantined': '已隔离',
+    'att.crashed': '实例崩溃',
+    'att.hung': '实例卡死',
+    'd.quarantined': '已隔离：{reason}',
+    'd.quarantineMeta': '{failures} 次失败 · {ago}',
+    'd.unquarantine': '解除隔离',
+    'tp.title': '拓扑',
+    'tp.sub': '请求怎样到达每个运行时，哪个服务不可达、影响了谁。',
+    'tp.view': '视图',
+    'tp.view.lane': '泳道',
+    'tp.view.graph': '连线',
+    'tp.sec.lane': '按运行时的泳道',
+    'tp.sec.laneDesc': '每个已注册应用在它的运行时泳道里；泳道到服务的边标出声明该能力的应用数。',
+    'tp.sec.graph': '每个应用的连线',
+    'tp.sec.graphDesc': '应用经过的网关阶段、声明的能力和能力背后的服务；点一个节点只看它的路径。',
+    'tp.laneHint': '点应用打开详情，点泳道标题看这个运行时怎么跑。',
+    'tp.graphHint': '默认画最近访问的 {n} 个应用。',
+    'tp.col.callers': '调用方',
+    'tp.col.gateway': '网关',
+    'tp.col.runtimes': '运行时',
+    'tp.col.services': '平台服务',
+    'tp.col.apps': '应用',
+    'tp.col.capabilities': '能力',
+    'tp.lane.label': '泳道视图：访客经网关进入三条运行时泳道，泳道连到平台服务。',
+    'tp.graph.label': '连线视图：每个应用从访客经网关阶段到它的能力和服务。',
+    'tp.lane.container.sub': 'Docker 引擎 · 每应用一个容器',
+    'tp.lane.isolate.sub': 'runner 服务 · 每应用一个 worker',
+    'tp.lane.static.sub': '只有包存储',
+    'tp.engine.container': 'Docker 引擎',
+    'tp.engine.isolate': 'runner 服务',
+    'tp.engine.static': '包存储',
+    'tp.keep.container': '/data 卷',
+    'tp.keep.isolate': 'runner 卷',
+    'tp.keep.static': '对象存储里的 bundle',
+    'tp.explain': '怎么跑',
+    'tp.explainFor': '{kind} 运行时说明',
+    'tp.noApps': '没有应用',
+    'tp.svcOff': '{name} 未启用',
+    'tp.unreachableShort': '不可达',
+    'tp.lift': '解除隔离',
+    'tp.stage.ingress': '入口',
+    'tp.stage.identity': '身份',
+    'tp.stage.static': '静态直出',
+    'tp.stage.wake': '唤醒',
+    'tp.stage.scheduler': '调度',
+    'tp.stage.admin': '管理口',
+    'tp.stage.identity.note': '登录和会话',
+    'tp.stage.static.note': '命中包，不唤醒',
+    'tp.stage.wake.note': 'Runtimes · Guard',
+    'tp.stage.scheduler.note': 'cron 投递',
+    'tp.visitor': '访客',
+    'tp.operator': '运营者',
+    'tp.caller': '服务调用方',
+    'tp.apps.one': '{n} 个应用', 'tp.apps.other': '{n} 个应用',
+    'tp.unprobed': '随 Docker 引擎，不探测',
+    'tp.unused': '没有应用需要它',
+    'tp.waiting': '等待第一次采样',
+    'tp.noRelease': '无发布', 'tp.unpublished': '未发布', 'tp.unpublishedSub': '首次发布未完成',
+    'tp.fixOff': '用 --profile {profile} 启动',
+    'tp.fixDown': 'docker compose start {service}',
+    'tp.needs': '{name} {status}',
+    'tp.affects.one': '影响 {n} 个应用', 'tp.affects.other': '影响 {n} 个应用',
+    'tp.affectsNone': '没有应用依赖它',
+    'tp.dependents.one': '{n} 个应用依赖', 'tp.dependents.other': '{n} 个应用依赖',
+    'tp.clear': '取消选择',
+    'tp.x.request': '请求怎样到达',
+    'tp.x.wake': '唤醒与睡去',
+    'tp.x.state': '状态放在哪',
+    'tp.x.failure': '卡死和崩溃',
+    'tp.x.checks': '这个运行时能检测',
+    'tp.x.noChecks': '没有实例，也就没有探活。',
+    'tp.x.container.request': '入口按 /apps/<name>/ 找到应用，经 Runtime.acquire 拿到实例，再转发到平台网络上这个应用容器的 8000 端口。',
+    'tp.x.container.wake': '睡着的应用收到请求时，网关用当前版本的镜像建容器，把绑定变成挂载和 PNEUMA_SPACE_* 环境变量，等端口应答。没有 Lease 满 {idle} 秒后排空并停掉容器。',
+    'tp.x.container.state': 'files 和 SQLite 在每应用的具名卷里；kv、object 和 PostgreSQL 在平台服务里。容器文件系统每次停止都丢掉。',
+    'tp.x.container.failure': 'Docker 事件报告退出，唤醒后 {ready} 秒内不应答算唤醒失败；醒着时卡死的容器检测不到。Guard 按版本计失败：{window} 秒内 {max} 次即隔离，失败后 {backoff} 秒内不再唤醒，直到新版本或手动解除。',
+    'tp.x.isolate.request': '入口转发到 runner:<port>，那里是 runner 给这个应用分配的端口（PNEUMA_SPACE_PORT），应用的 worker 在上面监听；没有每应用的容器。',
+    'tp.x.isolate.wake': '网关让 runner 起一个 worker_threads Worker：runner 用预签名地址下载 bundle 到自己的卷，经垫片加载入口，几十毫秒内应答。没有 Lease 满 {idle} 秒后 terminate。',
+    'tp.x.isolate.state': 'files 和 SQLite 在 runner 卷的 /data/apps/<id>/ 下；kv、object 和 PostgreSQL 在平台服务里。worker 停下后内存里的东西都没了。',
+    'tp.x.isolate.failure': 'runner 每秒给每个 worker 发心跳，3 秒无应答即 terminate；堆和堆外内存超限即结束；未捕获异常和退出都上报。一个 worker 出事不拖垮 runner。Guard 在 {window} 秒内 {max} 次失败后隔离应用。',
+    'tp.x.static.request': '入口在当前版本的 bundle 索引里找到文件，从包存储直接答；不唤醒任何东西，不跑应用代码。',
+    'tp.x.static.wake': '没有实例。发布时把静态目录作为 bundle 上传，网关读它的索引，从对象存储流式返回文件。',
+    'tp.x.static.state': '只有对象存储里的 bundle。新版本指向新的 bundle，旧的保留。',
+    'tp.x.static.failure': '没有会卡死或崩溃的进程。对象存储不可达时静态请求失败，拓扑会把对象存储和所有声明 static 的应用标红。',
+    'tp.check.exit': '实例自己结束了：崩溃、未捕获异常、非零退出。',
+    'tp.check.ready': '唤醒后 ready_timeout_seconds 内没有应答。',
+    'tp.check.hang': '醒着时不再应答心跳，被 terminate。',
+    'tp.check.memory': '超过内存上限被结束。',
   },
   en: {
     'brand.sub': 'Console', 'nav.group': 'Platform', 'nav.overview': 'Overview', 'nav.apps': 'Projects', 'nav.publish': 'Publish',
     'theme.light': 'Light', 'theme.dark': 'Dark', 'aside.since': 'Sampling since {time}; a gateway restart clears it.',
     'ov.title': 'Overview', 'ov.waiting': 'Waiting for the first sample',
     'svc.gateway': 'Gateway', 'svc.redis': 'Redis', 'svc.object': 'Object store', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn', 'svc.runner': 'runner',
-    'svc.gatewaySub': 'up {up} · RSS {rss}', 'svc.off': 'profile not running', 'svc.down': 'not reachable',
+    'svc.gatewaySub': 'up {up} · RSS {rss}', 'svc.off': 'profile not running', 'svc.down': 'not reachable', 'svc.unknown': 'waiting for the first sample',
     'sec.fleet': 'Seats, wakes and host', 'sec.fleetDesc': 'Each awake instance takes a seat; wakes are measured against the 3 s gate.',
     'k.awakeSub': 'waking {waking} · draining {draining} · stopping {stopping}',
     'k.wakes': 'Wakes, 1 h',
@@ -602,13 +799,13 @@ const I18N = {
     'col.attempts': 'Attempts', 'col.scheduledFor': 'Scheduled for', 'col.created': 'Created', 'col.nextAttempt': 'Next attempt',
     'empty.attention': 'Nothing needs attention.', 'empty.events': 'No events yet.', 'empty.filtered': 'Nothing matches.',
     'att.delivery': 'Delivery failed', 'att.deliveryDetail': '{trigger} · {attempts} attempts',
-    'apps.title': 'Projects', 'apps.count': '{n} apps', 'apps.filter': 'Filter by name', 'apps.allStates': 'All states',
+    'apps.title': 'Projects', 'apps.count.one': '{n} app', 'apps.count.other': '{n} apps', 'apps.filter': 'Filter by name', 'apps.allStates': 'All states',
     'apps.empty': 'No apps yet. Publish one to give it an address.', 'apps.publish': 'Publish an app',
     'never': 'never', 'routeOnly': 'route only',
     'st.registered': 'registered', 'st.removed': 'removed', 'st.purging': 'purging', 'st.none': 'none', 'st.asleep': 'asleep',
     'st.waking': 'waking', 'st.awake': 'awake', 'st.draining': 'draining', 'st.stopping': 'stopping', 'st.active': 'active',
     'st.suspended': 'suspended', 'st.due': 'due', 'st.delivering': 'delivering', 'st.done': 'done', 'st.failed': 'failed',
-    'st.cancelled': 'cancelled', 'st.up': 'up', 'st.down': 'down', 'st.off': 'off',
+    'st.cancelled': 'cancelled', 'st.up': 'up', 'st.down': 'down', 'st.off': 'off', 'st.unknown': 'unknown',
     'd.back': 'All projects', 'd.open': 'Open {address}', 'd.since': 'since {ago}', 'd.owner': 'owner {owner}',
     'd.publish': 'Publish release', 'd.remove': 'Remove', 'd.purge': 'Purge', 'cancel': 'Cancel',
     'd.removeTitle': 'Remove {name}?', 'd.removeBody': 'Its address will answer 404. Every volume, database, key prefix and bucket is kept; publishing again restores it.',
@@ -666,6 +863,96 @@ const I18N = {
     'rt.timelineDesc': 'Every instance awake in the last 15 min, narrowed by the filter. Click a row to follow that app; click again to clear.', 'rt.pick': 'Follow only {name}', 'rt.unpick': 'Stop following only {name}',
     'rt.f.seq': 'Seq', 'rt.f.app': 'App', 'rt.f.kind': 'Kind', 'rt.f.request': 'Request', 'rt.f.status': 'Status', 'rt.f.ms': 'Duration',
     'rt.f.open': 'Open for', 'rt.f.wait': 'Upstream ready after', 'rt.f.waitHint': 'wake included', 'rt.f.cold': 'Cold', 'rt.f.subject': 'Subject', 'rt.f.error': 'Error',
+    'nav.topology': 'Topology',
+    'svc.volumes': 'Docker volumes',
+    'col.runtime': 'Runtime',
+    'st.quarantined': 'quarantined',
+    'att.crashed': 'Instance crashed',
+    'att.hung': 'Instance hung',
+    'd.quarantined': 'Quarantined: {reason}',
+    'd.quarantineMeta': '{failures} failures · {ago}',
+    'd.unquarantine': 'Unquarantine',
+    'tp.title': 'Topology',
+    'tp.sub': 'How a request reaches each runtime, which service is down and whom it hits.',
+    'tp.view': 'View',
+    'tp.view.lane': 'Lanes',
+    'tp.view.graph': 'Graph',
+    'tp.sec.lane': 'Lanes by runtime',
+    'tp.sec.laneDesc': 'Every registered app sits in the lane of its runtime; an edge to a service counts the apps declaring that capability.',
+    'tp.sec.graph': 'Every app’s edges',
+    'tp.sec.graphDesc': 'The gateway stages an app passes, the capabilities it declares and the services behind them; pick a node to read its path.',
+    'tp.laneHint': 'Click an app to open it, a lane title to see how that runtime works.',
+    'tp.graphHint': 'Draws the {n} most recently accessed apps.',
+    'tp.col.callers': 'callers',
+    'tp.col.gateway': 'gateway',
+    'tp.col.runtimes': 'runtimes',
+    'tp.col.services': 'platform services',
+    'tp.col.apps': 'apps',
+    'tp.col.capabilities': 'capabilities',
+    'tp.lane.label': 'Lane view: visitors enter through the gateway into three runtime lanes, which connect to the platform services.',
+    'tp.graph.label': 'Graph view: each app from the visitor through the gateway stages to its capabilities and services.',
+    'tp.lane.container.sub': 'Docker engine · one container per app',
+    'tp.lane.isolate.sub': 'runner service · one worker per app',
+    'tp.lane.static.sub': 'bundle store only',
+    'tp.engine.container': 'Docker engine',
+    'tp.engine.isolate': 'runner service',
+    'tp.engine.static': 'bundle store',
+    'tp.keep.container': '/data volumes',
+    'tp.keep.isolate': 'runner volume',
+    'tp.keep.static': 'bundles in object storage',
+    'tp.explain': 'How it runs',
+    'tp.explainFor': 'How the {kind} runtime works',
+    'tp.noApps': 'No apps',
+    'tp.svcOff': '{name} is off',
+    'tp.unreachableShort': 'unreachable',
+    'tp.lift': 'Unquarantine',
+    'tp.stage.ingress': 'ingress',
+    'tp.stage.identity': 'identity',
+    'tp.stage.static': 'static',
+    'tp.stage.wake': 'wake',
+    'tp.stage.scheduler': 'scheduler',
+    'tp.stage.admin': 'admin',
+    'tp.stage.identity.note': 'login, sessions',
+    'tp.stage.static.note': 'bundle hit, no wake',
+    'tp.stage.wake.note': 'Runtimes · Guard',
+    'tp.stage.scheduler.note': 'cron deliveries',
+    'tp.visitor': 'visitor',
+    'tp.operator': 'operator',
+    'tp.caller': 'service caller',
+    'tp.apps.one': '{n} app', 'tp.apps.other': '{n} apps',
+    'tp.unprobed': 'with the Docker engine, not probed',
+    'tp.unused': 'no app needs it',
+    'tp.waiting': 'waiting for the first sample',
+    'tp.noRelease': 'no release', 'tp.unpublished': 'unpublished', 'tp.unpublishedSub': 'first publish not finished',
+    'tp.fixOff': 'start with --profile {profile}',
+    'tp.fixDown': 'docker compose start {service}',
+    'tp.needs': '{name} {status}',
+    'tp.affects.one': '{n} app affected', 'tp.affects.other': '{n} apps affected',
+    'tp.affectsNone': 'no app depends on it',
+    'tp.dependents.one': '{n} app depends on it', 'tp.dependents.other': '{n} apps depend on it',
+    'tp.clear': 'Clear',
+    'tp.x.request': 'How a request arrives',
+    'tp.x.wake': 'Wake and sleep',
+    'tp.x.state': 'Where state lives',
+    'tp.x.failure': 'Hangs and crashes',
+    'tp.x.checks': 'What this runtime detects',
+    'tp.x.noChecks': 'No instance, so nothing to probe.',
+    'tp.x.container.request': 'The ingress matches /apps/<name>/, takes an instance through Runtime.acquire and proxies to port 8000 of the app’s container on the platform network.',
+    'tp.x.container.wake': 'A request to an asleep app creates a container from the release image, turns bindings into mounts and PNEUMA_SPACE_* variables, and waits for the port. After {idle} s without a lease it drains and the container stops.',
+    'tp.x.container.state': 'Files and SQLite live in the app’s named volumes; kv, object and PostgreSQL in platform services. The container filesystem is discarded on every stop.',
+    'tp.x.container.failure': 'Docker events report an exit; no answer within {ready} s of a wake fails the wake. A container that hangs while awake is not detected. The Guard counts failures per release: {max} within {window} s quarantine the app, and for {backoff} s after a failure it does not wake, until a new release or an unquarantine.',
+    'tp.x.isolate.request': 'The ingress forwards to runner:<port>, the port the runner assigned the app (PNEUMA_SPACE_PORT), where its worker listens. There is no container per app.',
+    'tp.x.isolate.wake': 'The gateway asks the runner for a worker_threads Worker: the runner downloads the bundle by presigned URL into its volume, loads the entry through its shim and answers within tens of milliseconds. After {idle} s without a lease the worker is terminated.',
+    'tp.x.isolate.state': 'Files and SQLite live in the runner volume under /data/apps/<id>/; kv, object and PostgreSQL in platform services. A worker’s memory is gone when it stops.',
+    'tp.x.isolate.failure': 'The runner sends each worker a heartbeat every second and terminates one silent for 3 s; going over the heap or off-heap budget ends it; uncaught errors and exits are reported. One worker never takes the runner down. The Guard quarantines an app after {max} failures within {window} s.',
+    'tp.x.static.request': 'The ingress finds the file in the release’s bundle index and answers from the bundle store; nothing wakes and no app code runs.',
+    'tp.x.static.wake': 'There is no instance. Publishing uploads the static directory as a bundle; the gateway reads its index and streams files from object storage.',
+    'tp.x.static.state': 'Only the bundle in object storage. A new release points at a new bundle; old ones are kept.',
+    'tp.x.static.failure': 'No process to hang or crash. When object storage is down static requests fail, and the topology marks object storage and every app declaring static.',
+    'tp.check.exit': 'The instance ended on its own: a crash, an uncaught error, a non-zero exit.',
+    'tp.check.ready': 'No answer within ready_timeout_seconds of a wake.',
+    'tp.check.hang': 'Stopped answering the heartbeat while awake and was terminated.',
+    'tp.check.memory': 'Went over its memory limit and was ended.',
   },
 };
 
@@ -678,9 +965,9 @@ const POLL_MS = 5000;
 const WINDOWS = [60, 360, 1440];
 const MANIFEST_EXAMPLE = { contract: 1, capabilities: { files: {}, db: {}, identity: {} } };
 const TONE = {
-  green: ['registered', 'awake', 'active', 'done', 'up'],
+  green: ['registered', 'awake', 'active', 'done', 'up', 'unquarantined'],
   orange: ['waking', 'draining', 'stopping', 'purging', 'due', 'delivering'],
-  red: ['failed', 'down'],
+  red: ['failed', 'down', 'quarantined', 'crashed', 'hung'],
 };
 
 const root = document.documentElement;
@@ -701,6 +988,8 @@ function t(key, vars) {
 }
 const locale = () => (lang === 'zh' ? 'zh-CN' : 'en-US');
 const nf = (n) => new Intl.NumberFormat(locale()).format(n);
+/** A count in the key's plural form: `key.one` or `key.other`. */
+const plural = (key, n) => t(`${key}.${new Intl.PluralRules(locale()).select(n) === 'one' ? 'one' : 'other'}`, { n: nf(n) });
 const pct = (n) => new Intl.NumberFormat(locale(), { style: 'percent', maximumFractionDigits: 1 }).format(n);
 const ms = (v) => (v == null ? '-' : v >= 1000 ? `${new Intl.NumberFormat(locale(), { maximumFractionDigits: 1 }).format(v / 1000)} s` : `${nf(Math.round(v))} ms`);
 const clock = (v, seconds) => new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit', second: seconds ? '2-digit' : undefined, hour12: false }).format(v);
@@ -741,7 +1030,7 @@ function h(tag, attrs = {}, ...children) {
 function svg(tag, attrs = {}, ...children) {
   const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
   for (const [key, value] of Object.entries(attrs)) if (value != null) el.setAttribute(key, value);
-  el.append(...children);
+  el.append(...children.filter((c) => c != null && c !== false));
   return el;
 }
 
@@ -763,6 +1052,7 @@ const appLink = (name) => h('a', { href: `#/apps/${encodeURIComponent(name)}`, c
 const tone = (state) => Object.keys(TONE).find((k) => TONE[k].includes(state)) ?? '';
 const status = (state) => h('span', { class: `st ${tone(state)}` }, t(`st.${state}`));
 const chip = (text) => h('span', { class: 'chip' }, text);
+const runtimeChip = (a) => (a.release == null ? h('span', { class: 'chip muted' }, t('tp.noRelease')) : h('span', { class: 'chip runtime' }, a.runtime ?? 'static'));
 const leaseChips = (leases) => h('span', { class: 'chips' }, LEASE_KINDS.filter((k) => leases?.[k] > 0).map((k) => chip(`${k} ${leases[k]}`)));
 
 function sectionHead(index, title, desc, ...end) {
@@ -1016,7 +1306,7 @@ function servicesLine() {
     el,
     render(m) {
       const item = (name) => {
-        const s = m.services[name] ?? { status: 'down', latencyMs: null };
+        const s = m.services[name] ?? { status: 'unknown', latencyMs: null };
         return h('span', { class: `st ${tone(s.status)}`, title: s.status === 'up' ? t('st.up') : t(`svc.${s.status}`) },
           t(`svc.${name}`), h('span', { class: 'num' }, s.status === 'up' ? ms(s.latencyMs) : t(`st.${s.status}`)));
       };
@@ -1403,6 +1693,10 @@ function attentionItems(model, downSince) {
     what: t('att.delivery'), why: [t('att.deliveryDetail', { trigger: d.trigger, attempts: d.attempts }), d.reason ? ` · ${d.reason}` : ''].join(''),
   }));
   for (const e of model.events) {
+    if (e.ev === 'crashed' || e.ev === 'hung') {
+      items.push({ id: `e:${e.ev}:${e.app}:${e.t}`, group: `e:${e.ev}:${e.app}`, tone: 'red', at: e.t, app: e.app, what: t(`att.${e.ev}`), why: String(e.reason ?? e.ev) });
+      continue;
+    }
     if (e.error === undefined || e.ev === 'wake-failed' || (e.ev === 'asleep' && !model.wakeFailures.has(e))) continue;
     const wake = e.ev === 'asleep';
     items.push({ id: `e:${e.ev}:${e.app}:${e.t}`, group: `e:${e.ev}:${e.app}`, tone: 'red', at: e.t, app: e.app, what: wake ? t('att.wake') : h('span', { class: 'mono' }, e.ev), why: String(e.error) });
@@ -2030,16 +2324,16 @@ async function projects() {
     h('option', { value: '' }, t('apps.allStates')),
     STATE_FILTERS.map((s) => h('option', { value: s, selected: appsFilter.state === s }, t(`st.${s}`))));
   const render = () => {
-    count.textContent = t('apps.count', { n: nf(apps.length) });
+    count.textContent = plural('apps.count', apps.length);
     const needle = appsFilter.text.trim().toLowerCase();
     const rows = apps.filter((a) => (!needle || a.name.includes(needle)) && (!appsFilter.state || a.status === appsFilter.state || a.instance === appsFilter.state));
     body.replaceChildren(apps.length === 0
       ? h('div', { class: 'card' }, h('div', { class: 'empty' }, t('apps.empty'), h('div', { style: 'margin-top:12px' }, h('a', { class: 'btn primary', href: '#/publish' }, t('apps.publish')))))
       : table(
-        [['col.name'], ['col.status'], ['col.instance'], ['col.since'], ['col.release', 'r'], ['col.capabilities'], ['col.requests', 'r'], ['col.errors', 'r'], ['col.lastAccess']],
+        [['col.name'], ['col.status'], ['col.runtime'], ['col.instance'], ['col.since'], ['col.release', 'r'], ['col.capabilities'], ['col.requests', 'r'], ['col.errors', 'r'], ['col.lastAccess']],
         rows.map((a) => ({ href: `#/apps/${encodeURIComponent(a.name)}`, cells: [
-          appLink(a.name), status(a.status),
-          h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(a.instance), leaseChips(a.leases)),
+          appLink(a.name), status(a.status), runtimeChip(a),
+          h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, a.quarantine ? status('quarantined') : status(a.instance), leaseChips(a.leases)),
           a.since == null ? h('span', { class: 'muted' }, '-') : ago(a.since),
           h('span', { class: 'num' }, a.release == null ? '-' : `#${a.release}`),
           a.capabilities.length ? h('span', { class: 'chips' }, a.capabilities.map(chip)) : h('span', { class: 'muted' }, t('routeOnly')),
@@ -2134,19 +2428,40 @@ async function detail(name) {
   const { app, releases, bindings, policy, stats, deliveries } = d;
   d.address = `/apps/${app.name}/`;
   const reload = () => route();
-  const head = h('div', { class: 'grow' });
+  const lift = async () => {
+    try {
+      await api('POST', `${appPath(app.name)}/unquarantine`);
+      await reload();
+    } catch (error) {
+      actionMessage.textContent = error.message;
+    }
+  };
+  const top = h('div');
+  const qbar = h('div');
+  const strip = h('div');
+  const head = h('div', { class: 'grow' }, top, qbar, strip);
   const tiles = h('div', { class: 'tiles four' });
+  let quarantined = '';
   const renderHead = (row, detailStats, events) => {
     const s = row ?? { instance: d.instance, since: null, leases: null };
-    head.replaceChildren(
+    const q = row?.quarantine ?? null;
+    if (JSON.stringify(q) !== quarantined) {
+      quarantined = JSON.stringify(q);
+      fill(qbar, q ? h('div', { class: 'qbar' },
+        h('b', { role: 'alert' }, t('d.quarantined', { reason: q.reason })),
+        h('span', { class: 'mono', title: stamp(q.since) }, ticking(() => t('d.quarantineMeta', { failures: nf(q.failures), ago: ago(q.since).textContent }))),
+        h('button', { class: 'btn danger', type: 'button', onclick: lift }, t('d.unquarantine'))) : null);
+    }
+    fill(strip, stateStrip(events, app.name));
+    top.replaceChildren(
       h('a', { class: 'back', href: '#/apps' }, `← ${t('d.back')}`),
       h('h1', { class: 'mono', style: 'margin-top:12px' }, app.name),
       h('div', { class: 'meta' },
         status(app.status),
         app.status === 'registered' ? h('a', { href: ingressOrigin(health.ingressPort) + d.address, target: '_blank', rel: 'noopener', class: 'mono', title: t('d.open', { address: d.address }) }, d.address) : h('span', { class: 'mono muted' }, d.address),
+        row ? runtimeChip(row) : null,
         h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(s.instance), s.since != null ? h('span', { class: 'muted' }, t('d.since', { ago: ago(s.since).textContent })) : null, leaseChips(s.leases)),
-        h('span', { class: 'muted' }, t('d.owner', { owner: app.owner }))),
-      stateStrip(events, app.name));
+        h('span', { class: 'muted' }, t('d.owner', { owner: app.owner }))));
     tiles.replaceChildren(
       tile(t('d.requests'), nf(detailStats.requests), ''),
       tile(t('d.errors'), nf(detailStats.errors), detailStats.requests ? pct(detailStats.errors / detailStats.requests) : ''),
@@ -2284,6 +2599,742 @@ async function publish(prefill) {
 
 // Shell
 
+// Topology (ADR 0018): the lane view and the graph view share one model, its polls and its fault rules.
+
+const LANES = ['container', 'isolate', 'static'];
+const SERVICES = ['redis', 'object', 'postgres', 'coturn', 'runner'];
+/** Where an app's files and SQLite database live, by lane: Docker volumes, or the runner's volume (ADR 0017). */
+const STORE_OF = { container: 'volumes', isolate: 'runner', static: null };
+const CAP_SERVICE = { kv: 'redis', object: 'object', static: 'object', rtc: 'coturn' };
+const CAP_NODES = ['files', 'db:sqlite', 'db:postgres', 'kv', 'object', 'static', 'rtc', 'ws', 'cron', 'identity'];
+const GRAPH_SERVICES = ['volumes', 'runner', 'postgres', 'redis', 'object', 'coturn'];
+const STAGES = ['ingress', 'identity', 'static', 'wake'];
+/** The compose service and profile behind each probed service; the runner's profile comes from /api/health. */
+const COMPOSE = { redis: ['redis', null], object: ['rustfs', null], postgres: ['postgres', 'postgres'], coturn: ['coturn', 'rtc'], runner: ['runner', 'isolate'] };
+const GRAPH_CAP = 24;
+const FLOWS_PER_APP = 3;
+const MAX_PARTICLES = 12;
+
+/** The runtime lane an app runs in; null while it has no release (a first publish that has not finished). */
+const laneOf = (a) => (a.release == null ? null : a.runtime ?? 'static');
+const groupOf = (a) => laneOf(a) ?? 'unpublished';
+
+/** Each declared capability as its graph node and the service it rests on; null rests inside the gateway. */
+function needs(a) {
+  const store = STORE_OF[laneOf(a)];
+  return a.capabilities.map((kind) => {
+    if (kind === 'db') return a.dbBackend === 'postgres' ? { cap: 'db:postgres', kind, service: 'postgres' } : { cap: 'db:sqlite', kind, service: store };
+    if (kind === 'files') return { cap: kind, kind, service: store };
+    return { cap: kind, kind, service: CAP_SERVICE[kind] ?? null };
+  });
+}
+
+const passesOf = (a) => (laneOf(a) ? ['ingress', a.capabilities.includes('identity') && 'identity', a.capabilities.includes('static') && 'static', a.runtime && 'wake'].filter(Boolean) : []);
+
+/** Every service an app cannot answer without: its capabilities' services, and the runner for an isolate app. */
+function servicesOf(a) {
+  const out = new Set(needs(a).map((n) => n.service).filter(Boolean));
+  if (laneOf(a) === 'isolate') out.add('runner');
+  return out;
+}
+
+function topoModel() {
+  return { apps: [], health: null, services: {}, cursor: null, startedAt: null, last: null };
+}
+
+/** up, down or off from the last probe sample; unknown before the gateway's first sample, which is no fault. */
+const svcStatus = (model, name) => (name === 'volumes' ? 'up' : model.services[name]?.status ?? 'unknown');
+const unreachable = (model, name) => ['down', 'off'].includes(svcStatus(model, name));
+const dependents = (model, name) => model.apps.filter((a) => servicesOf(a).has(name));
+/** A service that is down, or off while an app needs it; an unused profile service that is off is normal. */
+const svcFault = (model, name) => {
+  const s = svcStatus(model, name);
+  return s === 'down' || (s === 'off' && dependents(model, name).length > 0);
+};
+const blockedBy = (model, a) => [...servicesOf(a)].filter((s) => unreachable(model, s));
+const laneDown = (model, lane) => lane === 'isolate' && unreachable(model, 'runner');
+
+function fixFor(model, name) {
+  const [service, profile] = COMPOSE[name];
+  const p = name === 'runner' ? model.health?.runtimes.isolate.profile ?? profile : profile;
+  return svcStatus(model, name) === 'off' ? t('tp.fixOff', { profile: p }) : t('tp.fixDown', { service });
+}
+
+const measureCtx = document.createElement('canvas').getContext('2d');
+function textWidth(s, size, mono, weight = 400) {
+  measureCtx.font = `${weight} ${size}px ${getComputedStyle(root).getPropertyValue(mono ? '--mono' : '--font')}`;
+  return measureCtx.measureText(s).width;
+}
+function fit(s, size, mono, max, weight) {
+  if (textWidth(s, size, mono, weight) <= max) return s;
+  while (s.length > 1 && textWidth(`${s}…`, size, mono, weight) > max) s = s.slice(0, -1);
+  return `${s}…`;
+}
+
+const tx = (x, y, s, cls = '', extra = {}) => svg('text', { x, y, class: cls, ...extra }, s);
+const curve = (x1, y1, x2, y2) => {
+  const dx = Math.max(24, (x2 - x1) / 2);
+  return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
+};
+const titled = (el, text) => { el.prepend(svg('title', {}, text)); return el; };
+
+/** A focusable SVG control: Enter and Space act like a click; its first rect carries the focus ring, its key survives a rebuild. */
+function act(el, label, onPick, key) {
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  el.setAttribute('aria-label', label);
+  el.dataset.key = key;
+  el.classList.add('act');
+  el.addEventListener('click', (e) => { e.stopPropagation(); onPick(); });
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(); } });
+  return el;
+}
+
+function stripeDefs() {
+  return svg('defs', {}, svg('pattern', { id: 'tp-stripe', width: 8, height: 8, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' },
+    svg('rect', { width: 8, height: 8, class: 'sbg' }), svg('rect', { width: 1, height: 8, class: 'sln' })));
+}
+
+/** An app as a chip: state dot and name; quarantine and an unreachable service colour it. */
+function appChip(model, a, x, y, w) {
+  const blocked = blockedBy(model, a);
+  const unpublished = laneOf(a) === null;
+  const state = a.quarantine ? 'quarantined' : unpublished ? 'unpublished' : a.instance;
+  const note = unpublished ? t('tp.noRelease') : '';
+  const noteW = note ? textWidth(note, 11.5) + 8 : 0;
+  const g = svg('g', { class: `chipg${blocked.length ? ' fault' : ''}`, 'data-state': state, 'data-app': a.name },
+    svg('rect', { x, y, width: w, height: 22, rx: 6, class: 'chipr' }),
+    svg('circle', { cx: x + 10, cy: y + 11, r: 3, class: 'sdot' }),
+    tx(x + 19, y + 15, fit(a.name, 11.5, true, w - 26 - noteW), 'm chipt'),
+    note ? tx(x + w - 8, y + 15, note, 't3 small', { 'text-anchor': 'end' }) : null);
+  const why = [unpublished ? note : t(`st.${a.instance}`), a.quarantine && `${t('att.quarantine')}: ${a.quarantine.reason}`, ...blocked.map((s) => t('tp.needs', { name: t(`svc.${s}`), status: t(`st.${svcStatus(model, s)}`) }))];
+  return titled(g, `${a.name} · ${why.filter(Boolean).join(' · ')}`);
+}
+
+function pillButton(x, y, label, onPick, key, cls = '') {
+  const w = textWidth(label, 11.5, false, 500) + 18;
+  const g = svg('g', { class: `pillb ${cls}` }, svg('rect', { x, y, width: w, height: 22, rx: 11 }), tx(x + 9, y + 15, label));
+  return { el: act(g, label, onPick, key), w };
+}
+
+function flowChips(apps, x0, rowW, y0) {
+  let x = x0, y = y0;
+  return apps.map((a) => {
+    const note = laneOf(a) === null ? textWidth(t('tp.noRelease'), 11.5) + 8 : 0;
+    const w = Math.min(rowW, Math.max(84, textWidth(a.name, 11.5, true) + 30 + note));
+    if (x + w > x0 + rowW) { x = x0; y += 30; }
+    const at = { a, x, y, w };
+    x += w + 6;
+    return at;
+  });
+}
+
+function serviceNode(model, name, x, y, w, hgt, label = t(`svc.${name}`)) {
+  const s = model.services[name];
+  const status = svcStatus(model, name);
+  const fault = svcFault(model, name);
+  const g = svg('g', { class: `svcn${fault ? ' fault' : ''}`, 'data-status': status, 'data-id': `svc:${name}` },
+    svg('rect', { x, y, width: w, height: hgt, rx: 10, class: 'svcbox' }),
+    tx(x + 12, y + 20, fit(label, 12.5, false, w - (name === 'volumes' ? 24 : 80), 600), 'svct'));
+  if (name === 'volumes') {
+    g.append(tx(x + 12, y + 36, fit(t('tp.unprobed'), 11, false, w - 24), 't3 small'));
+    return g;
+  }
+  const st = t(`st.${status}`);
+  const sw = textWidth(st, 11.5) + 12;
+  g.append(svg('circle', { cx: x + w - 12 - sw + 3, cy: y + 16, r: 3, class: 'sdot' }), tx(x + w - 12, y + 20, st, 'svcs', { 'text-anchor': 'end' }));
+  if (status === 'up') {
+    g.append(tx(x + 12, y + 36, ms(s.latencyMs), 'small t3 m', { 'data-latency': name }));
+    return g;
+  }
+  const second = status === 'unknown' ? t('tp.waiting') : status === 'off' && !fault ? t('tp.unused') : fixFor(model, name);
+  g.append(titled(tx(x + 12, y + 36, fit(second, 11, false, w - 24), `small ${fault ? 'bad' : 't3'}`), second));
+  return g;
+}
+
+// Lane view: callers, the gateway, one lane per runtime, the platform services.
+
+function laneScene(model, width, on) {
+  const W = Math.max(1040, width);
+  const top = 44;
+  const gx = 160, gw = 236, sw = 196, sx = W - 16 - sw;
+  const lx = gx + gw + 44, lw = sx - 104 - lx;
+  const el = svg('svg', { class: 'topo-svg', width: W, role: 'group', 'aria-label': t('tp.lane.label') });
+  const edges = svg('g');
+  const nodes = svg('g');
+  const labels = svg('g');
+  const flows = svg('g', { class: 'flows' });
+  const chips = new Map();
+  const chip = (p) => {
+    const el = act(appChip(model, p.a, p.x, p.y, p.w), p.a.name, () => on.open(p.a.name), `app:${p.a.name}`);
+    chips.set(p.a.name, el);
+    return el;
+  };
+  const head = (x, s) => tx(x, 20, s, 't3 small');
+  nodes.append(head(16, t('tp.col.callers')), head(gx, t('tp.col.gateway')), head(lx, t('tp.col.runtimes')), head(sx, t('tp.col.services')));
+
+  const byLane = Object.fromEntries(LANES.map((l) => [l, model.apps.filter((a) => laneOf(a) === l)]));
+  const laneBoxes = {};
+  let y = top;
+  for (const lane of LANES) {
+    const apps = byLane[lane];
+    const down = laneDown(model, lane);
+    const g = svg('g', { class: `lane${down ? ' fault' : ''}`, 'data-id': `lane:${lane}` });
+    const inner = lx + 14, innerW = lw - 28;
+    const placed = flowChips(apps, inner, innerW, y + 44);
+    const chipsBottom = apps.length ? placed.at(-1).y + 22 : y + 44 + 20;
+    const quarantined = apps.filter((a) => a.quarantine);
+    const qTop = chipsBottom + 10;
+    const stripY = qTop + quarantined.length * 46 + (quarantined.length ? 2 : 0);
+    const lh = stripY + 30 + 12 - y;
+    g.append(svg('rect', { x: lx, y, width: lw, height: lh, rx: 14, class: 'box' }));
+    if (down) g.append(svg('rect', { x: lx, y, width: lw, height: lh, rx: 14, class: 'downwash' }));
+    const explainText = `${t('tp.explain')} →`;
+    const explainW = textWidth(explainText, 12, false, 500);
+    const countText = down ? t('tp.unreachableShort') : plural('tp.apps', apps.length);
+    const countW = textWidth(countText, 11.5, !down);
+    const nameW = textWidth(lane, 13, false, 600);
+    g.append(act(svg('g', { class: 'lanet' },
+      svg('rect', { x: lx + 4, y: y + 4, width: lw - 8, height: 30, rx: 10, class: 'hit' }),
+      tx(lx + 14, y + 24, lane, 'lanen'),
+      textWidth(t(`tp.lane.${lane}.sub`), 11.5) <= lw - 28 - nameW - 8 - explainW - countW - 36 ? tx(lx + 22 + nameW, y + 24, t(`tp.lane.${lane}.sub`), 't3 small') : null,
+      tx(lx + lw - 14, y + 24, explainText, 'linkt', { 'text-anchor': 'end' })), t('tp.explainFor', { kind: lane }), () => on.explain(lane), `lane:${lane}`),
+      tx(lx + lw - 26 - explainW, y + 24, countText, down ? 'bad small' : 't3 small m', { 'text-anchor': 'end' }));
+    if (!apps.length) g.append(tx(inner, y + 59, t('tp.noApps'), 't3 small'));
+    for (const p of placed) g.append(chip(p));
+    quarantined.forEach((a, i) => {
+      const qy = qTop + i * 46;
+      const button = pillButton(0, qy, t('tp.lift'), () => on.lift(a.name), `lift:${a.name}`, 'danger');
+      button.el.setAttribute('transform', `translate(${inner + innerW - button.w - 4},0)`);
+      const meta = `×${a.quarantine.failures} · ${clock(a.quarantine.since, true)}`;
+      g.append(svg('g', { class: 'qrow' },
+        svg('rect', { x: inner, y: qy - 2, width: innerW, height: 42, rx: 8, class: 'qbg' }),
+        svg('circle', { cx: inner + 12, cy: qy + 11, r: 3, class: 'qdot' }),
+        tx(inner + 21, qy + 15, a.name, 'm small bad'),
+        tx(inner + 29 + textWidth(a.name, 11.5, true), qy + 15, fit(t('att.quarantine'), 11.5, false, innerW - button.w - 50 - textWidth(a.name, 11.5, true), 500), 'small bad'),
+        tx(inner + innerW - 10, qy + 32, meta, 'm t3 small', { 'text-anchor': 'end' }),
+        titled(tx(inner + 21, qy + 32, fit(a.quarantine.reason, 11, false, innerW - 44 - textWidth(meta, 11.5, true)), 'small t2'), a.quarantine.reason)), button.el);
+    });
+    const kept = lane === 'static' ? t('tp.keep.static') : [t(`tp.keep.${lane}`), ...['files', 'db:sqlite'].map((cap) => {
+      const n = apps.filter((a) => needs(a).some((x) => x.cap === cap)).length;
+      return n ? `${cap === 'files' ? 'files' : 'sqlite'} ${n}` : null;
+    })].filter(Boolean).join(' · ');
+    const engine = t(`tp.engine.${lane}`);
+    const engineW = textWidth(engine, 11.5, false, 500) + 20;
+    g.append(svg('rect', { x: inner, y: stripY, width: innerW, height: 30, rx: 8, class: 'strip' }),
+      tx(inner + 10, stripY + 19, engine, 't2 small strong'),
+      tx(inner + innerW - 10, stripY + 19, fit(kept, 11, true, innerW - engineW - 20), 'm t3 small', { 'text-anchor': 'end' }));
+    nodes.append(g);
+    laneBoxes[lane] = { y, h: lh, apps };
+    y += lh + 16;
+  }
+  const unpublished = model.apps.filter((a) => laneOf(a) === null);
+  if (unpublished.length) {
+    const placed = flowChips(unpublished, lx + 14, lw - 28, y + 34);
+    const uh = placed.at(-1).y + 22 + 12 - y;
+    nodes.append(svg('g', { 'data-id': 'unpublished' }, svg('rect', { x: lx, y, width: lw, height: uh, rx: 14, class: 'unpub' }),
+      tx(lx + 14, y + 22, t('tp.unpublished'), 'strong small t2'),
+      tx(lx + 22 + textWidth(t('tp.unpublished'), 11.5, false, 600), y + 22, fit(t('tp.unpublishedSub'), 11.5, false, lw - 60 - textWidth(t('tp.unpublished'), 11.5, false, 600)), 't3 small')),
+      ...placed.map(chip));
+    y += uh + 16;
+  }
+  const bottom = y - 16;
+
+  const rowsY = (i) => top + 52 + i * 36;
+  const stages = ['ingress', 'identity', 'static', 'wake', 'scheduler', 'admin'];
+  const gh = rowsY(stages.length - 1) + 30 - top;
+  const gateway = svg('g', { 'data-id': 'gateway' }, svg('rect', { x: gx, y: top, width: gw, height: gh, rx: 14, class: 'box' }),
+    tx(gx + 16, top + 26, t('svc.gateway'), 'lanen'));
+  const port = { ingress: `:${model.health.ingressPort}`, admin: `:${location.port || (location.protocol === 'https:' ? 443 : 80)}` };
+  stages.forEach((s, i) => {
+    const ry = rowsY(i);
+    gateway.append(svg('circle', { cx: gx + 20, cy: ry - 4, r: 2.5, class: 'stdot' }), tx(gx + 30, ry, t(`tp.stage.${s}`), 'small'),
+      tx(gx + gw - 14, ry, port[s] ?? fit(t(`tp.stage.${s}.note`), 11, false, gw - 120), port[s] ? 'm small t2' : 't3 small', { 'text-anchor': 'end' }));
+  });
+  nodes.append(gateway);
+
+  const caller = (cy, label, kind) => svg('g', { 'data-id': kind },
+    svg('rect', { x: 16, y: cy - 14, width: 112, height: 28, rx: 14, class: 'box' }),
+    svg('circle', { cx: 32, cy, r: 5.5, class: 'ring' }), tx(44, cy + 4, fit(label, 11.5, false, 78)));
+  const ingressY = rowsY(0) - 4, adminY = rowsY(5) - 4;
+  nodes.append(caller(ingressY, t('tp.visitor'), 'visitor'), caller(adminY, t('tp.operator'), 'operator'));
+  const edge = (d, cls = '') => { const p = svg('path', { d, class: `edge ${cls}` }); edges.append(p); return p; };
+  const visitorPath = edge(`M128,${ingressY} H${gx}`);
+  edge(`M128,${adminY} H${gx}`);
+
+  const lanePaths = {};
+  for (const lane of LANES) {
+    const from = rowsY(lane === 'static' ? 2 : 3) - 4;
+    lanePaths[lane] = edge(curve(gx + gw, from, lx, laneBoxes[lane].y + 20), laneDown(model, lane) ? 'fault' : '');
+  }
+
+  const sh = 50;
+  const span = Math.max(bottom - top, SERVICES.length * (sh + 12));
+  const sy = (i) => top + (i * (span - sh)) / (SERVICES.length - 1);
+  const svcY = Object.fromEntries(SERVICES.map((s, i) => [s, sy(i)]));
+  SERVICES.forEach((s) => nodes.append(serviceNode(model, s, sx, svcY[s], sw, sh)));
+  for (const lane of LANES) {
+    const box = laneBoxes[lane];
+    const kinds = new Map();
+    for (const a of box.apps) for (const n of needs(a)) {
+      if (!n.service || n.service === STORE_OF[lane]) continue;
+      const k = kinds.get(n.service) ?? new Map();
+      k.set(n.kind, (k.get(n.kind) ?? 0) + 1);
+      kinds.set(n.service, k);
+    }
+    if (lane === 'isolate' && box.apps.length) kinds.set('runner', new Map([['apps', box.apps.length]]));
+    const list = SERVICES.filter((s) => kinds.has(s));
+    list.forEach((s, i) => {
+      const y1 = box.y + 20 + ((i + 1) * (box.h - 40)) / (list.length + 1);
+      const y2 = svcY[s] + sh / 2 + (LANES.indexOf(lane) - 1) * 7;
+      edge(curve(lx + lw, y1, sx, y2), svcFault(model, s) || laneDown(model, lane) ? 'fault' : '');
+      const label = [...kinds.get(s)].map(([k, n]) => (k === 'apps' ? plural('tp.apps', n) : `${k} ${n}`)).join(' · ');
+      const lw2 = textWidth(label, 10.5, true) + 10;
+      const mx = lx + lw + 14, my = y1;
+      labels.append(svg('g', { class: `elabel${svcFault(model, s) ? ' fault' : ''}` }, svg('rect', { x: mx, y: my - 9, width: lw2, height: 18, rx: 5 }), tx(mx + 5, my + 4, label, 'm')));
+    });
+  }
+
+  const H = Math.max(bottom, top + span) + 16;
+  el.setAttribute('height', H);
+  el.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  el.append(stripeDefs(), edges, nodes, labels, flows);
+  return {
+    el,
+    flow(name) {
+      const a = model.apps.find((x) => x.name === name);
+      if (!a || !laneOf(a)) return;
+      const moved = particle(flows, [visitorPath, lanePaths[laneOf(a)]]);
+      const chip = chips.get(name);
+      if (chip) setTimeout(() => glow(chip, 'hit'), moved ? 900 : 0);
+    },
+  };
+}
+
+// Graph view: five fixed columns, one node per app, every edge the app's own.
+
+function graphScene(model, width, shown, hidden, on) {
+  const W = Math.max(1040, width);
+  const top = 56, row = 28, groupHead = 30;
+  const gx = 152, gw = 272, bandW = (gw - 16) / STAGES.length;
+  const ax = gx + gw + 28, aw = 172;
+  const sw = 164, sx = W - 16 - sw;
+  const cw = 138, cx = sx - 64 - cw;
+  const el = svg('svg', { class: 'topo-svg graph', width: W, role: 'group', 'aria-label': t('tp.graph.label') });
+  const under = svg('g');
+  const edges = svg('g');
+  const nodes = svg('g');
+  const flows = svg('g', { class: 'flows' });
+  const head = (x, s) => tx(x, 20, s, 't3 small');
+  nodes.append(head(16, t('tp.col.callers')), head(gx, t('tp.col.gateway')), head(ax, t('tp.col.apps')), head(cx, t('tp.col.capabilities')), head(sx, t('tp.col.services')));
+  /** Every drawn element keyed for selection: which apps it belongs to, or which service or capability it is. */
+  const parts = [];
+  const tag = (el, meta) => { parts.push({ el, ...meta }); return el; };
+
+  const rows = [];
+  let y = top + 8;
+  const groups = {};
+  const groupList = [...LANES, ...(shown.some((a) => !laneOf(a)) ? ['unpublished'] : [])];
+  for (const lane of groupList) {
+    const apps = shown.filter((a) => groupOf(a) === lane);
+    groups[lane] = { y, apps };
+    y += groupHead;
+    for (const a of apps) { rows.push({ a, y: y + row / 2 - 2 }); y += row; }
+    if (!apps.length) y += 4;
+    y += 10;
+  }
+  const appsBottom = y;
+  const bandTop = top + 8, bandBottom = Math.max(appsBottom, top + 8 + 260);
+  const boxY = bandBottom + 12;
+  const H0 = boxY + 52;
+
+  under.append(svg('rect', { x: gx, y: bandTop, width: gw, height: bandBottom - bandTop, rx: 14, class: 'box' }));
+  const bandX = (i) => gx + 8 + i * bandW + bandW / 2;
+  STAGES.forEach((s, i) => {
+    under.append(tag(svg('g', { 'data-stage': s },
+      svg('rect', { x: gx + 8 + i * bandW + 3, y: bandTop + 8, width: bandW - 6, height: bandBottom - bandTop - 16, rx: 9, class: i === 0 ? 'band ing' : 'band' }),
+      tx(bandX(i), bandTop + 26, fit(t(`tp.stage.${s}`), 11.5, false, bandW - 10), 'small t2', { 'text-anchor': 'middle' })), { stage: s }));
+  });
+  const halfW = (gw - 10) / 2;
+  const box = (x, label, note, id) => tag(svg('g', { 'data-id': id }, svg('rect', { x, y: boxY, width: halfW, height: 40, rx: 10, class: 'box' }),
+    tx(x + 12, boxY + 17, label, 'small strong'), tx(x + 12, boxY + 32, fit(note, 11, true, halfW - 24), 't3 small m')), { node: id });
+  nodes.append(box(gx, t('tp.stage.scheduler'), t('tp.stage.scheduler.note'), 'scheduler'),
+    box(gx + halfW + 10, t('tp.stage.admin'), `:${location.port || 80}`, 'admin'));
+
+  const callerY = { visitor: bandTop + 70, caller: bandTop + 120, operator: boxY + 20 };
+  for (const [kind, cy] of Object.entries(callerY)) {
+    nodes.append(tag(svg('g', { 'data-id': kind }, svg('rect', { x: 16, y: cy - 14, width: 116, height: 28, rx: 14, class: 'box' }),
+      svg('circle', { cx: 32, cy, r: 5.5, class: 'ring' }), tx(44, cy + 4, fit(t(`tp.${kind}`), 11.5, false, 82))), { node: kind }));
+  }
+  const path = (d, cls, meta) => tag(svg('path', { d, class: `edge ${cls}` }), meta);
+  const allNames = new Set(shown.map((a) => a.name));
+  const visitorPath = path(curve(132, callerY.visitor, bandX(0) - 10, callerY.visitor), '', { apps: allNames });
+  edges.append(visitorPath, path(curve(132, callerY.caller, bandX(0) - 10, callerY.caller), '', { apps: allNames }),
+    path(`M132,${callerY.operator} H${gx + halfW + 10}`, '', { node: 'operator' }));
+
+  const capY = {};
+  const capSpan = Math.max(appsBottom - top - 30, CAP_NODES.length * 34);
+  CAP_NODES.forEach((c, i) => { capY[c] = top + 12 + (i * capSpan) / (CAP_NODES.length - 1); });
+  const svcSpan = Math.max(appsBottom - top - 50, GRAPH_SERVICES.length * 56);
+  const svcY = Object.fromEntries(GRAPH_SERVICES.map((s, i) => [s, top + 8 + (i * svcSpan) / (GRAPH_SERVICES.length - 1)]));
+
+  const byGroup = Object.fromEntries(groupList.map((lane) => [lane, svg('g')]));
+  nodes.append(...Object.values(byGroup));
+  for (const lane of groupList) {
+    const { y: gy, apps } = groups[lane];
+    const extra = hidden[lane] ?? 0;
+    const down = laneDown(model, lane);
+    const hit = down || apps.some((a) => blockedBy(model, a).length);
+    if (lane === 'unpublished') {
+      const label = `${t('tp.unpublished')}  ${nf(apps.length)}${extra ? `  +${nf(extra)}` : ''}`;
+      byGroup[lane].append(tag(svg('g', { class: 'lanet', 'data-id': 'group:unpublished' }, tx(ax, gy + 18, label, 'grp')), { apps: new Set(apps.map((a) => a.name)), group: lane }));
+      continue;
+    }
+    const label = `${lane}  ${nf(apps.length)}${extra ? `  +${nf(extra)}` : ''}`;
+    const title = act(svg('g', { class: `lanet${hit ? ' fault' : ''}`, 'data-id': `group:${lane}` },
+      svg('rect', { x: ax - 6, y: gy + 2, width: aw + 12, height: 24, rx: 8, class: 'hit' }),
+      tx(ax, gy + 18, label, 'grp m'),
+      down ? tx(ax + aw, gy + 18, t('tp.unreachableShort'), 'bad small', { 'text-anchor': 'end' })
+        : tx(ax + aw, gy + 18, fit(t('tp.explain'), 11.5, false, aw - textWidth(label, 11.5, true) - 12, 500), 'linkt small', { 'text-anchor': 'end' })), t('tp.explainFor', { kind: lane }), () => on.explain(lane), `group:${lane}`);
+    byGroup[lane].append(tag(title, { apps: new Set(apps.map((a) => a.name)), group: lane }));
+    if (!apps.length) byGroup[lane].append(tx(ax, gy + groupHead + 6, t('tp.noApps'), 't3 small'));
+  }
+  const appPaths = new Map();
+  const appNodes = new Map();
+  for (const { a, y: ry } of rows) {
+    const g = act(appChip(model, a, ax, ry - 11, aw), a.name, () => on.pick({ app: a.name }), `app:${a.name}`);
+    g.setAttribute('data-id', `app:${a.name}`);
+    appNodes.set(a.name, tag(g, { apps: new Set([a.name]) }));
+    byGroup[groupOf(a)].append(g);
+    if (!laneOf(a)) continue;
+    const fault = blockedBy(model, a).length > 0;
+    const passes = passesOf(a);
+    const fx = bandX(0) - 10, fy = callerY.visitor;
+    const lanePath = path(`M${fx},${fy} C${fx + 14},${fy} ${fx - 4},${ry} ${fx + 14},${ry} H${ax}`, fault ? 'fault' : '', { apps: new Set([a.name]) });
+    edges.append(lanePath);
+    appPaths.set(a.name, lanePath);
+    for (const s of passes) edges.append(tag(svg('circle', { cx: bandX(STAGES.indexOf(s)), cy: ry, r: 3.5, class: 'pass' }), { apps: new Set([a.name]) }));
+    if (a.capabilities.includes('cron')) {
+      edges.append(path(`M${bandX(3) + 6},${boxY} V${ry + 6} Q${bandX(3) + 6},${ry} ${bandX(3) + 12},${ry}`, 'cron', { apps: new Set([a.name]) }));
+    }
+    for (const n of needs(a)) edges.append(path(curve(ax + aw, ry, cx, capY[n.cap]), n.service && svcFault(model, n.service) ? 'fault' : '', { apps: new Set([a.name]), cap: n.cap }));
+  }
+  const isolateApps = new Set(groups.isolate.apps.map((a) => a.name));
+  if (isolateApps.size) {
+    const gy = groups.isolate.y + 13;
+    const ry = top - 14;
+    edges.append(path(`M${ax + aw},${gy} C${ax + aw + 30},${gy} ${ax + aw + 10},${ry} ${ax + aw + 40},${ry} H${cx + cw + 10} C${sx - 30},${ry} ${sx - 40},${svcY.runner + 22} ${sx},${svcY.runner + 22}`, `group${laneDown(model, 'isolate') ? ' fault' : ''}`, { apps: isolateApps, service: 'runner' }));
+  }
+
+  const declarers = (cap) => shown.filter((a) => needs(a).some((n) => n.cap === cap));
+  for (const c of CAP_NODES) {
+    const who = declarers(c);
+    const services = new Set(who.map((a) => needs(a).find((n) => n.cap === c).service).filter(Boolean));
+    const fault = [...services].some((s) => svcFault(model, s));
+    const [kind, engine] = c.split(':');
+    const label = engine ? `db · ${engine === 'sqlite' ? 'SQLite' : 'PostgreSQL'}` : kind;
+    const g = act(svg('g', { class: `capn${fault ? ' fault' : ''}${who.length ? '' : ' idle'}`, 'data-id': `cap:${c}` },
+      svg('rect', { x: cx, y: capY[c] - 12, width: cw, height: 24, rx: 6, class: 'chipr' }),
+      tx(cx + 9, capY[c] + 4, label, 'm chipt'), tx(cx + cw - 9, capY[c] + 4, who.length ? nf(who.length) : '·', 'm t3', { 'text-anchor': 'end' })), label, () => on.pick({ cap: c }), `cap:${c}`);
+    nodes.append(tag(g, { cap: c, apps: new Set(who.map((a) => a.name)) }));
+    for (const s of services) {
+      const apps = new Set(who.filter((a) => needs(a).find((n) => n.cap === c).service === s).map((a) => a.name));
+      edges.append(path(curve(cx + cw, capY[c], sx, svcY[s] + 20), svcFault(model, s) ? 'fault' : '', { apps, cap: c, service: s }));
+    }
+  }
+  for (const s of GRAPH_SERVICES) {
+    const g = act(serviceNode(model, s, sx, svcY[s], sw, 44), t(`svc.${s}`), () => on.pick({ service: s }), `svc:${s}`);
+    nodes.append(tag(g, { service: s, apps: new Set(shown.filter((a) => servicesOf(a).has(s)).map((a) => a.name)) }));
+  }
+
+  const H = Math.max(H0, top + 8 + svcSpan + 52, top + 12 + capSpan + 20) + 12;
+  el.setAttribute('height', H);
+  el.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  el.append(stripeDefs(), under, edges, nodes, flows);
+
+  /** Selection reads the graph: an app lights its path, a capability its declarers, a service its dependents. */
+  const select = (sel) => {
+    el.classList.toggle('picking', Boolean(sel));
+    if (!sel) { for (const p of parts) p.el.classList.remove('lit'); return; }
+    const apps = sel.app ? new Set([sel.app])
+      : sel.cap ? new Set(declarers(sel.cap).map((a) => a.name))
+        : new Set(shown.filter((a) => servicesOf(a).has(sel.service)).map((a) => a.name));
+    const caps = new Set(shown.filter((a) => apps.has(a.name)).flatMap((a) => needs(a).filter((n) => !sel.service || n.service === sel.service).map((n) => n.cap)));
+    if (sel.cap) { caps.clear(); caps.add(sel.cap); }
+    const services = new Set(shown.filter((a) => apps.has(a.name)).flatMap((a) => needs(a).filter((n) => caps.has(n.cap)).map((n) => n.service)).filter(Boolean));
+    if (sel.service) services.add(sel.service);
+    if (sel.app && laneOf(shown.find((a) => a.name === sel.app) ?? {}) === 'isolate') services.add('runner');
+    const stages = new Set(shown.filter((a) => apps.has(a.name)).flatMap(passesOf));
+    for (const p of parts) {
+      const mine = p.apps && [...p.apps].some((n) => apps.has(n));
+      const lit = p.node === 'visitor' || p.node === 'caller' ? apps.size > 0
+        : p.stage ? stages.has(p.stage)
+          : p.node === 'scheduler' ? shown.some((a) => apps.has(a.name) && a.capabilities.includes('cron'))
+            : p.group ? mine
+              : p.cap && p.service ? mine && caps.has(p.cap) && services.has(p.service)
+                : p.cap && p.el.tagName === 'path' ? mine && caps.has(p.cap)
+                  : p.cap ? caps.has(p.cap)
+                    : p.service ? services.has(p.service) && (p.el.tagName !== 'path' || mine)
+                      : Boolean(mine);
+      p.el.classList.toggle('lit', lit);
+    }
+  };
+  return {
+    el,
+    select,
+    flow(name) {
+      const lanePath = appPaths.get(name);
+      if (!lanePath) return;
+      const moved = particle(flows, [visitorPath, lanePath]);
+      const chip = appNodes.get(name);
+      if (chip) setTimeout(() => glow(chip, 'hit'), moved ? 900 : 0);
+    },
+  };
+}
+
+const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** flash() for SVG, which has no offsetWidth to restart an animation with. */
+function glow(el, cls) {
+  el.classList.remove(cls);
+  void el.getBoundingClientRect();
+  el.classList.add(cls);
+  clearTimeout(el.glowed);
+  el.glowed = setTimeout(() => el.classList.remove(cls), 1600);
+}
+
+/** A packet along consecutive paths (ADR 0015: motion only for something that happened); none under reduced motion or past the cap. */
+function particle(layer, paths, delay = 0) {
+  if (layer.childElementCount >= MAX_PARTICLES) return false;
+  for (const p of paths) glow(p, 'hot');
+  if (reduced()) return false;
+  const g = svg('g', { class: 'pk', opacity: 0 }, svg('circle', { r: 7, class: 'halo' }), svg('circle', { r: 3.5 }));
+  layer.append(g);
+  const lengths = paths.map((p) => p.getTotalLength());
+  const total = lengths.reduce((s, n) => s + n, 0);
+  const duration = 420 * paths.length;
+  let start = null;
+  const step = (now) => {
+    if (!g.isConnected) return;
+    start ??= now + delay;
+    const f = (now - start) / duration;
+    if (f >= 1) return g.remove();
+    if (f >= 0) {
+      let d = (1 - (1 - f) ** 2) * total;
+      let i = 0;
+      while (i < lengths.length - 1 && d > lengths[i]) { d -= lengths[i]; i++; }
+      const pt = paths[i].getPointAtLength(d);
+      g.setAttribute('transform', `translate(${pt.x},${pt.y})`);
+      g.setAttribute('opacity', 1);
+    }
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+  return true;
+}
+
+function explainPanel(model, kind) {
+  const checks = kind === 'static' ? [] : model.health?.runtimes[kind]?.health ?? [];
+  const p = model.health?.policy ?? {};
+  const vars = { max: p.max_failures, window: p.failure_window_seconds, backoff: p.restart_backoff_seconds, idle: p.idle_seconds, ready: p.ready_timeout_seconds };
+  const block = (key) => h('div', { class: 'xb' }, h('h3', {}, t(`tp.x.${key}`)), h('p', {}, t(`tp.x.${kind}.${key}`, vars)));
+  return h('div', { class: 'card explain', 'data-section': 'explain' },
+    h('div', { class: 'xh' }, h('b', { class: 'mono' }, kind), h('span', { class: 'muted' }, t(`tp.lane.${kind}.sub`))),
+    h('div', { class: 'xg' }, ['request', 'wake', 'state', 'failure'].map(block),
+      h('div', { class: 'xb checks' }, h('h3', {}, t('tp.x.checks')),
+        checks.length ? h('ul', {}, checks.map((c) => h('li', {}, h('span', { class: 'chip' }, c), h('span', {}, t(`tp.check.${c}`)))))
+          : h('p', {}, t('tp.x.noChecks')))));
+}
+
+const faultsOf = (model) => SERVICES.filter((s) => svcFault(model, s)).map((s) => ({ s, status: svcStatus(model, s), hit: dependents(model, s).map((a) => a.name) }));
+
+function faultItems(model, faults) {
+  return faults.map(({ s, status: st, hit }) => h('div', { class: 'fault-item' },
+    h('span', { class: 'st red' }, t(st === 'off' ? 'tp.svcOff' : 'att.service', { name: t(`svc.${s}`) })),
+    h('span', { class: 'muted' }, hit.length ? plural('tp.affects', hit.length) : t('tp.affectsNone')),
+    h('span', { class: 'chips' }, hit.slice(0, 8).map((n) => appLink(n)), hit.length > 8 ? chip(`+${hit.length - 8}`) : null),
+    h('span', { class: 'mono fix' }, fixFor(model, s))));
+}
+
+let topoView = store.get('pneuma-space-topology') === 'graph' ? 'graph' : 'lane';
+
+function topology() {
+  const model = topoModel();
+  const header = liveHeader('live.lastRequest', () => refresh());
+  const banner = h('div', { class: 'card faults', role: 'alert' });
+  const sceneBox = h('div', { class: 'inset topo', 'data-section': 'topology' });
+  const panel = h('div');
+  const pickBar = h('div', { class: 'pickbar' });
+  const errBox = h('div', { class: 'msg err pickbar', role: 'alert' });
+  let errTimer = 0;
+  const clearError = () => { clearTimeout(errTimer); fill(errBox); };
+  const showError = (message) => { clearError(); fill(errBox, message); errTimer = setTimeout(clearError, 10_000); };
+  let explained = null;
+  let selection = null;
+  let filter = '';
+  let scene = null;
+  let painted = '';
+  let faultsPainted = '';
+  const live = () => ({ ...model, apps: model.apps.filter((a) => a.status === 'registered') });
+  const filterInput = h('input', { type: 'search', placeholder: t('apps.filter'), 'aria-label': t('apps.filter'), oninput: () => { filter = filterInput.value.trim().toLowerCase(); paint(); } });
+  const tools = h('div', { class: 'toolbar topo-tools' });
+  const secHead = h('div');
+  const renderChrome = () => {
+    const graph = topoView === 'graph';
+    fill(secHead, sectionHead(1, graph ? 'tp.sec.graph' : 'tp.sec.lane', graph ? 'tp.sec.graphDesc' : 'tp.sec.laneDesc',
+      segmented([['lane', t('tp.view.lane')], ['graph', t('tp.view.graph')]], topoView, (v) => {
+        topoView = v;
+        store.set('pneuma-space-topology', v);
+        selection = null;
+        renderChrome();
+        paint();
+      }, t('tp.view'))));
+    fill(tools, graph ? [filterInput, h('span', { class: 'muted' }, t('tp.graphHint', { n: GRAPH_CAP }))] : h('span', { class: 'muted' }, t('tp.laneHint')));
+  };
+  renderChrome();
+
+  const lift = async (name) => {
+    clearError();
+    try {
+      await api('POST', `${appPath(name)}/unquarantine`);
+      model.apps = await api('GET', '/api/apps');
+      paint();
+    } catch (error) {
+      showError(error.message);
+    }
+  };
+  const on = {
+    open: (name) => { location.hash = `#/apps/${encodeURIComponent(name)}`; },
+    explain: (kind) => {
+      clearError();
+      explained = explained === kind ? null : kind;
+      fill(panel, explained ? explainPanel(model, explained) : null);
+      if (explained) panel.scrollIntoView({ block: 'nearest', behavior: reduced() ? 'auto' : 'smooth' });
+    },
+    lift,
+    pick: (sel) => {
+      clearError();
+      const same = selection && JSON.stringify(selection) === JSON.stringify(sel);
+      selection = same ? null : sel;
+      scene?.select?.(selection);
+      renderPick();
+    },
+  };
+  const renderPick = () => {
+    if (topoView !== 'graph' || !selection) return fill(pickBar);
+    const local = live();
+    if (selection.app) {
+      const a = local.apps.find((x) => x.name === selection.app);
+      if (!a) return fill(pickBar);
+      return fill(pickBar,
+        appLink(a.name), runtimeChip(a), laneOf(a) ? status(a.instance) : null,
+        a.quarantine ? [h('span', { class: 'st red' }, `${t('att.quarantine')} · ${a.quarantine.reason}`), h('button', { class: 'btn danger', type: 'button', onclick: () => lift(a.name) }, t('tp.lift'))] : null,
+        blockedBy(local, a).map((s) => h('span', { class: 'st red' }, t('tp.needs', { name: t(`svc.${s}`), status: t(`st.${svcStatus(local, s)}`) }))),
+        h('button', { class: 'linkish', type: 'button', onclick: () => on.pick(selection) }, t('tp.clear')));
+    }
+    const label = selection.cap ?? t(`svc.${selection.service}`);
+    const n = selection.cap ? local.apps.filter((a) => needs(a).some((x) => x.cap === selection.cap)).length : dependents(local, selection.service).length;
+    fill(pickBar, h('b', { class: 'mono' }, label), h('span', { class: 'muted' }, plural('tp.dependents', n)),
+      h('button', { class: 'linkish', type: 'button', onclick: () => on.pick(selection) }, t('tp.clear')));
+  };
+
+  /** An old scene with packets in flight stays on top, invisible except its packets, until they land. */
+  const retire = (old) => {
+    if (!old.querySelector('.pk')) return old.remove();
+    const at = scene.el.getBoundingClientRect(), box = sceneBox.getBoundingClientRect();
+    old.classList.add('retired');
+    old.setAttribute('inert', '');
+    old.setAttribute('aria-hidden', 'true');
+    old.style.left = `${at.left - box.left + sceneBox.scrollLeft}px`;
+    old.style.top = `${at.top - box.top + sceneBox.scrollTop}px`;
+    setTimeout(() => old.remove(), 2000);
+  };
+
+  /** Rebuilds the scene only when its structure changed; per-sample numbers change in place. */
+  const paint = () => {
+    if (!model.health) return;
+    const local = live();
+    const faults = faultsOf(local);
+    const faultSig = JSON.stringify([faults, model.health.runtimes.isolate.profile]);
+    if (faultSig !== faultsPainted) {
+      faultsPainted = faultSig;
+      fill(banner, faultItems(local, faults));
+    }
+    const registered = local.apps;
+    const width = sceneBox.clientWidth - 24;
+    let shown = registered;
+    const hidden = {};
+    if (topoView === 'graph') {
+      const matching = registered.filter((a) => !filter || a.name.includes(filter));
+      shown = [...matching].sort((a, b) => (b.lastAccessAt ?? 0) - (a.lastAccessAt ?? 0) || a.name.localeCompare(b.name)).slice(0, GRAPH_CAP).sort((a, b) => a.name.localeCompare(b.name));
+      for (const a of registered) if (!shown.includes(a)) hidden[groupOf(a)] = (hidden[groupOf(a)] ?? 0) + 1;
+    }
+    const signature = JSON.stringify([topoView, width, filter, hidden, model.health, SERVICES.map((s) => svcStatus(model, s)),
+      shown.map((a) => [a.name, a.release, a.runtime, a.instance, a.quarantine, a.capabilities, a.dbBackend])]);
+    if (signature !== painted) {
+      painted = signature;
+      const focused = sceneBox.contains(document.activeElement) ? document.activeElement.dataset.key : null;
+      const old = scene?.el;
+      scene = topoView === 'graph' ? graphScene(local, width, shown, hidden, on) : laneScene(local, width, on);
+      sceneBox.prepend(scene.el);
+      if (old) retire(old);
+      if (focused) {
+        const find = (key) => scene.el.querySelector(`[data-key="${CSS.escape(key)}"]`);
+        (find(focused) ?? find(focused.replace(/^lift:/, 'app:')))?.focus({ preventScroll: true });
+      }
+      if (selection) scene.select?.(selection);
+      renderPick();
+      if (explained) fill(panel, explainPanel(model, explained));
+    }
+    for (const el of sceneBox.querySelectorAll('[data-latency]')) el.textContent = ms(model.services[el.dataset.latency]?.latencyMs);
+  };
+  const resize = new ResizeObserver(() => (sceneBox.isConnected ? paint() : resize.disconnect()));
+  resize.observe(sceneBox);
+
+  show(
+    h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('tp.title')), h('p', { class: 'sub' }, t('tp.sub'))), header.el),
+    h('section', { class: 'topo-sec' }, secHead, banner, tools, pickBar, errBox, sceneBox, panel),
+  );
+
+  const loadApps = async () => {
+    const [apps, health] = await Promise.all([api('GET', '/api/apps'), api('GET', '/api/health')]);
+    model.apps = apps;
+    model.health = health;
+  };
+  const loadMetrics = async () => {
+    const m = await api('GET', '/api/metrics');
+    if (model.startedAt !== null && m.gateway.startedAt !== model.startedAt) { model.cursor = null; header.restarted(m.gateway.startedAt); }
+    model.startedAt = m.gateway.startedAt;
+    model.services = m.services;
+  };
+  const pollRequests = header.guarded(async () => {
+    if (!scene) return;
+    const seeding = model.cursor === null;
+    const batch = await api('GET', `/api/requests?after=${model.cursor ?? 0}&limit=${REQUEST_RING}`);
+    if (batch.length) {
+      model.cursor = batch.at(-1).seq;
+      model.last = batch.at(-1).t;
+    } else model.cursor ??= 0;
+    header.seen(model.last);
+    if (seeding || !batch.length) return;
+    header.beat();
+    const counts = new Map();
+    for (const r of batch) counts.set(r.app, (counts.get(r.app) ?? 0) + 1);
+    for (const [name, n] of counts) {
+      for (let i = 0; i < Math.min(n, FLOWS_PER_APP); i++) setTimeout(() => scene.flow(name), i * 220);
+    }
+  });
+  const refresh = header.guarded(async () => {
+    await Promise.all([loadApps(), loadMetrics()]);
+    paint();
+    await pollRequests();
+  });
+  return {
+    loops: [[APPS_MS, header.guarded(async () => { await loadApps(); paint(); })], [METRICS_MS, header.guarded(async () => { await loadMetrics(); paint(); })], [REQUESTS_MS, pollRequests]],
+    first: refresh,
+  };
+}
+
 function footer(startedAt) {
   document.getElementById('foot').textContent = startedAt ? t('aside.since', { time: stamp(startedAt) }) : '';
 }
@@ -2291,9 +3342,9 @@ function footer(startedAt) {
 function shell() {
   const nav = document.querySelector('nav');
   const [, view] = location.hash.split('?')[0].split('/');
-  const current = ['apps', 'publish', 'realtime'].includes(view) ? view : 'overview';
+  const current = ['apps', 'publish', 'realtime', 'topology'].includes(view) ? view : 'overview';
   nav.replaceChildren(h('div', { class: 'group' }, t('nav.group')),
-    ...[['overview', '#/'], ['realtime', '#/realtime'], ['apps', '#/apps'], ['publish', '#/publish']].map(([key, href]) => h('a', { href, 'aria-current': key === current ? 'page' : null }, t(`nav.${key}`))));
+    ...[['overview', '#/'], ['realtime', '#/realtime'], ['topology', '#/topology'], ['apps', '#/apps'], ['publish', '#/publish']].map(([key, href]) => h('a', { href, 'aria-current': key === current ? 'page' : null }, t(`nav.${key}`))));
   document.getElementById('brand-sub').textContent = t('brand.sub');
   const theme = root.dataset.theme;
   document.querySelector('.controls').replaceChildren(
@@ -2332,6 +3383,7 @@ async function route() {
       : view === 'apps' ? await projects()
         : view === 'publish' ? (await publish(target), null)
           : view === 'realtime' ? realtime()
+            : view === 'topology' ? topology()
             : await overview();
     if (gen !== generation) return;
     if (typeof live === 'function') {
