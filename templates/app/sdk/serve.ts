@@ -67,7 +67,7 @@ export function serve(handler: Handler, options: { triggers?: Triggers; port?: n
       res.end('internal error');
     }
   });
-  server.listen(options.port ?? 8000, '0.0.0.0');
+  server.listen(options.port ?? Number(process.env.PNEUMA_SPACE_PORT ?? 8000), '0.0.0.0');
   process.once('SIGTERM', () => server.close(() => process.exit(0)));
   return server;
 }

@@ -10,7 +10,8 @@ PneumaSpace deploys stateful web apps on one trusted machine. An app names the i
 Requirements: Docker with Compose v2, Node.js 24 or newer on the host (for `appctl`).
 
 ```sh
-docker compose up -d                              # gateway, object service, redis
+docker compose --profile isolate up -d            # gateway, object service, redis, and the runner for isolate apps
+docker compose up -d                              # the same without the runner, for container apps only
 docker compose --profile postgres --profile rtc up -d   # also PostgreSQL and TURN
 ```
 
@@ -19,7 +20,7 @@ Console: http://127.0.0.1:8081/ (projects and platform overview). App addresses:
 ## Publish an app
 
 ```sh
-node cli/appctl.ts init myapp                     # copy templates/app (or --static for templates/static)
+node cli/appctl.ts init myapp                     # templates/app, an isolate app; --container adds a Dockerfile, --static copies templates/static
 cd myapp                                          # edit pneuma-space.json and src/server.ts; read AGENTS.md there
 node ../cli/appctl.ts publish myapp . --owner user:me
 open http://127.0.0.1:8080/apps/myapp/
@@ -27,9 +28,9 @@ open http://127.0.0.1:8080/apps/myapp/
 
 Examples built on the same scaffold, and how to publish them, are in [`examples/`](examples/README.md).
 
-`appctl publish <name> <dir>` reads the manifest, builds the image with Docker when the app needs a container, uploads the static directory when the manifest declares `static`, and registers the release. Publishing the same inputs again changes nothing; a new image or manifest makes a new release and keeps every volume, database, key prefix and bucket.
+`appctl publish <name> <dir>` reads the manifest. An isolate app is uploaded as a code bundle with its `node_modules` (`npm ci --omit=dev --ignore-scripts` on your machine, no Docker build); a container app is built with Docker; a static directory is uploaded when the manifest declares `static`. Then it registers the release. Publishing the same inputs again changes nothing; a new image or manifest makes a new release and keeps every volume, database, key prefix and bucket.
 
-Other commands: `list`, `show <name>`, `logs <name>` (the app container's recent output), `remove <name>` (address returns 404, data kept), `purge <name>` (deletes data, only after remove), `policy [<name>] key=value` (idle, ready, drain, connection-idle and trigger timeouts, `db_backend`, global `timezone`), `owner <name> <subject>`, `token create <name>` (a service token for invoking triggers from outside). `PNEUMA_SPACE_ADMIN` points the CLI at another admin port.
+Other commands: `list`, `show <name>`, `logs <name>` (the app's recent output), `unquarantine <name>` (lets an app the platform stopped for repeated crashes or hangs wake again), `remove <name>` (address returns 404, data kept), `purge <name>` (deletes data, only after remove), `policy [<name>] key=value` (idle, ready, drain, connection-idle and trigger timeouts, `db_backend`, global `timezone`), `owner <name> <subject>`, `token create <name>` (a service token for invoking triggers from outside). `PNEUMA_SPACE_ADMIN` points the CLI at another admin port.
 
 ## How a capability is mounted
 
@@ -59,7 +60,7 @@ Behind the gateway the services are shared: one Docker engine, one Redis, one ob
 
 | | PneumaSpace | Vercel | Supabase |
 | --- | --- | --- | --- |
-| You deploy | Any container image that listens on port 8000, or a static directory | Frontend frameworks and serverless functions from Git | A Postgres project with auth, storage, realtime and edge functions; your own server runs elsewhere |
+| You deploy | A Node code bundle run in a worker thread, any container image that listens on port 8000, or a static directory | Frontend frameworks and serverless functions from Git | A Postgres project with auth, storage, realtime and edge functions; your own server runs elsewhere |
 | It runs on | One machine you own, loopback ports by default | Vercel's global network | Supabase's cloud, or your servers through its self-hosting stack |
 | State | Each app declares `/data`, SQL, Redis and an S3 bucket; all survive sleep and new releases | No persistent disk; storage comes from attached services | Postgres at the center, storage buckets beside it |
 | Long-lived connections | WebSocket and SSE pass through and keep the app awake | Functions are request-scoped with a time limit | Realtime channels built in; your own long-running server is hosted elsewhere |

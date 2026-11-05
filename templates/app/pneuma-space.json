@@ -1,5 +1,6 @@
 {
   "contract": 1,
+  "runtime": "isolate",
   "capabilities": {
     "identity": { "required": false },
     "static": { "dir": "public" }

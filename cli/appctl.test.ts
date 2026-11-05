@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { after, before, beforeEach, test } from 'node:test';
+import { after, before, beforeEach, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const repo = fileURLToPath(new URL('../', import.meta.url));
@@ -38,12 +38,15 @@ before(async () => {
 after(() => server.close());
 beforeEach(() => (requests = []));
 
-function stubDocker(script: string): string {
+function stub(tools: Record<string, string>): string {
   const bin = mkdtempSync(join(tmpdir(), 'appctl-bin-'));
-  writeFileSync(join(bin, 'docker'), `#!/bin/sh\n${script}\n`);
-  chmodSync(join(bin, 'docker'), 0o755);
+  for (const [tool, script] of Object.entries(tools)) {
+    writeFileSync(join(bin, tool), `#!/bin/sh\n${script}\n`);
+    chmodSync(join(bin, tool), 0o755);
+  }
   return bin;
 }
+const stubDocker = (script: string) => stub({ docker: script });
 const dockerMustNotRun = stubDocker('echo "docker must not be invoked: $*" >&2; exit 99');
 
 function appctl(args: string[], { bin = dockerMustNotRun, cli = join(repo, 'cli/appctl.ts') } = {}) {
@@ -137,6 +140,7 @@ test('token create prints the one-time secret exactly once', async () => {
 test('init copies the template next to the CLI into a new dir and refuses a non-empty one', async () => {
   const root = mkdtempSync(join(tmpdir(), 'appctl-repo-'));
   cpSync(join(repo, 'cli/appctl.ts'), join(root, 'cli/appctl.ts'));
+  cpSync(join(repo, 'cli/scaffold.ts'), join(root, 'cli/scaffold.ts'));
   cpSync(join(repo, 'gateway/src/model.ts'), join(root, 'gateway/src/model.ts'));
   mkdirSync(join(root, 'templates/static'), { recursive: true });
   writeFileSync(join(root, 'templates/static/pneuma-space.json'), '{"contract":1}');
@@ -149,4 +153,97 @@ test('init copies the template next to the CLI into a new dir and refuses a non-
   assert.equal(again.code, 1);
   assert.match(again.stderr, /not empty/);
   assert.ok(existsSync(join(target, 'pneuma-space.json')));
+});
+
+const tarList = (body: Buffer) => {
+  const file = join(mkdtempSync(join(tmpdir(), 'appctl-tar-')), 'b.tar');
+  writeFileSync(file, body);
+  return execFileSync('tar', ['-tf', file], { encoding: 'utf8' }).trim().split('\n');
+};
+
+const scaffoldManifest = JSON.parse(readFileSync(join(repo, 'templates/app/pneuma-space.json'), 'utf8'));
+
+describe('publish of an isolate dir', () => {
+  let tar: string[];
+  let npmArgs: string;
+  let release: Recorded;
+  let bundle: string;
+  before(async () => {
+    const dir = source(scaffoldManifest, {
+      'package.json': '{"dependencies": {"dep": "1.0.0"}}',
+      'package-lock.json': '{}',
+      'src/server.ts': 'export {}',
+      'src/server.test.ts': 'not shipped',
+      'public/ui.css': 'body {}',
+      'node_modules/stale/index.js': 'not shipped',
+      'data/app.sqlite3': 'not shipped',
+      '.git/HEAD': 'not shipped',
+      '.audit/trail.tsv': 'not shipped',
+      '.env': 'SECRET=1',
+      '.env.local': 'SECRET=2',
+      '.npmrc': '//registry/:_authToken=x',
+    });
+    const outside = source({});
+    symlinkSync(join(outside, 'pneuma-space.json'), join(dir, 'src/outside.json'));
+    symlinkSync('../missing', join(dir, 'src/dangling'));
+    symlinkSync('../public/ui.css', join(dir, 'src/ui.css'));
+    symlinkSync('../data', join(dir, 'public/uploads'));
+    symlinkSync('../.env', join(dir, 'src/config'));
+    const log = join(outside, 'npm-args');
+    const bin = stub({
+      docker: 'exit 99',
+      npm: `echo "$*" > ${log}; mkdir -p node_modules/dep && echo x > node_modules/dep/index.js && ln -s ${outside} node_modules/linked`,
+    });
+    const result = await appctl(['publish', 'notes', dir, '--owner', 'user:ann'], { bin });
+    assert.equal(result.code, 0, result.stderr);
+    const [upload] = requests;
+    release = requests[1];
+    tar = tarList(upload.body);
+    bundle = createHash('sha256').update(upload.body).digest('hex');
+    npmArgs = readFileSync(log, 'utf8').trim();
+  });
+
+  test('installs production dependencies without their scripts', () => {
+    assert.equal(npmArgs, 'ci --omit=dev --ignore-scripts');
+  });
+
+  test('ships no local state, secrets, tests or stale node_modules', () => {
+    const excluded = ['data/app.sqlite3', '.git/HEAD', '.audit/trail.tsv', '.env', '.env.local', '.npmrc', 'src/server.test.ts', 'node_modules/stale/index.js'];
+    assert.deepEqual(tar.filter((path) => excluded.includes(path)), []);
+  });
+
+  test('follows links inside the app and skips dangling ones and ones leading outside', () => {
+    assert.ok(tar.includes('src/ui.css'));
+    assert.deepEqual(tar.filter((path) => /^(src\/outside\.json|src\/dangling|node_modules\/linked)/.test(path)), []);
+  });
+
+  test('ships nothing through a link into data or to .env', () => {
+    assert.deepEqual(tar.filter((path) => path.startsWith('public/uploads') || path.startsWith('src/config')), []);
+  });
+
+  test('puts files at app-relative paths', () => {
+    const expected = ['node_modules/dep/index.js', 'package-lock.json', 'package.json', 'pneuma-space.json', 'public/ui.css', 'src/server.ts'];
+    assert.deepEqual(expected.filter((path) => !tar.includes(path)), []);
+  });
+
+  test('releases the bundle with no image and the manifest entry', () => {
+    assert.deepEqual(json(release), { image: null, manifest: { ...scaffoldManifest, entry: 'src/server.ts' }, bundle, owner: 'user:ann' });
+  });
+});
+
+test('a path too long for a bundle exits 4 naming it before any upload', async () => {
+  const path = `${'d'.repeat(90)}/${'d'.repeat(90)}/${'d'.repeat(90)}/index.html`;
+  const dir = source({ contract: 1, capabilities: { static: { dir: 'dist' } } }, { [`dist/${path}`]: 'x' });
+  const result = await appctl(['publish', 'site', dir]);
+  assert.equal(result.code, 4);
+  assert.equal(result.stderr, `appctl: file path too long for a bundle: ${path}\n`);
+  assert.deepEqual(requests, []);
+});
+
+test('init --container is the app scaffold with runtime container and a Dockerfile', async () => {
+  const target = join(mkdtempSync(join(tmpdir(), 'appctl-init-')), 'app');
+  assert.equal((await appctl(['init', target, '--container'])).code, 0);
+  assert.deepEqual(JSON.parse(readFileSync(join(target, 'pneuma-space.json'), 'utf8')), { ...scaffoldManifest, runtime: 'container' });
+  assert.ok(existsSync(join(target, 'sdk/serve.ts')));
+  assert.ok(existsSync(join(target, 'Dockerfile')));
 });
