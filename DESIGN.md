@@ -93,7 +93,7 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 | Scheduler | 读 Trigger，写 Delivery（包括 Ingress 转来的按需 `invoke`），cron 计算，投递 worker | 除 `acquire` 和应用触发端点外的一切 |
 | Providers | 每种资源 kind 一个；`ensure`、`inject`、`suspend`、`destroy`；BundleStore；本地 IdentityProvider | 互相调用；写平台库 |
 | Metrics | 1.2 节的 Metrics 行。订阅生命周期事件流（每行 JSON 日志同时发给订阅者），每 10 s 采样 Ingress 的 Stats 快照、Runtime 的实例和 Lease 计数、Delivery 的状态计数、宿主机和平台服务可达性；`GET /api/metrics` 返回一份快照，每 App 的 Lease 计数、进入状态的时间和休眠时刻随列表返回（ADR 0015）；`GET /api/requests?after=<seq>` 返回游标之后的请求记录，由 Ingress 和 Scheduler 写入内存环（ADR 0016） | 写任何表；在请求路径上调 Docker 或网络（探测只在采样器里） |
-| Console 和 CLI | 8081 管理边界；页面是总览（US-P-13 列的指标）和项目（US-P-6 列的字段，项目详情含 Release 列表、Delivery 列表和容器日志），中英双语，明暗主题，单文件 HTML 内联 CSS、JS 和 SVG 图表，不加载外部资源；发布表单收镜像引用、manifest、可选 bundle 和首次发布时的 owner，引用由网关解析为镜像 id；`appctl publish` 用 `--owner`（默认取环境变量 `PNEUMA_SPACE_OWNER`）；全局 Policy、令牌和 owner 变更只有 `appctl`；`appctl` 先读 `pneuma-space.json`，需要容器时才 `docker build`，有 `static` 时打包目录，再调管理接口 | 任何逻辑；它们是薄壳 |
+| Console 和 CLI | 8081 管理边界；页面是总览（US-P-13 列的指标）、实时（ADR 0016）、拓扑（ADR 0018）和项目（US-P-6 列的字段，项目详情含 Release 列表、Delivery 列表和容器日志），中英双语，明暗主题，单文件 HTML 内联 CSS、JS 和 SVG 图表，不加载外部资源；发布表单收镜像引用、manifest、可选 bundle 和首次发布时的 owner，引用由网关解析为镜像 id；`appctl publish` 用 `--owner`（默认取环境变量 `PNEUMA_SPACE_OWNER`）；全局 Policy、令牌和 owner 变更只有 `appctl`；`appctl` 先读 `pneuma-space.json`，需要容器时才 `docker build`，有 `static` 时打包目录，再调管理接口 | 任何逻辑；它们是薄壳 |
 
 平台库是 `/data/pneuma-space.sqlite3`（WAL）。每张表一个写者。`ensure` 和 `suspend` 的结果由 Registry 写回 Binding 行。发布在一个事务里写 Release、Trigger、Binding 和 `App.current`，这是用数据库而不是 JSON 文件的原因。列出 500 个 App 是一次查询加一次内存读，没有 Docker 调用。
 
