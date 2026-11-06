@@ -35,3 +35,4 @@ PneumaSpace deploys stateful web apps on one trusted host. Read `REQUIREMENTS.md
 | `runtime.ts`, `infra.ts`, `docker.ts`, `providers.ts`, `compose.yaml` | also `npm run test:docker`: real containers and compose services, minutes |
 | `templates/app` | `npm test` inside `templates/app` |
 | Before a merge to main | `npm run test:acceptance` against `docker compose up -d`, one run at a time |
+| A runtime's speed, and a new runtime against the old ones | `node tests/bench/runtimes.ts` against a running stack: first request after publish, wake after sleep, warm request, per runtime; one TSV per run in `tests/bench/results/` with the host load, so runs compare. Never a timing assertion in a unit test |
