@@ -19,6 +19,7 @@
 </script>
 <style>
 :root {
+  --ease-nav: cubic-bezier(.16, 1, .3, 1);
   --page: oklch(98.5% .001 286.376);
   --canvas: oklch(96.1% .002 247.84);
   --surface: oklch(100% 0 0);
@@ -93,35 +94,41 @@ body {
 a { color: var(--accent-ink); text-decoration: none; }
 a:hover { text-decoration: underline; }
 button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
-.frame { display: grid; grid-template-columns: 288px minmax(0, 1fr); max-width: 1568px; min-height: 100vh; margin: 0 auto; background: var(--page); box-shadow: var(--shadow-card); }
-aside { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 28px; padding: 72px 28px 28px; border-right: 1px dashed var(--line); }
-.brand { display: flex; align-items: center; gap: 10px; }
+.frame { display: grid; grid-template-columns: auto minmax(0, 1fr); max-width: 1568px; min-height: 100vh; margin: 0 auto; background: var(--page); box-shadow: var(--shadow-card); }
+aside { position: sticky; top: 0; height: 100vh; width: 288px; overflow: hidden; padding: 72px 12px 28px; border-right: 1px dashed var(--line); transition: width .28s var(--ease-nav); }
+.aside-in { width: 264px; height: 100%; display: flex; flex-direction: column; gap: 28px; }
+.brand-row { position: relative; height: 36px; }
+.brand { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 44px 0 5px; overflow: hidden; transition: opacity .18s ease-out; }
+.brand > svg { flex-shrink: 0; }
 .brand b { display: block; font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
 .brand small { display: block; font-size: 12.5px; color: var(--ink-3); }
 nav { display: grid; gap: 2px; }
 nav .group { font-size: 11.5px; color: var(--ink-3); padding: 0 8px 6px; }
-nav a, .collapse { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-2); padding: 5px 8px; border-radius: 7px; }
-nav a svg, .collapse svg { color: var(--ink-3); }
-nav a:hover, .collapse:hover { background: var(--hover); text-decoration: none; }
+.collapse, .expand { position: absolute; top: 2px; right: 0; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 0; border-radius: 8px; background: none; color: var(--ink-3); cursor: pointer; transition: opacity .18s ease-out, background-color .18s ease-out, color .18s ease-out; }
+.expand { top: 0; right: auto; left: 0; width: 36px; height: 36px; opacity: 0; pointer-events: none; }
+.expand svg { transform: rotate(180deg); }
+.collapse:hover, .expand:hover { background: var(--hover); color: var(--ink); }
+nav a { display: flex; align-items: center; gap: 8px; width: 100%; height: 32px; padding: 0 8px; overflow: hidden; font-size: 12.5px; color: var(--ink-2); border-radius: 8px; transition: width .18s var(--ease-nav), background-color .15s ease-out, color .15s ease-out; }
+nav a .ico { width: 20px; justify-content: center; flex-shrink: 0; color: var(--ink-3); }
+nav a:hover { background: var(--hover); text-decoration: none; }
 nav a[aria-current] { color: var(--ink); font-weight: 500; background: var(--hover); }
-nav a[aria-current] svg, nav a:hover svg, .collapse:hover svg { color: var(--ink); }
-.aside-foot { margin-top: auto; display: grid; gap: 14px; font-size: 12px; color: var(--ink-3); }
+nav a[aria-current] .ico, nav a:hover .ico { color: var(--ink); }
+aside .label, .brand > span, nav .group, .controls { white-space: nowrap; transition: opacity .18s ease-out, transform .18s var(--ease-nav), visibility 0s; }
+.aside-foot { margin-top: auto; position: relative; min-height: 66px; display: flex; align-items: flex-end; font-size: 12px; color: var(--ink-3); }
 .controls { display: flex; gap: 6px; }
-.collapse { border: 0; background: none; cursor: pointer; color: var(--ink-3); margin: 0 0 -8px; }
-.ibtn { display: none; width: 36px; height: 30px; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: none; color: var(--ink-2); cursor: pointer; }
+.rail-controls { position: absolute; left: 0; bottom: 0; display: flex; flex-direction: column; gap: 2px; opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .18s ease-out, visibility 0s linear .18s; }
+.ibtn { display: inline-flex; width: 36px; height: 32px; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: none; color: var(--ink-2); cursor: pointer; }
 .ibtn:hover { background: var(--hover); color: var(--ink); }
 .ibtn svg { width: 16px; height: 16px; }
 .ibtn .glyph { font-size: 11px; font-weight: 500; color: var(--ink-3); letter-spacing: 0; }
 .ibtn .glyph b { font-weight: 600; color: var(--ink); }
 @media (min-width: 901px) {
-  :root[data-nav="rail"] .frame { grid-template-columns: 56px minmax(0, 1fr); }
-  :root[data-nav="rail"] aside { padding: 72px 0 28px; align-items: center; }
-  :root[data-nav="rail"] aside .label, :root[data-nav="rail"] .brand > span, :root[data-nav="rail"] nav .group, :root[data-nav="rail"] .controls .seg { display: none; }
-  :root[data-nav="rail"] nav a, :root[data-nav="rail"] .collapse { width: 36px; height: 32px; padding: 0; justify-content: center; }
-  :root[data-nav="rail"] .aside-foot { justify-items: center; }
-  :root[data-nav="rail"] .controls { flex-direction: column; gap: 2px; }
-  :root[data-nav="rail"] .ibtn { display: inline-flex; }
-  :root[data-nav="rail"] .collapse svg { transform: scaleX(-1); }
+  :root[data-nav="rail"] aside { width: 60px; }
+  :root[data-nav="rail"] aside .label, :root[data-nav="rail"] .brand > span, :root[data-nav="rail"] nav .group, :root[data-nav="rail"] .controls { opacity: 0; transform: translateX(-8px); pointer-events: none; }
+  :root[data-nav="rail"] .controls { visibility: hidden; transition-delay: 0s, 0s, .18s; }
+  :root[data-nav="rail"] .brand, :root[data-nav="rail"] .collapse { opacity: 0; pointer-events: none; }
+  :root[data-nav="rail"] .expand, :root[data-nav="rail"] .rail-controls { opacity: 1; visibility: visible; pointer-events: auto; transition-delay: 0s; }
+  :root[data-nav="rail"] nav a { width: 36px; }
 }
 main { min-width: 0; }
 .head { padding: 56px 32px 32px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 24px; }
@@ -593,11 +600,15 @@ dialog p { margin: 0 0 20px; font-size: 13px; color: var(--ink-2); }
 dialog .actions { justify-content: flex-end; }
 @media (max-width: 900px) {
   .frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; box-shadow: none; }
-  aside { position: relative; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 16px 20px; border-right: 0; border-bottom: 1px dashed var(--line); }
+  aside { position: relative; width: auto; height: auto; padding: 16px 20px; border-right: 0; border-bottom: 1px dashed var(--line); }
+  .aside-in { width: auto; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
+  .brand-row, .brand { height: auto; }
+  .brand { padding: 0; }
   .aside-foot { display: contents; }
   .controls { order: 2; margin-left: auto; }
   nav { order: 3; width: 100%; display: flex; gap: 4px; }
-  nav .group, nav .ico, .collapse { display: none; }
+  nav a { width: auto; }
+  nav .group, nav .ico, .collapse, .expand, .rail-controls { display: none; }
   .head { padding: 32px 20px 24px; }
   section { padding: 24px 20px; }
   .split { grid-template-columns: minmax(0, 1fr); }
@@ -608,14 +619,20 @@ dialog .actions { justify-content: flex-end; }
 <body>
 <div class="frame">
 <aside>
-  <a class="brand" href="#/" aria-label="PneumaSpace" style="color:inherit;text-decoration:none">
-    <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true"><rect x=".5" y=".5" width="25" height="25" rx="7" style="fill:var(--surface);stroke:var(--line-strong)"/><circle cx="13" cy="13" r="5" stroke-width="2" style="stroke:var(--accent)"/><circle cx="13" cy="13" r="1.6" style="fill:var(--accent)"/></svg>
-    <span><b>PneumaSpace</b><small id="brand-sub"></small></span>
-  </a>
-  <nav></nav>
-  <div class="aside-foot">
-    <div class="controls"></div>
-    <button class="collapse" type="button"></button>
+  <div class="aside-in">
+    <div class="brand-row">
+      <a class="brand" href="#/" aria-label="PneumaSpace" style="color:inherit;text-decoration:none">
+        <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true"><rect x=".5" y=".5" width="25" height="25" rx="7" style="fill:var(--surface);stroke:var(--line-strong)"/><circle cx="13" cy="13" r="5" stroke-width="2" style="stroke:var(--accent)"/><circle cx="13" cy="13" r="1.6" style="fill:var(--accent)"/></svg>
+        <span><b>PneumaSpace</b><small id="brand-sub"></small></span>
+      </a>
+      <button class="collapse" type="button"></button>
+      <button class="expand" type="button"></button>
+    </div>
+    <nav></nav>
+    <div class="aside-foot">
+      <div class="controls"></div>
+      <div class="rail-controls"></div>
+    </div>
   </div>
 </aside>
 <main id="main"></main>
@@ -625,7 +642,7 @@ const I18N = {
   zh: {
     'brand.sub': '控制台', 'nav.group': '平台', 'nav.overview': '总览', 'nav.apps': '项目', 'nav.publish': '发布',
     'theme.light': '浅色', 'theme.dark': '深色', 'theme.toLight': '切换到浅色', 'theme.toDark': '切换到深色',
-    'lang.toZh': '切换到中文', 'lang.toEn': '切换到 English', 'nav.collapse': '收起', 'nav.expand': '展开',
+    'lang.toZh': '切换到中文', 'lang.toEn': '切换到 English', 'nav.collapse': '收起侧栏', 'nav.expand': '展开侧栏',
     'ov.title': '总览', 'ov.waiting': '等待第一次采样',
     'svc.gateway': '网关', 'svc.redis': 'Redis', 'svc.object': '对象存储', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn', 'svc.runner': 'runner',
     'svc.gatewaySub': '已运行 {up} · 内存 {rss}', 'svc.off': '未启用 profile', 'svc.down': '不可达', 'svc.unknown': '等待第一次采样',
@@ -805,7 +822,7 @@ const I18N = {
   en: {
     'brand.sub': 'Console', 'nav.group': 'Platform', 'nav.overview': 'Overview', 'nav.apps': 'Projects', 'nav.publish': 'Publish',
     'theme.light': 'Light', 'theme.dark': 'Dark', 'theme.toLight': 'Switch to light theme', 'theme.toDark': 'Switch to dark theme',
-    'lang.toZh': 'Switch to 中文', 'lang.toEn': 'Switch to English', 'nav.collapse': 'Collapse', 'nav.expand': 'Expand',
+    'lang.toZh': 'Switch to 中文', 'lang.toEn': 'Switch to English', 'nav.collapse': 'Collapse sidebar', 'nav.expand': 'Expand sidebar',
     'ov.title': 'Overview', 'ov.waiting': 'Waiting for the first sample',
     'svc.gateway': 'Gateway', 'svc.redis': 'Redis', 'svc.object': 'Object store', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn', 'svc.runner': 'runner',
     'svc.gatewaySub': 'up {up} · RSS {rss}', 'svc.off': 'profile not running', 'svc.down': 'not reachable', 'svc.unknown': 'waiting for the first sample',
@@ -1131,7 +1148,7 @@ const ICON = {
   'nav-topology': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="9" r="2"/><circle cx="13.5" cy="4.5" r="2"/><circle cx="13.5" cy="13.5" r="2"/><path d="m6.3 8.1 5.4-2.7M6.3 9.9l5.4 2.7"/></svg>',
   'nav-apps': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="10" width="5.5" height="5.5" rx="1.5"/></svg>',
   'nav-publish': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.75v8.5M5.75 6 9 2.75 12.25 6"/><path d="M2.75 11.25v1.75a2 2 0 0 0 2 2h8.5a2 2 0 0 0 2-2v-1.75"/></svg>',
-  'chevron': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 7 9l4 4"/></svg>',
+  'panel': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.25" y="2.25" width="13.5" height="13.5" rx="3.5"/><path d="M6.75 2.25v13.5M12.25 7.25 10.5 9l1.75 1.75"/></svg>',
   moon: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"/></svg>',
 };
 const icon = (name) => { const span = h('span', { 'aria-hidden': 'true', class: 'ico' }); span.innerHTML = ICON[name]; return span; };
@@ -3408,11 +3425,10 @@ function topology() {
 const NAV = [['overview', '#/'], ['realtime', '#/realtime'], ['topology', '#/topology'], ['apps', '#/apps'], ['publish', '#/publish']];
 
 function shell() {
-  const rail = root.dataset.nav === 'rail';
   const [, view] = location.hash.split('?')[0].split('/');
   const current = NAV.some(([key]) => key === view) ? view : 'overview';
   document.querySelector('nav').replaceChildren(h('div', { class: 'group' }, t('nav.group')),
-    ...NAV.map(([key, href]) => h('a', { href, 'aria-current': key === current ? 'page' : null, 'aria-label': t(`nav.${key}`), title: rail ? t(`nav.${key}`) : null },
+    ...NAV.map(([key, href]) => h('a', { href, 'aria-current': key === current ? 'page' : null, 'aria-label': t(`nav.${key}`) },
       icon(`nav-${key}`), h('span', { class: 'label' }, t(`nav.${key}`)))));
   document.getElementById('brand-sub').textContent = t('brand.sub');
   const theme = root.dataset.theme;
@@ -3432,21 +3448,37 @@ function shell() {
   const langLabel = t(toLang === 'zh' ? 'lang.toZh' : 'lang.toEn');
   document.querySelector('.controls').replaceChildren(
     segmented([['light', icon('sun'), t('theme.light')], ['dark', icon('moon'), t('theme.dark')]], theme, setTheme, 'theme'),
-    segmented([['zh', '中'], ['en', 'EN']], lang, setLang, 'language'),
+    segmented([['zh', '中'], ['en', 'EN']], lang, setLang, 'language'));
+  document.querySelector('.rail-controls').replaceChildren(
     h('button', { class: 'ibtn', type: 'button', title: themeLabel, 'aria-label': themeLabel, onclick: () => setTheme(toTheme) }, icon(theme === 'dark' ? 'moon' : 'sun')),
     h('button', { class: 'ibtn', type: 'button', title: langLabel, 'aria-label': langLabel, onclick: () => setLang(toLang) },
       h('span', { class: 'glyph', 'aria-hidden': 'true' }, lang === 'zh' ? [h('b', {}, '中'), '/EN'] : ['中/', h('b', {}, 'EN')])));
-  const collapse = document.querySelector('.collapse');
-  const label = t(rail ? 'nav.expand' : 'nav.collapse');
-  collapse.setAttribute('aria-expanded', String(!rail));
-  collapse.setAttribute('aria-label', label);
-  collapse.title = rail ? label : '';
-  collapse.replaceChildren(icon('chevron'), h('span', { class: 'label' }, label));
-  collapse.onclick = () => {
-    root.dataset.nav = rail ? 'wide' : 'rail';
-    store.set('pneuma-space-nav', root.dataset.nav);
-    shell();
-  };
+  for (const [selector, key] of [['.collapse', 'nav.collapse'], ['.expand', 'nav.expand']]) {
+    const button = document.querySelector(selector);
+    button.replaceChildren(icon('panel'));
+    button.title = t(key);
+    button.setAttribute('aria-label', t(key));
+  }
+  navState();
+}
+
+/** The collapse toggle changes attributes only, so the labels and rows transition instead of being rebuilt. */
+function navState() {
+  const rail = root.dataset.nav === 'rail';
+  for (const a of document.querySelectorAll('nav a')) a.title = rail ? a.getAttribute('aria-label') : '';
+  document.querySelector('.brand').tabIndex = rail ? -1 : 0;
+  for (const [selector, to] of [['.collapse', 'rail'], ['.expand', 'wide']]) {
+    const button = document.querySelector(selector);
+    const shown = rail === (to === 'wide');
+    button.setAttribute('aria-hidden', String(!shown));
+    button.tabIndex = shown ? 0 : -1;
+    button.onclick = () => {
+      root.dataset.nav = to;
+      store.set('pneuma-space-nav', to);
+      navState();
+      document.querySelector(to === 'rail' ? '.expand' : '.collapse').focus({ preventScroll: true });
+    };
+  }
 }
 
 /** Each loop runs only while the tab is visible and stops when the route changes. */
