@@ -1,0 +1,5 @@
+.pulse { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
+.total { font: 600 40px/48px var(--mono); font-variant-numeric: tabular-nums; }
+.pulse .hint { flex-basis: 100%; margin: 0; font-size: 12.5px; color: var(--ink-3); }
+th.num { font-family: var(--font); }
+td.num { font-size: 12px; color: var(--ink-2); }

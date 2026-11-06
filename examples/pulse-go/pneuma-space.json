@@ -1,0 +1,10 @@
+{
+  "contract": 1,
+  "runtime": "container",
+  "capabilities": {
+    "kv": {},
+    "ws": {},
+    "identity": { "required": false },
+    "static": { "dir": "public" }
+  }
+}

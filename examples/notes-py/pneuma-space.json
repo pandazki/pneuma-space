@@ -1,0 +1,11 @@
+{
+  "contract": 1,
+  "runtime": "container",
+  "capabilities": {
+    "files": {},
+    "db": {},
+    "identity": {},
+    "cron": { "triggers": { "export": { "schedule": "0 3 * * *" } } },
+    "static": { "dir": "public" }
+  }
+}

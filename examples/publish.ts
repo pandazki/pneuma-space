@@ -12,13 +12,16 @@ if (!name || !existsSync(join(overlay, 'pneuma-space.json'))) {
   process.exit(2);
 }
 
-const kind = existsSync(join(overlay, 'site')) ? 'static' : 'app';
-const build = join(here, '.build', name);
-rmSync(build, { recursive: true, force: true });
-assemble(build, join(here, '../templates', kind), overlay, ['pneuma-space.json', kind === 'static' ? 'site' : 'src']);
-console.log(`assembled ${build}`);
+let dir = overlay;
+if (!existsSync(join(overlay, 'Dockerfile'))) {
+  const kind = existsSync(join(overlay, 'site')) ? 'static' : 'app';
+  dir = join(here, '.build', name);
+  rmSync(dir, { recursive: true, force: true });
+  assemble(dir, join(here, '../templates', kind), overlay, ['pneuma-space.json', kind === 'static' ? 'site' : 'src']);
+  console.log(`assembled ${dir}`);
+}
 
 if (!args.includes('--assemble-only')) {
   const appctl = join(here, '../cli/appctl.ts');
-  process.exit(spawnSync(process.execPath, [appctl, 'publish', name, build, ...args], { stdio: 'inherit' }).status ?? 1);
+  process.exit(spawnSync(process.execPath, [appctl, 'publish', name, dir, ...args], { stdio: 'inherit' }).status ?? 1);
 }
