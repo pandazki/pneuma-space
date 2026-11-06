@@ -21,5 +21,17 @@ PneumaSpace deploys stateful web apps on one trusted host. Read `REQUIREMENTS.md
 - Write the fewest precise words. No restating across files, no comments except a non-obvious why, no tests for behavior that no story, invariant or acceptance row names. One behavior per test.
 - Chinese for `REQUIREMENTS.md`, `DESIGN.md`, `docs/user-stories.md` and `docs/adr/`. English for this file, `docs/app-contract.md`, `docs/acceptance.md`, `README.md` and everything under `templates/` and `examples/`.
 - Reproduce a bug on the real platform before fixing it. Done means the relevant rows of `docs/acceptance.md` pass against `docker compose up -d`, not against a mock.
-- Run the test suite (`node --test` once the M1 gateway exists) after every change and the README smoke test when Docker is available.
+- Run the test group that covers the change (table below) after every change, and the README smoke test when Docker is available.
 - The Python prototype under `prototype/00-appbase-python/` and the other `prototype/` directories is evidence from the earlier phase. Do not extend it; M1 replaces it. Until a directory is deleted, keep its tests passing with `python3 -m unittest discover -s prototype/00-appbase-python/tests -v`.
+
+## Tests
+
+`npm test` runs the first three groups in turn. Every group is `node --test`; the file lists are in `package.json`, and a new test file lands in `test:unit` unless its name is in another group's list.
+
+| Change | Run |
+| --- | --- |
+| Anything under `gateway/src` or `cli/` | `npm run test:unit`: in-process, seconds. `console.html` has no test beyond it; look at the page on a running stack |
+| `runner.ts`, `isolate-shim.ts`, `isolate.ts`, `lifecycle.ts` | also `npm run test:runner`: spawns runner processes, timing-sensitive, needs a quiet host |
+| `runtime.ts`, `infra.ts`, `docker.ts`, `providers.ts`, `compose.yaml` | also `npm run test:docker`: real containers and compose services, minutes |
+| `templates/app` | `npm test` inside `templates/app` |
+| Before a merge to main | `npm run test:acceptance` against `docker compose up -d`, one run at a time |

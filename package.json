@@ -9,7 +9,10 @@
     "appctl": "cli/appctl.ts"
   },
   "scripts": {
-    "test": "node --test 'gateway/src/**/*.test.ts' 'cli/*.test.ts'",
+    "test": "npm run test:unit && npm run test:runner && npm run test:docker",
+    "test:unit": "node --test 'gateway/src/!(runner|isolate|runtime|providers).test.ts' 'cli/*.test.ts'",
+    "test:runner": "node --test gateway/src/runner.test.ts gateway/src/isolate.test.ts",
+    "test:docker": "node --test gateway/src/runtime.test.ts gateway/src/providers.test.ts",
     "test:acceptance": "node --test tests/acceptance"
   }
 }

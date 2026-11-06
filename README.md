@@ -89,7 +89,8 @@ The design documents are in Chinese; everything an app developer reads is in Eng
 ## Tests
 
 ```sh
-npm test                                          # unit tests; the runtime and provider suites need Docker
+npm run test:unit                                 # in-process, seconds
+npm test                                          # also the runner and Docker suites (AGENTS.md says which change needs which)
 npm run test:acceptance                           # docs/acceptance.md against a real stack on its own ports (project pneuma-space-acc)
 ```
 
