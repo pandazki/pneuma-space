@@ -55,7 +55,7 @@ Only the declared capabilities' variables exist. `PNEUMA_SPACE_APP` (the app nam
 | Capability | Variables |
 | --- | --- |
 | `files` | `PNEUMA_SPACE_FILES_DIR` (`/data`) |
-| `db` | `PNEUMA_SPACE_DB_URL`. The scheme is `sqlite` or `postgresql`; ship a client for both and write SQL both accept, or use the example SDK which does |
+| `db` | `PNEUMA_SPACE_DB_URL`. The scheme is `sqlite` or `postgresql`; ship a client for both and write SQL both accept, or use the example SDK which does. A SQLite URL names a file under `/pneuma/db`, a volume the platform mounts into a container; an image that runs as a non-root user creates that directory with its own owner, because a fresh volume takes the ownership of the directory it mounts over |
 | `kv` | `PNEUMA_SPACE_KV_URL`, `PNEUMA_SPACE_KV_PREFIX`. Every key and channel must start with the prefix; anything else fails with `NOPERM` |
 | `object` | `PNEUMA_SPACE_OBJECT_ENDPOINT` (server-side S3 calls), `PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT` (browser-reachable, for presigned URLs), `PNEUMA_SPACE_OBJECT_BUCKET`, `PNEUMA_SPACE_OBJECT_ACCESS_KEY`, `PNEUMA_SPACE_OBJECT_SECRET_KEY` |
 | `rtc` | `PNEUMA_SPACE_RTC_STUN_URLS`, `PNEUMA_SPACE_RTC_TURN_URLS` (comma separated), `PNEUMA_SPACE_RTC_TURN_SECRET` (HMAC secret for TURN REST credentials; one value for the whole platform, set by the operator) |

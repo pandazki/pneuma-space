@@ -123,6 +123,8 @@ Each origin scenario is an overlay on this template under `examples/` in the Pne
 | `examples/ttt` | `kv`, `ws`, `identity` | a game stored in KV, moves by compare-and-set, one subscription per game id fanned out to local sockets, reconnect after close 1001, a bot through a service token |
 | `examples/widget` | `cron`, `db`, `static`, `identity` | a trigger upserting one row by slot so a redelivery is harmless, a public `card.json` with `max-age` and CORS, owner-only writes, a minute schedule that keeps the app awake |
 | `examples/chat` | `kv`, `ws`, `identity` | the smallest realtime app |
+| `examples/notes-py` | `files`, `db`, `cron`, `identity`, `static` | a container app in Python with no SDK: the contract read straight from the environment and the headers, one database driver for both engines, a non-root image that owns its `/data` and `/pneuma/db` |
+| `examples/pulse-go` | `kv`, `ws`, `identity` (optional), `static` | a container app in Go with no SDK: a distroless image, a key prefix, server-sent events through `ws` |
 | `examples/site-docs` | `static` | a site with no container |
 
 For a direct data channel between two players, add `rtc`, serve `GET /ice` with `iceServers(identity.subject, 3600)`, and relay offer, answer and candidates over the WebSocket.
