@@ -176,10 +176,13 @@ test('the first wake after the runner is back answers', async (t) => {
 });
 
 test('a start during which the runner dies counts as a failed wake', async (t) => {
-  const { app, guarded, stopRunner } = await fixture(t, { max_failures: 1 }, [], { START_BUSY_MS: '3000' });
+  const { app, guarded, stopRunner, workers } = await fixture(t, { max_failures: 1 }, [], { START_BUSY_MS: '3000' });
   const runtimes = guarded();
   const wake = runtimes.acquire(app, 'request');
-  await sleep(1000);
+  // Stop only once the runner holds the start; a stop before the POST is sent is classified unavailable, not a failure.
+  for (const deadline = Date.now() + 5000; !(await workers()).some((w) => w.app === app); await sleep(50)) {
+    assert.ok(Date.now() < deadline, 'the start reached the runner');
+  }
   await stopRunner();
   await assert.rejects(wake);
   assert.notEqual(runtimes.quarantine(app), null);
