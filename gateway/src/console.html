@@ -14,6 +14,7 @@
   media.addEventListener('change', apply);
   const lang = stored('pneuma-space-lang') ?? navigator.language;
   root.lang = lang.startsWith('zh') ? 'zh' : 'en';
+  root.dataset.nav = stored('pneuma-space-nav') === 'rail' ? 'rail' : 'wide';
 })();
 </script>
 <style>
@@ -94,16 +95,34 @@ a:hover { text-decoration: underline; }
 button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
 .frame { display: grid; grid-template-columns: 288px minmax(0, 1fr); max-width: 1568px; min-height: 100vh; margin: 0 auto; background: var(--page); box-shadow: var(--shadow-card); }
 aside { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 28px; padding: 72px 28px 28px; border-right: 1px dashed var(--line); }
-.controls { position: absolute; top: 20px; right: 20px; display: flex; gap: 6px; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand b { display: block; font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
 .brand small { display: block; font-size: 12.5px; color: var(--ink-3); }
 nav { display: grid; gap: 2px; }
 nav .group { font-size: 11.5px; color: var(--ink-3); padding: 0 8px 6px; }
-nav a { font-size: 12.5px; color: var(--ink-2); padding: 5px 8px; border-radius: 7px; }
-nav a:hover { background: var(--hover); text-decoration: none; }
+nav a, .collapse { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-2); padding: 5px 8px; border-radius: 7px; }
+nav a svg, .collapse svg { color: var(--ink-3); }
+nav a:hover, .collapse:hover { background: var(--hover); text-decoration: none; }
 nav a[aria-current] { color: var(--ink); font-weight: 500; background: var(--hover); }
-.aside-foot { margin-top: auto; font-size: 12px; color: var(--ink-3); }
+nav a[aria-current] svg, nav a:hover svg, .collapse:hover svg { color: var(--ink); }
+.aside-foot { margin-top: auto; display: grid; gap: 14px; font-size: 12px; color: var(--ink-3); }
+.controls { display: flex; gap: 6px; }
+.collapse { border: 0; background: none; cursor: pointer; color: var(--ink-3); margin: 0 0 -8px; }
+.ibtn { display: none; width: 36px; height: 30px; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: none; color: var(--ink-2); cursor: pointer; }
+.ibtn:hover { background: var(--hover); color: var(--ink); }
+.ibtn svg { width: 16px; height: 16px; }
+.ibtn .glyph { font-size: 11px; font-weight: 500; color: var(--ink-3); letter-spacing: 0; }
+.ibtn .glyph b { font-weight: 600; color: var(--ink); }
+@media (min-width: 901px) {
+  :root[data-nav="rail"] .frame { grid-template-columns: 56px minmax(0, 1fr); }
+  :root[data-nav="rail"] aside { padding: 72px 0 28px; align-items: center; }
+  :root[data-nav="rail"] aside .label, :root[data-nav="rail"] .brand > span, :root[data-nav="rail"] nav .group, :root[data-nav="rail"] .controls .seg { display: none; }
+  :root[data-nav="rail"] nav a, :root[data-nav="rail"] .collapse { width: 36px; height: 32px; padding: 0; justify-content: center; }
+  :root[data-nav="rail"] .aside-foot { justify-items: center; }
+  :root[data-nav="rail"] .controls { flex-direction: column; gap: 2px; }
+  :root[data-nav="rail"] .ibtn { display: inline-flex; }
+  :root[data-nav="rail"] .collapse svg { transform: scaleX(-1); }
+}
 main { min-width: 0; }
 .head { padding: 56px 32px 32px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 24px; }
 .head .grow { flex: 1; min-width: 0; }
@@ -120,6 +139,7 @@ section { padding: 40px 32px; border-top: 1px dashed var(--line); }
 .inset { background: var(--canvas); border-radius: 14px; box-shadow: 0 0 0 1px var(--line); padding: 12px; }
 .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .muted { color: var(--ink-3); }
+.ico { display: inline-flex; }
 .seg { display: inline-flex; padding: 2px; border-radius: 999px; background: var(--field); }
 .seg button { border: 0; background: none; cursor: pointer; font-size: 11.5px; font-weight: 500; line-height: 18px; padding: 2px 8px; border-radius: 999px; color: var(--ink-3); display: inline-flex; align-items: center; }
 .seg button[aria-pressed="true"] { background: var(--surface); box-shadow: var(--shadow-btn); color: var(--ink); }
@@ -460,7 +480,10 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .topo-svg .strong, .topo-svg .lanen { font-weight: 600; }
 .topo-svg .lanen { font-size: 13px; }
 .topo-svg .grp { font-size: 11.5px; font-weight: 500; fill: var(--ink-2); }
-.topo-svg .linkt { font-size: 12px; font-weight: 500; fill: var(--accent-ink); }
+.topo-svg .info { color: var(--ink-3); }
+.topo-svg .info circle, .topo-svg .info path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+.topo-svg .info .dot { fill: currentColor; stroke: none; }
+.topo-svg .info:hover, .topo-svg .info:focus-visible { color: var(--accent); }
 .topo-svg .sbg { fill: var(--stripe-bg); }
 .topo-svg .sln { fill: var(--stripe); }
 .topo-svg .box { fill: var(--surface); stroke: var(--line-strong); }
@@ -476,7 +499,6 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .topo-svg .hit { fill: transparent; stroke: none; }
 .topo-svg.retired { position: absolute; pointer-events: none; }
 .topo-svg.retired > :not(.flows) { opacity: 0; }
-.topo-svg .lanet:hover .linkt { text-decoration: underline; }
 .topo-svg .edge { fill: none; stroke: var(--line-strong); stroke-width: 1.25; transition: stroke .4s, opacity .3s; }
 .topo-svg .edge.cron, .topo-svg .edge.group { stroke-dasharray: 3 3; }
 .topo-svg .edge.fault { stroke: var(--red); stroke-dasharray: 5 4; }
@@ -572,9 +594,10 @@ dialog .actions { justify-content: flex-end; }
 @media (max-width: 900px) {
   .frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; box-shadow: none; }
   aside { position: relative; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 16px 20px; border-right: 0; border-bottom: 1px dashed var(--line); }
-  .controls { position: static; order: 2; margin-left: auto; }
+  .aside-foot { display: contents; }
+  .controls { order: 2; margin-left: auto; }
   nav { order: 3; width: 100%; display: flex; gap: 4px; }
-  nav .group, .aside-foot { display: none; }
+  nav .group, nav .ico, .collapse { display: none; }
   .head { padding: 32px 20px 24px; }
   section { padding: 24px 20px; }
   .split { grid-template-columns: minmax(0, 1fr); }
@@ -585,13 +608,15 @@ dialog .actions { justify-content: flex-end; }
 <body>
 <div class="frame">
 <aside>
-  <div class="controls"></div>
-  <a class="brand" href="#/" style="color:inherit;text-decoration:none">
+  <a class="brand" href="#/" aria-label="PneumaSpace" style="color:inherit;text-decoration:none">
     <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true"><rect x=".5" y=".5" width="25" height="25" rx="7" style="fill:var(--surface);stroke:var(--line-strong)"/><circle cx="13" cy="13" r="5" stroke-width="2" style="stroke:var(--accent)"/><circle cx="13" cy="13" r="1.6" style="fill:var(--accent)"/></svg>
     <span><b>PneumaSpace</b><small id="brand-sub"></small></span>
   </a>
   <nav></nav>
-  <div class="aside-foot" id="foot"></div>
+  <div class="aside-foot">
+    <div class="controls"></div>
+    <button class="collapse" type="button"></button>
+  </div>
 </aside>
 <main id="main"></main>
 </div>
@@ -599,7 +624,8 @@ dialog .actions { justify-content: flex-end; }
 const I18N = {
   zh: {
     'brand.sub': '控制台', 'nav.group': '平台', 'nav.overview': '总览', 'nav.apps': '项目', 'nav.publish': '发布',
-    'theme.light': '浅色', 'theme.dark': '深色', 'aside.since': '自 {time} 起采样，网关重启后清零。',
+    'theme.light': '浅色', 'theme.dark': '深色', 'theme.toLight': '切换到浅色', 'theme.toDark': '切换到深色',
+    'lang.toZh': '切换到中文', 'lang.toEn': '切换到 English', 'nav.collapse': '收起', 'nav.expand': '展开',
     'ov.title': '总览', 'ov.waiting': '等待第一次采样',
     'svc.gateway': '网关', 'svc.redis': 'Redis', 'svc.object': '对象存储', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn', 'svc.runner': 'runner',
     'svc.gatewaySub': '已运行 {up} · 内存 {rss}', 'svc.off': '未启用 profile', 'svc.down': '不可达', 'svc.unknown': '等待第一次采样',
@@ -703,7 +729,7 @@ const I18N = {
     'tp.sec.laneDesc': '每个已注册应用在它的运行时泳道里；泳道到服务的边标出声明该能力的应用数。',
     'tp.sec.graph': '每个应用的连线',
     'tp.sec.graphDesc': '应用经过的网关阶段、声明的能力和能力背后的服务；点一个节点只看它的路径。',
-    'tp.laneHint': '每条泳道最多画 {n} 个应用，醒着的和最近访问的优先。点应用打开详情，点泳道标题看这个运行时怎么跑。',
+    'tp.laneHint': '每条泳道最多画 {n} 个应用，醒着的和最近访问的优先。点应用打开详情，点 ⓘ 看这个运行时怎么跑。',
     'tp.graphHint': '默认画最近访问的 {n} 个应用。',
     'tp.col.callers': '调用方',
     'tp.col.gateway': '网关',
@@ -722,8 +748,7 @@ const I18N = {
     'tp.keep.container': '/data 卷',
     'tp.keep.isolate': 'runner 卷',
     'tp.keep.static': '对象存储里的 bundle',
-    'tp.explain': '怎么跑',
-    'tp.explainFor': '{kind} 运行时说明',
+    'tp.explainFor': '{kind} 怎么跑',
     'tp.noApps': '没有应用',
     'tp.more': '+{n}', 'tp.moreTitle': '还有 {n} 个应用没画出来；项目页列出全部',
     'tp.svcOff': '{name} 未启用',
@@ -779,7 +804,8 @@ const I18N = {
   },
   en: {
     'brand.sub': 'Console', 'nav.group': 'Platform', 'nav.overview': 'Overview', 'nav.apps': 'Projects', 'nav.publish': 'Publish',
-    'theme.light': 'Light', 'theme.dark': 'Dark', 'aside.since': 'Sampling since {time}; a gateway restart clears it.',
+    'theme.light': 'Light', 'theme.dark': 'Dark', 'theme.toLight': 'Switch to light theme', 'theme.toDark': 'Switch to dark theme',
+    'lang.toZh': 'Switch to 中文', 'lang.toEn': 'Switch to English', 'nav.collapse': 'Collapse', 'nav.expand': 'Expand',
     'ov.title': 'Overview', 'ov.waiting': 'Waiting for the first sample',
     'svc.gateway': 'Gateway', 'svc.redis': 'Redis', 'svc.object': 'Object store', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn', 'svc.runner': 'runner',
     'svc.gatewaySub': 'up {up} · RSS {rss}', 'svc.off': 'profile not running', 'svc.down': 'not reachable', 'svc.unknown': 'waiting for the first sample',
@@ -883,7 +909,7 @@ const I18N = {
     'tp.sec.laneDesc': 'Every registered app sits in the lane of its runtime; an edge to a service counts the apps declaring that capability.',
     'tp.sec.graph': 'Every app’s edges',
     'tp.sec.graphDesc': 'The gateway stages an app passes, the capabilities it declares and the services behind them; pick a node to read its path.',
-    'tp.laneHint': 'Each lane draws at most {n} apps, awake and recently accessed first. Click an app to open it, a lane title to see how that runtime works.',
+    'tp.laneHint': 'Each lane draws at most {n} apps, awake and recently accessed first. Click an app to open it, ⓘ to see how its runtime runs.',
     'tp.graphHint': 'Draws the {n} most recently accessed apps.',
     'tp.col.callers': 'callers',
     'tp.col.gateway': 'gateway',
@@ -902,8 +928,7 @@ const I18N = {
     'tp.keep.container': '/data volumes',
     'tp.keep.isolate': 'runner volume',
     'tp.keep.static': 'bundles in object storage',
-    'tp.explain': 'How it runs',
-    'tp.explainFor': 'How the {kind} runtime works',
+    'tp.explainFor': 'How {kind} runs',
     'tp.noApps': 'No apps',
     'tp.more': '+{n}', 'tp.moreTitle': '{n} more apps not drawn; the Projects page lists them all',
     'tp.svcOff': '{name} is off',
@@ -1101,9 +1126,15 @@ const ICON = {
   sun: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/></svg>',
   check: '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2 5 8.5l4.5-5"/></svg>',
   search: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>',
+  'nav-overview': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.25" y="2.25" width="13.5" height="13.5" rx="3.5"/><path d="M5 9.5h1.75l1.5-3.25 1.75 5.5 1.5-2.25H13"/></svg>',
+  'nav-realtime': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="1.25" fill="currentColor" stroke="none"/><path d="M6.2 5.7a4.4 4.4 0 0 0 0 6.6M11.8 5.7a4.4 4.4 0 0 1 0 6.6M3.9 3.4a7.6 7.6 0 0 0 0 11.2M14.1 3.4a7.6 7.6 0 0 1 0 11.2"/></svg>',
+  'nav-topology': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="9" r="2"/><circle cx="13.5" cy="4.5" r="2"/><circle cx="13.5" cy="13.5" r="2"/><path d="m6.3 8.1 5.4-2.7M6.3 9.9l5.4 2.7"/></svg>',
+  'nav-apps': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="10" width="5.5" height="5.5" rx="1.5"/></svg>',
+  'nav-publish': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.75v8.5M5.75 6 9 2.75 12.25 6"/><path d="M2.75 11.25v1.75a2 2 0 0 0 2 2h8.5a2 2 0 0 0 2-2v-1.75"/></svg>',
+  'chevron': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 7 9l4 4"/></svg>',
   moon: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"/></svg>',
 };
-const icon = (name) => { const span = h('span', { 'aria-hidden': 'true', style: 'display:inline-flex' }); span.innerHTML = ICON[name]; return span; };
+const icon = (name) => { const span = h('span', { 'aria-hidden': 'true', class: 'ico' }); span.innerHTML = ICON[name]; return span; };
 
 // Views
 
@@ -2723,6 +2754,17 @@ function appChip(model, a, x, y, w) {
   return titled(g, `${a.name} · ${why.filter(Boolean).join(' · ')}`);
 }
 
+const INFO = 16;
+/** The circled "i" that opens a runtime's explanation; cy is its centre line. */
+function infoButton(x, cy, kind, onPick, key) {
+  const label = t('tp.explainFor', { kind });
+  return act(titled(svg('g', { class: 'info', transform: `translate(${x},${cy - INFO / 2})` },
+    svg('rect', { x: -3, y: -3, width: INFO + 6, height: INFO + 6, rx: (INFO + 6) / 2, class: 'hit' }),
+    svg('circle', { cx: 8, cy: 8, r: 6.75 }),
+    svg('path', { d: 'M8 7.5v3.75' }),
+    svg('circle', { cx: 8, cy: 5.1, r: .9, class: 'dot' })), label), label, onPick, key);
+}
+
 function pillButton(x, y, label, onPick, key, cls = '') {
   const w = textWidth(label, 11.5, false, 500) + 18;
   const g = svg('g', { class: `pillb ${cls}` }, svg('rect', { x, y, width: w, height: 22, rx: 11 }), tx(x + 9, y + 15, label));
@@ -2813,17 +2855,15 @@ function laneScene(model, width, shown, on) {
     const lh = stripY + 30 + 12 - y;
     g.append(svg('rect', { x: lx, y, width: lw, height: lh, rx: 14, class: 'box' }));
     if (down) g.append(svg('rect', { x: lx, y, width: lw, height: lh, rx: 14, class: 'downwash' }));
-    const explainText = `${t('tp.explain')} →`;
-    const explainW = textWidth(explainText, 12, false, 500);
     const countText = down ? t('tp.unreachableShort') : plural('tp.apps', all.length);
     const countW = textWidth(countText, 11.5, !down);
     const nameW = textWidth(lane, 13, false, 600);
-    g.append(act(svg('g', { class: 'lanet' },
-      svg('rect', { x: lx + 4, y: y + 4, width: lw - 8, height: 30, rx: 10, class: 'hit' }),
+    const subX = lx + 14 + nameW + 6 + INFO + 10;
+    g.append(svg('g', { class: 'lanet' },
       tx(lx + 14, y + 24, lane, 'lanen'),
-      textWidth(t(`tp.lane.${lane}.sub`), 11.5) <= lw - 28 - nameW - 8 - explainW - countW - 36 ? tx(lx + 22 + nameW, y + 24, t(`tp.lane.${lane}.sub`), 't3 small') : null,
-      tx(lx + lw - 14, y + 24, explainText, 'linkt', { 'text-anchor': 'end' })), t('tp.explainFor', { kind: lane }), () => on.explain(lane), `lane:${lane}`),
-      tx(lx + lw - 26 - explainW, y + 24, countText, down ? 'bad small' : 't3 small m', { 'text-anchor': 'end' }));
+      infoButton(lx + 14 + nameW + 6, y + 20, lane, () => on.explain(lane), `lane:${lane}`),
+      textWidth(t(`tp.lane.${lane}.sub`), 11.5) <= lx + lw - 14 - countW - 16 - subX ? tx(subX, y + 24, t(`tp.lane.${lane}.sub`), 't3 small') : null),
+      tx(lx + lw - 14, y + 24, countText, down ? 'bad small' : 't3 small m', { 'text-anchor': 'end' }));
     if (!apps.length && !more) g.append(tx(inner, y + 59, t('tp.noApps'), 't3 small'));
     for (const p of placed) g.append(chip(p));
     if (more) {
@@ -3021,11 +3061,10 @@ function graphScene(model, width, shown, hidden, on) {
       continue;
     }
     const label = `${lane}  ${nf(apps.length)}${extra ? `  +${nf(extra)}` : ''}`;
-    const title = act(svg('g', { class: `lanet${hit ? ' fault' : ''}`, 'data-id': `group:${lane}` },
-      svg('rect', { x: ax - 6, y: gy + 2, width: aw + 12, height: 24, rx: 8, class: 'hit' }),
+    const title = svg('g', { class: `lanet${hit ? ' fault' : ''}`, 'data-id': `group:${lane}` },
       tx(ax, gy + 18, label, 'grp m'),
-      down ? tx(ax + aw, gy + 18, t('tp.unreachableShort'), 'bad small', { 'text-anchor': 'end' })
-        : tx(ax + aw, gy + 18, fit(t('tp.explain'), 11.5, false, aw - textWidth(label, 11.5, true) - 12, 500), 'linkt small', { 'text-anchor': 'end' })), t('tp.explainFor', { kind: lane }), () => on.explain(lane), `group:${lane}`);
+      infoButton(ax + textWidth(label, 11.5, true) + 6, gy + 14, lane, () => on.explain(lane), `group:${lane}`),
+      down ? tx(ax + aw, gy + 18, t('tp.unreachableShort'), 'bad small', { 'text-anchor': 'end' }) : null);
     byGroup[lane].append(tag(title, { apps: new Set(apps.map((a) => a.name)), group: lane }));
     if (!apps.length) byGroup[lane].append(tx(ax, gy + groupHead + 6, t('tp.noApps'), 't3 small'));
   }
@@ -3366,29 +3405,48 @@ function topology() {
   };
 }
 
-function footer(startedAt) {
-  document.getElementById('foot').textContent = startedAt ? t('aside.since', { time: stamp(startedAt) }) : '';
-}
+const NAV = [['overview', '#/'], ['realtime', '#/realtime'], ['topology', '#/topology'], ['apps', '#/apps'], ['publish', '#/publish']];
 
 function shell() {
-  const nav = document.querySelector('nav');
+  const rail = root.dataset.nav === 'rail';
   const [, view] = location.hash.split('?')[0].split('/');
-  const current = ['apps', 'publish', 'realtime', 'topology'].includes(view) ? view : 'overview';
-  nav.replaceChildren(h('div', { class: 'group' }, t('nav.group')),
-    ...[['overview', '#/'], ['realtime', '#/realtime'], ['topology', '#/topology'], ['apps', '#/apps'], ['publish', '#/publish']].map(([key, href]) => h('a', { href, 'aria-current': key === current ? 'page' : null }, t(`nav.${key}`))));
+  const current = NAV.some(([key]) => key === view) ? view : 'overview';
+  document.querySelector('nav').replaceChildren(h('div', { class: 'group' }, t('nav.group')),
+    ...NAV.map(([key, href]) => h('a', { href, 'aria-current': key === current ? 'page' : null, 'aria-label': t(`nav.${key}`), title: rail ? t(`nav.${key}`) : null },
+      icon(`nav-${key}`), h('span', { class: 'label' }, t(`nav.${key}`)))));
   document.getElementById('brand-sub').textContent = t('brand.sub');
   const theme = root.dataset.theme;
+  const setTheme = (value) => {
+    store.set('pneuma-space-theme', value);
+    root.dataset.theme = value;
+    shell();
+  };
+  const setLang = (value) => {
+    store.set('pneuma-space-lang', value);
+    lang = root.lang = value;
+    route();
+  };
+  const toTheme = theme === 'dark' ? 'light' : 'dark';
+  const toLang = lang === 'zh' ? 'en' : 'zh';
+  const themeLabel = t(toTheme === 'dark' ? 'theme.toDark' : 'theme.toLight');
+  const langLabel = t(toLang === 'zh' ? 'lang.toZh' : 'lang.toEn');
   document.querySelector('.controls').replaceChildren(
-    segmented([['light', icon('sun'), t('theme.light')], ['dark', icon('moon'), t('theme.dark')]], theme, (value) => {
-      store.set('pneuma-space-theme', value);
-      root.dataset.theme = value;
-      shell();
-    }, 'theme'),
-    segmented([['zh', '中'], ['en', 'EN']], lang, (value) => {
-      store.set('pneuma-space-lang', value);
-      lang = root.lang = value;
-      route();
-    }, 'language'));
+    segmented([['light', icon('sun'), t('theme.light')], ['dark', icon('moon'), t('theme.dark')]], theme, setTheme, 'theme'),
+    segmented([['zh', '中'], ['en', 'EN']], lang, setLang, 'language'),
+    h('button', { class: 'ibtn', type: 'button', title: themeLabel, 'aria-label': themeLabel, onclick: () => setTheme(toTheme) }, icon(theme === 'dark' ? 'moon' : 'sun')),
+    h('button', { class: 'ibtn', type: 'button', title: langLabel, 'aria-label': langLabel, onclick: () => setLang(toLang) },
+      h('span', { class: 'glyph', 'aria-hidden': 'true' }, lang === 'zh' ? [h('b', {}, '中'), '/EN'] : ['中/', h('b', {}, 'EN')])));
+  const collapse = document.querySelector('.collapse');
+  const label = t(rail ? 'nav.expand' : 'nav.collapse');
+  collapse.setAttribute('aria-expanded', String(!rail));
+  collapse.setAttribute('aria-label', label);
+  collapse.title = rail ? label : '';
+  collapse.replaceChildren(icon('chevron'), h('span', { class: 'label' }, label));
+  collapse.onclick = () => {
+    root.dataset.nav = rail ? 'wide' : 'rail';
+    store.set('pneuma-space-nav', root.dataset.nav);
+    shell();
+  };
 }
 
 /** Each loop runs only while the tab is visible and stops when the route changes. */
