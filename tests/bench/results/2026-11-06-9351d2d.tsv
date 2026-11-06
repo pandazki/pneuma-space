@@ -1,9 +1,9 @@
 at	commit	host	load1	runtime	metric	n	median_ms	max_ms
-2026-11-06T05:58:38.628Z	9351d2d	Ezs-MacBook-Pro.local	16.8	container	first	1	294.5	294.5
-2026-11-06T05:58:38.628Z	9351d2d	Ezs-MacBook-Pro.local	16.8	container	wake	3	183.6	689.0
-2026-11-06T05:58:38.628Z	9351d2d	Ezs-MacBook-Pro.local	16.8	container	warm	60	1.3	2.9
-2026-11-06T05:58:38.628Z	9351d2d	Ezs-MacBook-Pro.local	16.8	isolate	first	1	135.3	135.3
-2026-11-06T05:58:38.628Z	9351d2d	Ezs-MacBook-Pro.local	16.8	isolate	wake	3	70.1	73.2
-2026-11-06T05:58:38.628Z	9351d2d	Ezs-MacBook-Pro.local	16.8	isolate	warm	60	1.5	6.7
-2026-11-06T05:58:38.628Z	9351d2d	Ezs-MacBook-Pro.local	16.8	static	warm	20	1.6	3.1
-2026-11-06T05:58:38.628Z	9351d2d	Ezs-MacBook-Pro.local	16.8	gateway	list 9 apps	10	0.6	2.2
+2026-11-06T05:58:38.628Z	9351d2d	Apple M4 Max arm64	16.8	container	first	1	294.5	294.5
+2026-11-06T05:58:38.628Z	9351d2d	Apple M4 Max arm64	16.8	container	wake	3	183.6	689.0
+2026-11-06T05:58:38.628Z	9351d2d	Apple M4 Max arm64	16.8	container	warm	60	1.3	2.9
+2026-11-06T05:58:38.628Z	9351d2d	Apple M4 Max arm64	16.8	isolate	first	1	135.3	135.3
+2026-11-06T05:58:38.628Z	9351d2d	Apple M4 Max arm64	16.8	isolate	wake	3	70.1	73.2
+2026-11-06T05:58:38.628Z	9351d2d	Apple M4 Max arm64	16.8	isolate	warm	60	1.5	6.7
+2026-11-06T05:58:38.628Z	9351d2d	Apple M4 Max arm64	16.8	static	warm	20	1.6	3.1
+2026-11-06T05:58:38.628Z	9351d2d	Apple M4 Max arm64	16.8	gateway	list 9 apps	10	0.6	2.2

@@ -2,7 +2,7 @@
 // node tests/bench/runtimes.ts [--rounds 5] [--out file]; PNEUMA_SPACE_ADMIN and PNEUMA_SPACE_INGRESS name the stack.
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { hostname, loadavg, tmpdir } from 'node:os';
+import { arch, cpus, loadavg, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,6 +16,7 @@ const OWNER = 'user:bench';
 const IMAGE = 'pneuma-space-bench/echo:1';
 const CAPABILITIES = { files: {}, db: {} };
 const WARM_REQUESTS = 20;
+const host = `${cpus()[0].model} ${arch()}`;
 
 const sh = (file: string, args: string[], env: Record<string, string> = {}) =>
   execFileSync(file, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } }).trim();
@@ -125,7 +126,7 @@ async function measure(runtime: string, target: Target): Promise<void> {
 const commit = (() => { try { return sh('git', ['-C', root, 'rev-parse', '--short', 'HEAD']); } catch { return 'unknown'; } })();
 const at = new Date().toISOString();
 const load = loadavg()[0].toFixed(1);
-console.log(`stack ${admin}, commit ${commit}, host ${hostname()}, load ${load}, rounds ${rounds}`);
+console.log(`stack ${admin}, commit ${commit}, host ${host}, load ${load}, rounds ${rounds}`);
 for (const [runtime, target] of Object.entries(targets)) await measure(runtime, target);
 const apps = await listing();
 const listed: number[] = [];
@@ -137,5 +138,5 @@ for (const row of rows) console.log(`${row.runtime.padEnd(10)} ${row.metric.padE
 const out = flag('out', join(root, 'tests/bench/results', `${at.slice(0, 10)}-${commit}.tsv`));
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, ['at\tcommit\thost\tload1\truntime\tmetric\tn\tmedian_ms\tmax_ms',
-  ...rows.map((row) => [at, commit, hostname(), load, row.runtime, row.metric, row.n, row.median.toFixed(1), row.max.toFixed(1)].join('\t'))].join('\n') + '\n');
+  ...rows.map((row) => [at, commit, host, load, row.runtime, row.metric, row.n, row.median.toFixed(1), row.max.toFixed(1)].join('\t'))].join('\n') + '\n');
 console.log(`\nwritten ${out}`);
