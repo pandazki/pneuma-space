@@ -30,7 +30,7 @@ export type AdminDeps = {
 };
 
 /** ADMIN_PATHS lacks these while model.ts is frozen. */
-export const TENANT_PATHS = {
+const TENANT_PATHS = {
   me: '/api/me',
   tenants: '/api/tenants',
   access: (name: string) => `/api/apps/${name}/access`,
