@@ -5,10 +5,13 @@ import { emit } from './events.ts';
 import type { Metrics } from './metrics.ts';
 import type { Runtimes } from './runtimes.ts';
 import { RING, type RequestLog } from './requests.ts';
+import { LOCAL_CALLER } from './authz.ts';
+import type { Failure } from './identity.ts';
 import {
-  ADMIN_PATHS, ADMIN_PORT, Conflict, InputError, NotFound, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
+  ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, NotFound, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
   appName, bundleId, parseManifest, subject, tenantName,
-  type AppId, type BundleStore, type Guard, type Registry, type StoreOps, type UsageBucket, type UsageCounters,
+  type Actor, type AppId, type AuditAction, type AuditRecord, type BundleStore, type Caller, type Guard, type Registry, type Release, type StoreOps,
+  type Subject, type TenantName, type UsageBucket, type UsageCounters,
 } from './model.ts';
 
 export type AdminDeps = {
@@ -18,19 +21,34 @@ export type AdminDeps = {
   readonly guard: Guard;
   readonly metrics: Pick<Metrics, 'snapshot'>;
   readonly requests: Pick<RequestLog, 'after'>;
-  readonly usage: Pick<StoreOps, 'usage'>;
+  readonly store: Pick<StoreOps, 'usage' | 'insertAudit' | 'audit'>;
   readonly ingressPort: number;
   readonly consoleFile?: string | URL;
+  /** Who is asking; LOCAL_CALLER when absent, as under `local` (ADR 0022 item 4). */
+  readonly caller?: (request: IncomingMessage) => Promise<Caller | Failure>;
 };
 
 const BODY_LIMIT = 1024 * 1024;
 const MAX_TAIL = 10_000;
 const HOUR = 3_600_000;
 const USAGE_SPAN_MS = 30 * 24 * HOUR;
+// ADMIN_PATHS lacks it while model.ts is frozen.
+const AUDIT_PATH = '/api/audit';
 
+type Body = Readonly<Record<string, unknown>>;
 /** A string result is sent as text/plain, anything else as JSON. */
-type Handler = (request: IncomingMessage, name: string | undefined) => Promise<unknown> | unknown;
-type Route = { readonly method: string; readonly path: RegExp; readonly handle: Handler };
+type Handler = (request: IncomingMessage, name: string | undefined, body: Body) => Promise<unknown> | unknown;
+type Target = { readonly kind: AuditRecord['targetKind']; readonly id: string; readonly tenant: TenantName | null };
+/** `target` runs before the handler and must not throw; `details` never returns a secret, and gets no result before the handler succeeds. */
+type Audit = {
+  readonly action: AuditAction;
+  readonly target: (name: string | undefined, body: Body) => Target;
+  readonly details?: (body: Body, result?: unknown) => Record<string, unknown>;
+};
+/** `json` routes get the parsed request body; `audit` marks a state-changing route (ADR 0024 item 6). */
+type Route = { readonly method: string; readonly path: RegExp; readonly handle: Handler; readonly json?: true; readonly audit?: Audit };
+// ADR 0024 item 6 names `started` beside the three results; AuditRecord['result'] lacks it while model.ts is frozen.
+type AuditResult = 'started' | AuditRecord['result'];
 
 async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
@@ -85,13 +103,39 @@ function byStart(rows: readonly UsageBucket[]): (UsageCounters & { readonly star
   return [...out.values()].sort((a, b) => a.start - b.start) as (UsageCounters & { readonly start: number })[];
 }
 
-function routes({ registry, bundles, runtime, guard, metrics, requests, usage, ingressPort }: AdminDeps): Route[] {
+function auditFilter(request: IncomingMessage) {
+  const query = new URL(request.url ?? '/', 'http://admin').searchParams;
+  const given = (name: string) => query.get(name) || undefined;
+  const tenant = given('tenant');
+  const action = given('action');
+  if (action !== undefined && !(AUDIT_ACTIONS as readonly string[]).includes(action)) throw new InputError(`action must be one of ${AUDIT_ACTIONS.join(', ')}, got "${action}"`);
+  return {
+    ...(tenant !== undefined && { tenant: tenantName(tenant) }),
+    from: wholeParam(request, 'from', 0, 0, Number.MAX_SAFE_INTEGER),
+    to: wholeParam(request, 'to', Number.MAX_SAFE_INTEGER, 0, Number.MAX_SAFE_INTEGER),
+    actor: given('actor'),
+    action: action as AuditAction | undefined,
+    target: given('target'),
+    limit: wholeParam(request, 'limit', 100, 1, 1000),
+  };
+}
+
+function routes({ registry, bundles, runtime, guard, metrics, requests, store, ingressPort }: AdminDeps): Route[] {
   const app = (name: string | undefined) => appName(name!);
   const found = <T>(value: T | null, name: string | undefined): T => {
     if (value === null) throw new NotFound(`no app named "${name}"`);
     return value;
   };
   const at = (path: string) => new RegExp(`^${path.replace('<name>', '([^/]+)')}$`);
+  /** A malformed name has no view; the handler refuses it. A first publish lands in DEFAULT_TENANT until the route passes `tenant`. */
+  const appTarget = (name: string | undefined): Target => {
+    let tenant: TenantName = DEFAULT_TENANT;
+    try {
+      tenant = registry.view(appName(name ?? ''))?.tenant ?? DEFAULT_TENANT;
+    } catch {}
+    return { kind: 'app', id: name ?? '', tenant };
+  };
+  const onApp = (action: AuditAction, details?: Audit['details']): Audit => ({ action, target: appTarget, ...(details && { details }) });
   return [
     {
       method: 'GET', path: at(ADMIN_PATHS.health), handle: () => ({
@@ -111,9 +155,9 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, usage, i
         const tenant = query.get('tenant');
         if (name !== null) {
           const app = name === '*' ? '*' : found(registry.view(appName(name)), name).app;
-          return { app: name, step: 3600, ...window, buckets: byStart(await usage.usage({ step: 3600, app, ...window })) };
+          return { app: name, step: 3600, ...window, buckets: byStart(await store.usage({ step: 3600, app, ...window })) };
         }
-        if (tenant !== null) return { tenant, step: 3600, ...window, buckets: byStart(await usage.usage({ step: 3600, tenant: tenantName(tenant), ...window })) };
+        if (tenant !== null) return { tenant, step: 3600, ...window, buckets: byStart(await store.usage({ step: 3600, tenant: tenantName(tenant), ...window })) };
         throw new InputError('app or tenant is required');
       },
     },
@@ -121,7 +165,7 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, usage, i
       method: 'GET', path: at(ADMIN_PATHS.usageApps), handle: async (request) => {
         const query = new URL(request.url ?? '/', 'http://admin').searchParams;
         const tenant = query.get('tenant');
-        const rows = await usage.usage({ step: 3600, ...usageWindow(request), ...(tenant !== null && { tenant: tenantName(tenant) }) });
+        const rows = await store.usage({ step: 3600, ...usageWindow(request), ...(tenant !== null && { tenant: tenantName(tenant) }) });
         const apps = new Map<AppId, { tenant: string | null; counts: Record<string, number> }>();
         for (const b of rows) {
           if (b.app === '*') continue;
@@ -134,6 +178,7 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, usage, i
           .slice(0, wholeParam(request, 'limit', 50, 1, 1000));
       },
     },
+    { method: 'GET', path: at(AUDIT_PATH), handle: (request) => store.audit(auditFilter(request)) },
     {
       method: 'GET', path: at(ADMIN_PATHS.requests), handle: (request) => requests
         .after(wholeParam(request, 'after', 0, 0, Number.MAX_SAFE_INTEGER), wholeParam(request, 'limit', 500, 1, RING))
@@ -144,38 +189,53 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, usage, i
     },
     { method: 'GET', path: at(ADMIN_PATHS.logs('<name>')), handle: (request, name) => runtime.logs(found(registry.view(app(name)), name).app, wholeParam(request, 'tail', 200, 1, MAX_TAIL)) },
     {
-      method: 'PUT', path: at(ADMIN_PATHS.release('<name>')), handle: async (request, name) => {
-        const body = await readJson(request);
-        return registry.publish({
-          name: app(name),
-          manifest: parseManifest(body.manifest),
-          image: optional(body.image, 'image', (raw) => raw),
-          bundle: optional(body.bundle, 'bundle', bundleId),
-          owner: optional(body.owner, 'owner', subject),
-        });
-      },
+      method: 'PUT', path: at(ADMIN_PATHS.release('<name>')), json: true,
+      audit: onApp('app.publish', (_, result) => {
+        const release = result as Release | undefined;
+        return release ? { release: release.number, releaseKey: release.releaseKey } : {};
+      }),
+      handle: (_, name, body) => registry.publish({
+        name: app(name),
+        manifest: parseManifest(body.manifest),
+        image: optional(body.image, 'image', (raw) => raw),
+        bundle: optional(body.bundle, 'bundle', bundleId),
+        owner: optional(body.owner, 'owner', subject),
+      }),
     },
     { method: 'POST', path: at(ADMIN_PATHS.bundles), handle: async (request) => ({ bundle: await bundles.put(request) }) },
-    { method: 'PUT', path: at(ADMIN_PATHS.policy), handle: async (request) => registry.setGlobalPolicy(await readJson(request)) },
-    { method: 'PUT', path: at(ADMIN_PATHS.appPolicy('<name>')), handle: async (request, name) => registry.setAppPolicy(app(name), await readJson(request)) },
     {
-      method: 'PUT', path: at(ADMIN_PATHS.owner('<name>')), handle: async (request, name) => {
-        const owner = subject(String((await readJson(request)).owner));
+      method: 'PUT', path: at(ADMIN_PATHS.policy), json: true,
+      audit: { action: 'policy.global', target: () => ({ kind: 'policy', id: 'global', tenant: null }), details: (patch) => ({ patch }) },
+      handle: (_, __, body) => registry.setGlobalPolicy(body),
+    },
+    {
+      method: 'PUT', path: at(ADMIN_PATHS.appPolicy('<name>')), json: true, audit: onApp('app.policy', (patch) => ({ patch })),
+      handle: (_, name, body) => registry.setAppPolicy(app(name), body),
+    },
+    {
+      method: 'PUT', path: at(ADMIN_PATHS.owner('<name>')), json: true, audit: onApp('app.owner', (body) => ({ owner: body.owner })),
+      handle: async (_, name, body) => {
+        const owner = subject(String(body.owner));
         await registry.setOwner(app(name), owner);
         return { owner };
       },
     },
-    { method: 'POST', path: at(ADMIN_PATHS.remove('<name>')), handle: async (_, name) => (await registry.remove(app(name)), { status: 'removed' }) },
+    { method: 'POST', path: at(ADMIN_PATHS.remove('<name>')), audit: onApp('app.remove'), handle: async (_, name) => (await registry.remove(app(name)), { status: 'removed' }) },
     {
-      method: 'POST', path: at(ADMIN_PATHS.unquarantine('<name>')), handle: (_, name) => {
+      method: 'POST', path: at(ADMIN_PATHS.unquarantine('<name>')), audit: onApp('app.unquarantine'), handle: (_, name) => {
         guard.unquarantine(found(registry.view(app(name)), name).app);
         return { quarantine: null };
       },
     },
-    { method: 'POST', path: at(ADMIN_PATHS.purge('<name>')), handle: async (_, name) => (await registry.purge(app(name)), { status: 'purged' }) },
+    { method: 'POST', path: at(ADMIN_PATHS.purge('<name>')), audit: onApp('app.purge'), handle: async (_, name) => (await registry.purge(app(name)), { status: 'purged' }) },
     {
-      method: 'POST', path: at(ADMIN_PATHS.tokens), handle: async (request) => {
-        const { name } = await readJson(request);
+      method: 'POST', path: at(ADMIN_PATHS.tokens), json: true,
+      audit: {
+        action: 'token.issue',
+        target: (_, body) => ({ kind: 'token', id: `service:${String(body.name)}`, tenant: DEFAULT_TENANT }),
+        details: (_, result) => (result ? { token: (result as { id: string }).id } : {}),
+      },
+      handle: (_, __, { name }) => {
         if (typeof name !== 'string') throw new InputError('name must be a string');
         return registry.issueToken(name);
       },
@@ -195,9 +255,47 @@ function send(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { 'content-type': 'application/json' }).end(json);
 }
 
+/** The actor column, and what ADR 0022 item 7 adds to trace it to a person: the name, or the token and its issuer. */
+function actorColumns(actor: Actor): { readonly actor: Subject | 'local'; readonly details: Record<string, unknown> } {
+  if (actor.via === 'local') return { actor: 'local', details: {} };
+  const { subject, ...rest } = actor;
+  return { actor: subject, details: { actor: rest } };
+}
+
+/** The started row is awaited, so a command never runs unaudited; a lost result row is reported, not answered as a failure of a command that ran. */
+async function audited(store: AdminDeps['store'], caller: Caller, audit: Audit, name: string | undefined, body: Body | Error, run: (body: Body) => unknown): Promise<unknown> {
+  const parsed = body instanceof Error ? {} : body;
+  const target = audit.target(name, parsed);
+  const who = actorColumns(caller.actor);
+  const row = (result: AuditResult, details: Record<string, unknown>) => store.insertAudit({
+    at: Date.now(),
+    actor: who.actor,
+    actorTenant: caller.platformAdmin || target.tenant === null || !caller.roles.has(target.tenant) ? null : target.tenant,
+    tenant: target.tenant,
+    action: audit.action,
+    targetKind: target.kind,
+    target: target.id,
+    result: result as AuditRecord['result'],
+    details: { ...who.details, ...details },
+  });
+  const settle = (result: AuditResult, details: Record<string, unknown>) =>
+    row(result, details).catch((error: Error) => emit('audit-failed', null, { action: audit.action, target: target.id, result, error: error.message }));
+  await row('started', audit.details?.(parsed) ?? {});
+  try {
+    if (body instanceof Error) throw body;
+    const result = await run(body);
+    await settle('ok', audit.details?.(body, result) ?? {});
+    return result;
+  } catch (error) {
+    await settle(statusOf(error) < 500 ? 'refused' : 'error', { ...audit.details?.(parsed), error: (error as Error).message });
+    throw error;
+  }
+}
+
 export function createAdmin(deps: AdminDeps): Server {
   const table = routes(deps);
   const consoleFile = deps.consoleFile ?? new URL('./console.html', import.meta.url);
+  const callerOf = deps.caller ?? (async () => LOCAL_CALLER);
   return createServer(async (request, response) => {
     const path = new URL(request.url ?? '/', 'http://admin').pathname;
     try {
@@ -208,7 +306,12 @@ export function createAdmin(deps: AdminDeps): Server {
       for (const route of table) {
         const match = route.path.exec(path);
         if (match && route.method === request.method) {
-          const result = await route.handle(request, match[1] && decodeURIComponent(match[1]));
+          const caller = await callerOf(request);
+          if (typeof caller === 'string') return send(response, caller === 'keys-unavailable' ? 503 : 401, { error: `not signed in: ${caller}` });
+          const name = match[1] && decodeURIComponent(match[1]);
+          const result = route.audit
+            ? await audited(deps.store, caller, route.audit, name, route.json ? await readJson(request).catch((error: Error) => error) : {}, (body) => route.handle(request, name, body))
+            : await route.handle(request, name, route.json ? await readJson(request) : {});
           if (typeof result === 'string') return void response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end(result);
           return send(response, 200, result);
         }
