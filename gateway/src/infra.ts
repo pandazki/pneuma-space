@@ -32,4 +32,8 @@ export class DockerInfra implements Infra {
   resolveImage(reference: string): Promise<ImageId | null> {
     return this.#docker.imageId(reference);
   }
+
+  async nodes(): Promise<null> {
+    return null;
+  }
 }

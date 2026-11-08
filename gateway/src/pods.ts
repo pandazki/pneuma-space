@@ -218,6 +218,7 @@ export class PodDriver implements Driver<ContainerRun, string> {
       slot.release = spec.release;
       slot.specHash = specHash(spec);
       const ip = await this.#running(slot.handle, spec, deadline);
+      slot.node = this.#pods.get(slot.handle)?.spec.nodeName;
       const readyBy = this.#now() + spec.policy.ready_timeout_seconds * 1000;
       while (!(await this.#connect(ip, APP_PORT))) {
         this.#alive(slot.handle, spec);

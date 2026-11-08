@@ -15,8 +15,8 @@ const TAKEOVER_MS = 5000;
 /** How long a wake waits for the Registry to catch up with a newer app row before reading the RunSpec again. */
 const STALE_MS = 50;
 
-/** What a driver realized for an instance, persisted in its row: `handle` survives sleep when the driver keeps it (a stopped container), with the release and spec hash it was made for; `epoch` is the row's. */
-export type Slot<H extends string> = { handle: H | null; release: ReleaseNumber; specHash: string; epoch: number };
+/** What a driver realized for an instance, persisted in its row: `handle` survives sleep when the driver keeps it (a stopped container), with the release and spec hash it was made for; `epoch` is the row's; `node` is the cluster node, when the driver knows it. */
+export type Slot<H extends string> = { handle: H | null; release: ReleaseNumber; specHash: string; epoch: number; node?: string };
 
 /** An instance found at startup; `address` null means it exists but is not running. */
 export type Adopted<H> = { readonly app: AppId; readonly handle: H; readonly release: string; readonly spec: string; readonly address: string | null };
@@ -371,7 +371,7 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
       slot.epoch = current.epoch + 1;
       const waking: Instance = {
         ...current, ...instanceShape(spec), runtime: this.kind, release: spec.release, specHash: specHash(spec),
-        epoch: slot.epoch, state: 'waking', actor: this.#me, handle: slot.handle, address: null, since: Date.now(), awakeAt: null,
+        epoch: slot.epoch, state: 'waking', actor: this.#me, handle: slot.handle, address: null, node: null, since: Date.now(), awakeAt: null,
       };
       return (await tx.casInstance(current, waking)) ? waking : 'lost';
     });
@@ -407,7 +407,7 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
       throw error;
     }
     const now = Date.now();
-    const awake: Instance = { ...claimed, state: 'awake', actor: null, handle: slot.handle, release: slot.release, specHash: slot.specHash, address, since: now, awakeAt: now };
+    const awake: Instance = { ...claimed, state: 'awake', actor: null, handle: slot.handle, release: slot.release, specHash: slot.specHash, address, node: slot.node ?? null, since: now, awakeAt: now };
     const lease = this.#lease(local, awake, kind);
     const tally = this.#tally(app, awake.epoch, this.#counts(local), local);
     const ok = await this.#enqueue(local, awake.epoch, tally, () => this.#store.transaction(async (tx) => {

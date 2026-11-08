@@ -30,6 +30,8 @@ export type RegistryDeps = {
   /** GiB a new files or SQLite binding asks of the tenant's `storage_gb`; the Store counts existing ones at the same size. */
   readonly volumeGb?: number;
   readonly quotaRefused?: QuotaRefused;
+  /** The node an app's instance runs on (ADR 0024 item 8); null everywhere otherwise. */
+  readonly nodeOf?: (app: AppId) => string | null;
 };
 
 const SECONDS_FIELDS = ['idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds', 'failure_window_seconds', 'restart_backoff_seconds'] as const;
@@ -128,6 +130,7 @@ export class PlatformRegistry implements Registry, TenantCommands {
   readonly #addressing: Addressing;
   readonly #volumeGb: number;
   readonly #quotaRefused: QuotaRefused;
+  readonly #nodeOf: (app: AppId) => string | null;
   readonly #changed = new EventEmitter();
   readonly #views = new Map<AppName, RouteView>();
   readonly #specs = new Map<AppId, RunSpec>();
@@ -150,6 +153,7 @@ export class PlatformRegistry implements Registry, TenantCommands {
     this.#addressing = deps.addressing ?? PATH_ADDRESSING;
     this.#volumeGb = deps.volumeGb ?? 1;
     this.#quotaRefused = deps.quotaRefused ?? quotaRefused;
+    this.#nodeOf = deps.nodeOf ?? (() => null);
     this.#policy = policy;
   }
 
@@ -535,7 +539,7 @@ export class PlatformRegistry implements Registry, TenantCommands {
         lastAccessAt: s?.lastAccessAt ?? null,
         requests: s?.requests ?? 0,
         errors: s?.errors ?? 0,
-        node: null,
+        node: this.#nodeOf(view.app),
       };
     }).sort((a, b) => (a.name < b.name ? -1 : 1));
   }

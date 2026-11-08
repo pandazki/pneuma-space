@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { KubeClient, type Node, type PersistentVolumeClaim, type Pod } from './kube.ts';
-import type { Ending } from './lifecycle.ts';
+import type { Ending, Slot } from './lifecycle.ts';
 import { appName, DEFAULT_POLICY, DEFAULT_TENANT, type AppId, type ImageId, type InstanceLog, type ReleaseNumber, type RunSpec } from './model.ts';
 import { planeOf, podConfig, podFor, PodDriver } from './pods.ts';
 import { Unavailable } from './runtimes.ts';
@@ -170,7 +170,7 @@ async function setup(t: TestContext, options: { ready?: () => boolean } = {}): P
   return { kube, driver, clock, gone, saved, probes };
 }
 
-const slot = (epoch = 7) => ({ handle: null as string | null, release: 3 as ReleaseNumber, specHash: '', epoch });
+const slot = (epoch = 7): Slot<string> => ({ handle: null, release: 3 as ReleaseNumber, specHash: '', epoch });
 
 async function until(what: string, condition: () => boolean): Promise<void> {
   for (const end = Date.now() + 3000; !condition(); await sleep(5)) if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
@@ -285,6 +285,12 @@ test('the TCP probe starts once the container runs and the wake resolves with th
   ready = true;
   assert.equal(await start, '10.0.0.9:8000');
   assert.ok(s.probes.every((probe) => probe === '10.0.0.9:8000'));
+});
+
+test('a wake records the node its Pod was scheduled on, for the instance row', async (t) => {
+  const s = await setup(t);
+  const { into } = await started(s);
+  assert.equal(into.node, 'n1');
 });
 
 test('a Pod that fails while the wake waits fails it as the app\'s, with the exit reason', async (t) => {

@@ -59,7 +59,7 @@ before(async () => {
   const identity = new UpstreamIdentity(config('console'), authority, registry);
   const server = await startAdmin({
     registry, bundles: w.bundles, runtime: { logs: async () => '', healthOf: () => [] }, guard: w.runtime,
-    metrics: { snapshot: () => ({}) as never }, requests: { after: () => [] }, store, ingressPort: 18080, upstream: { identity, authority },
+    metrics: { snapshot: () => ({}) as never }, nodes: { snapshot: () => ({ source: null, sampledAt: null, nodes: [] }) }, requests: { after: () => [] }, store, ingressPort: 18080, upstream: { identity, authority },
   }, { port: 0 });
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   close = async () => void server.close();
@@ -87,6 +87,7 @@ const TABLE: [row: string, method: string, path: string, body: unknown, allowed:
   ['apps', 'GET', '/api/apps', undefined, 'dan', null, 401],
   ['metrics', 'GET', '/api/metrics', undefined, 'root', 'ana', 403, true],
   ['requests', 'GET', '/api/requests', undefined, 'root', 'ana', 403, true],
+  ['nodes', 'GET', '/api/nodes', undefined, 'root', 'ana', 403, true],
   ['app detail', 'GET', '/api/apps/alpha', undefined, 'bob', 'cid', 404],
   ['app logs', 'GET', '/api/apps/alpha/logs', undefined, 'token:bob', 'cid', 404],
   ['usage by tenant', 'GET', `/api/usage?tenant=${A}`, undefined, 'bob', 'cid', 403],
