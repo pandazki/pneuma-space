@@ -86,6 +86,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   margin: 0; min-height: 100vh; color: var(--ink);
   font: 14px/21px var(--font); letter-spacing: -0.01em; -webkit-font-smoothing: antialiased;
@@ -607,6 +608,29 @@ dialog::backdrop { background: oklch(0% 0 0 / .3); }
 dialog h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 dialog p { margin: 0 0 20px; font-size: 13px; color: var(--ink-2); }
 dialog .actions { justify-content: flex-end; }
+dialog .field { margin: 0 0 20px; }
+.frame { position: relative; }
+.topbar { position: absolute; top: 14px; right: 32px; z-index: 4; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-2); }
+.topbar select { height: 27px; border-radius: 999px; padding: 0 8px 0 12px; font-weight: 500; max-width: 220px; }
+.topbar .sep { width: 1px; height: 16px; background: var(--line-strong); flex: none; }
+.who { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.who .av { width: 22px; height: 22px; border-radius: 50%; flex: none; background: var(--accent-tint); color: var(--accent-ink); font: 600 11px/22px var(--font); text-align: center; letter-spacing: 0; }
+.who b { font-weight: 500; color: var(--ink); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn.ghost { background: none; color: var(--ink-2); padding: 0 10px; }
+.btn.ghost:hover { background: var(--hover); color: var(--ink); }
+.btn.small { height: 24px; padding: 0 10px; font-size: 12px; }
+td select { height: 26px; }
+.rows { display: grid; gap: 16px; }
+.rowkv { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.rowkv > .k { width: 112px; flex: none; font-size: 12.5px; font-weight: 500; }
+.rowkv > p { flex-basis: 100%; margin: 0 0 0 128px; font-size: 12px; color: var(--ink-3); }
+.secret { display: grid; gap: 10px; margin-bottom: 16px; box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-tint); }
+.secret header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.secret header b { font-size: 12.5px; font-weight: 600; }
+.secret code { display: block; font: 12.5px/18px var(--mono); overflow-wrap: anywhere; padding: 8px 10px; background: var(--surface); border-radius: 8px; box-shadow: 0 0 0 1px var(--line); user-select: all; }
+.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.you { margin-left: 6px; }
+.chip.text { font-family: var(--font); font-size: 11.5px; }
 @media (max-width: 900px) {
   .frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; box-shadow: none; }
   aside { position: relative; width: auto; height: auto; padding: 16px 20px; border-right: 0; border-bottom: 1px dashed var(--line); }
@@ -620,6 +644,11 @@ dialog .actions { justify-content: flex-end; }
   nav .group, nav .ico, .collapse, .expand, .rail-controls { display: none; }
   .head { padding: 32px 20px 24px; }
   section { padding: 24px 20px; }
+  .frame:has(> .topbar:not([hidden])) { grid-template-rows: auto auto 1fr; }
+  .topbar { position: static; padding: 12px 20px 0; justify-content: flex-end; }
+  .topbar select { max-width: 140px; }
+  .who .chip, .topbar .sep { display: none; }
+  .rowkv > p { margin-left: 0; }
   .split { grid-template-columns: minmax(0, 1fr); }
   .toolbar input { width: 100%; }
 }
@@ -644,6 +673,7 @@ dialog .actions { justify-content: flex-end; }
     </div>
   </div>
 </aside>
+<header class="topbar" hidden></header>
 <main id="main"></main>
 </div>
 <script>
@@ -700,7 +730,7 @@ const I18N = {
     'sec.deliveries': '触发投递', 'sec.deliveriesDesc': '最近 50 条。', 'empty.deliveries': '没有投递记录。', 'd.onDemand': '按需',
     'sec.logs': '日志', 'sec.logsDesc': '当前或上一个容器最近的 stdout 和 stderr。', 'logs.refresh': '刷新', 'empty.logs': '没有输出。',
     'pub.title': '发布', 'pub.titleFor': '发布 {name}', 'pub.sub': '网关会把镜像引用解析为镜像 id。只声明 static 的清单可以不填镜像。',
-    'f.name': '名称', 'f.nameHint': '小写字母、数字和 -，地址是 /apps/<name>/。', 'f.image': '镜像引用',
+    'f.name': '名称', 'f.nameHint': '小写字母、数字和 -。', 'f.image': '镜像引用',
     'f.owner': '所有者', 'f.ownerHint': '仅首次发布需要：应用看到的所有者主体。', 'f.manifest': '清单（pneuma-space.json）',
     'f.bundle': '静态包', 'f.bundleHint': '可选，static 目录打成的 tar。', 'f.submit': '发布', 'f.busy': '发布中…', 'f.badJson': '不是合法的 JSON：{msg}',
     'pub.existing': '已有应用', 'pub.existingDesc': '选一个来发布新版本。', 'pub.none': '还没有应用。',
@@ -816,7 +846,7 @@ const I18N = {
     'tp.x.failure': '卡死和崩溃',
     'tp.x.checks': '这个运行时能检测',
     'tp.x.noChecks': '没有实例，也就没有探活。',
-    'tp.x.container.request': '入口按 /apps/<name>/ 找到应用，经 Runtime.acquire 拿到实例，再转发到平台网络上这个应用容器的 8000 端口。',
+    'tp.x.container.request': '入口按应用地址{address}找到应用，经 Runtime.acquire 拿到实例，再转发到平台网络上这个应用容器的 8000 端口。',
     'tp.x.container.wake': '睡着的应用收到请求时，网关用当前版本的镜像建容器，把绑定变成挂载和 PNEUMA_SPACE_* 环境变量，等端口应答。没有 Lease 满 {idle} 秒后排空并停掉容器。',
     'tp.x.container.state': 'files 和 SQLite 在每应用的具名卷里；kv、object 和 PostgreSQL 在平台服务里。容器文件系统每次停止都丢掉。',
     'tp.x.container.failure': 'Docker 事件报告退出，唤醒后 {ready} 秒内不应答算唤醒失败；醒着时卡死的容器检测不到。Guard 按版本计失败：{window} 秒内 {max} 次即隔离，失败后 {backoff} 秒内不再唤醒，直到新版本或手动解除。',
@@ -832,6 +862,39 @@ const I18N = {
     'tp.check.ready': '唤醒后 ready_timeout_seconds 内没有应答。',
     'tp.check.hang': '醒着时不再应答心跳，被 terminate。',
     'tp.check.memory': '超过内存上限被结束。',
+    'nav.team': '团队', 'col.actions': '操作', 'top.tenant': '租户', 'tn.all': '全部租户', 'top.signOut': '退出', 'top.platformAdmin': '平台管理员',
+    'col.tenant': '租户', 'col.member': '成员', 'col.role': '角色', 'col.lastSeen': '最近登录', 'col.label': '标签', 'col.subject': '主体',
+    'col.createdBy': '签发人', 'col.display': '显示名', 'col.apps': '应用', 'role.admin': '管理员', 'role.member': '成员',
+    'team.title': '团队', 'team.sub': '{tenant} 的成员和令牌。', 'team.subAll': '平台上的每个租户。点一行管理它的成员和令牌。',
+    'team.none': '你还不属于任何租户。请租户管理员按你的 id（{id}）添加你。',
+    'sec.members': '成员', 'sec.membersRead': '这个租户的成员和角色。租户管理员负责添加和移除。', 'sec.membersDesc': '按 id 添加，对方不必已经登录过。每个租户至少保留一个管理员。',
+    'm.never': '从未登录', 'm.you': '你', 'm.add': '添加成员', 'm.id': '用户 id', 'm.idHint': '上游身份里的用户 id，不带 user:。',
+    'm.added': '{id} 已加入，角色是{role}。', 'm.roleSaved': '{id} 的角色改为{role}。', 'm.remove': '移除',
+    'm.removeTitle': '从 {tenant} 移除 {id}？', 'm.removeBody': '他在这个租户签发的个人令牌随之失效。30 秒内在每个副本生效。',
+    'sec.tokens': '令牌', 'sec.tokensDesc': '服务令牌给自动化，个人令牌给你自己的 appctl。权限不超过成员，明文只显示一次。',
+    'sec.tokensMine': '你在这个租户签发的令牌。管理员能看到全部。',
+    'tk.kind': '类型', 'tk.kind.service': '服务', 'tk.kind.personal': '个人', 'tk.issue': '签发令牌', 'tk.name': '名称',
+    'tk.nameHint': '主体 service:{tenant}.<名称>', 'tk.personalHint': '主体是你自己（{subject}），appctl 用它发布的应用所有者就是你。',
+    'tk.label': '标签（可选）', 'tk.serviceAdmin': '服务令牌由租户管理员签发。',
+    'tk.secretTitle': '现在复制这个令牌，它不会再显示', 'tk.secretFor': '主体 {subject}', 'tk.copy': '复制', 'tk.copied': '已复制', 'tk.done': '我已保存',
+    'tk.revoke': '吊销', 'tk.revokeTitle': '吊销 {label}？', 'tk.revokeBody': '用它的请求 30 秒内在每个副本开始被拒绝。无法撤销。',
+    'tk.revoked': '已吊销', 'tk.active': '有效',
+    'empty.members': '还没有成员。', 'empty.tokens': '还没有令牌。', 'empty.tenants': '还没有租户。',
+    'sec.tenants': '租户', 'sec.tenantsDesc': '点一行切换到这个租户。', 'sec.newTenant': '新建租户', 'sec.newTenantDesc': '首批管理员按 id 填写，可以还没登录过。',
+    'tn.name': '名称', 'tn.nameHint': '小写字母、数字和 -。', 'tn.display': '显示名（可选）', 'tn.admins': '首批管理员', 'tn.adminsHint': '用户 id，用逗号或空格分隔。',
+    'tn.create': '创建租户', 'tn.created': '已创建 {name}。',
+    'err.forbidden': '权限不足：{msg}', 'err.conflict': '无法完成：{msg}',
+    'sec.access': '访问与租户', 'sec.accessDesc': '谁能打开这个应用的地址，它属于哪个租户。',
+    'ac.label': '访问范围', 'ac.tenant': '租户内', 'ac.org': '组织内', 'ac.public': '公开',
+    'ac.tenant.desc': '只有 {tenant} 的成员和平台管理员能打开，静态文件也一样。',
+    'ac.org.desc': '组织里任何登录的人或有效令牌都能打开。',
+    'ac.public.desc': '不需要登录；应用声明了 identity 时，登录的访客仍带着身份。上游也要为它放行匿名访问。',
+    'd.tenant': '所属租户', 'd.move': '移到租户…', 'd.purgeAdmin': '需要 {tenant} 的管理员。',
+    'mv.title': '把 {name} 移到另一个租户', 'mv.body': '移动会先退役实例：配额占用、标签和旧租户令牌的访问一次切换，下一次请求在新租户下唤醒。数据全部保留。',
+    'mv.to': '目标租户', 'mv.action': '移动并退役实例', 'mv.none': '没有别的租户。',
+    'f.nameHintAt': '小写字母、数字和 -，地址是 {address}。', 'f.ownerHintSelf': '可选，默认是你（{subject}）。仅首次发布生效。',
+    'f.tenant': '租户', 'f.tenantHint': '跟随顶栏的租户切换器；仅首次发布生效。', 'f.tenantPick': '首次发布进入的租户。',
+    'tp.x.addr': '（{p}）',
   },
   en: {
     'brand.sub': 'Console', 'nav.group': 'Platform', 'nav.overview': 'Overview', 'nav.apps': 'Projects', 'nav.publish': 'Publish',
@@ -885,7 +948,7 @@ const I18N = {
     'sec.deliveries': 'Trigger deliveries', 'sec.deliveriesDesc': 'The latest 50.', 'empty.deliveries': 'No deliveries.', 'd.onDemand': 'on demand',
     'sec.logs': 'Logs', 'sec.logsDesc': 'Recent stdout and stderr of the current or last container.', 'logs.refresh': 'Refresh', 'empty.logs': 'No output.',
     'pub.title': 'Publish', 'pub.titleFor': 'Publish {name}', 'pub.sub': 'The gateway resolves the image reference to an image id. Leave the image empty for a manifest with only static.',
-    'f.name': 'Name', 'f.nameHint': 'Lowercase letters, digits and -; the address is /apps/<name>/.', 'f.image': 'Image reference',
+    'f.name': 'Name', 'f.nameHint': 'Lowercase letters, digits and -.', 'f.image': 'Image reference',
     'f.owner': 'Owner', 'f.ownerHint': 'First publish only: the subject apps see as their owner.', 'f.manifest': 'Manifest (pneuma-space.json)',
     'f.bundle': 'Static bundle', 'f.bundleHint': 'Optional tar of the static directory.', 'f.submit': 'Publish', 'f.busy': 'Publishing…', 'f.badJson': 'Not valid JSON: {msg}',
     'pub.existing': 'Existing apps', 'pub.existingDesc': 'Pick one to publish a new release.', 'pub.none': 'No app yet.',
@@ -1001,7 +1064,7 @@ const I18N = {
     'tp.x.failure': 'Hangs and crashes',
     'tp.x.checks': 'What this runtime detects',
     'tp.x.noChecks': 'No instance, so nothing to probe.',
-    'tp.x.container.request': 'The ingress matches /apps/<name>/, takes an instance through Runtime.acquire and proxies to port 8000 of the app’s container on the platform network.',
+    'tp.x.container.request': 'The ingress matches the app’s address{address}, takes an instance through Runtime.acquire and proxies to port 8000 of the app’s container on the platform network.',
     'tp.x.container.wake': 'A request to an asleep app creates a container from the release image, turns bindings into mounts and PNEUMA_SPACE_* variables, and waits for the port. After {idle} s without a lease it drains and the container stops.',
     'tp.x.container.state': 'Files and SQLite live in the app’s named volumes; kv, object and PostgreSQL in platform services. The container filesystem is discarded on every stop.',
     'tp.x.container.failure': 'Docker events report an exit; no answer within {ready} s of a wake fails the wake. A container that hangs while awake is not detected. The Guard counts failures per release: {max} within {window} s quarantine the app, and for {backoff} s after a failure it does not wake, until a new release or an unquarantine.',
@@ -1017,6 +1080,39 @@ const I18N = {
     'tp.check.ready': 'No answer within ready_timeout_seconds of a wake.',
     'tp.check.hang': 'Stopped answering the heartbeat while awake and was terminated.',
     'tp.check.memory': 'Went over its memory limit and was ended.',
+    'nav.team': 'Team', 'col.actions': 'Actions', 'top.tenant': 'Tenant', 'tn.all': 'All tenants', 'top.signOut': 'Sign out', 'top.platformAdmin': 'Platform admin',
+    'col.tenant': 'Tenant', 'col.member': 'Member', 'col.role': 'Role', 'col.lastSeen': 'Last seen', 'col.label': 'Label', 'col.subject': 'Subject',
+    'col.createdBy': 'Issued by', 'col.display': 'Display name', 'col.apps': 'Apps', 'role.admin': 'admin', 'role.member': 'member',
+    'team.title': 'Team', 'team.sub': 'Members and tokens of {tenant}.', 'team.subAll': 'Every tenant on the platform. Click a row to manage its members and tokens.',
+    'team.none': 'You are not in any tenant yet. Ask a tenant admin to add you by your id ({id}).',
+    'sec.members': 'Members', 'sec.membersRead': 'The members of this tenant and their roles. A tenant admin adds and removes them.', 'sec.membersDesc': 'Add by id; the person need not have signed in yet. Every tenant keeps at least one admin.',
+    'm.never': 'Never signed in', 'm.you': 'you', 'm.add': 'Add member', 'm.id': 'User id', 'm.idHint': 'The user id from the upstream identity, without user:.',
+    'm.added': '{id} added as {role}.', 'm.roleSaved': '{id} is now {role}.', 'm.remove': 'Remove',
+    'm.removeTitle': 'Remove {id} from {tenant}?', 'm.removeBody': 'Personal tokens they issued in this tenant stop working too. Every replica applies it within 30 s.',
+    'sec.tokens': 'Tokens', 'sec.tokensDesc': 'Service tokens for automation, personal tokens for your own appctl. A token never exceeds member; its secret is shown once.',
+    'sec.tokensMine': 'The tokens you issued in this tenant. An admin sees all of them.',
+    'tk.kind': 'Kind', 'tk.kind.service': 'Service', 'tk.kind.personal': 'Personal', 'tk.issue': 'Issue token', 'tk.name': 'Name',
+    'tk.nameHint': 'Subject service:{tenant}.<name>', 'tk.personalHint': 'The subject is you ({subject}), so apps appctl publishes with it are owned by you.',
+    'tk.label': 'Label (optional)', 'tk.serviceAdmin': 'A tenant admin issues service tokens.',
+    'tk.secretTitle': 'Copy this token now; it will not be shown again', 'tk.secretFor': 'Subject {subject}', 'tk.copy': 'Copy', 'tk.copied': 'Copied', 'tk.done': 'I saved it',
+    'tk.revoke': 'Revoke', 'tk.revokeTitle': 'Revoke {label}?', 'tk.revokeBody': 'Requests with it start failing on every replica within 30 s. This cannot be undone.',
+    'tk.revoked': 'Revoked', 'tk.active': 'Active',
+    'empty.members': 'No members yet.', 'empty.tokens': 'No tokens yet.', 'empty.tenants': 'No tenants yet.',
+    'sec.tenants': 'Tenants', 'sec.tenantsDesc': 'Click a row to switch to that tenant.', 'sec.newTenant': 'New tenant', 'sec.newTenantDesc': 'First admins by id; they need not have signed in yet.',
+    'tn.name': 'Name', 'tn.nameHint': 'Lowercase letters, digits and -.', 'tn.display': 'Display name (optional)', 'tn.admins': 'First admins', 'tn.adminsHint': 'User ids, separated by commas or spaces.',
+    'tn.create': 'Create tenant', 'tn.created': 'Created {name}.',
+    'err.forbidden': 'Not allowed: {msg}', 'err.conflict': 'Cannot do that: {msg}',
+    'sec.access': 'Access and tenant', 'sec.accessDesc': 'Who can open this app’s address, and which tenant it belongs to.',
+    'ac.label': 'Access', 'ac.tenant': 'Tenant', 'ac.org': 'Organization', 'ac.public': 'Public',
+    'ac.tenant.desc': 'Only members of {tenant} and platform admins can open it, static files included.',
+    'ac.org.desc': 'Anyone signed in to the organization, or any valid token, can open it.',
+    'ac.public.desc': 'No sign-in needed; when the app declares identity, a signed-in visitor still carries it. The upstream must also let anonymous requests through.',
+    'd.tenant': 'Tenant', 'd.move': 'Move to tenant…', 'd.purgeAdmin': 'Requires an admin of {tenant}.',
+    'mv.title': 'Move {name} to another tenant', 'mv.body': 'The move retires the instance first: quota usage, labels and the old tenant’s token access switch at once, and the next request wakes it under the new tenant. All data is kept.',
+    'mv.to': 'Destination', 'mv.action': 'Move and retire instance', 'mv.none': 'There is no other tenant.',
+    'f.nameHintAt': 'Lowercase letters, digits and -; the address is {address}.', 'f.ownerHintSelf': 'Optional; defaults to you ({subject}). First publish only.',
+    'f.tenant': 'Tenant', 'f.tenantHint': 'Follows the tenant switcher; first publish only.', 'f.tenantPick': 'The tenant of the first publish.',
+    'tp.x.addr': ' ({p})',
   },
 };
 
@@ -1132,8 +1228,8 @@ function table(columns, rows, emptyKey, scroll = false) {
   return h('div', { class: scroll ? 'card table scroll' : 'card table' }, h('table', {},
     h('thead', {}, h('tr', {}, columns.map(([label, align]) => h('th', { class: align }, t(label))))),
     h('tbody', {}, rows.map((row) => h('tr', {
-      'data-href': row.href,
-      onclick: row.href && ((e) => { if (!e.target.closest('a')) location.hash = row.href; }),
+      'data-href': row.href ?? (row.onpick ? '' : null),
+      onclick: row.href ? ((e) => { if (!e.target.closest('a')) location.hash = row.href; }) : row.onpick,
     }, row.cells.map((cell, i) => h('td', { class: columns[i][1] }, cell)))))));
 }
 
@@ -1145,10 +1241,10 @@ function segmented(items, current, onPick, label) {
     }, content)));
 }
 
-function confirmDialog(title, body, action) {
+function confirmDialog(title, body, action, extra = null) {
   return new Promise((resolve) => {
     const dialog = h('dialog', {},
-      h('h3', {}, title), h('p', {}, body),
+      h('h3', {}, title), h('p', {}, body), extra,
       h('form', { method: 'dialog', class: 'actions' },
         h('button', { class: 'btn', value: 'cancel', autofocus: true }, t('cancel')),
         h('button', { class: 'btn danger', value: 'ok' }, action)));
@@ -1167,10 +1263,70 @@ const ICON = {
   'nav-topology': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="9" r="2"/><circle cx="13.5" cy="4.5" r="2"/><circle cx="13.5" cy="13.5" r="2"/><path d="m6.3 8.1 5.4-2.7M6.3 9.9l5.4 2.7"/></svg>',
   'nav-apps': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="10" width="5.5" height="5.5" rx="1.5"/></svg>',
   'nav-publish': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.75v8.5M5.75 6 9 2.75 12.25 6"/><path d="M2.75 11.25v1.75a2 2 0 0 0 2 2h8.5a2 2 0 0 0 2-2v-1.75"/></svg>',
+  'nav-team': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.75" cy="6.25" r="2.5"/><path d="M2.25 14.75a4.5 4.5 0 0 1 9 0"/><path d="M11.5 3.9a2.5 2.5 0 0 1 0 4.7M13.25 10.6a4.5 4.5 0 0 1 2.5 4.15"/></svg>',
   'panel': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.25" y="2.25" width="13.5" height="13.5" rx="3.5"/><path d="M6.75 2.25v13.5M12.25 7.25 10.5 9l1.75 1.75"/></svg>',
   moon: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"/></svg>',
 };
 const icon = (name) => { const span = h('span', { 'aria-hidden': 'true', class: 'ico' }); span.innerHTML = ICON[name]; return span; };
+
+// Session (ADR 0022 item 8): who is signed in and which tenant the console shows. Under local `me` is {local: true, platformAdmin: true} and nothing below appears.
+
+const ALL = '*';
+const TENANT_KEY = 'pneuma-space-tenant';
+/** { me, tenants: names the switcher offers besides ALL, scope: a tenant name, ALL, or null for a user in no tenant } */
+let session = null;
+
+const offeredOf = ({ me, tenants }) => (me.platformAdmin ? [ALL, ...tenants] : tenants);
+
+async function loadSession() {
+  const me = await api('GET', '/api/me');
+  const tenants = me.local ? [] : me.platformAdmin ? (await api('GET', '/api/tenants')).map((x) => x.name) : Object.keys(me.roles).sort();
+  const offered = offeredOf({ me, tenants });
+  const stored = store.get(TENANT_KEY);
+  return { me, tenants, scope: me.local ? ALL : offered.includes(stored) ? stored : offered[0] ?? null };
+}
+
+const upstream = () => session !== null && !session.me.local;
+const isPlatformAdmin = () => session?.me.platformAdmin === true;
+const mayAdmin = (tenant) => isPlatformAdmin() || session.me.roles?.[tenant] === 'admin';
+const userId = () => session.me.subject.slice('user:'.length);
+const scoped = (apps) => (session.scope === ALL ? apps : apps.filter((a) => a.tenant === session.scope));
+const failText = (error) => (error.status === 403 ? t('err.forbidden', { msg: error.message }) : error.status === 409 ? t('err.conflict', { msg: error.message }) : error.message);
+
+/** The address any app would get, read off a listed app's address, since the deployment picks path or subdomain addressing (ADR 0019 item 9). */
+function addressPattern(apps) {
+  for (const { name, address } of apps) {
+    if (address.endsWith(`/${name}/`)) return `${address.slice(0, -name.length - 1)}<name>/`;
+    if (address.includes(`//${name}.`)) return address.replace(`//${name}.`, '//<name>.');
+  }
+  return null;
+}
+
+function setScope(scope) {
+  session.scope = scope;
+  store.set(TENANT_KEY, scope);
+  route();
+}
+
+function topbar() {
+  const bar = document.querySelector('.topbar');
+  bar.hidden = !upstream();
+  if (bar.hidden) return bar.replaceChildren();
+  const { me, scope } = session;
+  const offered = offeredOf(session);
+  const label = (x) => (x === ALL ? t('tn.all') : x);
+  const tenant = offered.length > 1
+    ? h('select', { 'aria-label': t('top.tenant'), title: t('top.tenant'), onchange: (e) => setScope(e.target.value) },
+      offered.map((x) => h('option', { value: x, selected: x === scope }, label(x))))
+    : scope === null ? null : h('span', { class: 'chip', title: t('top.tenant') }, label(scope));
+  bar.replaceChildren(
+    tenant, tenant && h('span', { class: 'sep', 'aria-hidden': 'true' }),
+    h('span', { class: 'who', title: me.subject },
+      h('span', { class: 'av', 'aria-hidden': 'true' }, [...me.name][0]?.toUpperCase() ?? '?'),
+      h('b', {}, me.name),
+      me.platformAdmin ? h('span', { class: 'chip text' }, t('top.platformAdmin')) : null),
+    h('a', { class: 'btn ghost', href: '/_pneuma-space/logout' }, t('top.signOut')));
+}
 
 // Views
 
@@ -2211,7 +2367,11 @@ const statusTone = (s) => (s === 0 || s >= 500 ? 'red' : s >= 400 ? 'orange' : s
 const took = (v) => (v >= 60_000 ? `${new Intl.NumberFormat(locale(), { maximumFractionDigits: 1 }).format(v / 60_000)} min` : ms(v));
 const reach = (v) => Math.min(1, Math.log10(1 + v) / Math.log10(1 + WATERFALL_MS));
 /** The path below the app's address, as the app's routes read it; the full path stays in the detail. */
-const appRelative = (r) => (r.path.startsWith(`/apps/${r.app}/`) ? r.path.slice(`/apps/${r.app}`.length) : r.path);
+/** Under path addressing a request path carries the app's address as its prefix; under subdomains it is already relative. */
+function appRelative(r, apps) {
+  const address = apps.find((a) => a.name === r.app)?.address;
+  return address?.startsWith('/') && r.path.startsWith(address) ? r.path.slice(address.length - 1) : r.path;
+}
 
 function filterBar(state, onChange) {
   const input = h('input', {
@@ -2346,7 +2506,7 @@ function realtime() {
   const requestLine = (entry) => {
     const r = entry.item;
     const failed = requestFailed(r);
-    const rel = appRelative(r);
+    const rel = appRelative(r, model.apps);
     const wait = r.waitMs ?? 0;
     const width = reach(r.ms) * 100;
     const row = h('div', {
@@ -2487,7 +2647,8 @@ function realtime() {
     renderLane(true);
   };
   const polls = [pollMetrics, pollRequests, pollApps].map((fn) => header.guarded(fn));
-  const first = () => Promise.all(polls.map((fn) => fn()));
+  // The metrics poll loads the listing, whose addresses the first request rows need.
+  const first = async () => { await polls[0](); await Promise.all([polls[1](), polls[2]()]); };
   return { loops: [[METRICS_MS, polls[0]], [REQUESTS_MS, polls[1]], [APPS_MS, polls[2]]], first };
 }
 
@@ -2502,6 +2663,7 @@ async function projects() {
   const state = h('select', { 'aria-label': t('col.state'), onchange: () => { appsFilter.state = state.value; render(); } },
     h('option', { value: '' }, t('apps.allStates')),
     STATE_FILTERS.map((s) => h('option', { value: s, selected: appsFilter.state === s }, t(`st.${s}`))));
+  const tenantColumn = upstream() && session.scope === ALL;
   const render = () => {
     count.textContent = plural('apps.count', apps.length);
     const needle = appsFilter.text.trim().toLowerCase();
@@ -2509,15 +2671,15 @@ async function projects() {
     body.replaceChildren(apps.length === 0
       ? h('div', { class: 'card' }, h('div', { class: 'empty' }, t('apps.empty'), h('div', { style: 'margin-top:12px' }, h('a', { class: 'btn primary', href: '#/publish' }, t('apps.publish')))))
       : table(
-        [['col.name'], ['col.status'], ['col.runtime'], ['col.instance'], ['col.since'], ['col.release', 'r'], ['col.capabilities'], ['col.requests', 'r'], ['col.errors', 'r'], ['col.lastAccess']],
+        [['col.name'], tenantColumn && ['col.tenant'], ['col.status'], ['col.runtime'], ['col.instance'], ['col.since'], ['col.release', 'r'], ['col.capabilities'], ['col.requests', 'r'], ['col.errors', 'r'], ['col.lastAccess']].filter(Boolean),
         rows.map((a) => ({ href: `#/apps/${encodeURIComponent(a.name)}`, cells: [
-          appLink(a.name), status(a.status), runtimeChip(a),
+          appLink(a.name), tenantColumn && h('span', { class: 'mono' }, a.tenant), status(a.status), runtimeChip(a),
           h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, a.quarantine ? status('quarantined') : status(a.instance), leaseChips(a.leases)),
           a.since == null ? h('span', { class: 'muted' }, '-') : ago(a.since),
           h('span', { class: 'num' }, a.release == null ? '-' : `#${a.release}`),
           a.capabilities.length ? h('span', { class: 'chips' }, a.capabilities.map(chip)) : h('span', { class: 'muted' }, t('routeOnly')),
           h('span', { class: 'num' }, nf(a.requests)), h('span', { class: 'num' }, nf(a.errors)), ago(a.lastAccessAt),
-        ] })),
+        ].filter((cell) => cell !== false) })),
         'empty.filtered'));
   };
   show(
@@ -2525,7 +2687,7 @@ async function projects() {
     h('section', {}, h('div', { class: 'toolbar' }, text, state), body),
   );
   return async function update() {
-    apps = await api('GET', '/api/apps');
+    apps = scoped(await api('GET', '/api/apps'));
     render();
   };
 }
@@ -2554,7 +2716,7 @@ function policyForm(app, effective, reload) {
       await reload();
     } catch (error) {
       message.className = 'msg err';
-      message.textContent = error.message;
+      message.textContent = failText(error);
     }
   } },
     h('div', { class: 'fields' }, POLICY_FIELDS.map(field), field('db_backend')),
@@ -2604,7 +2766,8 @@ function stateStrip(events, name) {
 
 async function detail(name) {
   const usagePath = () => `/api/usage?app=${encodeURIComponent(name)}&from=${Math.floor(Date.now() / HOUR_MS) * HOUR_MS - APP_HEAT_DAYS * 24 * HOUR_MS}`;
-  const [d, apps, m, health, usage] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), api('GET', '/api/metrics'), api('GET', '/api/health'), api('GET', usagePath())]);
+  const events = async () => (isPlatformAdmin() ? (await api('GET', '/api/metrics')).events : []);
+  const [d, apps, recent, health, usage] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), events(), api('GET', '/api/health'), api('GET', usagePath())]);
   const heat = heatGrid('heat.app');
   heat.set(dayRows(usage.buckets, APP_HEAT_DAYS));
   let heatAt = Date.now();
@@ -2616,7 +2779,7 @@ async function detail(name) {
       await api('POST', `${appPath(app.name)}/unquarantine`);
       await reload();
     } catch (error) {
-      actionMessage.textContent = error.message;
+      actionMessage.textContent = failText(error);
     }
   };
   const top = h('div');
@@ -2651,7 +2814,7 @@ async function detail(name) {
       tile(t('d.lastAccess'), detailStats.lastAccessAt == null ? t('never') : ago(detailStats.lastAccessAt).textContent, detailStats.lastAccessAt == null ? '' : stamp(detailStats.lastAccessAt)),
       tile(t('d.release'), app.current == null ? '-' : `#${app.current}`, releases.length ? stamp(Math.max(...releases.map((r) => r.publishedAt))) : ''));
   };
-  renderHead(apps.find((a) => a.name === app.name), stats, m.events);
+  renderHead(apps.find((a) => a.name === app.name), stats, recent);
 
   const act = (kind) => async () => {
     if (!(await confirmDialog(t(`d.${kind}Title`, { name: app.name }), t(`d.${kind}Body`), t(`d.${kind}`)))) return;
@@ -2660,24 +2823,28 @@ async function detail(name) {
       if (kind === 'purge') location.hash = '#/apps';
       else await reload();
     } catch (error) {
-      actionMessage.textContent = error.message;
+      actionMessage.textContent = failText(error);
     }
   };
   const actionMessage = h('div', { class: 'msg err', role: 'alert' });
   const logs = logsPanel(app.name);
   const current = (r) => r.number === app.current;
+  const purgeBlock = app.status !== 'removed' ? t('d.purgeHint') : mayAdmin(app.tenant) ? null : t('d.purgeAdmin', { tenant: app.tenant });
+  let index = 0;
+  const sectionAt = (...args) => sectionHead(++index, ...args);
   show(
     h('div', { class: 'head' }, head,
       h('div', { style: 'display:grid;gap:8px;justify-items:end' },
         h('div', { class: 'actions' },
           h('a', { class: 'btn', href: `#/publish/${encodeURIComponent(app.name)}` }, t('d.publish')),
           h('button', { class: 'btn danger', type: 'button', disabled: app.status !== 'registered', onclick: act('remove') }, t('d.remove')),
-          h('button', { class: 'btn danger', type: 'button', disabled: app.status !== 'removed', title: app.status === 'removed' ? null : t('d.purgeHint'), onclick: act('purge') }, t('d.purge'))),
+          h('button', { class: 'btn danger', type: 'button', disabled: purgeBlock !== null, title: purgeBlock, onclick: act('purge') }, t('d.purge'))),
         actionMessage)),
     h('section', { style: 'padding-top:0;border-top:0' }, tiles),
-    h('section', {}, sectionHead(1, 'sec.usage', 'sec.usageDesc'), h('div', { class: 'inset chart', 'data-section': 'usage' }, h('header', {}, h('b', {}, t('heat.app'))), heat.el)),
-    h('section', {}, sectionHead(2, 'sec.policy', 'sec.policyDesc'), policyForm(app, policy, reload)),
-    h('section', {}, sectionHead(3, 'sec.releases', 'sec.releasesDesc'), table(
+    h('section', {}, sectionAt('sec.usage', 'sec.usageDesc'), h('div', { class: 'inset chart', 'data-section': 'usage' }, h('header', {}, h('b', {}, t('heat.app'))), heat.el)),
+    upstream() ? h('section', {}, sectionAt('sec.access', 'sec.accessDesc'), accessCard(app, reload)) : null,
+    h('section', {}, sectionAt('sec.policy', 'sec.policyDesc'), policyForm(app, policy, reload)),
+    h('section', {}, sectionAt('sec.releases', 'sec.releasesDesc'), table(
       [['col.release', 'r'], ['col.image'], ['col.capabilities'], ['col.bundle'], ['col.published']],
       [...releases].sort((a, b) => b.number - a.number).map((r) => ({ cells: [
         h('span', { class: 'num' }, `#${r.number}`, current(r) ? h('span', { class: 'chip', style: 'margin-left:6px' }, t('r.current')) : null),
@@ -2686,21 +2853,21 @@ async function detail(name) {
         h('span', { class: 'mono', title: r.bundle ?? '' }, r.bundle ? r.bundle.slice(0, 12) : '-'),
         h('span', { title: stamp(r.publishedAt) }, ago(r.publishedAt)),
       ] })), 'empty.filtered')),
-    h('section', {}, sectionHead(4, 'sec.bindings', 'sec.bindingsDesc'), table(
+    h('section', {}, sectionAt('sec.bindings', 'sec.bindingsDesc'), table(
       [['col.kind'], ['col.provider'], ['col.state']],
       bindings.map((b) => ({ cells: [chip(b.kind), h('span', { class: 'mono' }, b.provider), status(b.state)] })), 'empty.bindings')),
-    h('section', {}, sectionHead(5, 'sec.deliveries', 'sec.deliveriesDesc'), table(
+    h('section', {}, sectionAt('sec.deliveries', 'sec.deliveriesDesc'), table(
       [['col.state'], ['col.trigger'], ['col.attempts', 'r'], ['col.scheduledFor'], ['col.created'], ['col.nextAttempt']],
       deliveries.map((x) => ({ cells: [
         status(x.state), h('span', { class: 'mono' }, x.trigger), h('span', { class: 'num' }, nf(x.attempts)),
         x.scheduledFor == null ? h('span', { class: 'muted' }, t('d.onDemand')) : h('span', { class: 'mono' }, stamp(x.scheduledFor)),
         ago(x.createdAt), x.state === 'due' ? ago(x.nextAttemptAt) : h('span', { class: 'muted' }, '-'),
       ] })), 'empty.deliveries')),
-    h('section', {}, sectionHead(6, 'sec.logs', 'sec.logsDesc', ...logs.controls), logs.box),
+    h('section', {}, sectionAt('sec.logs', 'sec.logsDesc', ...logs.controls), logs.box),
   );
   return async function update() {
-    const [fresh, list, now] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), api('GET', '/api/metrics')]);
-    renderHead(list.find((a) => a.name === app.name), fresh.stats, now.events);
+    const [fresh, list, now] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), events()]);
+    renderHead(list.find((a) => a.name === app.name), fresh.stats, now);
     if (Date.now() - heatAt >= HEAT_MS) {
       heatAt = Date.now();
       heat.set(dayRows((await api('GET', usagePath())).buckets, APP_HEAT_DAYS));
@@ -2708,22 +2875,57 @@ async function detail(name) {
   };
 }
 
+const ACCESS_LEVELS = ['tenant', 'org', 'public'];
+
+function accessCard(app, reload) {
+  const message = h('div', { class: 'msg err', role: 'alert' });
+  const failed = (error) => { message.textContent = failText(error); };
+  const pick = async (access) => {
+    if (access === app.access) return;
+    try {
+      await api('PUT', `${appPath(app.name)}/access`, { access });
+      await reload();
+    } catch (error) { failed(error); }
+  };
+  const others = session.tenants.filter((x) => x !== app.tenant);
+  const move = async () => {
+    const select = h('select', {}, others.map((x) => h('option', { value: x }, x)));
+    if (!(await confirmDialog(t('mv.title', { name: app.name }), t('mv.body'), t('mv.action'), h('label', { class: 'field' }, h('span', {}, t('mv.to')), select)))) return;
+    try {
+      await api('PUT', `${appPath(app.name)}/tenant`, { tenant: select.value });
+      await reload();
+    } catch (error) { failed(error); }
+  };
+  return h('div', { class: 'card rows' },
+    h('div', { class: 'rowkv' }, h('span', { class: 'k' }, t('ac.label')),
+      segmented(ACCESS_LEVELS.map((a) => [a, t(`ac.${a}`)]), app.access, pick, t('ac.label')),
+      h('p', {}, t(`ac.${app.access}.desc`, { tenant: app.tenant }))),
+    h('div', { class: 'rowkv' }, h('span', { class: 'k' }, t('d.tenant')), h('span', { class: 'chip' }, app.tenant),
+      isPlatformAdmin() ? h('button', { class: 'btn small', type: 'button', disabled: !others.length, title: others.length ? null : t('mv.none'), onclick: move }, t('d.move')) : null),
+    message);
+}
+
 // A path-mode address is relative to the ingress, which listens on its own port; a subdomain address is absolute.
 const appUrl = (address, port) => new URL(address, `${location.protocol}//${location.hostname}:${port}`).href;
 
-const FIELD_OF = [[/^app name/, 'name'], [/^subject/, 'owner'], [/^image|image "/, 'image'], [/^bundle|static is declared/, 'bundle']];
+const FIELD_OF = [[/^app name/, 'name'], [/^subject/, 'owner'], [/^image|image "/, 'image'], [/^bundle|static is declared/, 'bundle'], [/tenant/, 'tenant']];
 
 async function publish(prefill) {
   const apps = await api('GET', '/api/apps');
   const existing = new Set(apps.map((a) => a.name));
+  const pattern = addressPattern(apps);
+  const tenantField = upstream() && session.scope !== null;
+  const firstPublish = [];
   const general = h('div', { class: 'msg err', role: 'alert' });
-  const hint = (key) => h('small', {}, t(key));
+  const hint = (key) => h('small', {}, typeof key === 'string' ? t(key) : t(...key));
   const err = () => h('small', { class: 'err', hidden: true });
   const make = (key, control, hintKey) => ({ control, error: err(), label: key, hintKey });
   const f = {
-    name: make('f.name', h('input', { name: 'name', required: true, pattern: '[a-z][a-z0-9\\-]{0,39}', value: prefill ?? '', placeholder: 'survey', autocomplete: 'off', spellcheck: 'false' }), 'f.nameHint'),
+    name: make('f.name', h('input', { name: 'name', required: true, pattern: '[a-z][a-z0-9\\-]{0,39}', value: prefill ?? '', placeholder: 'survey', autocomplete: 'off', spellcheck: 'false' }), pattern ? ['f.nameHintAt', { address: pattern }] : 'f.nameHint'),
     image: make('f.image', h('input', { name: 'image', placeholder: 'survey:latest', autocomplete: 'off', spellcheck: 'false' })),
-    owner: make('f.owner', h('input', { name: 'owner', placeholder: 'user:ana', autocomplete: 'off', spellcheck: 'false' }), 'f.ownerHint'),
+    owner: make('f.owner', h('input', { name: 'owner', placeholder: upstream() ? session.me.subject : 'user:ana', autocomplete: 'off', spellcheck: 'false' }), upstream() ? ['f.ownerHintSelf', { subject: session.me.subject }] : 'f.ownerHint'),
+    tenant: make('f.tenant', h('select', { name: 'tenant', disabled: session.scope !== ALL },
+      (session.scope === ALL ? session.tenants : [session.scope]).map((x) => h('option', { value: x }, x))), session.scope === ALL ? 'f.tenantPick' : 'f.tenantHint'),
     manifest: make('f.manifest', h('textarea', { name: 'manifest', rows: 14, spellcheck: 'false' })),
     bundle: make('f.bundle', h('input', { name: 'bundle', type: 'file', accept: '.tar,application/x-tar' }), 'f.bundleHint'),
   };
@@ -2735,8 +2937,9 @@ async function publish(prefill) {
     f[k].control.setAttribute('aria-invalid', 'true');
     f[k].control.focus();
   };
-  const ownerField = label('owner');
-  const syncOwner = () => { ownerField.hidden = existing.has(f.name.control.value); };
+  firstPublish.push(label('owner'));
+  if (tenantField) firstPublish.push(label('tenant'));
+  const syncOwner = () => { for (const field of firstPublish) field.hidden = existing.has(f.name.control.value); };
   f.name.control.addEventListener('input', syncOwner);
   syncOwner();
   const submit = h('button', { class: 'btn primary', type: 'submit' }, t('f.submit'));
@@ -2758,7 +2961,11 @@ async function publish(prefill) {
       const file = f.bundle.control.files[0];
       const bundle = file ? (await api('POST', '/api/bundles', file, 'application/x-tar')).bundle : null;
       const body = { image: f.image.control.value.trim() || null, manifest, bundle };
-      if (!existing.has(name)) body.owner = f.owner.control.value.trim();
+      if (!existing.has(name)) {
+        const owner = f.owner.control.value.trim();
+        if (owner || !upstream()) body.owner = owner;
+        if (tenantField) body.tenant = f.tenant.control.value;
+      }
       await api('PUT', `${appPath(name)}/release`, body);
       location.hash = `#/apps/${encodeURIComponent(name)}`;
     } catch (error) {
@@ -2770,7 +2977,7 @@ async function publish(prefill) {
       submit.textContent = t('f.submit');
     }
   } },
-    h('div', { class: 'fields' }, label('name'), label('image'), ownerField),
+    h('div', { class: 'fields' }, label('name'), label('image'), firstPublish),
     label('manifest'),
     label('bundle'),
     h('div', { class: 'actions' }, submit),
@@ -2781,8 +2988,194 @@ async function publish(prefill) {
     h('section', {}, h('div', { class: 'split' }, form,
       h('div', { class: 'card' },
         h('div', { class: 'sh', style: 'margin:0' }, h('div', {}, h('h2', {}, t('pub.existing')), h('p', {}, t('pub.existingDesc')))),
-        apps.length ? h('div', { class: 'picks' }, apps.map((a) => h('a', { href: `#/publish/${encodeURIComponent(a.name)}` }, h('span', {}, a.name), status(a.status))))
+        scoped(apps).length ? h('div', { class: 'picks' }, scoped(apps).map((a) => h('a', { href: `#/publish/${encodeURIComponent(a.name)}` }, h('span', {}, a.name), status(a.status))))
           : h('div', { class: 'empty' }, t('pub.none'))))),
+  );
+}
+
+// Team (ADR 0022 item 8): the chosen tenant's members and tokens; in the all-tenants view every tenant and a form to create one.
+
+const tokenKind = (token) => (token.subject.startsWith('service:') ? 'service' : 'personal');
+const say = (el, text, ok = false) => { el.className = ok ? 'msg' : 'msg err'; el.textContent = text; };
+const teamHead = (sub) => h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('team.title')), h('p', { class: 'sub' }, sub)));
+const youChip = (subject) => (subject === session.me.subject ? h('span', { class: 'chip text you' }, t('m.you')) : null);
+
+async function team() {
+  const { scope } = session;
+  if (scope === ALL) return tenantsPage();
+  if (scope === null) return show(teamHead(''), h('section', {}, h('div', { class: 'card' }, h('div', { class: 'empty' }, t('team.none', { id: userId() })))));
+  const admin = mayAdmin(scope);
+  const base = `/api/tenants/${encodeURIComponent(scope)}`;
+  const members = h('div');
+  const tokens = h('div');
+  const secret = h('div');
+  const memberMsg = h('div', { class: 'msg', role: 'status' });
+  const tokenMsg = h('div', { class: 'msg', role: 'status' });
+
+  const loadMembers = async () => {
+    const rows = (await api('GET', `${base}/members`)).sort((a, b) => (a.role === b.role ? (a.id < b.id ? -1 : 1) : a.role === 'admin' ? -1 : 1));
+    const setRole = async (m, select) => {
+      try {
+        await api('PUT', `${base}/members/${encodeURIComponent(m.id)}`, { role: select.value });
+        say(memberMsg, t('m.roleSaved', { id: m.id, role: t(`role.${select.value}`) }), true);
+        await loadMembers();
+      } catch (error) {
+        select.value = m.role;
+        say(memberMsg, failText(error));
+      }
+    };
+    const remove = async (m) => {
+      if (!(await confirmDialog(t('m.removeTitle', { id: m.id, tenant: scope }), t('m.removeBody'), t('m.remove')))) return;
+      try {
+        await api('DELETE', `${base}/members/${encodeURIComponent(m.id)}`);
+        say(memberMsg, '', true);
+        await Promise.all([loadMembers(), loadTokens()]);
+      } catch (error) { say(memberMsg, failText(error)); }
+    };
+    members.replaceChildren(table(
+      [['col.member'], ['col.role'], ['col.lastSeen'], admin && ['col.actions', 'r']].filter(Boolean),
+      rows.map((m) => ({ cells: [
+        h('span', {}, h('span', { class: 'mono' }, m.id), m.name && m.name !== m.id ? h('span', { class: 'muted' }, ` · ${m.name}`) : null, youChip(`user:${m.id}`)),
+        admin ? h('select', { 'aria-label': t('col.role'), onchange: (e) => setRole(m, e.target) }, ['admin', 'member'].map((r) => h('option', { value: r, selected: r === m.role }, t(`role.${r}`))))
+          : t(`role.${m.role}`),
+        m.lastSeen == null ? h('span', { class: 'chip text' }, t('m.never')) : ago(m.lastSeen),
+        admin && h('button', { class: 'btn danger small', type: 'button', onclick: () => remove(m) }, t('m.remove')),
+      ].filter((cell) => cell !== false) })), 'empty.members'));
+  };
+
+  const loadTokens = async () => {
+    const rows = (await api('GET', `${base}/tokens`)).sort((a, b) => (a.revokedAt === null) !== (b.revokedAt === null) ? (a.revokedAt === null ? -1 : 1) : b.createdAt - a.createdAt);
+    const revoke = async (token) => {
+      if (!(await confirmDialog(t('tk.revokeTitle', { label: token.label }), t('tk.revokeBody'), t('tk.revoke')))) return;
+      try {
+        await api('DELETE', `${base}/tokens/${encodeURIComponent(token.id)}`);
+        await loadTokens();
+      } catch (error) { say(tokenMsg, failText(error)); }
+    };
+    tokens.replaceChildren(table(
+      [['tk.kind'], ['col.label'], ['col.subject'], ['col.createdBy'], ['col.created'], ['col.state'], ['col.actions', 'r']],
+      rows.map((token) => ({ cells: [
+        h('span', { class: 'chip text' }, t(`tk.kind.${tokenKind(token)}`)),
+        token.label,
+        h('span', { class: 'mono' }, token.subject),
+        h('span', {}, h('span', { class: 'mono' }, token.createdBy), youChip(token.createdBy)),
+        ago(token.createdAt),
+        token.revokedAt === null ? h('span', { class: 'st green' }, t('tk.active')) : h('span', { class: 'st', title: stamp(token.revokedAt) }, t('tk.revoked')),
+        token.revokedAt === null && (admin || token.createdBy === session.me.subject)
+          ? h('button', { class: 'btn danger small', type: 'button', onclick: () => revoke(token) }, t('tk.revoke')) : null,
+      ] })), 'empty.tokens'));
+  };
+
+  const id = h('input', { placeholder: t('m.id'), 'aria-label': t('m.id'), title: t('m.idHint'), autocomplete: 'off', spellcheck: 'false' });
+  const role = h('select', { 'aria-label': t('col.role') }, ['member', 'admin'].map((r) => h('option', { value: r }, t(`role.${r}`))));
+  const addForm = h('form', { class: 'toolbar', onsubmit: async (event) => {
+    event.preventDefault();
+    const who = id.value.trim().replace(/^user:/, '');
+    if (!who) return id.focus();
+    try {
+      await api('PUT', `${base}/members/${encodeURIComponent(who)}`, { role: role.value });
+      say(memberMsg, t('m.added', { id: who, role: t(`role.${role.value}`) }), true);
+      id.value = '';
+      await loadMembers();
+    } catch (error) { say(memberMsg, failText(error)); }
+  } }, id, role, h('button', { class: 'btn primary', type: 'submit' }, t('m.add')));
+
+  const kinds = admin ? ['service', 'personal'] : ['personal'];
+  let kind = kinds[0];
+  const name = h('input', { placeholder: 'deploy', pattern: '[a-z][a-z0-9\\-]{0,22}', maxlength: 23, autocomplete: 'off', spellcheck: 'false' });
+  const label = h('input', { autocomplete: 'off' });
+  const kindPick = h('span');
+  const nameField = h('label', { class: 'field' }, h('span', {}, t('tk.name')), name, h('small', { class: 'mono' }, t('tk.nameHint', { tenant: scope })));
+  const personalNote = h('small', { class: 'muted' }, t('tk.personalHint', { subject: session.me.subject }));
+  const syncKind = () => {
+    kindPick.replaceChildren(segmented(kinds.map((k) => [k, t(`tk.kind.${k}`)]), kind, (k) => { kind = k; syncKind(); }, t('tk.kind')));
+    nameField.hidden = kind !== 'service';
+    personalNote.hidden = kind !== 'personal';
+  };
+  syncKind();
+  const showSecret = ({ token, subject }) => {
+    const code = h('code', {}, token);
+    const copy = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+      try {
+        await navigator.clipboard.writeText(token);
+      } catch {
+        const range = document.createRange();
+        range.selectNodeContents(code);
+        getSelection().removeAllRanges();
+        getSelection().addRange(range);
+        document.execCommand('copy');
+      }
+      copy.textContent = t('tk.copied');
+    } }, t('tk.copy'));
+    secret.replaceChildren(h('div', { class: 'inset secret', role: 'status' },
+      h('header', {}, h('b', {}, t('tk.secretTitle')), h('span', { class: 'muted mono' }, t('tk.secretFor', { subject }))),
+      code,
+      h('div', { class: 'actions' }, copy, h('button', { class: 'btn', type: 'button', onclick: () => secret.replaceChildren() }, t('tk.done')))));
+  };
+  const issueForm = h('form', { class: 'card form', novalidate: true, onsubmit: async (event) => {
+    event.preventDefault();
+    say(tokenMsg, '', true);
+    const body = { kind, ...(kind === 'service' && { name: name.value.trim() }), ...(label.value.trim() && { label: label.value.trim() }) };
+    try {
+      showSecret(await api('POST', `${base}/tokens`, body));
+      name.value = label.value = '';
+      await loadTokens();
+    } catch (error) { say(tokenMsg, failText(error)); }
+  } },
+    h('div', { class: 'fields' },
+      h('div', { class: 'field' }, h('span', {}, t('tk.kind')), kindPick, admin ? null : h('small', {}, t('tk.serviceAdmin'))),
+      nameField,
+      h('label', { class: 'field' }, h('span', {}, t('tk.label')), label)),
+    h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, t('tk.issue')), personalNote),
+    tokenMsg);
+
+  await Promise.all([loadMembers(), loadTokens()]);
+  show(
+    teamHead(t('team.sub', { tenant: scope })),
+    h('section', {}, sectionHead(1, 'sec.members', admin ? 'sec.membersDesc' : 'sec.membersRead'), admin ? addForm : null, members, memberMsg),
+    h('section', {}, sectionHead(2, 'sec.tokens', admin ? 'sec.tokensDesc' : 'sec.tokensMine'), secret, h('div', { class: 'stack' }, issueForm, tokens)),
+  );
+}
+
+async function tenantsPage() {
+  const list = h('div');
+  const message = h('div', { class: 'msg', role: 'status' });
+  const load = async () => {
+    const [tenants, apps] = await Promise.all([api('GET', '/api/tenants'), api('GET', '/api/apps')]);
+    session.tenants = tenants.map((x) => x.name);
+    topbar();
+    list.replaceChildren(table(
+      [['col.name'], ['col.display'], ['col.apps', 'r'], ['col.created']],
+      tenants.map((x) => ({ onpick: () => setScope(x.name), cells: [
+        h('span', { class: 'mono' }, x.name), x.display, h('span', { class: 'num' }, nf(apps.filter((a) => a.tenant === x.name).length)), ago(x.createdAt),
+      ] })), 'empty.tenants'));
+  };
+  const field = (key, control, hintKey) => h('label', { class: 'field' }, h('span', {}, t(key)), control, hintKey ? h('small', {}, t(hintKey)) : null);
+  const name = h('input', { required: true, pattern: '[a-z][a-z0-9\\-]{0,39}', placeholder: 'design', autocomplete: 'off', spellcheck: 'false' });
+  const display = h('input', { autocomplete: 'off' });
+  const admins = h('input', { placeholder: 'ana, bo', autocomplete: 'off', spellcheck: 'false' });
+  const form = h('form', { class: 'card form', novalidate: true, onsubmit: async (event) => {
+    event.preventDefault();
+    const body = {
+      name: name.value.trim(),
+      admins: admins.value.split(/[\s,]+/).filter(Boolean).map((x) => x.replace(/^user:/, '')),
+      ...(display.value.trim() && { display: display.value.trim() }),
+    };
+    try {
+      await api('POST', '/api/tenants', body);
+      say(message, t('tn.created', { name: body.name }), true);
+      name.value = display.value = admins.value = '';
+      await load();
+    } catch (error) { say(message, failText(error)); }
+  } },
+    h('div', { class: 'fields' }, field('tn.name', name, 'tn.nameHint'), field('tn.display', display), field('tn.admins', admins, 'tn.adminsHint')),
+    h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, t('tn.create'))),
+    message);
+  await load();
+  show(
+    teamHead(t('team.subAll')),
+    h('section', {}, sectionHead(1, 'sec.tenants', 'sec.tenantsDesc'), list),
+    h('section', {}, sectionHead(2, 'sec.newTenant', 'sec.newTenantDesc'), form),
   );
 }
 
@@ -3360,7 +3753,8 @@ function particle(layer, paths, delay = 0) {
 function explainPanel(model, kind) {
   const checks = kind === 'static' ? [] : model.health?.runtimes[kind]?.health ?? [];
   const p = model.health?.policy ?? {};
-  const vars = { max: p.max_failures, window: p.failure_window_seconds, backoff: p.restart_backoff_seconds, idle: p.idle_seconds, ready: p.ready_timeout_seconds };
+  const pattern = addressPattern(model.apps);
+  const vars = { max: p.max_failures, window: p.failure_window_seconds, backoff: p.restart_backoff_seconds, idle: p.idle_seconds, ready: p.ready_timeout_seconds, address: pattern ? t('tp.x.addr', { p: pattern }) : '' };
   const block = (key) => h('div', { class: 'xb' }, h('h3', {}, t(`tp.x.${key}`)), h('p', {}, t(`tp.x.${kind}.${key}`, vars)));
   return h('div', { class: 'card explain', 'data-section': 'explain' },
     h('div', { class: 'xh' }, h('b', { class: 'mono' }, kind), h('span', { class: 'muted' }, t(`tp.lane.${kind}.sub`))),
@@ -3560,13 +3954,22 @@ function topology() {
   };
 }
 
-const NAV = [['overview', '#/'], ['realtime', '#/realtime'], ['topology', '#/topology'], ['apps', '#/apps'], ['publish', '#/publish']];
+const NAV = [['overview', '#/'], ['realtime', '#/realtime'], ['topology', '#/topology'], ['team', '#/team'], ['apps', '#/apps'], ['publish', '#/publish']];
+const PLATFORM_VIEWS = ['overview', 'realtime', 'topology'];
+const allowed = (key) => (PLATFORM_VIEWS.includes(key) ? isPlatformAdmin() : key === 'team' ? upstream() : session !== null);
+
+/** The page a hash shows: an unknown view is the overview, and a page the caller may not see is the project list. */
+function viewOf(hash) {
+  const [, view] = hash.split('?')[0].split('/');
+  const key = NAV.some(([k]) => k === view) ? view : 'overview';
+  return allowed(key) ? key : 'apps';
+}
 
 function shell() {
-  const [, view] = location.hash.split('?')[0].split('/');
-  const current = NAV.some(([key]) => key === view) ? view : 'overview';
+  const current = viewOf(location.hash);
+  topbar();
   document.querySelector('nav').replaceChildren(h('div', { class: 'group' }, t('nav.group')),
-    ...NAV.map(([key, href]) => h('a', { href, 'aria-current': key === current ? 'page' : null, 'aria-label': t(`nav.${key}`) },
+    ...NAV.filter(([key]) => allowed(key)).map(([key, href]) => h('a', { href, 'aria-current': key === current ? 'page' : null, 'aria-label': t(`nav.${key}`) },
       icon(`nav-${key}`), h('span', { class: 'label' }, t(`nav.${key}`)))));
   document.getElementById('brand-sub').textContent = t('brand.sub');
   const theme = root.dataset.theme;
@@ -3634,16 +4037,25 @@ async function route() {
   const gen = ++generation;
   document.onvisibilitychange = null;
   crosshair.reset();
+  try {
+    session ??= await loadSession();
+  } catch (error) {
+    shell();
+    return show(h('div', { class: 'head' }, h('p', { class: 'msg err' }, t('err.load', { msg: error.message }))));
+  }
+  if (gen !== generation) return;
   shell();
-  const [, view, name] = location.hash.split('?')[0].split('/');
+  const [, , name] = location.hash.split('?')[0].split('/');
+  const view = viewOf(location.hash);
   const target = name && decodeURIComponent(name);
   try {
     const live = view === 'apps' && target ? await detail(target)
       : view === 'apps' ? await projects()
         : view === 'publish' ? (await publish(target), null)
-          : view === 'realtime' ? realtime()
-            : view === 'topology' ? topology()
-            : await overview();
+          : view === 'team' ? (await team(), null)
+            : view === 'realtime' ? realtime()
+              : view === 'topology' ? topology()
+                : await overview();
     if (gen !== generation) return;
     if (typeof live === 'function') {
       await live();
