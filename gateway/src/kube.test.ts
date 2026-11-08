@@ -142,13 +142,13 @@ test('log passes tailLines and container in the query and returns the text', asy
   assert.deepEqual([seen[0].url.searchParams.get('tailLines'), seen[0].url.searchParams.get('container')], ['200', 'app']);
 });
 
-test('a refused connection throws Unavailable', async () => {
+test('a refused connection throws Unavailable naming the Kubernetes API, not a compose profile', async () => {
   const closed = http.createServer().listen(0, '127.0.0.1');
   await once(closed, 'listening');
   const port = (closed.address() as AddressInfo).port;
   closed.close();
   await once(closed, 'close');
-  await assert.rejects(client(`http://127.0.0.1:${port}`).list('pods'), Unavailable);
+  await assert.rejects(client(`http://127.0.0.1:${port}`).list('pods'), (error) => error instanceof Unavailable && error.message === 'the Kubernetes API did not answer');
 });
 
 test('a call with no answer inside its timeout rejects as Unavailable', async (t) => {

@@ -41,7 +41,7 @@ async function fakeRunner(t: TestContext, id: string) {
   return { ref, starts };
 }
 
-async function fixture(t: TestContext, runners: readonly RunnerRef[]) {
+async function fixture(t: TestContext, runners: readonly RunnerRef[], unreachable?: string) {
   const store = tempStore();
   const specs = new Map<AppId, RunSpec>();
   const specFor = (id: AppId) => specs.get(id) ?? null;
@@ -54,7 +54,7 @@ async function fixture(t: TestContext, runners: readonly RunnerRef[]) {
     register(store, spec);
     specs.set(app, spec);
   }
-  const pool = { list: runners, ready: async () => true, runners: () => pool.list } satisfies RunnerPool & { list: readonly RunnerRef[] };
+  const pool = { list: runners, ready: async () => true, runners: () => pool.list, unreachable } satisfies RunnerPool & { list: readonly RunnerRef[] };
   const instances = new Instances(store, { replica: 'gateway' as ReplicaId });
   const guard = new AppGuard({ instances, specFor });
   const events: { app: string | null; ev: string; unavailable?: unknown }[] = [];
@@ -94,6 +94,19 @@ test('a wake whose home is not ready is refused as Unavailable and the Guard cou
   pool.list = [{ ...a.ref, ready: false }];
   await assert.rejects(runtime.acquire(app, 'request'), Unavailable);
   assert.equal(guard.quarantine(app), null);
+});
+
+test('on the kubernetes plane a wake with no runner names the runner StatefulSet, not a compose profile', async (t) => {
+  const kube = {
+    list: async () => ({ metadata: { resourceVersion: '1' }, items: [] }),
+    async *watch(_: string, { signal }: { signal: AbortSignal }) {
+      await once(signal, 'abort');
+    },
+  } as unknown as KubeClient;
+  const statefulSet = new StatefulSetPool(kube);
+  t.after(() => statefulSet.close());
+  const { apps: [app], runtime } = await fixture(t, [], statefulSet.unreachable);
+  await assert.rejects(runtime.acquire(app, 'request'), { message: 'no runner Pod of the pneuma-space-runner StatefulSet answered' });
 });
 
 test('a runner the pool drops marks only its own apps asleep as unavailable', async (t) => {

@@ -150,7 +150,7 @@ const running = (pod: Pod): string | null => {
 };
 
 const missing = (error: unknown): boolean => error instanceof KubeError && error.status === 404;
-const unavailable = (message: string): Unavailable => Object.assign(new Unavailable('container'), { message });
+const unavailable = (message: string): Unavailable => new Unavailable('container', message);
 
 export type PodDriverOptions = {
   /** In the apps namespace. */

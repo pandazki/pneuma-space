@@ -16,9 +16,10 @@ export class Backoff extends Error {
   }
 }
 
+/** The runtime's service did not answer; `reason` names it on the kubernetes plane, where there is no compose profile to start. */
 export class Unavailable extends Conflict {
-  constructor(kind: RuntimeKind) {
-    super(`runtime ${kind} is not available; start docker compose --profile ${RUNTIMES[kind].profile}`);
+  constructor(kind: RuntimeKind, reason?: string) {
+    super(reason ?? `runtime ${kind} is not available; start docker compose --profile ${RUNTIMES[kind].profile}`);
   }
 }
 

@@ -32,6 +32,8 @@ export interface RunnerPool {
   /** False when the pool could not read its runners, so nothing is known of the workers they hold. */
   ready(): Promise<boolean>;
   runners(): readonly RunnerRef[];
+  /** What Unavailable says when no runner answers; the compose profile hint when absent. */
+  readonly unreachable?: string;
 }
 
 /** The ready runner with the fewest awake workers, ties by id (ADR 0019 item 8). */
@@ -67,6 +69,7 @@ const RELIST_MS = 1000;
 
 /** Kubernetes: the runner StatefulSet's Pods in the client's namespace, listed and then watched; a Pod without an IP holds no workers yet. */
 export class StatefulSetPool implements RunnerPool {
+  readonly unreachable = 'no runner Pod of the pneuma-space-runner StatefulSet answered';
   #runners: readonly RunnerRef[] = [];
   readonly #listed = Promise.withResolvers<boolean>();
   readonly #stop = new AbortController();
@@ -176,6 +179,10 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     this.#log = options.log ?? emit;
   }
 
+  #unavailable(): Unavailable {
+    return new Unavailable('isolate', this.#pool.unreachable);
+  }
+
   accepts(spec: RunSpec): spec is IsolateRun {
     return spec.runtime.kind === 'isolate';
   }
@@ -186,7 +193,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
       if (row.runtime === 'isolate' && row.state !== 'asleep' && row.home !== null) awake.set(row.home, (awake.get(row.home) ?? 0) + 1);
     }
     const home = pick(this.#pool.runners(), (id) => awake.get(id) ?? 0);
-    if (!home) throw new Unavailable('isolate');
+    if (!home) throw this.#unavailable();
     return home.id;
   }
 
@@ -194,7 +201,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     slot.release = spec.release;
     slot.specHash = specHash(spec);
     const ref = this.#pool.runners().find((runner) => runner.id === slot.home);
-    if (!ref?.ready) throw new Unavailable('isolate');
+    if (!ref?.ready) throw this.#unavailable();
     const runner = this.#track(ref);
     const readyMs = spec.policy.ready_timeout_seconds * 1000;
     const request: StartRequest = {
@@ -209,7 +216,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     };
     const address = await this.#resolve(runner);
     // No app code has run yet, so a runner that does not answer this is never the app's fault.
-    await this.#call(runner, 'GET', '/health', undefined, readyMs).catch(() => { throw new Unavailable('isolate'); });
+    await this.#call(runner, 'GET', '/health', undefined, readyMs).catch(() => { throw this.#unavailable(); });
     runner.starting.add(spec.app);
     let started: Started;
     try {
@@ -318,13 +325,13 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     const home = this.#instances.row(app)?.home ?? (refs.length === 1 ? refs[0].id : null);
     if (home === null) return null;
     const ref = refs.find(({ id }) => id === home);
-    if (!ref) throw new Unavailable('isolate');
+    if (!ref) throw this.#unavailable();
     return this.#track(ref);
   }
 
   #reach(app: AppId, handle: string | null): Runner {
     const runner = this.#locate(app, handle);
-    if (!runner) throw new Unavailable('isolate');
+    if (!runner) throw this.#unavailable();
     return runner;
   }
 
@@ -444,7 +451,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
   async #resolve(runner: Runner): Promise<string> {
     return (await lookup(new URL(runner.url).hostname).catch(() => {
       runner.suspect = true;
-      throw new Unavailable('isolate');
+      throw this.#unavailable();
     })).address;
   }
 
@@ -462,10 +469,10 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     } catch (error) {
       runner.suspect = true;
       const code = (error as { cause?: { code?: string } }).cause?.code;
-      if (code !== undefined && UNREACHED.has(code)) throw new Unavailable('isolate');
+      if (code !== undefined && UNREACHED.has(code)) throw this.#unavailable();
       throw new RunnerError(`runner ${runner.id} ${method} ${path}: ${(error as Error).name === 'TimeoutError' ? `no answer within ${timeoutMs} ms` : String((error as Error).cause ?? error)}`);
     }
-    if (response.status === 503) throw new Unavailable('isolate');
+    if (response.status === 503) throw this.#unavailable();
     if (!response.ok) throw new RunnerError(`runner ${runner.id} ${method} ${path}: ${response.status} ${text}`);
     if (response.status === 204) return undefined as T;
     return (response.headers.get('content-type')?.startsWith('application/json') ? JSON.parse(text) : text) as T;

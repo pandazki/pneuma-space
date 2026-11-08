@@ -6,6 +6,8 @@ import { Unavailable } from './runtimes.ts';
 
 type Labels = Readonly<Record<string, string>>;
 
+const NO_ANSWER = 'the Kubernetes API did not answer';
+
 export type ObjectMeta = {
   readonly name: string;
   readonly namespace?: string;
@@ -149,7 +151,7 @@ async function read(res: IncomingMessage): Promise<string> {
   try {
     for await (const chunk of res) body += chunk;
   } catch (error) {
-    throw Object.assign(new Unavailable('container'), { cause: error });
+    throw Object.assign(new Unavailable('container', NO_ANSWER), { cause: error });
   }
   return body;
 }
@@ -292,7 +294,7 @@ export class KubeClient {
     if (payload !== undefined) Object.assign(headers, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) });
     return new Promise((resolve, reject) => {
       const req = this.#transport.request(this.#server + path, { method, headers, agent: this.#agent, signal }, resolve);
-      req.on('error', (error) => reject(Object.assign(new Unavailable('container'), { cause: error })));
+      req.on('error', (error) => reject(Object.assign(new Unavailable('container', NO_ANSWER), { cause: error })));
       req.end(payload);
     });
   }
