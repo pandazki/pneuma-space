@@ -11,7 +11,7 @@ import { MIGRATIONS, SqliteSession, SqliteStore } from './store.ts';
 
 const path = () => join(mkdtempSync(join(tmpdir(), 'pneuma-space-store-')), 'pneuma-space.sqlite3');
 
-storeContract('SQLite', async () => new SqliteStore(path()));
+storeContract('SQLite', async (options) => new SqliteStore(path(), options));
 
 test('a call issued while a transaction is open runs after it commits', async () => {
   const store = new SqliteStore(path());

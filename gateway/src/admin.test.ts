@@ -23,7 +23,7 @@ async function admin(runtime?: Runtimes) {
     nameOf: (app) => registry.nameOf(app),
     probes: { redis: async () => 'up' },
     host: async () => ({ cpus: 1, load: [0, 0, 0], memory: { totalBytes: 1, freeBytes: 1 }, data: null }),
-    usage: store,
+    store,
     policy: () => registry.policy(),
     view: (name) => registry.view(name),
     series: new Series(),
@@ -31,9 +31,9 @@ async function admin(runtime?: Runtimes) {
     retries: () => 0,
     replica: 'r1' as ReplicaId,
   });
-  const requests = new RequestLog();
+  const requests = new RequestLog(() => {});
   const logs = { logs: (app: AppId, tail: number) => w.runtime.logs(app, tail), healthOf: () => [] };
-  const server = await startAdmin({ registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, requests, store, ingressPort: 18080 }, { port: 0 });
+  const server = await startAdmin({ registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, requests, replica: 'r1' as ReplicaId, store, ingressPort: 18080 }, { port: 0 });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
     const raw = typeof body === 'string' ? body : body === undefined ? undefined : JSON.stringify(body);
@@ -132,8 +132,9 @@ test('GET /api/requests answers the records after the cursor, named, without a D
   const id = (await store.app(appName('survey')))!.id as AppId;
   for (const path of ['/a', '/b', '/c']) requests.record({ app: id, kind: 'request', method: 'GET', path, status: 200, ms: 2, waitMs: 1, cold: false, subject: null, error: null });
   w.runtime.calls.length = 0;
-  const reply = await call('GET', '/api/requests?after=1&limit=1');
-  assert.deepEqual(reply.body.map((r: { seq: number; app: string; path: string }) => [r.seq, r.app, r.path]), [[2, 'survey', '/b']]);
+  const reply = await call('GET', '/api/requests?after=r1:1&limit=1');
+  assert.deepEqual(reply.body.records.map((r: { replica: string; seq: number; app: string; path: string }) => [r.replica, r.seq, r.app, r.path]), [['r1', 2, 'survey', '/b']]);
+  assert.equal(reply.body.cursor, 'r1:2');
   assert.deepEqual(w.runtime.calls, []);
 });
 
@@ -237,4 +238,28 @@ test('GET /api/audit filters by tenant, time range, action and actor, newest fir
   const ats = async (query: string) => (await call('GET', `/api/audit?${query}`)).body.map((r: AuditRecord) => r.at);
   assert.deepEqual(await ats('tenant=lab&from=20&to=40&action=app.remove&actor=user:ann'), [30, 20]);
   assert.deepEqual(await ats('tenant=lab&action=app.remove&actor=user:ann&limit=3'), [40, 30, 20]);
+});
+
+test('a first publish past the tenant\'s apps quota answers 409 with the quota field', async (t) => {
+  const { call, server } = await admin();
+  t.after(() => server.close());
+  await call('POST', '/api/tenants', { name: 'blue', admins: ['ann'] });
+  await call('PUT', '/api/tenants/blue/quota', { apps: 1 });
+  assert.equal((await call('PUT', '/api/apps/one/release', { ...kvApp, tenant: 'blue' })).status, 200);
+  const refused = await call('PUT', '/api/apps/two/release', { ...kvApp, tenant: 'blue' });
+  assert.deepEqual([refused.status, refused.body.quota], [409, { tenant: 'blue', resource: 'apps', used: 1, limit: 1, ask: 1 }]);
+});
+
+test('a per-app cpu_millis or memory_mb above the tenant\'s total answers 400', async (t) => {
+  const { call, server } = await admin();
+  t.after(() => server.close());
+  await call('POST', '/api/tenants', { name: 'blue', admins: ['ann'] });
+  await call('PUT', '/api/tenants/blue/quota', { cpu_millis: 2000, memory_mb: 1024 });
+  await call('PUT', '/api/apps/one/release', { ...kvApp, tenant: 'blue' });
+  const statuses = await Promise.all([
+    call('PUT', '/api/apps/one/policy', { cpu_millis: 2001 }),
+    call('PUT', '/api/apps/one/policy', { memory_mb: 1025 }),
+    call('PUT', '/api/apps/one/policy', { cpu_millis: 2000, memory_mb: 1024 }),
+  ]);
+  assert.deepEqual(statuses.map((r) => r.status), [400, 400, 200]);
 });

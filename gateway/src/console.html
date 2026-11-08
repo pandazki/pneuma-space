@@ -751,7 +751,7 @@ const I18N = {
     'att.wake': '唤醒失败', 'att.quarantine': '已隔离', 'att.service': '{name} 不可达', 'att.serviceDetail': '网关的探测连不上它。',
     'att.p95': '唤醒 p95 超过门槛', 'att.p95Detail': '最近 1 小时 p95 {p95}，门槛 3 秒',
     'att.seen': '标为已读', 'att.allSeen': '全部已读', 'att.showSeen': '已读 {n} 条', 'att.hideSeen': '收起已读',
-    'tail.restart': '网关重启，序号从 1 重新开始。', 'tail.gap': '两次轮询之间超过 100 条事件，有 {n} 条没有显示。', 'tail.new': '{n} 条新事件', 'tail.paused': '已暂停跟随', 'tail.dropped': '暂停期间丢弃 {n} 条',
+    'tail.gap': '两次轮询之间超过 100 条事件，有 {n} 条没有显示。', 'tail.new': '{n} 条新事件', 'tail.paused': '已暂停跟随', 'tail.dropped': '暂停期间丢弃 {n} 条',
     'd.recent': '最近的状态变化',
     'dur.d': '{n} 天', 'dur.h': '{n} 小时', 'dur.m': '{n} 分', 'dur.s': '{n} 秒',
     'nav.realtime': '实时', 'ov.toRealtime': '实时页', 'tl.cut': '只画最近有变化的 {n} 个，共 {total} 个',
@@ -766,13 +766,15 @@ const I18N = {
     'rt.requests': '请求', 'rt.requestsDesc': '每次交换结束时记一条，最新在上。点一行看全部字段。',
     'rt.events': '事件', 'rt.eventsDesc': '生命周期事件。app 和 error 条件也作用于这里。',
     'rt.shown': '显示 {shown} / 共 {kept} 条', 'rt.new': '{n} 条新请求', 'empty.requests': '还没有请求。',
-    'rt.gap': '两次轮询之间结束的请求超过 {ring} 条，有 {n} 条没有显示。', 'rt.restart': '网关重启，请求序号从 1 重新开始。',
+    'rt.gap': '两次轮询之间结束的请求超过 {ring} 条，有 {n} 条没有显示。', 'rt.missing': '副本 {replica} 没有应答，它处理的请求在它恢复应答前不会显示。',
     'rt.cold': '冷启动 {ms}', 'rt.noAnswer': '没有应答', 'rt.addFilter': '加入过滤条件',
     'rt.c.tm': '时间', 'rt.c.sc': '状态', 'rt.c.mt': '方法', 'rt.c.ap': '应用', 'rt.c.pt': '路径', 'rt.c.du': '耗时', 'rt.c.wf': '时序', 'rt.c.sb': '主体',
     'rt.timelineDesc': '最近 15 分钟醒过的每个实例，随过滤条件收窄。点一行只看这个应用，再点一次取消。', 'rt.pick': '只看 {name}', 'rt.unpick': '取消只看 {name}',
-    'rt.f.seq': '序号', 'rt.f.app': '应用', 'rt.f.kind': '类别', 'rt.f.request': '请求', 'rt.f.status': '状态码', 'rt.f.ms': '总耗时',
+    'rt.f.seq': '副本与序号', 'rt.f.app': '应用', 'rt.f.kind': '类别', 'rt.f.request': '请求', 'rt.f.status': '状态码', 'rt.f.ms': '总耗时',
     'rt.f.open': '连接存续', 'rt.f.wait': '等上游就绪', 'rt.f.waitHint': '含唤醒', 'rt.f.cold': '冷启动', 'rt.f.subject': '主体', 'rt.f.error': '错误',
     'nav.topology': '拓扑',
+    'team.quota': '配额', 'team.quotaDesc': '已用对上限；留空表示不限', 'team.unlimited': '不限', 'team.limit': '上限',
+    'q.apps': '应用', 'q.awake': '醒着的实例', 'q.cpu_millis': 'CPU（千分之一核）', 'q.memory_mb': '内存（MiB）', 'q.storage_gb': '已供应存储（GiB）',
     'svc.volumes': 'Docker 卷',
     'col.runtime': '运行时',
     'st.quarantined': '已隔离',
@@ -969,7 +971,7 @@ const I18N = {
     'att.wake': 'Wake failed', 'att.quarantine': 'Quarantined', 'att.service': '{name} is down', 'att.serviceDetail': 'The gateway probe cannot reach it.',
     'att.p95': 'Wake p95 over the gate', 'att.p95Detail': 'p95 {p95} in the last hour against 3 s',
     'att.seen': 'Mark seen', 'att.allSeen': 'Mark all seen', 'att.showSeen': '{n} seen', 'att.hideSeen': 'Hide seen',
-    'tail.restart': 'Gateway restarted; seq starts again at 1.', 'tail.gap': '{n} events not shown: more than 100 arrived between two polls.', 'tail.new': '{n} new', 'tail.paused': 'following paused', 'tail.dropped': '{n} dropped while paused',
+    'tail.gap': '{n} events not shown: more than 100 arrived between two polls.', 'tail.new': '{n} new', 'tail.paused': 'following paused', 'tail.dropped': '{n} dropped while paused',
     'd.recent': 'recent state changes',
     'dur.d': '{n} d', 'dur.h': '{n} h', 'dur.m': '{n} min', 'dur.s': '{n} s',
     'nav.realtime': 'Realtime', 'ov.toRealtime': 'Realtime page', 'tl.cut': 'the {n} most recently changed of {total}',
@@ -984,13 +986,15 @@ const I18N = {
     'rt.requests': 'Requests', 'rt.requestsDesc': 'One row per exchange as it ends, newest on top. Click a row for every field.',
     'rt.events': 'Events', 'rt.eventsDesc': 'Lifecycle events. The app and error terms apply here too.',
     'rt.shown': '{shown} of {kept} shown', 'rt.new': '{n} new', 'empty.requests': 'No requests yet.',
-    'rt.gap': '{n} requests not shown: more than {ring} ended between two polls.', 'rt.restart': 'Gateway restarted; request seq starts again at 1.',
+    'rt.gap': '{n} requests not shown: more than {ring} ended between two polls.', 'rt.missing': 'Replica {replica} does not answer; the requests it handles are not shown until it does.',
     'rt.cold': 'cold {ms}', 'rt.noAnswer': 'no answer', 'rt.addFilter': 'Add to the filter',
     'rt.c.tm': 'Time', 'rt.c.sc': 'Status', 'rt.c.mt': 'Method', 'rt.c.ap': 'App', 'rt.c.pt': 'Path', 'rt.c.du': 'Duration', 'rt.c.wf': 'Waterfall', 'rt.c.sb': 'Subject',
     'rt.timelineDesc': 'Every instance awake in the last 15 min, narrowed by the filter. Click a row to follow that app; click again to clear.', 'rt.pick': 'Follow only {name}', 'rt.unpick': 'Stop following only {name}',
-    'rt.f.seq': 'Seq', 'rt.f.app': 'App', 'rt.f.kind': 'Kind', 'rt.f.request': 'Request', 'rt.f.status': 'Status', 'rt.f.ms': 'Duration',
+    'rt.f.seq': 'Replica, seq', 'rt.f.app': 'App', 'rt.f.kind': 'Kind', 'rt.f.request': 'Request', 'rt.f.status': 'Status', 'rt.f.ms': 'Duration',
     'rt.f.open': 'Open for', 'rt.f.wait': 'Upstream ready after', 'rt.f.waitHint': 'wake included', 'rt.f.cold': 'Cold', 'rt.f.subject': 'Subject', 'rt.f.error': 'Error',
     'nav.topology': 'Topology',
+    'team.quota': 'Quota', 'team.quotaDesc': 'Used over limit; empty means unlimited', 'team.unlimited': 'unlimited', 'team.limit': 'Limit',
+    'q.apps': 'Apps', 'q.awake': 'Awake instances', 'q.cpu_millis': 'CPU (millicores)', 'q.memory_mb': 'Memory (MiB)', 'q.storage_gb': 'Provisioned storage (GiB)',
     'svc.volumes': 'Docker volumes',
     'col.runtime': 'Runtime',
     'st.quarantined': 'quarantined',
@@ -1262,6 +1266,7 @@ const ICON = {
   'nav-realtime': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="1.25" fill="currentColor" stroke="none"/><path d="M6.2 5.7a4.4 4.4 0 0 0 0 6.6M11.8 5.7a4.4 4.4 0 0 1 0 6.6M3.9 3.4a7.6 7.6 0 0 0 0 11.2M14.1 3.4a7.6 7.6 0 0 1 0 11.2"/></svg>',
   'nav-topology': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="9" r="2"/><circle cx="13.5" cy="4.5" r="2"/><circle cx="13.5" cy="13.5" r="2"/><path d="m6.3 8.1 5.4-2.7M6.3 9.9l5.4 2.7"/></svg>',
   'nav-apps': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="10" width="5.5" height="5.5" rx="1.5"/></svg>',
+  'nav-team': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="6" r="2.5"/><circle cx="12.5" cy="7" r="2"/><path d="M2.25 15c0-2.5 1.9-4.25 4.25-4.25S10.75 12.5 10.75 15"/><path d="M11 11.1c.45-.2.95-.35 1.5-.35 1.9 0 3.25 1.45 3.25 3.5"/></svg>',
   'nav-publish': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.75v8.5M5.75 6 9 2.75 12.25 6"/><path d="M2.75 11.25v1.75a2 2 0 0 0 2 2h8.5a2 2 0 0 0 2-2v-1.75"/></svg>',
   'nav-team': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.75" cy="6.25" r="2.5"/><path d="M2.25 14.75a4.5 4.5 0 0 1 9 0"/><path d="M11.5 3.9a2.5 2.5 0 0 1 0 4.7M13.25 10.6a4.5 4.5 0 0 1 2.5 4.15"/></svg>',
   'panel': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.25" y="2.25" width="13.5" height="13.5" rx="3.5"/><path d="M6.75 2.25v13.5M12.25 7.25 10.5 9l1.75 1.75"/></svg>',
@@ -1366,28 +1371,30 @@ const MARKS = {
   deliveryFailed: { test: (e) => e.ev === 'delivery.failed', color: 'var(--red)' },
 };
 
-/** Everything the overview knows, folded from snapshots: the event history by seq and each app's state transitions. */
+/** Everything the overview knows, folded from snapshots: the event history by id and each app's state transitions. */
 function liveModel() {
-  return { startedAt: null, lastSeq: 0, horizon: 0, events: [], transitions: new Map(), wakeFailures: new WeakSet(), metrics: null, apps: [], appsAt: 0, rates: new Map() };
+  return { startedAt: null, lastId: 0, horizon: 0, events: [], transitions: new Map(), wakeFailures: new WeakSet(), metrics: null, apps: [], appsAt: 0, rates: new Map() };
 }
 
 function absorbMetrics(model, m) {
   const initial = model.startedAt === null;
-  const restarted = !initial && m.gateway.startedAt !== model.startedAt;
-  if (restarted) model.lastSeq = 0;
-  model.startedAt = m.gateway.startedAt;
-  const fresh = m.events.filter((e) => e.seq > model.lastSeq);
-  const missed = !initial && fresh.length ? fresh[0].seq - model.lastSeq - 1 : 0;
-  const lost = m.events.length > 0 && m.events[0].seq > model.lastSeq + 1;
+  // Events live in the platform store, so a restart loses none and only marks the header; a replica that started earlier is no restart.
+  const restarted = !initial && m.gateway.startedAt > model.startedAt;
+  model.startedAt = Math.max(model.startedAt ?? 0, m.gateway.startedAt);
+  const fresh = m.events.filter((e) => e.id > model.lastId);
+  // Ids may skip, so only a full answer of nothing but fresh events can hide older ones.
+  const full = m.events.length >= EVENT_RING;
+  const missed = !initial && full && fresh.length === m.events.length ? Math.max(0, fresh[0].id - model.lastId - 1) : 0;
+  const lost = missed > 0;
   const reset = initial || restarted || lost;
-  if (reset) {
-    model.horizon = lost ? m.events[0].t : m.gateway.startedAt;
+  if (initial || lost) {
+    model.horizon = full ? m.events[0].t : Math.min(m.events[0]?.t ?? Infinity, m.gateway.startedAt);
     for (const [name, list] of model.transitions) {
       const kept = list.filter((s) => s.t >= model.horizon);
       if (kept.length) model.transitions.set(name, kept); else model.transitions.delete(name);
     }
   }
-  if (fresh.length) model.lastSeq = fresh.at(-1).seq;
+  if (fresh.length) model.lastId = fresh.at(-1).id;
   for (const e of fresh) {
     if (!e.app || !INSTANCE_EVENTS.includes(e.ev)) continue;
     const list = model.transitions.get(e.app) ?? [];
@@ -1599,7 +1606,7 @@ function gateCard() {
   const strip = h('div', { class: 'gate', 'aria-hidden': 'true' });
   const latest = h('div', { class: 'ks' });
   const el = h('div', { class: 'card', 'data-section': 'gate' }, h('div', { class: 'kh' }, h('span', { class: 'l' }, t('k.wakes'))), value, sub, strip, latest);
-  let lastSeq = null;
+  let lastId = null;
   let shown = null;
   return {
     el,
@@ -1621,13 +1628,13 @@ function gateCard() {
         ...wakes.map((e) => {
           const failed = e.ms === undefined;
           return h('div', {
-            class: ['w', failed ? 'fail' : '', e === newest ? 'last' : '', animate && lastSeq !== null && e.seq > lastSeq ? 'drop' : ''].join(' '),
+            class: ['w', failed ? 'fail' : '', e === newest ? 'last' : '', animate && lastId !== null && e.id > lastId ? 'drop' : ''].join(' '),
             style: `left:${failed ? '100%' : x(e.ms)}`,
           });
         }),
         ...[['p50', w.p50Ms, 'end'], ['p95', w.p95Ms, 'start']].filter(([, v]) => v != null).map(([label, v, side]) => h('span', { class: `p ${side}`, style: `left:${x(v)}` }, label)),
         ...[0, 1000].map((v) => h('span', { class: `p axis${v ? '' : ' zero'}`, style: `left:${x(v)}` }, v ? ms(v) : '0')));
-      lastSeq = model.lastSeq;
+      lastId = model.lastId;
       fill(latest, newest
         ? [newest.ms === undefined ? h('span', { class: 'over' }, t('gate.failed')) : t('gate.latest', { ms: ms(newest.ms) }), ' · ', newest.app ?? '', ' · ', ticking(() => since(newest.t))]
         : t('gate.none'));
@@ -2098,21 +2105,21 @@ function eventTone(e) {
 }
 
 function eventFields(e) {
-  return Object.entries(e).filter(([k]) => !['seq', 't', 'ev', 'app'].includes(k))
+  return Object.entries(e).filter(([k]) => !['id', 't', 'ev', 'app', 'replica'].includes(k))
     .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' ');
 }
 
 const eventText = (e) => `${e.ev} ${e.app ?? ''} ${eventFields(e)}`.toLowerCase();
 
 function eventLine({ item: e }) {
-  return h('div', { class: 'ev', title: `#${e.seq} · ${stamp(e.t)}` },
+  return h('div', { class: 'ev', title: `#${e.id} · ${e.replica} · ${stamp(e.t)}` },
     h('span', { class: 'mono' }, clock(e.t, true)),
     h('span', { class: `st ${eventTone(e)}` }, h('span', { class: 'mono' }, e.ev)),
     e.app ? appLink(e.app) : h('span', { class: 'muted' }, '-'),
     h('span', { class: 'f', title: eventFields(e) }, eventFields(e)));
 }
 
-const eventMarks = (diff) => [diff.restarted && t('tail.restart'), diff.missed > 0 && t('tail.gap', { n: nf(diff.missed) })].filter(Boolean);
+const eventMarks = (diff) => (diff.missed > 0 ? [t('tail.gap', { n: nf(diff.missed) })] : []);
 
 /**
  * A newest-on-top stream that follows arrivals (ADR 0015): while the pointer is over it or it is scrolled down, new
@@ -2481,7 +2488,7 @@ function pulseStrip() {
 function realtime() {
   const filter = filterState();
   const model = liveModel();
-  const page = { cursor: 0, generation: 0, seeded: false, skip: new Set(), records: [], parsed: parseFilter(filter.text) };
+  const page = { cursor: '', seeded: false, last: new Map(), missing: new Set(), records: [], parsed: parseFilter(filter.text) };
   const match = { request: () => true, event: () => true };
   const header = liveHeader('live.lastRequest', () => first());
   const pulse = pulseStrip();
@@ -2492,7 +2499,7 @@ function realtime() {
   const detail = (r) => {
     const row = (key, ...value) => [h('dt', {}, t(`rt.f.${key}`)), h('dd', {}, value)];
     return h('div', { class: 'rqd' }, h('dl', {},
-      row('seq', `#${nf(r.seq)}`, h('span', { class: 'muted' }, `${new Intl.DateTimeFormat(locale(), { dateStyle: 'medium' }).format(r.t)} ${clock(r.t, true)}.${String(r.t % 1000).padStart(3, '0')}`)),
+      row('seq', `${r.replica} #${nf(r.seq)}`, h('span', { class: 'muted' }, `${new Intl.DateTimeFormat(locale(), { dateStyle: 'medium' }).format(r.t)} ${clock(r.t, true)}.${String(r.t % 1000).padStart(3, '0')}`)),
       row('app', appLink(r.app), term(`app:${r.app}`)),
       row('kind', r.kind, term(`kind:${r.kind}`)),
       row('request', `${r.method} ${r.path}`),
@@ -2604,22 +2611,23 @@ function realtime() {
 
   const pollRequests = async () => {
     for (let round = 0; round < 3; round++) {
-      const generation = page.generation;
-      const batch = await api('GET', `/api/requests?after=${page.cursor}&limit=${REQUEST_PAGE}`);
-      // Asked of the process before the restart was seen: its seqs mean nothing to the new cursor.
-      if (generation !== page.generation) return;
-      const missed = page.seeded && batch.length ? batch[0].seq - page.cursor - 1 : 0;
-      if (batch.length) page.cursor = batch.at(-1).seq;
-      const fresh = batch.filter((r) => !page.skip.has(r.seq));
-      page.records.push(...fresh);
-      page.records.splice(0, Math.max(0, page.records.length - KEEP_REQUESTS));
-      if (!page.seeded) requests.seed(fresh);
-      else if (fresh.length || missed > 0) {
-        requests.push(missed > 0 ? [t('rt.gap', { n: nf(missed), ring: nf(REQUEST_RING) })] : [], fresh);
-        header.beat();
+      const batch = await api('GET', `/api/requests?after=${encodeURIComponent(page.cursor)}&limit=${REQUEST_PAGE}`);
+      page.cursor = batch.cursor;
+      const marks = batch.missing.filter((name) => !page.missing.has(name)).map((name) => t('rt.missing', { replica: name }));
+      page.missing = new Set(batch.missing);
+      // Per replica, a seq past the next one means its ring overflowed between polls; a lower one, that it restarted.
+      for (const r of batch.records) {
+        const last = page.last.get(r.replica);
+        if (page.seeded && last !== undefined && r.seq > last + 1) marks.push(t('rt.gap', { n: nf(r.seq - last - 1), ring: nf(REQUEST_RING) }));
+        page.last.set(r.replica, r.seq);
       }
+      page.records.push(...batch.records);
+      page.records.splice(0, Math.max(0, page.records.length - KEEP_REQUESTS));
+      if (!page.seeded) requests.seed(batch.records);
+      if (marks.length || (page.seeded && batch.records.length)) requests.push(marks, page.seeded ? batch.records : []);
+      if (page.seeded && batch.records.length) header.beat();
       page.seeded = true;
-      if (batch.length < REQUEST_PAGE) break;
+      if (batch.records.length < REQUEST_PAGE) break;
     }
     header.seen(page.records.at(-1)?.t);
     renderPulse();
@@ -2627,14 +2635,7 @@ function realtime() {
   const pollMetrics = async () => {
     const m = await api('GET', '/api/metrics');
     const diff = absorbMetrics(model, m);
-    if (diff.restarted) {
-      header.restarted(m.gateway.startedAt);
-      // Records already read from the new process come again once the cursor starts over.
-      page.skip = new Set(page.records.filter((r) => r.t >= m.gateway.startedAt).map((r) => r.seq));
-      page.cursor = 0;
-      page.generation += 1;
-      requests.push([t('rt.restart')], []);
-    }
+    if (diff.restarted) header.restarted(m.gateway.startedAt);
     if (diff.reset) absorbApps(model, await api('GET', '/api/apps'), Date.now());
     if (diff.initial) events.seed(diff.fresh);
     else events.push(eventMarks(diff), diff.fresh);
@@ -3129,11 +3130,12 @@ async function team() {
     h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, t('tk.issue')), personalNote),
     tokenMsg);
 
-  await Promise.all([loadMembers(), loadTokens()]);
+  const [quota] = await Promise.all([quotaSection(scope, isPlatformAdmin()), loadMembers(), loadTokens()]);
   show(
     teamHead(t('team.sub', { tenant: scope })),
     h('section', {}, sectionHead(1, 'sec.members', admin ? 'sec.membersDesc' : 'sec.membersRead'), admin ? addForm : null, members, memberMsg),
     h('section', {}, sectionHead(2, 'sec.tokens', admin ? 'sec.tokensDesc' : 'sec.tokensMine'), secret, h('div', { class: 'stack' }, issueForm, tokens)),
+    quota,
   );
 }
 
@@ -3922,23 +3924,21 @@ function topology() {
   };
   const loadMetrics = async () => {
     const m = await api('GET', '/api/metrics');
-    if (model.startedAt !== null && m.gateway.startedAt !== model.startedAt) { model.cursor = null; header.restarted(m.gateway.startedAt); }
-    model.startedAt = m.gateway.startedAt;
+    if (model.startedAt !== null && m.gateway.startedAt > model.startedAt) header.restarted(m.gateway.startedAt);
+    model.startedAt = Math.max(model.startedAt ?? 0, m.gateway.startedAt);
     model.services = m.services;
   };
   const pollRequests = header.guarded(async () => {
     if (!scene) return;
     const seeding = model.cursor === null;
-    const batch = await api('GET', `/api/requests?after=${model.cursor ?? 0}&limit=${REQUEST_RING}`);
-    if (batch.length) {
-      model.cursor = batch.at(-1).seq;
-      model.last = batch.at(-1).t;
-    } else model.cursor ??= 0;
+    const { records, cursor } = await api('GET', `/api/requests?after=${encodeURIComponent(model.cursor ?? '')}&limit=${REQUEST_RING}`);
+    model.cursor = cursor;
+    if (records.length) model.last = records.at(-1).t;
     header.seen(model.last);
-    if (seeding || !batch.length) return;
+    if (seeding || !records.length) return;
     header.beat();
     const counts = new Map();
-    for (const r of batch) counts.set(r.app, (counts.get(r.app) ?? 0) + 1);
+    for (const r of records) counts.set(r.app, (counts.get(r.app) ?? 0) + 1);
     for (const [name, n] of counts) {
       for (let i = 0; i < Math.min(n, FLOWS_PER_APP); i++) setTimeout(() => scene.flow(name), i * 220);
     }
@@ -3963,6 +3963,38 @@ function viewOf(hash) {
   const [, view] = hash.split('?')[0].split('/');
   const key = NAV.some(([k]) => k === view) ? view : 'overview';
   return allowed(key) ? key : 'apps';
+const QUOTA_RESOURCES = ['apps', 'awake', 'cpu_millis', 'memory_mb', 'storage_gb'];
+
+/** The tenant's quota as used over limit per resource; a platform admin edits a limit in place (PUT quota). */
+async function quotaSection(tenant, platformAdmin) {
+  const path = `/api/tenants/${encodeURIComponent(tenant)}/quota`;
+  const grid = h('div', { class: 'tiles' });
+  const paint = ({ quota, used }) => grid.replaceChildren(...QUOTA_RESOURCES.map((r) => {
+    const limit = quota[r];
+    const shown = Number.isInteger(used[r]) ? String(used[r]) : used[r].toFixed(2);
+    const edit = platformAdmin && h('input', {
+      type: 'number', min: 0, step: 1, value: limit ?? '', placeholder: t('team.unlimited'), 'aria-label': `${t(`q.${r}`)} ${t('team.limit')}`,
+      onkeydown: (e) => { if (e.key === 'Enter') e.target.blur(); },
+      // Not onchange: clearing a number input to mean unlimited does not always fire it.
+      onblur: async (e) => {
+        const next = e.target.value === '' ? null : Number(e.target.value);
+        if (next === limit) return;
+        e.target.disabled = true;
+        try {
+          await api('PUT', path, { [r]: next });
+          paint(await api('GET', path));
+        } catch (error) {
+          e.target.disabled = false;
+          e.target.setCustomValidity(error.message);
+          e.target.reportValidity();
+        }
+      },
+    });
+    return tile(t(`q.${r}`), `${shown} / ${limit ?? t('team.unlimited')}`, edit || '', limit == null ? null : limit === 0 ? 1 : used[r] / limit);
+  }));
+  paint(await api('GET', path));
+  return h('section', {}, sectionHead(3, 'team.quota', 'team.quotaDesc'), grid);
+}
 }
 
 function shell() {

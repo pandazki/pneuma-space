@@ -1,4 +1,4 @@
-import { emit, type Emit } from './events.ts';
+import { emit, quotaRefused, type Emit, type QuotaRefused } from './events.ts';
 import type { Instances } from './instances.ts';
 import type { Series } from './metrics.ts';
 import {
@@ -34,7 +34,11 @@ export type RuntimesOptions = {
   readonly runtimes: readonly Runtime[];
   readonly specFor: (app: AppId) => RunSpec | null;
   readonly instances: Instances;
+  readonly quotaRefused?: QuotaRefused;
 };
+
+/** A wake refused by the tenant's quota answers 503 with this Retry-After; a refused delivery waits as long (ADR 0023 item 5). */
+export const QUOTA_RETRY_SECONDS = 30;
 
 /** What a wake takes from its tenant's quota (ADR 0023): an isolate worker shares the runner's CPU, so it records none. */
 export const instanceShape = (spec: RunSpec) => ({ cpuMillis: spec.runtime.kind === 'isolate' ? 0 : spec.policy.cpu_millis, memoryMb: spec.policy.memory_mb });
@@ -44,12 +48,14 @@ export class Runtimes implements Omit<Runtime, 'kind'> {
   readonly #byKind: ReadonlyMap<RuntimeKind, Runtime>;
   readonly #specFor: (app: AppId) => RunSpec | null;
   readonly #instances: Instances;
+  readonly #quotaRefused: QuotaRefused;
   readonly #owners = new WeakMap<Lease, Runtime>();
 
   constructor(options: RuntimesOptions) {
     this.#byKind = new Map(options.runtimes.map((runtime) => [runtime.kind, runtime]));
     this.#specFor = options.specFor;
     this.#instances = options.instances;
+    this.#quotaRefused = options.quotaRefused ?? quotaRefused;
   }
 
   async acquire(app: AppId, kind: 'request' | 'trigger'): Promise<Lease> {
@@ -60,7 +66,10 @@ export class Runtimes implements Omit<Runtime, 'kind'> {
     const row = this.#instances.row(app);
     // One row per app: the old runtime's instance goes before the new runtime wakes; an asleep row with no handle holds nothing.
     if (row && row.runtime !== runtime.kind && (row.state !== 'asleep' || row.handle !== null)) await this.#byKind.get(row.runtime)?.retire(app);
-    const lease = await runtime.acquire(app, kind);
+    const lease = await runtime.acquire(app, kind).catch((error: unknown) => {
+      if (error instanceof QuotaExceeded) this.#quotaRefused(error, app, 'wake');
+      throw error;
+    });
     this.#owners.set(lease, runtime);
     return lease;
   }

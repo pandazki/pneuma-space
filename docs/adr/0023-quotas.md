@@ -24,10 +24,10 @@
 
 3. **平台库计数，在租户行锁下。** 唤醒事务先 `SELECT ... FROM tenant WHERE name=$1 FOR UPDATE`，再对本租户的实例行 `count` 和两个 `sum`，与 `quota` 比较，通过则把实例行置 `waking` 并写入这次的 `cpu_millis`、`memory_mb`（取自有效 Policy，之后改 Policy 不改在跑实例的占用）。锁只串行化同一租户的唤醒，持有时间是一次索引扫描，事务里没有网络和 K8s 调用。判定是 `model.ts` 里的纯函数 `admits(quota, used, ask) -> Refusal | null`，发布和唤醒两处调用。
 4. **存储按已供应容量计，不实测。** 四个采样器（kubelet、Docker、`pg_database_size`、bucket 用量）和 15 min 的陈旧值都省掉，`storage_usage` 表不建。代价是 PostgreSQL 库、bucket 和 Redis 不受存储配额约束，运营者在服务层限制。
-5. **拒绝的形状。** 新错误 `QuotaExceeded extends Conflict`，带 `{tenant, resource, used, limit, ask}`。发布答 409，体带 `quota` 字段，`appctl` 原样打印；唤醒答 503 加 `Retry-After: 30`，请求记录 `refused` 为真，与 Backoff、Quarantined 同族，不算唤醒失败，Guard 不计数；投递的配额拒绝不消耗 `attempts`，`next_attempt_at` 后移 30 s。事件 `quota-refused {tenant, resource, used, limit, action}` 同一 `(tenant, resource)` 每分钟至多一条。`GET /api/tenants/<t>/quota` 返回 `{quota, used, storageMeasuredAt}`，团队页画已用对上限的条。
+5. **拒绝的形状。** 新错误 `QuotaExceeded extends Conflict`，带 `{tenant, resource, used, limit, ask}`。发布答 409，体带 `quota` 字段，`appctl` 原样打印；唤醒答 503 加 `Retry-After: 30`，请求记录 `refused` 为真，与 Backoff、Quarantined 同族，不算唤醒失败，Guard 不计数；投递的配额拒绝不消耗 `attempts`，`next_attempt_at` 后移 30 s。事件 `quota-refused {tenant, resource, used, limit, action}` 同一 `(tenant, resource)` 每分钟至多一条。`GET /api/tenants/<t>/quota` 返回 `{quota, used}`，团队页画已用对上限的条。
 
 理由：ResourceQuota 做不了执行点：runner Pod 是共享的，isolate 实例逃过它；单机版没有它；应用数和对象存储量表达不了；它的拒绝发生在 Pod 创建时，已经在唤醒中途，而且只是一个 403。平台库计数无论如何都要有，ResourceQuota 只会成为第二个真相源。锁下 `count` 和 `sum` 比租户上的计数器列便宜且永远正确，计数器在崩溃和重试下会漂移。`requests.cpu` 不等于上限，因为每个醒着但空闲的实例预留整份 CPU 会让四核节点只放得下四个默认实例，违背 G2；内存不可压缩，超卖会让无辜的 Pod 被 OOM，所以 request 等于 limit。
 
 拒绝：K8s ResourceQuota 做租户配额（运营者自己加的 ResourceQuota 或 LimitRange 拒绝了 Pod，就是一次带 K8s 原文的唤醒失败，平台不创建它）；Guaranteed QoS；cpu 和 memory 各拆成 request 和 limit 四个字段（三个没人会调）；用计数器列增减；配额满时驱逐本租户最久没有 Lease 的实例（reaper 在 `idle_seconds` 内本来就让出位置，503 窗口被抱怨再做）。
 
-后果：租户行锁在 PostgreSQL 上加在唤醒的热路径上，同一租户的大量同时冷唤醒被串行，每个只等毫秒级，进 `tests/bench/runtimes.ts` 量。存储配额是供应量不是用量：许多本地存储类不强制 PVC 大小，单个应用写满节点盘只能靠存储类挡。
+后果：`quota-refused` 的每分钟节流是每副本一份，N 个副本最多 N 条；存储准入在租户锁下判定而 Binding 行在 Provider 的 IO 之后才写，同一租户并发发布可能一起通过；把 `db_backend` 切到 sqlite 新建的 SQLite Binding 不经存储准入。租户行锁在 PostgreSQL 上加在唤醒的热路径上，同一租户的大量同时冷唤醒被串行，每个只等毫秒级，进 `tests/bench/runtimes.ts` 量。存储配额是供应量不是用量：许多本地存储类不强制 PVC 大小，单个应用写满节点盘只能靠存储类挡。

@@ -17,7 +17,18 @@ export type ProviderConfig = {
   readonly redisPassword: string;
   readonly rtcSecret: string;
   readonly rtcPublicHost: string;
+  /** GiB one files or SQLite binding is provisioned with; the tenant's `storage_gb` counts it (ADR 0023 item 4). */
+  readonly volumeGb: number;
 };
+
+const QUANTITY_GIB: Readonly<Record<string, number>> = { '': 2 ** -30, Ki: 2 ** -20, Mi: 2 ** -10, Gi: 1, Ti: 2 ** 10, k: 1e3 / 2 ** 30, M: 1e6 / 2 ** 30, G: 1e9 / 2 ** 30, T: 1e12 / 2 ** 30 };
+
+/** A Kubernetes quantity like `1Gi` or `500M`, in GiB. */
+export function gibibytes(raw: string): number {
+  const match = /^(\d+(?:\.\d+)?)(Ki|Mi|Gi|Ti|k|M|G|T)?$/.exec(raw);
+  if (!match) throw new InputError(`volume size "${raw}" must be a quantity like 1Gi or 500Mi`);
+  return Number(match[1]) * QUANTITY_GIB[match[2] ?? '']!;
+}
 
 export function providerConfig(env: Readonly<Record<string, string | undefined>>): ProviderConfig {
   return {
@@ -29,6 +40,7 @@ export function providerConfig(env: Readonly<Record<string, string | undefined>>
     redisPassword: env.PNEUMA_SPACE_REDIS_PASSWORD ?? 'pneuma',
     rtcSecret: env.PNEUMA_SPACE_RTC_SECRET ?? '',
     rtcPublicHost: env.PNEUMA_SPACE_RTC_PUBLIC_HOST ?? '127.0.0.1',
+    volumeGb: gibibytes((env.PNEUMA_SPACE_PLANE === 'kubernetes' ? env.PNEUMA_SPACE_K8S_VOLUME_SIZE : env.PNEUMA_SPACE_VOLUME_SIZE) ?? '1Gi'),
   };
 }
 

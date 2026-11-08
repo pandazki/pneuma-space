@@ -12,6 +12,9 @@ import { Ingress } from './ingress.ts';
 import { hostSample, httpProbe, Metrics, profileProbe, serveMetrics, Series, tcpProbe } from './metrics.ts';
 import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId } from './model.ts';
 import { composeProject, DockerInfra } from './infra.ts';
+import { inClusterClient } from './kube.ts';
+import { KubeInfra } from './kube-infra.ts';
+import { planeOf, podConfig, PodRuntime } from './pods.ts';
 import { createProviders, providerConfig, S3BundleStore } from './providers.ts';
 import { PlatformRegistry } from './registry.ts';
 import { IsolateRuntime, RUNNER_PORT } from './isolate.ts';
@@ -28,11 +31,12 @@ const log = (ev: string, extra: Record<string, unknown> = {}) => emit(ev, null, 
 
 const setup = (() => {
   try {
+    const pods = planeOf(process.env) === 'kubernetes' ? podConfig(process.env) : null;
     const identity = parseIdentityEnv(process.env);
     const admins = parsePlatformAdmins(process.env.PNEUMA_SPACE_PLATFORM_ADMINS);
     const upstream = identity.kind === 'upstream' ? { ...identity.options, verifier: new JwtVerifier(identity.jwt), audiences: identity.jwt.audiences } : null;
     const consoleIdentity = identity.kind === 'upstream' && upstream ? { ...upstream, audiences: identity.consoleAudiences } : null;
-    return { admins, upstream, consoleIdentity, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
+    return { pods, admins, upstream, consoleIdentity, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
   } catch (error) {
     console.error(`pneuma-space: ${(error as Error).message}`);
     process.exit(1);
@@ -49,18 +53,25 @@ const replica = (process.env.PNEUMA_SPACE_REPLICA ?? hostname()) as ReplicaId;
 const storeUrl = process.env.PNEUMA_SPACE_STORE_URL;
 const store = storeUrl
   ? await PgStore.open(storeUrl, {
-    commands: Number(process.env.PNEUMA_SPACE_STORE_COMMANDS ?? 4), testRetry: process.env.PNEUMA_SPACE_STORE_TEST_RETRY === '1',
+    commands: Number(process.env.PNEUMA_SPACE_STORE_COMMANDS ?? 4), testRetry: process.env.PNEUMA_SPACE_STORE_TEST_RETRY === '1', volumeGb: config.volumeGb,
   })
-  : new SqliteStore(join(data, 'pneuma-space.sqlite3'));
+  : new SqliteStore(join(data, 'pneuma-space.sqlite3'), { volumeGb: config.volumeGb });
 const series = new Series();
 const instances = new Instances(store, { replica });
 await instances.ready();
 await instances.start();
-const docker = new Docker();
-const infra = new DockerInfra(docker, await composeProject(docker));
 const specFor = (app: AppId) => registry.runSpec(app);
 const guard = new AppGuard({ instances, specFor, series });
-const container = new DockerRuntime({ docker, network, specFor, instances, guard });
+// The plane swaps the container driver and Infra; everything else is shared (ADR 0019 item 1).
+const { infra, container } = setup.pods
+  ? {
+    infra: new KubeInfra({ registry: process.env.PNEUMA_SPACE_REGISTRY?.trim() || null, authFile: process.env.PNEUMA_SPACE_REGISTRY_AUTH?.trim() || null }),
+    container: new PodRuntime({ kube: await inClusterClient('pneuma-space-apps'), config: setup.pods, specFor, instances, guard }),
+  }
+  : await (async () => {
+    const docker = new Docker();
+    return { infra: new DockerInfra(docker, await composeProject(docker)), container: new DockerRuntime({ docker, network, specFor, instances, guard }) };
+  })();
 const bundles = new S3BundleStore(config.object);
 const isolate = new IsolateRuntime({
   runner: `http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`, bundleUrl: (id) => bundles.presignTar(id), specFor,
@@ -69,9 +80,9 @@ const isolate = new IsolateRuntime({
 const runtime = new Runtimes({ runtimes: [container, isolate], specFor, instances });
 const registry = await PlatformRegistry.open({
   store, runtime, guard, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => metrics.stats(),
-  addressing: setup.addressing,
+  addressing: setup.addressing, volumeGb: config.volumeGb,
 });
-const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica });
+const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica, policy: () => registry.policy() });
 const authority = new Authority(store, setup.admins);
 const identity: Identity = setup.upstream
   ? new UpstreamIdentity(setup.upstream, authority, registry)
@@ -96,7 +107,7 @@ const metrics = new Metrics({
     runner: profileProbe('runner', RUNNER_PORT),
   },
   host: () => hostSample(data),
-  usage: store,
+  store,
   policy: () => registry.policy(),
   view: (name) => registry.view(name),
   series,
@@ -125,7 +136,10 @@ await instances.onLeader((leading) => {
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
 // The console audience keeps a JWT leaked from an app request from replaying on the admin API (ADR 0021 item 1).
 const upstream = setup.consoleIdentity ? { identity: new UpstreamIdentity(setup.consoleIdentity, authority, registry), authority } : undefined;
-const admin = await startAdmin({ registry, bundles, runtime, guard, metrics, requests, store, ingressPort, upstream }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const peers = process.env.PNEUMA_SPACE_PEERS
+  ? { host: process.env.PNEUMA_SPACE_PEERS, forward: ['authorization', ...(setup.upstream ? [setup.upstream.header] : [])] }
+  : undefined;
+const admin = await startAdmin({ registry, bundles, runtime, guard, metrics, requests, replica, peers, store, ingressPort, upstream }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const exporter = await serveMetrics(process.env.PNEUMA_SPACE_METRICS_PORT, () => metrics.prometheus());
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {
@@ -146,7 +160,8 @@ process.once('SIGTERM', async () => {
   await Promise.all([ingress.close(), new Promise((resolve) => admin.close(resolve))]);
   await ingress.flush();
   await instances.close();
-  await store.close();
   log('gateway-stopped');
+  await metrics.flushEvents();
+  await store.close();
   process.exit(0);
 });

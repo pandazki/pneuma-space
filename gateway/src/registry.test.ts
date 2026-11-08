@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { Ingress } from './ingress.ts';
 import { Series } from './metrics.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { Conflict, InputError, appName, parseManifest, subject, triggerName, type App, type AppId, type BundleId, type Capabilities, type Change, type Store, type StoreOps } from './model.ts';
+import { Conflict, InputError, QuotaExceeded, appName, parseManifest, subject, tenantName, triggerName, type App, type AppId, type BundleId, type Capabilities, type Change, type Store, type StoreOps } from './model.ts';
 import { PlatformRegistry } from './registry.ts';
 import { FakeRuntime, world } from './registry.fakes.ts';
 import { DeliveryScheduler } from './scheduler.ts';
@@ -294,4 +294,34 @@ test('a refresh that read an older app version than the view holds is not applie
   for (const listener of listeners) listener({ kind: 'app', name: survey });
   await sleep(50);
   assert.equal(registry.view(survey)?.owner, 'user:bob');
+});
+
+async function quotaWorld(quota: Record<string, number | null>) {
+  const w = world();
+  const opened = await w.open();
+  await opened.registry.createTenant(blue, 'Blue', ['ann']);
+  await opened.registry.setQuota(blue, quota);
+  return { ...opened, w };
+}
+
+const blue = tenantName('blue');
+
+function publishIn(registry: PlatformRegistry, name: string, capabilities: Record<string, unknown>, image = 'example:1') {
+  const manifest = parseManifest({ contract: 1, capabilities: capabilities as Capabilities });
+  return registry.publish({ name: appName(name), image, manifest, bundle: null, owner: ann, tenant: blue });
+}
+
+test('a republish of an app is never refused, even with the tenant over its apps and storage quotas', async () => {
+  const { registry } = await quotaWorld({ apps: 1, storage_gb: 1 });
+  await publishIn(registry, 'one', { files: {} });
+  await registry.setQuota(blue, { apps: 0, storage_gb: 0 });
+  assert.equal((await publishIn(registry, 'one', { files: {} }, 'example:2')).number, 2);
+});
+
+test('storage_gb counts only bindings a publish would create, and only files and SQLite ones', async () => {
+  const { registry } = await quotaWorld({ storage_gb: 2 });
+  await publishIn(registry, 'one', { files: {}, db: {} });
+  await publishIn(registry, 'one', { files: {}, db: {}, kv: {}, object: {} }, 'example:2');
+  await assert.rejects(publishIn(registry, 'two', { db: {} }), (error: unknown) =>
+    error instanceof QuotaExceeded && JSON.stringify(error.refusal) === JSON.stringify({ resource: 'storage_gb', used: 2, limit: 2, ask: 1 }));
 });

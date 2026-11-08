@@ -6,6 +6,8 @@ services:
   gateway:
     build: ./gateway
     restart: unless-stopped
+    # Every request and lifecycle event is a stdout line (ADR 0024 item 5); the log driver bounds what the host keeps.
+    logging: { driver: json-file, options: { max-size: "50m", max-file: "5" } }
     depends_on:
       rustfs: { condition: service_healthy }
       redis: { condition: service_started }
@@ -28,6 +30,7 @@ services:
       PNEUMA_SPACE_RTC_SECRET: ${PNEUMA_SPACE_RTC_SECRET:-pneuma-local-rtc}
       PNEUMA_SPACE_RTC_PUBLIC_HOST: ${PNEUMA_SPACE_RTC_PUBLIC_HOST:-127.0.0.1}
       PNEUMA_SPACE_REDIS_PASSWORD: ${PNEUMA_SPACE_REDIS_PASSWORD:-pneuma}
+      PNEUMA_SPACE_VOLUME_SIZE: ${PNEUMA_SPACE_VOLUME_SIZE:-1Gi}
     networks: [pneuma-space]
 
   rustfs:
