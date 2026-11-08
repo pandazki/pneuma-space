@@ -9,7 +9,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { demux, Docker, type ContainerInfo } from './docker.ts';
 import { DockerInfra } from './infra.ts';
 import {
-  appName, DEFAULT_POLICY, newAppId, NotFound, type AppId, type ImageId, type Lease, type Policy, type ReleaseNumber, type RunSpec, type StorageBinding,
+  appName, DEFAULT_POLICY, DEFAULT_TENANT, newAppId, NotFound, type AppId, type ImageId, type Lease, type Policy, type ReleaseNumber, type RunSpec, type StorageBinding,
 } from './model.ts';
 import { DockerRuntime } from './runtime.ts';
 
@@ -83,7 +83,7 @@ function inner(image: ImageId, network: string): void {
     const app = newAppId();
     const specs = new Map<AppId, RunSpec>();
     const publish = (release: number, env: Record<string, string> = {}, id: AppId = app, storage: StorageBinding[] = []) => specs.set(id, {
-      app: id, name: appName('fixture'), release: release as ReleaseNumber, runtime: { kind: 'container', image }, injection: { env, storage }, policy: { ...DEFAULT_POLICY, ...policy },
+      app: id, name: appName('fixture'), tenant: DEFAULT_TENANT, release: release as ReleaseNumber, runtime: { kind: 'container', image }, injection: { env, storage, services: [] }, policy: { ...DEFAULT_POLICY, ...policy },
     });
     publish(1);
     const runtimes: DockerRuntime[] = [];

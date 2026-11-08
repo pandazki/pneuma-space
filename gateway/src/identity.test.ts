@@ -7,11 +7,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { LocalIdentity, issueToken, loadOrCreateSecret } from './identity.ts';
-import type { Token } from './model.ts';
+import { DEFAULT_TENANT, type Token } from './model.ts';
 
 const secret = randomBytes(32);
 const issued = issueToken('ci');
-const tokens = new Map<string, Token>([[issued.hash, { id: '1', subject: issued.subject, hash: issued.hash, createdAt: 0 }]]);
+const tokens = new Map<string, Token>([[issued.hash, { id: '1', tenant: DEFAULT_TENANT, subject: issued.subject, label: 'ci', hash: issued.hash, createdBy: 'local', createdAt: 0, revokedAt: null }]]);
 const identity = new LocalIdentity(secret, async (hash) => tokens.get(hash) ?? null);
 
 const server = createServer((request, response) => void identity.serve(request, response)).listen(0);

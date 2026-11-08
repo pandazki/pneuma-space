@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
-import { IDEMPOTENCY_WINDOW_MS, type App, type AppId, type AppName, type Delivery, type DeliveryId, type Subject, type TriggerName } from './model.ts';
+import { DEFAULT_TENANT, IDEMPOTENCY_WINDOW_MS, type App, type AppId, type AppName, type Delivery, type DeliveryId, type Subject, type TriggerName } from './model.ts';
 import { SqliteStore } from './store.ts';
 
 const store = new SqliteStore(join(mkdtempSync(join(tmpdir(), 'pneuma-space-store-')), 'pneuma-space.sqlite3'));
@@ -18,7 +18,7 @@ function delivery(id: string, fields: Partial<Delivery>): Delivery {
 
 function app(name: string): App {
   return {
-    name: name as AppName, id: `id-${name}` as AppId, owner: 'user:ann' as Subject, status: 'registered', current: null, policyOverride: {}, registeredAt: 0,
+    name: name as AppName, id: `id-${name}` as AppId, tenant: DEFAULT_TENANT, access: 'org', owner: 'user:ann' as Subject, status: 'registered', current: null, policyOverride: {}, registeredAt: 0,
   };
 }
 

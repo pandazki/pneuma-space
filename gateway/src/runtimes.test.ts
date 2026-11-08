@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { EventLog } from './events.ts';
 import {
-  appName, Conflict, DEFAULT_POLICY, newAppId,
+  appName, Conflict, DEFAULT_POLICY, DEFAULT_TENANT, newAppId,
   type AppId, type BundleId, type ImageId, type Lease, type Policy, type ReleaseNumber, type Runtime, type RunSpec, type RuntimeKind,
 } from './model.ts';
 import { Backoff, Quarantined, Runtimes } from './runtimes.ts';
@@ -47,7 +47,7 @@ function fixture(kinds: readonly RuntimeKind[], policy: Partial<Policy> = {}) {
   const app = newAppId();
   const clock = { now: 1_000_000 };
   let spec: RunSpec = {
-    app, name: appName('fixture'), release: 1 as ReleaseNumber, runtime: RUN.container, injection: { env: {}, storage: [] }, policy: { ...DEFAULT_POLICY, ...policy },
+    app, name: appName('fixture'), tenant: DEFAULT_TENANT, release: 1 as ReleaseNumber, runtime: RUN.container, injection: { env: {}, storage: [], services: [] }, policy: { ...DEFAULT_POLICY, ...policy },
   };
   const events = new EventLog(() => {});
   const calls: string[] = [];

@@ -1,11 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
-  APPS_PATH, CAPABILITIES, Conflict, DEFAULT_ENTRY, InputError, NotFound, RUNTIMES,
+  APPS_PATH, CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_TENANT, InputError, NotFound, RUNTIMES,
   declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider,
   type App, type AppDetail, type AppId, type AppName, type AppSummary, type Binding, type BindingState,
-  type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type CapabilityProvider, type Guard, type Infra,
-  type Injection, type Manifest, type Policy, type PolicyOverride, type PolicyPatch, type ProviderName,
+  type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type Change, type CapabilityProvider, type Guard, type Infra,
+  type Manifest, type Policy, type PolicyOverride, type PolicyPatch, type ProviderName,
   type PublishRequest, type Registry, type Release, type ReleaseNumber, type ResourceKind, type RouteView,
   type RunSpec, type Runtime, type RuntimeKind, type SchedulerView, type Stats, type Store, type StoreOps, type Subject, type Trigger, type TriggerName,
 } from './model.ts';
@@ -98,7 +98,6 @@ export class PlatformRegistry implements Registry {
   readonly #names = new Map<AppId, AppName>();
   readonly #schedules = new Map<AppId, SchedulerView>();
   readonly #indexes = new Map<BundleId, BundleIndex>();
-  readonly #locks = new Map<AppName, Promise<unknown>>();
   #policy: Policy;
 
   private constructor(deps: RegistryDeps, policy: Policy) {
@@ -113,22 +112,42 @@ export class PlatformRegistry implements Registry {
     this.#policy = policy;
   }
 
-  /** Loads the global policy and every RouteView, fetching bundle indexes of current releases. */
+  /** Loads the global policy and every RouteView, then follows committed changes from any replica. */
   static async open(deps: RegistryDeps): Promise<PlatformRegistry> {
     const registry = new PlatformRegistry(deps, await deps.store.policy());
-    for (const app of await deps.store.apps()) {
-      const bundle = (await currentRelease(deps.store, app))?.bundle;
-      if (bundle && !registry.#indexes.has(bundle)) registry.#indexes.set(bundle, await deps.bundles.index(bundle));
-      await registry.#refresh(app.name);
-    }
+    await registry.#reload();
+    deps.store.onChange((change) => void registry.#follow(change).catch((error: Error) => log('follow-failed', null, { error: error.message })));
+    deps.store.onResync(() => void registry.#reload().catch((error: Error) => log('resync-failed', null, { error: error.message })));
     return registry;
   }
 
-  publish(request: PublishRequest): Promise<Release> {
-    return this.#exclusive(request.name, () => this.#publish(request));
+  /** A command's own replica has already refreshed; the second refresh reads the same rows. Retire and reload stay with that replica (ADR 0025 item 5). */
+  async #follow(change: Change): Promise<void> {
+    if (change.kind === 'app') return this.#load(change.name);
+    if (change.kind !== 'policy') return;
+    this.#policy = await this.#store.policy();
+    for (const name of [...this.#views.keys()]) await this.#refresh(name);
   }
 
-  async #publish({ name, image: reference, manifest, bundle, owner }: PublishRequest): Promise<Release> {
+  async #reload(): Promise<void> {
+    this.#policy = await this.#store.policy();
+    const names = new Set((await this.#store.apps()).map((app) => app.name));
+    for (const name of new Set([...names, ...this.#views.keys()])) await this.#load(name);
+  }
+
+  /** Fetches the current release's bundle index if this replica has not seen it, then refreshes. */
+  async #load(name: AppName): Promise<void> {
+    const app = await this.#store.app(name);
+    const bundle = app && (await currentRelease(this.#store, app))?.bundle;
+    if (bundle && !this.#indexes.has(bundle)) this.#indexes.set(bundle, await this.#bundles.index(bundle));
+    await this.#refresh(name);
+  }
+
+  publish(request: PublishRequest): Promise<Release> {
+    return this.#store.exclusive(request.name, () => this.#publish(request));
+  }
+
+  async #publish({ name, image: reference, manifest, bundle, owner, tenant = DEFAULT_TENANT }: PublishRequest): Promise<Release> {
     const kinds = declaredKinds(manifest);
     const needsRuntime = kinds.some((k) => CAPABILITIES[k].needsRuntime);
     const runtime: RuntimeKind | null = manifest.runtime ?? (reference !== null ? 'container' : bundle !== null && needsRuntime ? 'isolate' : null);
@@ -163,7 +182,8 @@ export class PlatformRegistry implements Registry {
 
     if (!app) {
       if (owner === null) throw new InputError(`owner is required on the first publish of "${name}"; pass user:<name> or service:<name>`);
-      app = { name, id: newAppId(), owner, status: 'registered', current: null, policyOverride: pinned, registeredAt: Date.now() };
+      if (!(await this.#store.tenant(tenant))) throw new NotFound(`no tenant named "${tenant}"`);
+      app = { name, id: newAppId(), tenant, access: 'org', owner, status: 'registered', current: null, policyOverride: pinned, registeredAt: Date.now() };
       await this.#store.putApp(app);
       await this.#refresh(name);
       log('app-created', name, { id: app.id });
@@ -194,7 +214,7 @@ export class PlatformRegistry implements Registry {
   }
 
   remove(name: AppName): Promise<void> {
-    return this.#exclusive(name, async () => {
+    return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
       if (app.status === 'removed') return this.#converge(name);
       if (app.status === 'purging') throw new Conflict(`app "${name}" is being purged`);
@@ -209,7 +229,7 @@ export class PlatformRegistry implements Registry {
   }
 
   purge(name: AppName): Promise<void> {
-    return this.#exclusive(name, async () => {
+    return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
       if (app.status === 'registered') throw new Conflict(`app "${name}" is registered; remove it before purging`);
       if (app.status === 'removed') {
@@ -236,13 +256,20 @@ export class PlatformRegistry implements Registry {
       this.#indexes.delete(bundle);
     }
     await this.#store.deleteApp(app.id);
-    this.#views.delete(app.name);
-    this.#specs.delete(app.id);
-    this.#runtimes.delete(app.id);
-    this.#schedules.delete(app.id);
+    this.#forget(app.name);
     log('purge', app.name);
     this.#emit(app.id);
     this.#names.delete(app.id);
+  }
+
+  /** Drops what this replica holds for an app whose row is gone. `nameOf` keeps answering for the id, so late events still carry the name. */
+  #forget(name: AppName): void {
+    const id = this.#views.get(name)?.app;
+    this.#views.delete(name);
+    if (id === undefined) return;
+    this.#specs.delete(id);
+    this.#runtimes.delete(id);
+    this.#schedules.delete(id);
   }
 
   async setGlobalPolicy(patch: Partial<Policy>): Promise<Policy> {
@@ -260,7 +287,7 @@ export class PlatformRegistry implements Registry {
 
   setAppPolicy(name: AppName, patch: PolicyPatch): Promise<PolicyOverride> {
     const fields = parsePolicyPatch(patch, 'app');
-    return this.#exclusive(name, async () => {
+    return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
       const override: Record<string, unknown> = { ...app.policyOverride };
       for (const [key, value] of Object.entries(fields)) {
@@ -295,7 +322,9 @@ export class PlatformRegistry implements Registry {
 
   async issueToken(name: string): Promise<{ readonly token: string; readonly subject: Subject }> {
     const { token, hash, subject } = issueToken(name);
-    await this.#store.putToken({ id: randomBytes(8).toString('hex'), subject, hash, createdAt: Date.now() });
+    await this.#store.putToken({
+      id: randomBytes(8).toString('hex'), tenant: DEFAULT_TENANT, subject, label: name, hash, createdBy: 'local', createdAt: Date.now(), revokedAt: null,
+    });
     log('token', null, { subject });
     return { token, subject };
   }
@@ -340,6 +369,7 @@ export class PlatformRegistry implements Registry {
         lastAccessAt: s?.lastAccessAt ?? null,
         requests: s?.requests ?? 0,
         errors: s?.errors ?? 0,
+        node: null,
       };
     }).sort((a, b) => (a.name < b.name ? -1 : 1));
   }
@@ -369,7 +399,7 @@ export class PlatformRegistry implements Registry {
   /** Resolves once every interrupted purge and binding convergence has run; startup need not await it. */
   async resume(): Promise<void> {
     const apps = await this.#store.apps();
-    const work = apps.map((app) => this.#exclusive(app.name, async () => {
+    const work = apps.map((app) => this.#store.exclusive(app.name, async () => {
       if (app.status === 'purging') await this.#finishPurge(app);
       else await this.#converge(app.name);
     }).catch((error: Error) => log('resume-failed', app.name, { error: error.message })));
@@ -436,12 +466,14 @@ export class PlatformRegistry implements Registry {
   #refresh(name: AppName): Promise<void> {
     return this.#store.transaction(async (tx) => {
       const app = await tx.app(name);
-      if (!app) return;
+      if (!app) return this.#forget(name);
       const release = await currentRelease(tx, app);
       const policy = effectivePolicy(this.#policy, app.policyOverride);
       const view: RouteView = Object.freeze({
         app: app.id,
         name,
+        tenant: app.tenant,
+        access: app.access,
         status: app.status,
         owner: app.owner,
         release: release?.number ?? null,
@@ -473,12 +505,14 @@ export class PlatformRegistry implements Registry {
   }
 
   #spec(app: App, release: Release, bindings: readonly Binding[], policy: Policy): RunSpec {
-    const injections: Injection[] = bindings
+    const providers = bindings
       .filter((b) => b.state === 'active' && desiredState(app, release.manifest, policy, b) === 'active')
-      .map((b) => this.#provider(b.provider).inject(app.id, b.resource));
+      .map((b) => [this.#provider(b.provider), b.resource] as const);
+    const injections = providers.map(([provider, resource]) => provider.inject(app.id, resource));
     return {
       app: app.id,
       name: app.name,
+      tenant: app.tenant,
       release: release.number,
       runtime: release.runtime === 'isolate'
         ? { kind: 'isolate', bundle: release.bundle!, entry: release.manifest.entry ?? DEFAULT_ENTRY }
@@ -486,6 +520,7 @@ export class PlatformRegistry implements Registry {
       injection: {
         env: Object.assign({}, ...injections.map((i) => i.env)),
         storage: injections.flatMap((i) => i.storage),
+        services: [...new Set(providers.flatMap(([provider]) => (provider.service ? [provider.service] : [])))],
       },
       policy,
     };
@@ -510,14 +545,5 @@ export class PlatformRegistry implements Registry {
     const provider = this.#providers.get(name);
     if (!provider) throw new Conflict(`provider "${name}" is not available in this gateway`);
     return provider;
-  }
-
-  /** Serializes commands per app so two publishes never race on the same rows or backend resources. */
-  #exclusive<T>(name: AppName, fn: () => Promise<T>): Promise<T> {
-    const run = (this.#locks.get(name) ?? Promise.resolve()).then(fn);
-    const tail = run.catch(() => undefined);
-    this.#locks.set(name, tail);
-    void tail.then(() => this.#locks.get(name) === tail && this.#locks.delete(name));
-    return run;
   }
 }

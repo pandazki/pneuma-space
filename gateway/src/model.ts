@@ -17,6 +17,7 @@ export class Conflict extends Error {}
 const NAME_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
 
 export type AppName = Brand<string, 'AppName'>;
+export type TenantName = Brand<string, 'TenantName'>;
 export type AppId = Brand<string, 'AppId'>;
 export type ReleaseNumber = Brand<number, 'ReleaseNumber'>;
 /** Docker image id (`sha256:...`), resolved from a reference at publish. */
@@ -34,14 +35,22 @@ export function appName(raw: string): AppName {
   return raw as AppName;
 }
 
+export function tenantName(raw: string): TenantName {
+  if (!NAME_PATTERN.test(raw)) throw new InputError(`tenant name "${raw}" must match ${NAME_PATTERN.source}`);
+  return raw as TenantName;
+}
+
+/** Where single-host writes land and where migration step 4 put every M1 app and token (ADR 0022). */
+export const DEFAULT_TENANT = 'default' as TenantName;
+
 export function triggerName(raw: string): TriggerName {
   if (!NAME_PATTERN.test(raw)) throw new InputError(`trigger name "${raw}" must match ${NAME_PATTERN.source}`);
   return raw as TriggerName;
 }
 
 export function subject(raw: string): Subject {
-  if (!/^(user|service):[A-Za-z0-9._@-]{1,64}$/.test(raw)) {
-    throw new InputError(`subject "${raw}" must be user:<id> or service:<id>, id of letters, digits and ._@-`);
+  if (!/^(user|service):[A-Za-z0-9._@+-]{1,64}$/.test(raw)) {
+    throw new InputError(`subject "${raw}" must be user:<id> or service:<id>, id of up to 64 letters, digits and ._@+-`);
   }
   return raw as Subject;
 }
@@ -288,10 +297,15 @@ export function releaseKey(image: ImageId | null, manifest: Manifest, bundle: Bu
 // Entities (DESIGN.md 1.2). Times are epoch milliseconds.
 
 export type AppStatus = 'registered' | 'removed' | 'purging';
+export const ACCESS_LEVELS = ['tenant', 'org', 'public'] as const;
+/** Who may reach the app (ADR 0022 item 6); orthogonal to the manifest's `identity`. */
+export type Access = (typeof ACCESS_LEVELS)[number];
 
 export type App = {
   readonly name: AppName;
   readonly id: AppId;
+  readonly tenant: TenantName;
+  readonly access: Access;
   readonly owner: Subject;
   readonly status: AppStatus;
   /** Null between the first publish's App insert and its commit; the address answers 404 meanwhile. */
@@ -338,10 +352,18 @@ export type Policy = {
   readonly max_failures: number;
   readonly failure_window_seconds: number;
   readonly restart_backoff_seconds: number;
+  /** Instance shape (ADR 0023): thousandths of a core and MiB. */
+  readonly cpu_millis: number;
+  readonly memory_mb: number;
   /** Global only; cron schedules are read in it. */
   readonly timezone: string;
+  /** Global only (ADR 0024). */
+  readonly usage_retention_days: number;
+  readonly events_retention_days: number;
+  readonly events_max_rows: number;
 };
-export type PolicyOverride = Partial<Omit<Policy, 'timezone'>>;
+export const GLOBAL_ONLY_POLICY = ['timezone', 'usage_retention_days', 'events_retention_days', 'events_max_rows'] as const;
+export type PolicyOverride = Partial<Omit<Policy, (typeof GLOBAL_ONLY_POLICY)[number]>>;
 /** A per-app policy change; null clears that override field. */
 export type PolicyPatch = { readonly [K in keyof PolicyOverride]?: PolicyOverride[K] | null };
 
@@ -355,7 +377,12 @@ export const DEFAULT_POLICY: Policy = {
   max_failures: 3,
   failure_window_seconds: 60,
   restart_backoff_seconds: 5,
+  cpu_millis: 1000,
+  memory_mb: 256,
   timezone: 'UTC',
+  usage_retention_days: 90,
+  events_retention_days: 14,
+  events_max_rows: 1_000_000,
 };
 
 /** Merged on every read and never stored, so a global change reaches every app without an override at once. */
@@ -389,12 +416,77 @@ export type Delivery = {
   readonly createdAt: number;
 };
 
+/** A service token's subject is `service:<tenant>.<label>`, a personal token's is its issuer's `user:<id>` (ADR 0022 item 2). */
 export type Token = {
   readonly id: string;
+  readonly tenant: TenantName;
   readonly subject: Subject;
+  readonly label: string;
   /** sha256 hex of the secret; the secret itself is shown once and never stored. */
   readonly hash: string;
+  readonly createdBy: Subject | 'local';
   readonly createdAt: number;
+  readonly revokedAt: number | null;
+};
+
+// Tenants and quotas (ADR 0022, 0023)
+
+export const QUOTA_RESOURCES = ['apps', 'awake', 'cpu_millis', 'memory_mb', 'storage_gb'] as const;
+export type QuotaResource = (typeof QUOTA_RESOURCES)[number];
+/** Null is unlimited. */
+export type Quota = { readonly [R in QuotaResource]: number | null };
+export type QuotaUsage = { readonly [R in QuotaResource]: number };
+/** Copied into a tenant when it is created; changing it leaves existing tenants as they are. */
+export const DEFAULT_QUOTA: Quota = { apps: 100, awake: 20, cpu_millis: 20000, memory_mb: 8192, storage_gb: 20 };
+
+export type Refusal = { readonly resource: QuotaResource; readonly used: number; readonly limit: number; readonly ask: number };
+
+/** The one quota rule, at publish and at wake: refused when `used + ask` passes a limit. A new binding asks 0 GB, so only a tenant already over its storage is refused. */
+export function admits(quota: Quota, used: QuotaUsage, ask: Partial<QuotaUsage>): Refusal | null {
+  for (const resource of QUOTA_RESOURCES) {
+    const limit = quota[resource];
+    const more = ask[resource];
+    if (more === undefined || limit === null) continue;
+    if (used[resource] + more > limit) return { resource, used: used[resource], limit, ask: more };
+  }
+  return null;
+}
+
+/** Publish answers 409 with `quota`; a wake answers 503 with Retry-After. */
+export class QuotaExceeded extends Conflict {
+  readonly tenant: TenantName;
+  readonly refusal: Refusal;
+  constructor(tenant: TenantName, refusal: Refusal) {
+    super(`tenant "${tenant}" is at its ${refusal.resource} quota: ${refusal.used} used + ${refusal.ask} asked > ${refusal.limit}`);
+    this.tenant = tenant;
+    this.refusal = refusal;
+  }
+}
+
+export type Tenant = { readonly name: TenantName; readonly display: string; readonly quota: Quota; readonly createdAt: number };
+export type User = {
+  /** The subject without `user:`. */
+  readonly id: string;
+  readonly name: string;
+  /** As last seen from the upstream; shown, never used to authorize. */
+  readonly groups: readonly string[];
+  readonly firstSeen: number;
+  readonly lastSeen: number;
+};
+export type Role = 'admin' | 'member';
+export type Membership = { readonly tenant: TenantName; readonly user: string; readonly role: Role };
+
+/** Who did it, as the audit row and the admin boundary record it (ADR 0022 item 7). */
+export type Actor =
+  | { readonly via: 'upstream'; readonly subject: Subject; readonly name: string }
+  | { readonly via: 'token'; readonly subject: Subject; readonly token: string; readonly createdBy: Subject | 'local' }
+  | { readonly via: 'local' };
+/** Built once per request by authentication; nothing downstream looks identity up again. A token's roles are narrowed to its tenant and capped at member. */
+export type Caller = {
+  readonly actor: Actor;
+  readonly platformAdmin: boolean;
+  readonly roles: ReadonlyMap<TenantName, Role>;
+  readonly viaToken: boolean;
 };
 
 export type BundleFile = { readonly size: number; readonly etag: string; readonly contentType: string };
@@ -424,13 +516,21 @@ export type Lease = { readonly app: AppId; readonly address: string };
 
 /** A persistent directory an app needs; the runtime realizes `id` (a volume, or a directory in the runner's volume) and replaces `{dir}` in `env` values with where it put it. */
 export type StorageBinding = { readonly id: string; readonly target: string; readonly env: Readonly<Record<string, string>> };
+/** A platform service an app's provider talks to; a Kubernetes instance gets a `reach.<service>` label per entry (ADR 0019). */
+export type ProviderService = 'postgres' | 'redis' | 'object' | 'coturn';
 /** Derived from the current Release's bindings at instance creation; never stored. */
-export type Injection = { readonly env: Readonly<Record<string, string>>; readonly storage: readonly StorageBinding[] };
+export type Injection = {
+  readonly env: Readonly<Record<string, string>>;
+  readonly storage: readonly StorageBinding[];
+  /** The `service` of every active binding's provider. */
+  readonly services: readonly ProviderService[];
+};
 
 /** Everything the Runtime needs to run an app; it never reads a Manifest. */
 export type RunSpec = {
   readonly app: AppId;
   readonly name: AppName;
+  readonly tenant: TenantName;
   readonly release: ReleaseNumber;
   readonly runtime: { readonly kind: 'container'; readonly image: ImageId } | { readonly kind: 'isolate'; readonly bundle: BundleId; readonly entry: string };
   readonly injection: Injection;
@@ -441,6 +541,8 @@ export type RunSpec = {
 export type RouteView = {
   readonly app: AppId;
   readonly name: AppName;
+  readonly tenant: TenantName;
+  readonly access: Access;
   readonly status: AppStatus;
   readonly owner: Subject;
   readonly release: ReleaseNumber | null;
@@ -465,6 +567,8 @@ export type PublishRequest = {
   readonly bundle: BundleId | null;
   /** Required on first publish, ignored after. */
   readonly owner: Subject | null;
+  /** Read on first publish only; DEFAULT_TENANT when absent. */
+  readonly tenant?: TenantName;
 };
 
 export type AppSummary = {
@@ -486,6 +590,8 @@ export type AppSummary = {
   readonly lastAccessAt: number | null;
   readonly requests: number;
   readonly errors: number;
+  /** The node the instance runs on; null when asleep or not known. */
+  readonly node: string | null;
 };
 
 export type AppDetail = {
@@ -519,6 +625,169 @@ export type DeliveryFilter = {
   readonly limit?: number;
 };
 
+// Instance state in the platform library (ADR 0020). Written only by compare-and-set on (state, epoch).
+
+/** Pod name under Kubernetes, the host name on a single host. */
+export type ReplicaId = Brand<string, 'ReplicaId'>;
+export type Replica = { readonly id: ReplicaId; readonly startedAt: number; readonly seenAt: number };
+
+export type Instance = {
+  readonly app: AppId;
+  readonly runtime: RuntimeKind;
+  readonly release: ReleaseNumber;
+  readonly specHash: string;
+  /** Raised by every wake; a CAS that names an older epoch fails. */
+  readonly epoch: number;
+  readonly state: InstanceState;
+  /** The replica in the middle of a waking or stopping transition. */
+  readonly actor: ReplicaId | null;
+  readonly handle: string | null;
+  readonly address: string | null;
+  readonly node: string | null;
+  readonly home: string | null;
+  readonly since: number;
+  readonly awakeAt: number | null;
+  /** What this wake took from the tenant's quota; a later policy change does not alter it. */
+  readonly cpuMillis: number;
+  readonly memoryMb: number;
+};
+
+/** One replica's leases on one instance; an app's leases are the sum over replicas at the current epoch. */
+export type LeaseTally = {
+  readonly app: AppId;
+  readonly replica: ReplicaId;
+  readonly epoch: number;
+  readonly request: number;
+  readonly channel: number;
+  readonly trigger: number;
+  readonly releasedAt: number | null;
+};
+
+export type GuardRecord = {
+  readonly app: AppId;
+  readonly release: ReleaseNumber;
+  /** Epoch ms of each failure inside the window. */
+  readonly failures: readonly number[];
+  readonly quarantineReason: string | null;
+  readonly quarantinedAt: number | null;
+};
+
+/** `FOR SHARE` or `FOR UPDATE` on PostgreSQL; a SQLite transaction is exclusive already. */
+export type RowLock = 'share' | 'update';
+
+// Observability in the platform library (ADR 0024)
+
+export type UsageStep = 60 | 3600;
+export const USAGE_COUNTERS = ['requests', 'errors', 'wakes', 'wakeFailures', 'sleeps', 'deliveriesDone', 'deliveriesFailed', 'deliveriesRetried', 'wakeMs', 'awakeMs'] as const;
+export type UsageCounters = { readonly [C in (typeof USAGE_COUNTERS)[number]]: number };
+/** One replica's absolute counts for one bucket; `app` '*' is the whole platform. */
+export type Usage = UsageCounters & {
+  readonly app: AppId | '*';
+  readonly tenant: TenantName | null;
+  readonly step: UsageStep;
+  readonly start: number;
+  readonly replica: ReplicaId;
+};
+/** Summed over replicas. */
+export type UsageBucket = Omit<Usage, 'replica'>;
+export type UsageFilter = {
+  readonly step: UsageStep;
+  readonly app?: AppId | '*';
+  readonly tenant?: TenantName;
+  /** start >= from and start < to */
+  readonly from: number;
+  readonly to: number;
+};
+
+export type EventRecord = {
+  /** Global and increasing; the console's cursor. */
+  readonly id: number;
+  /** The library's clock. */
+  readonly at: number;
+  readonly replica: ReplicaId;
+  readonly ev: string;
+  readonly app: string | null;
+  readonly tenant: TenantName | null;
+  readonly body: Readonly<Record<string, unknown>>;
+};
+export type EventFilter = {
+  readonly after?: number;
+  /** at >= since */
+  readonly since?: number;
+  readonly ev?: string;
+  /** Leaves out rows younger than this on the library's clock, so a concurrent commit with a lower id is not skipped by a cursor. */
+  readonly settleMs?: number;
+  readonly limit?: number;
+};
+export const EVENT_SETTLE_MS = 2000;
+
+export const AUDIT_ACTIONS = [
+  'app.publish', 'app.remove', 'app.purge', 'app.policy', 'app.owner', 'app.access', 'app.move', 'app.unquarantine',
+  'policy.global', 'token.issue', 'token.revoke', 'tenant.create', 'tenant.quota', 'member.add', 'member.role', 'member.remove',
+] as const;
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+export type AuditRecord = {
+  readonly id: number;
+  readonly at: number;
+  readonly actor: Subject | 'local';
+  /** The tenant whose role the actor used; null for a platform admin. */
+  readonly actorTenant: TenantName | null;
+  /** The tenant of what was acted on. */
+  readonly tenant: TenantName | null;
+  readonly action: AuditAction;
+  readonly targetKind: 'app' | 'tenant' | 'token' | 'member' | 'policy';
+  readonly target: string;
+  readonly result: 'ok' | 'refused' | 'error';
+  /** Never a secret. */
+  readonly details: Readonly<Record<string, unknown>>;
+};
+export type AuditFilter = {
+  readonly tenant?: TenantName;
+  readonly from?: number;
+  readonly to?: number;
+  readonly actor?: string;
+  readonly action?: AuditAction;
+  readonly target?: string;
+  readonly limit?: number;
+};
+
+export type StorageUsage = {
+  readonly app: AppId;
+  readonly kind: ResourceKind;
+  readonly provider: ProviderName;
+  readonly bytes: number;
+  readonly measuredAt: number;
+};
+
+/** The tail of an instance's log kept when it ended, one row per app. */
+export type InstanceLog = { readonly app: AppId; readonly release: ReleaseNumber; readonly endedAt: number; readonly reason: string; readonly tail: string };
+
+/** What a committed write touched; on PostgreSQL the NOTIFY payload is `changeKey(change)` (ADR 0025 item 5). */
+export type Change =
+  | { readonly kind: 'app'; readonly name: AppName }
+  | { readonly kind: 'policy' }
+  | { readonly kind: 'instance'; readonly app: AppId }
+  | { readonly kind: 'tenant'; readonly name: TenantName };
+
+export function changeKey(change: Change): string {
+  switch (change.kind) {
+    case 'app': return `app/${change.name}`;
+    case 'policy': return 'policy';
+    case 'instance': return `instance/${change.app}`;
+    case 'tenant': return `tenant/${change.name}`;
+  }
+}
+
+export function parseChange(key: string): Change | null {
+  if (key === 'policy') return { kind: 'policy' };
+  const [kind, value] = key.split('/', 2);
+  if (!value) return null;
+  if (kind === 'app') return { kind, name: value as AppName };
+  if (kind === 'instance') return { kind, app: value as AppId };
+  if (kind === 'tenant') return { kind, name: value as TenantName };
+  return null;
+}
+
 // Protocols
 
 /** The platform library's rows; one writer per table is a convention the Registry and Scheduler keep, not a type. */
@@ -542,8 +811,24 @@ export interface StoreOps {
   policy(): Promise<Policy>;
   putPolicy(policy: Policy): Promise<void>;
 
+  /** Revoked tokens included; the caller decides. */
   token(hash: string): Promise<Token | null>;
+  tokens(tenant: TenantName): Promise<Token[]>;
   putToken(token: Token): Promise<void>;
+  /** False when the token does not exist or was already revoked. */
+  revokeToken(id: string, at: number): Promise<boolean>;
+
+  tenant(name: TenantName, lock?: RowLock): Promise<Tenant | null>;
+  tenants(): Promise<Tenant[]>;
+  putTenant(tenant: Tenant): Promise<void>;
+  /** Apps not purging, instances waking to stopping with their recorded cpu and memory, and measured storage in GiB. */
+  quotaUsed(tenant: TenantName): Promise<QuotaUsage>;
+
+  user(id: string): Promise<User | null>;
+  putUser(user: User): Promise<void>;
+  memberships(filter: { readonly tenant?: TenantName; readonly user?: string }): Promise<Membership[]>;
+  putMembership(membership: Membership): Promise<void>;
+  deleteMembership(tenant: TenantName, user: string): Promise<void>;
 
   /** Returns the stored row: an existing one for the same scheduled slot, or the same (app, trigger, idempotencyKey) within IDEMPOTENCY_WINDOW_MS. */
   insertDelivery(delivery: Delivery): Promise<Delivery>;
@@ -556,12 +841,69 @@ export interface StoreOps {
   stats(): Promise<Stats[]>;
   putStats(stats: readonly Stats[]): Promise<void>;
   deleteStats(app: AppId): Promise<void>;
+
+  replicas(): Promise<Replica[]>;
+  putReplica(replica: Replica): Promise<void>;
+  /** Deletes replicas not seen since `before` and their lease tallies; returns their ids. */
+  sweepReplicas(before: number): Promise<ReplicaId[]>;
+  /** A replica's own shutdown: its row and its lease tallies. */
+  deleteReplica(id: ReplicaId): Promise<void>;
+
+  instance(app: AppId, lock?: RowLock): Promise<Instance | null>;
+  instances(): Promise<Instance[]>;
+  /** False when the app already has a row. */
+  insertInstance(instance: Instance): Promise<boolean>;
+  /** Writes `next` only if the row is still in `expected` state and epoch; false otherwise. */
+  casInstance(expected: Pick<Instance, 'state' | 'epoch'>, next: Instance): Promise<boolean>;
+
+  leaseTallies(app?: AppId): Promise<LeaseTally[]>;
+  putLeaseTally(tally: LeaseTally): Promise<void>;
+
+  guard(app: AppId, lock?: RowLock): Promise<GuardRecord | null>;
+  guards(): Promise<GuardRecord[]>;
+  putGuard(record: GuardRecord): Promise<void>;
+  deleteGuard(app: AppId): Promise<void>;
+
+  /** Upserts absolute counts, so a retried write never counts twice. */
+  putUsage(rows: readonly Usage[]): Promise<void>;
+  /** Ordered by app, then start. */
+  usage(filter: UsageFilter): Promise<UsageBucket[]>;
+  sweepUsage(step: UsageStep, before: number): Promise<number>;
+
+  /** `at` is the library's clock. */
+  insertEvents(events: readonly Omit<EventRecord, 'id' | 'at'>[]): Promise<void>;
+  /** Oldest first. */
+  events(filter: EventFilter): Promise<EventRecord[]>;
+  /** Deletes events older than `before`, then the oldest beyond `maxRows`; returns how many went. */
+  sweepEvents(before: number, maxRows: number): Promise<number>;
+  /** Deletes done and cancelled deliveries created before `before`; failed ones stay until purge. */
+  sweepDeliveries(before: number): Promise<number>;
+
+  /** Append only: the library refuses any update or delete. Returns the id. */
+  insertAudit(record: Omit<AuditRecord, 'id'>): Promise<number>;
+  /** Newest first. */
+  audit(filter: AuditFilter): Promise<AuditRecord[]>;
+
+  storageUsage(app?: AppId): Promise<StorageUsage[]>;
+  putStorageUsage(rows: readonly StorageUsage[]): Promise<void>;
+
+  instanceLog(app: AppId): Promise<InstanceLog | null>;
+  putInstanceLog(log: InstanceLog): Promise<void>;
 }
 
-/** Hides the platform library (SQLite in M1). */
+/** Hides the platform library: SQLite on a single host, PostgreSQL on a cluster (ADR 0025). */
 export interface Store extends StoreOps {
-  /** `fn` reads and writes only through `tx`; it commits when `fn` resolves and rolls back when it rejects. Nothing else runs meanwhile, so `fn` must not await network or Docker. */
+  /**
+   * `fn` reads and writes only through `tx`; it commits when `fn` resolves and rolls back when it rejects.
+   * The effect is as if nothing else ran meanwhile, and `fn` may run more than once, so besides reads and writes through `tx` it makes only idempotent in-memory writes. It must not await network or Docker.
+   */
   transaction<T>(fn: (tx: StoreOps) => Promise<T>): Promise<T>;
+  /** Runs commands on one name one at a time, across replicas; `fn` may await anything. */
+  exclusive<T>(name: AppName, fn: () => Promise<T>): Promise<T>;
+  /** Called once per changed key after each commit, on every replica. */
+  onChange(listener: (change: Change) => void): void;
+  /** Called when changes may have been missed; listeners re-read everything. */
+  onResync(listener: () => void): void;
 }
 
 /** Hides how instances run: instances, leases, the reaper and their lifecycle. The M2 multi-node seam. */
@@ -599,9 +941,11 @@ export interface Infra {
 export interface CapabilityProvider {
   readonly kind: ResourceKind;
   readonly name: ProviderName;
+  /** The platform service an instance with this binding must reach; null when none. */
+  readonly service: ProviderService | null;
   /** Creates or converges the resource and re-enables it if suspended; `current` is the binding's last record. Throws Conflict when the backend is not running. */
   ensure(app: AppId, current: Resource | null): Promise<Resource>;
-  inject(app: AppId, resource: Resource): Injection;
+  inject(app: AppId, resource: Resource): Omit<Injection, 'services'>;
   suspend(app: AppId, resource: Resource): Promise<void>;
   destroy(app: AppId, resource: Resource): Promise<void>;
 }

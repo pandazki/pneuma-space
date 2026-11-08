@@ -8,7 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { EventLog } from './events.ts';
 import { IsolateRuntime } from './isolate.ts';
 import {
-  appName, DEFAULT_POLICY, newAppId, NotFound, type AppId, type BundleId, type Policy, type ReleaseNumber, type RunSpec, type StorageBinding,
+  appName, DEFAULT_POLICY, DEFAULT_TENANT, newAppId, NotFound, type AppId, type BundleId, type Policy, type ReleaseNumber, type RunSpec, type StorageBinding,
 } from './model.ts';
 import type { EventPage } from './runner.ts';
 import { serveBundle, startRunner, type RunnerProcess } from './runner.harness.ts';
@@ -19,8 +19,8 @@ async function fixture(t: TestContext, policy: Partial<Policy> = {}, storage: re
   const specs = new Map<AppId, RunSpec>();
   const specFor = (id: AppId) => specs.get(id) ?? null;
   const publish = (release: number, id = app) => specs.set(id, {
-    app: id, name: appName('fixture'), release: release as ReleaseNumber, runtime: { kind: 'isolate', bundle: 'b' as BundleId, entry: 'app.mjs' },
-    injection: { env, storage }, policy: { ...DEFAULT_POLICY, ...policy },
+    app: id, name: appName('fixture'), tenant: DEFAULT_TENANT, release: release as ReleaseNumber, runtime: { kind: 'isolate', bundle: 'b' as BundleId, entry: 'app.mjs' },
+    injection: { env, storage, services: [] }, policy: { ...DEFAULT_POLICY, ...policy },
   });
   publish(1);
   /** A second app on the same runner. */

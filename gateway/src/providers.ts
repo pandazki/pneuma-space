@@ -59,6 +59,7 @@ const secret = () => randomBytes(24).toString('hex');
 class StorageProvider implements CapabilityProvider {
   readonly kind: ResourceKind;
   readonly name: ProviderName;
+  readonly service = null;
   readonly #storage: Storage;
   readonly #prefix: string;
   readonly #target: string;
@@ -77,7 +78,7 @@ class StorageProvider implements CapabilityProvider {
     return { id: this.#prefix + app, target: this.#target };
   }
 
-  inject(app: AppId): Injection {
+  inject(app: AppId): Omit<Injection, 'services'> {
     return { env: {}, storage: [{ id: this.#prefix + app, target: this.#target, env: this.#env }] };
   }
 
@@ -91,6 +92,7 @@ class StorageProvider implements CapabilityProvider {
 class PostgresProvider implements CapabilityProvider {
   readonly kind = 'db';
   readonly name = 'postgres';
+  readonly service = 'postgres';
   readonly #infra: ProviderInfra;
   readonly #probe: ServiceProbe;
 
@@ -117,7 +119,7 @@ REVOKE CONNECT ON DATABASE ${role} FROM PUBLIC;
     return { role, database: role, password };
   }
 
-  inject(_app: AppId, resource: Resource): Injection {
+  inject(_app: AppId, resource: Resource): Omit<Injection, 'services'> {
     return { env: { PNEUMA_SPACE_DB_URL: `postgresql://${resource.role}:${resource.password}@postgres:5432/${resource.database}` }, storage: [] };
   }
 
@@ -140,6 +142,7 @@ const UNLINK_PREFIX =
 class RedisProvider implements CapabilityProvider {
   readonly kind = 'kv';
   readonly name = 'redis';
+  readonly service = 'redis';
   readonly #infra: ProviderInfra;
   readonly #password: string;
 
@@ -162,7 +165,7 @@ class RedisProvider implements CapabilityProvider {
     return { user, password, prefix: `${app}:` };
   }
 
-  inject(_app: AppId, resource: Resource): Injection {
+  inject(_app: AppId, resource: Resource): Omit<Injection, 'services'> {
     return {
       env: { PNEUMA_SPACE_KV_URL: `redis://${resource.user}:${resource.password}@redis:6379`, PNEUMA_SPACE_KV_PREFIX: resource.prefix },
       storage: [],
@@ -181,6 +184,7 @@ class RedisProvider implements CapabilityProvider {
 class S3Provider implements CapabilityProvider {
   readonly kind = 'object';
   readonly name = 's3';
+  readonly service = 'object';
   readonly #store: ObjectService;
   readonly #publicEndpoint: string;
 
@@ -200,7 +204,7 @@ class S3Provider implements CapabilityProvider {
     return { bucket, ...credential };
   }
 
-  inject(_app: AppId, resource: Resource): Injection {
+  inject(_app: AppId, resource: Resource): Omit<Injection, 'services'> {
     return {
       env: {
         PNEUMA_SPACE_OBJECT_ENDPOINT: this.#store.endpoint,
@@ -238,6 +242,7 @@ class S3Provider implements CapabilityProvider {
 class CoturnProvider implements CapabilityProvider {
   readonly kind = 'rtc';
   readonly name = 'coturn';
+  readonly service = 'coturn';
   readonly #config: ProviderConfig;
   readonly #probe: ServiceProbe;
 
@@ -252,7 +257,7 @@ class CoturnProvider implements CapabilityProvider {
     return {};
   }
 
-  inject(): Injection {
+  inject(): Omit<Injection, 'services'> {
     const host = this.#config.rtcPublicHost;
     return {
       env: {
