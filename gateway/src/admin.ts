@@ -11,7 +11,7 @@ import type { Answer, Identity } from './identity.ts';
 import {
   ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, LOGOUT_PATH, NotFound, QuotaExceeded, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
   appName, bundleId, parseManifest, subject, tenantName,
-  type Access, type Actor, type App, type AppId, type AuditAction, type AuditRecord, type Binding, type BundleStore, type Caller, type CapabilityProvider, type Guard, type ProviderName,
+  type Access, type Actor, type App, type AppId, type AuditAction, type AuditRecord, type Binding, type BundleStore, type Caller, type CapabilityProvider, type Guard,
   type Registry, type Release, type ReplicaId, type Role, type StateInventory, type StoreOps, type Subject, type TenantName, type UsageBucket, type UsageCounters,
 } from './model.ts';
 
@@ -189,7 +189,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, r
     const value = request.headers[name];
     return typeof value === 'string' ? [[name, value]] : [];
   }));
-  const locate = new Map(providers.map((p) => [p.name, p] as const)) as ReadonlyMap<ProviderName, Pick<CapabilityProvider, 'location'>>;
+  const locate = new Map(providers.map((p) => [p.name, p]));
   const inventory = (app: App, release: Release | null, bindings: readonly Binding[]): StateInventory => ({
     app: app.name,
     release: app.current,
