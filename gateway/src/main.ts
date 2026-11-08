@@ -100,7 +100,7 @@ const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registr
 const authority = new Authority(store, setup.admins);
 const identity: Identity = setup.upstream
   ? new UpstreamIdentity(setup.upstream, authority, registry)
-  : new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), authority);
+  : new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), authority, setup.addressing.mode);
 const ingress = new Ingress({
   registry, runtime, identity, authority, addressing: setup.addressing, bundles, scheduler,
   upstream: setup.upstream && { header: setup.upstream.header, stripCookies: setup.upstream.stripCookies }, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),

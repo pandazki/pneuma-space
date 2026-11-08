@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash, createHmac, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
+import { once } from 'node:events';
 import { mkdtempSync } from 'node:fs';
 import { createServer, type IncomingHttpHeaders, type IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -32,8 +33,8 @@ function cookie(payload: object, key: Buffer = secret): string {
   return `pneuma_space_session=${body}.${createHmac('sha256', key).update(body).digest('base64url')}`;
 }
 
-function login(name: string, next = '/apps/survey/?q=1'): Promise<Response> {
-  return fetch(`${base()}/_pneuma-space/login`, {
+function login(name: string, next = '/apps/survey/?q=1', at = base()): Promise<Response> {
+  return fetch(`${at}/_pneuma-space/login`, {
     method: 'POST',
     body: new URLSearchParams({ name, next }),
     redirect: 'manual',
@@ -87,6 +88,16 @@ test('login never redirects outside /apps/', async () => {
   for (const next of ['https://evil.example/apps/', '//evil.example/apps/', '/api/apps']) {
     assert.equal((await login('ana', next)).headers.get('location'), '/');
   }
+});
+
+test('under subdomain addressing login returns to any path on the app\'s host and to no other host', async (t) => {
+  const subdomain = new LocalIdentity(secret, { token: async () => null, memberships: async () => [] }, 'subdomain');
+  const host = createServer((request, response) => void subdomain.serve(request, response)).listen(0);
+  t.after(() => host.close());
+  await once(host, 'listening');
+  const at = `http://127.0.0.1:${(host.address() as AddressInfo).port}`;
+  const back = async (next: string) => (await login('ana', next, at)).headers.get('location');
+  assert.deepEqual([await back('/board?id=7'), await back('//evil.example/'), await back('/\\evil.example/')], ['/board?id=7', '/', '/']);
 });
 
 test('the platform secret is created once and read back on the next start', () => {
