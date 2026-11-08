@@ -250,6 +250,11 @@ export function storeContract(name: string, open: OpenStore): void {
       assert.ok(rows[0].id < rows[1].id && rows.every((e) => e.at >= before));
     });
 
+    test('events with newest read the last matching rows, oldest first', async () => {
+      await store.insertEvents([1, 2, 3].map((n) => ({ replica, ev: 'tail', app: null, tenant: null, body: { n } })));
+      assert.deepEqual((await store.events({ ev: 'tail', newest: 2 })).map((e) => e.body.n), [2, 3]);
+    });
+
     test('audit rows read back newest first', async () => {
       const row = {
         at: 1, actor: 'user:ann' as Subject, actorTenant: DEFAULT_TENANT, tenant: DEFAULT_TENANT, action: 'app.publish', targetKind: 'app',

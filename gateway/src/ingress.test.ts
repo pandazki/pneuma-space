@@ -8,7 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import {
   DEFAULT_POLICY, DEFAULT_TENANT, NotFound,
   type AppId, type AppName, type BundleId, type CapabilityKind, type DeliveryId, type ImageId, type InvokeRequest,
-  type Principal, type ReleaseNumber, type RouteView, type Stats, type Subject, type TenantName,
+  type Principal, type ReleaseNumber, type RouteView, type Subject, type Traffic, type TenantName,
 } from './model.ts';
 import { PATH_ADDRESSING } from './address.ts';
 import { LOCAL_CALLER } from './authz.ts';
@@ -75,7 +75,7 @@ let events: string[] = [];
 let retires: (() => void)[] = [];
 let invoked: InvokeRequest[] = [];
 let addresses: string[] = [];
-let flushed: Stats[][] = [];
+let flushed: Traffic[][] = [];
 let instance: 'asleep' | 'awake' = 'awake';
 let waking: Promise<void> = Promise.resolve();
 const series = new Series();

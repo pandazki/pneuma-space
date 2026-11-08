@@ -10,7 +10,7 @@ const name = `pneuma-space-smoke-${randomBytes(3).toString('hex')}`;
 let kube: KubeClient;
 
 async function until(resourceVersion: string, match: (event: WatchEvent<Pod>) => boolean): Promise<WatchEvent<Pod> | undefined> {
-  for await (const event of kube.watch('pods', { labelSelector: SELECTOR, resourceVersion, signal: AbortSignal.timeout(120_000) })) {
+  for await (const event of kube.watch('pods', { labelSelector: SELECTOR, from: { metadata: { resourceVersion }, items: [] }, signal: AbortSignal.timeout(120_000) })) {
     if (match(event)) return event;
   }
   return undefined;

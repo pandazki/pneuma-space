@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Addressing } from './address.ts';
 import type { Authority } from './authz.ts';
 import { emit } from './events.ts';
 import { JwtError, type JwtConfig, type JwtVerifier } from './jwt.ts';
@@ -90,10 +91,12 @@ function isBrowser(request: IncomingMessage): boolean {
 export class LocalIdentity implements Identity {
   readonly #secret: Buffer;
   readonly #tokens: Tokens;
+  readonly #addressing: Addressing['mode'];
 
-  constructor(secret: Buffer, tokens: Tokens) {
+  constructor(secret: Buffer, tokens: Tokens, addressing: Addressing['mode'] = 'path') {
     this.#secret = secret;
     this.#tokens = tokens;
+    this.#addressing = addressing;
   }
 
   authenticate(request: IncomingMessage): Promise<Principal | Challenge> {
@@ -113,7 +116,7 @@ export class LocalIdentity implements Identity {
   async serve(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? '/', 'http://gateway');
     if (url.pathname === LOGIN_PATH && request.method === 'GET') {
-      page(response, 200, loginPage(safeNext(url.searchParams.get('next')), null, languageOf(request)));
+      page(response, 200, loginPage(this.#next(url.searchParams.get('next')), null, languageOf(request)));
     } else if (url.pathname === LOGIN_PATH && request.method === 'POST') {
       await this.#login(request, response);
     } else if (url.pathname === LOGOUT_PATH) {
@@ -145,6 +148,12 @@ export class LocalIdentity implements Identity {
     return { subject: session.sub, name: session.name };
   }
 
+  /** Under subdomains every path of this host is the app's; under paths only `/apps/` ones are, so login cannot redirect off the apps. */
+  #next(next: string | null): string {
+    if (next === null) return '/';
+    return (this.#addressing === 'subdomain' ? sameHostPath(next) : /^\/apps\/[\x21-\x7e]*$/.test(next)) ? next : '/';
+  }
+
   #sign(payload: string): string {
     return createHmac('sha256', this.#secret).update(payload).digest('base64url');
   }
@@ -154,7 +163,7 @@ export class LocalIdentity implements Identity {
     for await (const chunk of request) if (body.length <= FORM_LIMIT) body += chunk;
     const form = new URLSearchParams(body);
     const name = form.get('name') ?? '';
-    const next = safeNext(form.get('next'));
+    const next = this.#next(form.get('next'));
     if (!USER_NAME.test(name)) {
       page(response, 400, loginPage(next, 'invalid', languageOf(request)));
       return;
@@ -175,7 +184,7 @@ export type IdentitySetup =
   };
 
 export function parseIdentityEnv(env: NodeJS.ProcessEnv): IdentitySetup {
-  const kind = env.PNEUMA_SPACE_IDENTITY ?? 'local';
+  const kind = env.PNEUMA_SPACE_IDENTITY?.trim() || 'local';
   if (kind === 'local') return { kind };
   if (kind !== 'upstream') throw new Error(`PNEUMA_SPACE_IDENTITY must be local or upstream, got "${kind}"`);
   const required = (key: string) => {
@@ -184,7 +193,7 @@ export function parseIdentityEnv(env: NodeJS.ProcessEnv): IdentitySetup {
     return value;
   };
   const header = required('PNEUMA_SPACE_IDENTITY_HEADER').toLowerCase();
-  const list = (key: string, fallback = '') => (env[key] ?? fallback).split(',').map((part) => part.trim()).filter(Boolean);
+  const list = (key: string, fallback = '') => (env[key]?.trim() || fallback).split(',').map((part) => part.trim()).filter(Boolean);
   const url = env.PNEUMA_SPACE_IDENTITY_JWKS_URL?.trim();
   const file = env.PNEUMA_SPACE_IDENTITY_KEYS_FILE?.trim();
   if (!url === !file) throw new Error('set exactly one of PNEUMA_SPACE_IDENTITY_JWKS_URL and PNEUMA_SPACE_IDENTITY_KEYS_FILE when PNEUMA_SPACE_IDENTITY=upstream');
@@ -335,11 +344,6 @@ function sameHostPath(next: string): boolean {
 
 function json(response: ServerResponse, status: number, body: object): void {
   response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
-}
-
-/** Only app paths, so the login page cannot redirect off this gateway. */
-function safeNext(next: string | null): string {
-  return next !== null && /^\/apps\/[\x21-\x7e]*$/.test(next) ? next : '/';
 }
 
 function redirect(response: ServerResponse, location: string, cookie?: string): void {

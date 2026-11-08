@@ -7,7 +7,7 @@ import { setImmediate as tick } from 'node:timers/promises';
 import { test } from 'node:test';
 import { EventLog } from './events.ts';
 import { EXPOSITION_TYPE, Metrics, serveMetrics, Series } from './metrics.ts';
-import { DEFAULT_TENANT, USAGE_COUNTERS, appName, type AppId, type AppSummary, type InstanceState, type ReplicaId, type Stats, type TenantName, type Usage } from './model.ts';
+import { DEFAULT_TENANT, USAGE_COUNTERS, appName, type AppId, type AppSummary, type InstanceState, type ReplicaId, type TenantName, type Traffic, type Usage } from './model.ts';
 import { SqliteStore } from './store.ts';
 
 const HOUR = 3_600_000;
@@ -16,7 +16,7 @@ const survey = appName('survey');
 
 function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader = true, clock = { now: 1_800_000_000_000 }, policy = {} } = {}) {
   const events = new EventLog(() => {});
-  const stats: Stats[] = [];
+  const stats: Traffic[] = [];
   const apps: AppSummary[] = [];
   const metrics = new Metrics({
     events,
@@ -30,7 +30,6 @@ function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader =
     policy: () => ({ usage_retention_days: 90, events_retention_days: 14, events_max_rows: 1_000_000, ...policy }),
     view: (name) => (name === survey ? { app, tenant: DEFAULT_TENANT } : null),
     series: new Series(),
-    quota: store,
     retries: () => 0,
     replica: replica as ReplicaId,
     leader: () => leader,
@@ -42,7 +41,7 @@ function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader =
 }
 
 const summary = (instance: InstanceState): AppSummary => ({
-  name: survey, address: '/apps/survey/', release: null, capabilities: [], status: 'registered', instance, since: null,
+  name: survey, address: '/apps/survey/', tenant: DEFAULT_TENANT, access: 'org', release: null, capabilities: [], status: 'registered', instance, since: null,
   leases: { request: 0, channel: 0, trigger: 0 }, sleepsAt: null, runtime: 'container', quarantine: null, dbBackend: null,
   lastAccessAt: null, requests: 0, errors: 0, node: null,
 });

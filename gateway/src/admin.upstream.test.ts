@@ -30,7 +30,7 @@ function jwt(sub: string, aud = 'console'): string {
 
 const config = (audience: string): UpstreamConfig => ({
   header: 'x-upstream-jwt', audiences: [audience], userClaim: 'sub', nameClaims: ['name'], groupsClaim: 'groups',
-  loginUrl: 'https://sso.test/start?rd={url}', logoutUrl: null, stripCookies: [],
+  loginUrl: 'https://sso.test/start?rd={url}', logoutUrl: 'https://sso.test/logout', stripCookies: [],
   verifier: new JwtVerifier({ issuer: ISSUER, audiences: [audience], keys }),
 });
 
@@ -145,6 +145,16 @@ test('a signed-in write without Sec-Fetch-Site: same-origin gets 403; a token\'s
   assert.equal((await policy('bob', true)).status, 403);
   assert.equal((await policy('bob')).status, 200);
   assert.equal((await policy('token:ci', true)).status, 200);
+});
+
+test('GET /healthz answers 200 with no body and no credential while /api/health answers 401', async () => {
+  const healthz = await call(null, 'GET', '/healthz');
+  assert.deepEqual([healthz.status, healthz.body, (await call(null, 'GET', '/api/health')).status], [200, '', 401]);
+});
+
+test('the console\'s sign-out link on 8081 answers 303 to the logout URL (ADR 0021 item 3)', async () => {
+  const out = await call(null, 'GET', '/_pneuma-space/logout');
+  assert.deepEqual([out.status, out.location], [303, 'https://sso.test/logout']);
 });
 
 test('without a credential a browser is sent to the login URL and a program gets 401', async () => {

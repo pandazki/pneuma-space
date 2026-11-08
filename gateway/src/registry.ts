@@ -4,11 +4,11 @@ import {
   CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_QUOTA, DEFAULT_TENANT, GLOBAL_ONLY_POLICY, InputError, NotFound, QUOTA_RESOURCES, QuotaExceeded, RUNTIMES,
   admits, declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider, subject,
   type Access, type App, type AppDetail, type AppId, type AppName, type AppSummary, type Binding, type BindingState,
-  type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type Change, type CapabilityProvider, type Guard, type Infra,
+  type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type Change, type CapabilityProvider, type Guard, type Infra, type IssuedToken,
   type Manifest, type Policy, type PolicyOverride, type PolicyPatch, type ProviderName, type Quota, type QuotaUsage, type Role,
   type PublishRequest, type Registry, type Release, type ReleaseNumber, type ResourceKind, type RouteView,
-  type RunSpec, type Runtime, type RuntimeKind, type SchedulerView, type Stats, type Store, type StoreOps, type Subject, type Tenant, type TenantName,
-  type Trigger, type TriggerName,
+  type RunSpec, type Runtime, type RuntimeKind, type SchedulerView, type Store, type StoreOps, type Subject, type Tenant, type TenantName,
+  type Traffic, type Trigger, type TriggerName,
 } from './model.ts';
 import { address, PATH_ADDRESSING, type Addressing } from './address.ts';
 import { emit, quotaRefused, type QuotaRefused } from './events.ts';
@@ -24,8 +24,8 @@ export type RegistryDeps = {
   readonly providers: readonly CapabilityProvider[];
   /** Whether a runtime's compose service is up; publish refuses a runtime whose service is not. */
   readonly probe?: ServiceProbe;
-  /** The 24 h counts and last access per app; the stored last access otherwise. */
-  readonly statsSource?: () => Promise<Stats[]>;
+  /** The 24 h counts and last access per app; the stored last access with no counts otherwise. */
+  readonly statsSource?: () => Promise<readonly Traffic[]>;
   readonly addressing?: Addressing;
   /** GiB a new files or SQLite binding asks of the tenant's `storage_gb`; the Store counts existing ones at the same size. */
   readonly volumeGb?: number;
@@ -43,29 +43,6 @@ const PROVISIONED: ReadonlySet<ProviderName> = new Set(['volume', 'sqlite']);
 const SIGHTING_MS = 5 * 60_000;
 
 const log = emit;
-
-/** A listing row with the columns AppSummary lacks while model.ts is frozen. */
-export type Listed = AppSummary & { readonly tenant: TenantName; readonly access: Access };
-
-/** What the admin API calls: the frozen interface, the tenant commands and the wider listing. */
-export type AdminRegistry = Omit<Registry, 'listing'> & TenantCommands & { listing(): Promise<Listed[]> };
-
-export type IssuedToken = { readonly id: string; readonly token: string; readonly subject: Subject };
-
-/** Commands beyond the frozen Registry interface; actor-free, since the admin boundary audits them (ADR 0024 item 6). */
-export type TenantCommands = {
-  /** Copies DEFAULT_QUOTA; `admins` are user ids, at least one. */
-  createTenant(name: TenantName, display: string, admins: readonly string[]): Promise<Tenant>;
-  setQuota(tenant: TenantName, patch: Readonly<Record<string, unknown>>): Promise<Quota>;
-  /** `force` lets a platform admin leave a tenant without an admin; otherwise demoting or removing the last one is a Conflict. */
-  setMember(tenant: TenantName, user: string, role: Role, force: boolean): Promise<void>;
-  removeMember(tenant: TenantName, user: string, force: boolean): Promise<void>;
-  issueTenantToken(tenant: TenantName, subject: Subject, label: string, createdBy: Subject | 'local'): Promise<IssuedToken>;
-  revokeToken(tenant: TenantName, id: string): Promise<void>;
-  setAccess(name: AppName, access: Access): Promise<void>;
-  /** Retires the instance, then moves the row, so quota, labels and tokens switch at once (ADR 0022 item 3). */
-  moveApp(name: AppName, tenant: TenantName): Promise<void>;
-};
 
 const isResourceKind = (kind: CapabilityKind): kind is ResourceKind => CAPABILITIES[kind].class === 'resource';
 
@@ -118,7 +95,7 @@ function triggersOf(app: AppId, manifest: Manifest): Trigger[] {
   }));
 }
 
-export class PlatformRegistry implements Registry, TenantCommands {
+export class PlatformRegistry implements Registry {
   readonly #store: Store;
   readonly #runtime: RegistryDeps['runtime'];
   readonly #guard: RegistryDeps['guard'];
@@ -126,7 +103,7 @@ export class PlatformRegistry implements Registry, TenantCommands {
   readonly #probe: ServiceProbe;
   readonly #bundles: BundleStore;
   readonly #providers: ReadonlyMap<ProviderName, CapabilityProvider>;
-  readonly #stats: () => Promise<Stats[]>;
+  readonly #stats: () => Promise<readonly Traffic[]>;
   readonly #addressing: Addressing;
   readonly #volumeGb: number;
   readonly #quotaRefused: QuotaRefused;
@@ -149,7 +126,7 @@ export class PlatformRegistry implements Registry, TenantCommands {
     this.#probe = deps.probe ?? resolvesOnNetwork;
     this.#bundles = deps.bundles;
     this.#providers = new Map(deps.providers.map((p) => [p.name, p]));
-    this.#stats = deps.statsSource ?? (() => deps.store.stats());
+    this.#stats = deps.statsSource ?? (async () => (await deps.store.stats()).map((s) => ({ ...s, requests: 0, errors: 0 })));
     this.#addressing = deps.addressing ?? PATH_ADDRESSING;
     this.#volumeGb = deps.volumeGb ?? 1;
     this.#quotaRefused = deps.quotaRefused ?? quotaRefused;
@@ -395,7 +372,6 @@ export class PlatformRegistry implements Registry, TenantCommands {
     log('owner', name, { owner });
   }
 
-  /** `id` is beyond the frozen interface; the admin boundary audits it. Under `local` every token lands in `default` (ADR 0022 item 4). */
   issueToken(name: string): Promise<IssuedToken> {
     return this.issueTenantToken(DEFAULT_TENANT, subject(`service:${name}`), name, 'local');
   }
@@ -517,7 +493,7 @@ export class PlatformRegistry implements Registry, TenantCommands {
     return this.#schedules.get(id) ?? null;
   }
 
-  async listing(): Promise<Listed[]> {
+  async listing(): Promise<AppSummary[]> {
     const stats = new Map((await this.#stats()).map((s) => [s.app, s]));
     return [...this.#views.values()].map((view) => {
       const s = stats.get(view.app);
@@ -555,7 +531,7 @@ export class PlatformRegistry implements Registry, TenantCommands {
         bindings: (await tx.bindings(app.id)).map(({ resource: _, ...binding }) => binding),
         policy: effectivePolicy(this.#policy, app.policyOverride),
         instance: this.#runtime.state(app.id),
-        stats: stats.find((s) => s.app === app.id) ?? { app: app.id, requests: 0, errors: 0, lastAccessAt: null },
+        stats: { app: app.id, lastAccessAt: stats.find((s) => s.app === app.id)?.lastAccessAt ?? null },
         deliveries: await tx.deliveries({ app: app.id, limit: DETAIL_DELIVERIES }),
         quarantine: this.#guard.quarantine(app.id),
       };

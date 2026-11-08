@@ -147,7 +147,7 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
       const row = this.#instances.row(app);
       const local = this.#localOf(app);
       if (row?.runtime === this.kind && row.state === 'awake' && local.ended !== row.epoch) {
-        if (this.#driver.serves && !this.#driver.serves(row.handle as H, row.address!)) throw new Unavailable(this.kind);
+        if (this.#driver.serves && !this.#driver.serves(row.handle as H, row.address!)) throw new Unavailable(this.kind, `the instance at ${row.address} is gone; retry`);
         if (local.queued?.epoch === row.epoch && local.queued.total > 0) return this.#lease(local, row, kind);
         const lease = await this.#slow(app, row, kind);
         if (lease) return lease;

@@ -6,6 +6,8 @@ import { Unavailable } from './runtimes.ts';
 
 type Labels = Readonly<Record<string, string>>;
 
+const NO_ANSWER = 'the Kubernetes API did not answer';
+
 export type ObjectMeta = {
   readonly name: string;
   readonly namespace?: string;
@@ -98,7 +100,8 @@ const NAMESPACED: Readonly<Record<Kind, boolean>> = { pods: true, persistentvolu
 
 export type List<T> = { readonly metadata: { readonly resourceVersion: string }; readonly items: readonly T[] };
 export type Selectors = { readonly labelSelector?: string; readonly fieldSelector?: string };
-export type WatchOptions = { readonly labelSelector?: string; readonly resourceVersion?: string; readonly signal: AbortSignal };
+/** `from` is the caller's list: the watch resumes at its resourceVersion and knows its objects. Without it the current objects arrive first as ADDED. */
+export type WatchOptions<T> = { readonly labelSelector?: string; readonly from?: List<T>; readonly signal: AbortSignal };
 export type WatchEvent<T> =
   | { readonly type: 'ADDED' | 'MODIFIED' | 'DELETED'; readonly object: T }
   | { readonly type: 'BOOKMARK'; readonly object: { readonly metadata: { readonly resourceVersion: string } } };
@@ -148,7 +151,7 @@ async function read(res: IncomingMessage): Promise<string> {
   try {
     for await (const chunk of res) body += chunk;
   } catch (error) {
-    throw Object.assign(new Unavailable('container'), { cause: error });
+    throw Object.assign(new Unavailable('container', NO_ANSWER), { cause: error });
   }
   return body;
 }
@@ -212,13 +215,14 @@ export class KubeClient {
   }
 
   /**
-   * Events until `signal` aborts. Without `resourceVersion` the current objects arrive first as ADDED. A server-closed
-   * stream resumes from the last resourceVersion seen; an expired one (410) lists again and resumes from the list's
-   * resourceVersion, sending the listed objects as ADDED, so a change missed in the gap still arrives as current state.
+   * Events until `signal` aborts. A server-closed stream resumes from the last resourceVersion seen; an expired one (410)
+   * lists again and resumes from the list's resourceVersion. The relist sends DELETED for every known object it no longer
+   * holds under the same uid, then the listed objects as ADDED, so a change missed in the gap still arrives as current state.
    */
-  async *watch<K extends Listable>(kind: K, options: WatchOptions): AsyncGenerator<WatchEvent<Objects[K]>> {
+  async *watch<K extends Listable>(kind: K, options: WatchOptions<Objects[K]>): AsyncGenerator<WatchEvent<Objects[K]>> {
     const { labelSelector, signal } = options;
-    let resourceVersion = options.resourceVersion;
+    let resourceVersion = options.from?.metadata.resourceVersion;
+    const known = new Map<string, Objects[K]>((options.from?.items ?? []).map((object) => [object.metadata.name, object]));
     while (!signal.aborted) {
       let expired = false;
       try {
@@ -241,6 +245,8 @@ export class KubeClient {
                 throw new KubeError(event.object.code ?? 0, event.object.reason ?? 'Unknown', event.object.message ?? '');
               }
               resourceVersion = event.object.metadata.resourceVersion;
+              if (event.type === 'DELETED') known.delete(event.object.metadata.name);
+              else if (event.type !== 'BOOKMARK') known.set(event.object.metadata.name, event.object);
               yield event;
             }
           }
@@ -254,7 +260,16 @@ export class KubeClient {
       if (expired) {
         const listed = await this.list(kind, { labelSelector });
         resourceVersion = listed.metadata.resourceVersion;
-        for (const object of listed.items) yield { type: 'ADDED', object };
+        const uids = new Map(listed.items.map((object) => [object.metadata.name, object.metadata.uid]));
+        for (const [name, object] of known) {
+          if (uids.has(name) && uids.get(name) === object.metadata.uid) continue;
+          known.delete(name);
+          yield { type: 'DELETED', object };
+        }
+        for (const object of listed.items) {
+          known.set(object.metadata.name, object);
+          yield { type: 'ADDED', object };
+        }
       }
     }
   }
@@ -279,7 +294,7 @@ export class KubeClient {
     if (payload !== undefined) Object.assign(headers, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) });
     return new Promise((resolve, reject) => {
       const req = this.#transport.request(this.#server + path, { method, headers, agent: this.#agent, signal }, resolve);
-      req.on('error', (error) => reject(Object.assign(new Unavailable('container'), { cause: error })));
+      req.on('error', (error) => reject(Object.assign(new Unavailable('container', NO_ANSWER), { cause: error })));
       req.end(payload);
     });
   }

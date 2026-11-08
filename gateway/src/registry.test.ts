@@ -144,7 +144,7 @@ test('after purge, a stats flush and a scheduler reload leave no row of the app 
   const ingress = new Ingress({
     registry, runtime: w.runtime, bundles: w.bundles, scheduler,
     identity: { authenticate: async () => ({ status: 401 }), serve: async () => {} },
-    stats: [{ app, requests: 3, errors: 0, lastAccessAt: 1 }],
+    stats: [{ app, lastAccessAt: 1 }],
     flushStats: (stats) => store.putStats(stats),
     deleteStats: (id) => store.deleteStats(id),
     series: new Series(),

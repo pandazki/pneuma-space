@@ -6,7 +6,7 @@ import {
   APPS_PATH, HEADERS, InputError, LOGIN_PATH, LOGOUT_PATH, NotFound, QuotaExceeded, RESERVED_HEADER_PREFIX, RESERVED_SEGMENT,
   TRIGGER_BODY_LIMIT, appName, effectivePolicy, triggerName,
   type AppId, type BundleStore, type Lease, type Principal, type Registry,
-  type RouteView, type Runtime, type RuntimeKind, type Scheduler, type Stats, type Subject, type TenantName,
+  type RouteView, type Runtime, type RuntimeKind, type Scheduler, type Stats, type Subject, type TenantName, type Traffic,
 } from './model.ts';
 import { hostLabel, type Addressing } from './address.ts';
 import { allows, type Authority } from './authz.ts';
@@ -30,7 +30,7 @@ export type IngressDeps = {
   readonly scheduler: Pick<Scheduler, 'invoke'>;
   /** The stored last access per app, loaded at startup (INV-7); counts start at zero in every process. */
   readonly stats: readonly Stats[];
-  readonly flushStats: (stats: Stats[]) => Promise<void>;
+  readonly flushStats: (stats: Traffic[]) => Promise<void>;
   readonly deleteStats: (app: AppId) => Promise<void>;
   readonly series: Pick<Series, 'request'>;
 };
@@ -172,7 +172,8 @@ export class Ingress {
     return new Promise((resolve) => this.server.close(() => resolve()));
   }
 
-  snapshot(): Stats[] {
+  /** Counts since this process started; the last access survives restarts through the store. */
+  snapshot(): Traffic[] {
     return [...this.#stats].map(([app, counter]) => ({ app, ...counter }));
   }
 

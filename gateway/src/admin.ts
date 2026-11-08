@@ -8,16 +8,15 @@ import type { Runtimes } from './runtimes.ts';
 import { gather, peerSources, RING, seqIn, type RequestLog, type Source } from './requests.ts';
 import { can, LOCAL_CALLER, type Action, type Authority } from './authz.ts';
 import type { Answer, Identity } from './identity.ts';
-import type { AdminRegistry } from './registry.ts';
 import {
-  ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, NotFound, QuotaExceeded, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
+  ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, LOGOUT_PATH, NotFound, QuotaExceeded, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
   appName, bundleId, parseManifest, subject, tenantName,
-  type Access, type Actor, type AppId, type AuditAction, type AuditRecord, type BundleStore, type Caller, type Guard, type Release, type ReplicaId, type Role, type StoreOps,
+  type Access, type Actor, type AppId, type AuditAction, type AuditRecord, type BundleStore, type Caller, type Guard, type Registry, type Release, type ReplicaId, type Role, type StoreOps,
   type Subject, type TenantName, type UsageBucket, type UsageCounters,
 } from './model.ts';
 
 export type AdminDeps = {
-  readonly registry: AdminRegistry;
+  readonly registry: Registry;
   readonly bundles: BundleStore;
   readonly runtime: Pick<Runtimes, 'logs' | 'healthOf'>;
   readonly guard: Guard;
@@ -32,21 +31,8 @@ export type AdminDeps = {
   readonly ingressPort: number;
   readonly consoleFile?: string | URL;
   /** The console-audience provider and the Authority; absent under `local`, where every request is LOCAL_CALLER (ADR 0022 item 4). */
-  readonly upstream?: { readonly identity: Pick<Identity, 'identify' | 'challenge'>; readonly authority: Pick<Authority, 'callerOf'> };
+  readonly upstream?: { readonly identity: Pick<Identity, 'identify' | 'challenge' | 'serve'>; readonly authority: Pick<Authority, 'callerOf'> };
 };
-
-/** ADMIN_PATHS lacks these while model.ts is frozen. */
-const TENANT_PATHS = {
-  me: '/api/me',
-  tenants: '/api/tenants',
-  access: (name: string) => `/api/apps/${name}/access`,
-  move: (name: string) => `/api/apps/${name}/tenant`,
-  quota: (tenant: string) => `/api/tenants/${tenant}/quota`,
-  members: (tenant: string) => `/api/tenants/${tenant}/members`,
-  member: (tenant: string, user: string) => `/api/tenants/${tenant}/members/${user}`,
-  tokens: (tenant: string) => `/api/tenants/${tenant}/tokens`,
-  token: (tenant: string, id: string) => `/api/tenants/${tenant}/tokens/${id}`,
-} as const;
 
 const BODY_LIMIT = 1024 * 1024;
 const MAX_TAIL = 10_000;
@@ -207,7 +193,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, r
 
   const table: Route[] = [
     {
-      method: 'GET', path: at(TENANT_PATHS.me), action: 'me', handle: ({ caller: { actor, roles, platformAdmin } }) => {
+      method: 'GET', path: at(ADMIN_PATHS.me), action: 'me', handle: ({ caller: { actor, roles, platformAdmin } }) => {
         if (actor.via === 'local') return { local: true, platformAdmin: true };
         const name = actor.via === 'upstream' ? actor.name : actor.subject.slice(actor.subject.indexOf(':') + 1);
         return { subject: actor.subject, name, roles: Object.fromEntries(roles), platformAdmin };
@@ -304,7 +290,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, r
     appRoute('PUT', ADMIN_PATHS.appPolicy('<name>'), 'app.policy', ({ params: [name], body }) => registry.setAppPolicy(app(name), body), {
       json: true, audit: onAppAudit('app.policy', (patch) => ({ patch })),
     }),
-    appRoute('PUT', TENANT_PATHS.access('<name>'), 'app.access', async ({ params: [name], body }) => {
+    appRoute('PUT', ADMIN_PATHS.access('<name>'), 'app.access', async ({ params: [name], body }) => {
       if (!(ACCESS_LEVELS as readonly unknown[]).includes(body.access)) throw new InputError(`access must be one of ${ACCESS_LEVELS.join(', ')}`);
       await registry.setAccess(app(name), body.access as Access);
       return { access: body.access };
@@ -314,7 +300,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, r
       await registry.setOwner(app(name), owner);
       return { owner };
     }, { json: true, audit: onAppAudit('app.owner', (body) => ({ owner: body.owner })) }),
-    appRoute('PUT', TENANT_PATHS.move('<name>'), 'app.move', async ({ params: [name], body }) => {
+    appRoute('PUT', ADMIN_PATHS.move('<name>'), 'app.move', async ({ params: [name], body }) => {
       const tenant = tenantName(String(body.tenant));
       await registry.moveApp(app(name), tenant);
       return { tenant };
@@ -329,9 +315,9 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, r
     appRoute('POST', ADMIN_PATHS.purge('<name>'), 'app.purge', async ({ params: [name] }) => (await registry.purge(app(name)), { status: 'purged' }), {
       audit: onAppAudit('app.purge'),
     }),
-    { method: 'GET', path: at(TENANT_PATHS.tenants), action: 'tenants', handle: () => store.tenants() },
+    { method: 'GET', path: at(ADMIN_PATHS.tenants), action: 'tenants', handle: () => store.tenants() },
     {
-      method: 'POST', path: at(TENANT_PATHS.tenants), json: true, action: 'tenants',
+      method: 'POST', path: at(ADMIN_PATHS.tenants), json: true, action: 'tenants',
       audit: {
         action: 'tenant.create',
         target: ({ body }) => ({ kind: 'tenant', id: String(body.name), tenant: typeof body.name === 'string' ? body.name as TenantName : null }),
@@ -344,26 +330,26 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, r
       },
     },
     {
-      method: 'GET', path: at(TENANT_PATHS.quota('<t>')), action: 'tenant.read', scope: onTenant, handle: async (_, scope) => {
+      method: 'GET', path: at(ADMIN_PATHS.quota('<t>')), action: 'tenant.read', scope: onTenant, handle: async (_, scope) => {
         const tenant = await store.tenant(scope.tenant!);
         if (!tenant) throw new NotFound(`no tenant named "${scope.tenant}"`);
         return { quota: tenant.quota, used: await store.quotaUsed(tenant.name) };
       },
     },
     {
-      method: 'PUT', path: at(TENANT_PATHS.quota('<t>')), json: true, action: 'tenant.quota.set', scope: onTenant,
+      method: 'PUT', path: at(ADMIN_PATHS.quota('<t>')), json: true, action: 'tenant.quota.set', scope: onTenant,
       audit: { action: 'tenant.quota', target: (_, scope) => ({ kind: 'tenant', id: scope.tenant ?? '', tenant: scope.tenant }), details: (patch) => ({ patch }) },
       handle: async ({ body }, scope) => ({ quota: await registry.setQuota(scope.tenant!, body) }),
     },
     {
-      method: 'GET', path: at(TENANT_PATHS.members('<t>')), action: 'tenant.read', scope: onTenant, handle: async (_, scope) =>
+      method: 'GET', path: at(ADMIN_PATHS.members('<t>')), action: 'tenant.read', scope: onTenant, handle: async (_, scope) =>
         Promise.all((await store.memberships({ tenant: scope.tenant! })).map(async ({ user, role }) => {
           const seen = await store.user(user);
           return { id: user, name: seen?.name ?? null, role, firstSeen: seen?.firstSeen ?? null, lastSeen: seen?.lastSeen ?? null };
         })),
     },
     {
-      method: 'PUT', path: at(TENANT_PATHS.member('<t>', '<user>')), json: true, action: 'members.write', scope: onTenant,
+      method: 'PUT', path: at(ADMIN_PATHS.member('<t>', '<user>')), json: true, action: 'members.write', scope: onTenant,
       audit: {
         action: async ({ params: [, user] }, scope) =>
           scope.tenant !== null && (await store.memberships({ tenant: scope.tenant, user })).length ? 'member.role' : 'member.add',
@@ -378,7 +364,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, r
       },
     },
     {
-      method: 'DELETE', path: at(TENANT_PATHS.member('<t>', '<user>')), action: 'members.write', scope: onTenant,
+      method: 'DELETE', path: at(ADMIN_PATHS.member('<t>', '<user>')), action: 'members.write', scope: onTenant,
       audit: { action: 'member.remove', target: ({ params: [, user] }, scope) => ({ kind: 'member', id: user ?? '', tenant: scope.tenant }) },
       handle: async ({ params: [, user], caller }, scope) => {
         const id = userId(user);
@@ -387,13 +373,13 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, r
       },
     },
     {
-      method: 'GET', path: at(TENANT_PATHS.tokens('<t>')), action: 'tokens.list', scope: onTenant, handle: async ({ caller }, scope) => {
+      method: 'GET', path: at(ADMIN_PATHS.tenantTokens('<t>')), action: 'tokens.list', scope: onTenant, handle: async ({ caller }, scope) => {
         const all = (await store.tokens(scope.tenant!)).map(({ hash: _, ...token }) => token);
         return tenantAdmin(caller, scope.tenant) ? all : all.filter((t) => t.createdBy === subjectOf(caller.actor));
       },
     },
     {
-      method: 'POST', path: at(TENANT_PATHS.tokens('<t>')), json: true, scope: onTenant,
+      method: 'POST', path: at(ADMIN_PATHS.tenantTokens('<t>')), json: true, scope: onTenant,
       action: ({ body }) => (body.kind === 'service' ? 'tokens.issue.service' : 'tokens.issue.personal'),
       audit: {
         action: 'token.issue',
@@ -413,7 +399,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, r
       },
     },
     {
-      method: 'DELETE', path: at(TENANT_PATHS.token('<t>', '<id>')), action: 'tokens.revoke',
+      method: 'DELETE', path: at(ADMIN_PATHS.tenantToken('<t>', '<id>')), action: 'tokens.revoke',
       scope: async (ctx) => {
         const { tenant } = onTenant(ctx);
         return { tenant, holder: (await store.tokens(tenant!)).find((t) => t.id === ctx.params[1])?.createdBy ?? null };
@@ -518,6 +504,8 @@ export function createAdmin(deps: AdminDeps): Server {
     const url = new URL(request.url ?? '/', 'http://admin');
     const path = url.pathname;
     try {
+      if (path === ADMIN_PATHS.healthz && READS.has(request.method ?? '')) return void response.writeHead(200).end();
+      if (path === LOGOUT_PATH && deps.upstream) return await deps.upstream.identity.serve(request, response);
       if (request.method === 'GET' && path === '/') {
         const page = await readFile(consoleFile).catch(() => null);
         if (page) return void ((await callerOf(request, response)) && response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page));

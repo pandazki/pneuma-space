@@ -497,12 +497,13 @@ export type BundleFile = { readonly size: number; readonly etag: string; readonl
 /** Paths without a leading slash, relative to `static.dir` in a static bundle and to the app root in a code bundle. */
 export type BundleIndex = { readonly id: BundleId; readonly files: Readonly<Record<string, BundleFile>> };
 
+/** What the `stats` table keeps of an app (ADR 0024 item 3); the counts live in `usage`. */
 export type Stats = {
   readonly app: AppId;
-  readonly requests: number;
-  readonly errors: number;
   readonly lastAccessAt: number | null;
 };
+/** An app's request and error counts beside its last access: since boot in Ingress, over the last 24 h in the listing. */
+export type Traffic = Stats & { readonly requests: number; readonly errors: number };
 
 export type InstanceState = 'asleep' | 'waking' | 'awake' | 'draining' | 'stopping';
 /** What a runtime can detect about an instance (ADR 0017); the Guard judges, the runtime only reports. */
@@ -581,6 +582,8 @@ export type PublishRequest = {
 export type AppSummary = {
   readonly name: AppName;
   readonly address: string;
+  readonly tenant: TenantName;
+  readonly access: Access;
   readonly release: ReleaseNumber | null;
   readonly capabilities: readonly CapabilityKind[];
   readonly status: AppStatus;
@@ -726,6 +729,8 @@ export type EventFilter = {
   /** Leaves out rows younger than this on the library's clock, so a concurrent commit with a lower id is not skipped by a cursor. */
   readonly settleMs?: number;
   readonly limit?: number;
+  /** The newest this many matching rows instead of the oldest, still returned oldest first. */
+  readonly newest?: number;
 };
 export const EVENT_SETTLE_MS = 2000;
 
@@ -1032,6 +1037,9 @@ export type SchedulerView = {
   readonly policy: Policy;
 };
 
+/** The secret appears here once; the store keeps only its hash. */
+export type IssuedToken = { readonly id: string; readonly token: string; readonly subject: Subject };
+
 /** Hides the platform rows behind commands; the only writer of everything but Delivery and Stats. */
 export interface Registry {
   publish(request: PublishRequest): Promise<Release>;
@@ -1041,7 +1049,19 @@ export interface Registry {
   setGlobalPolicy(patch: Partial<Policy>): Promise<Policy>;
   setAppPolicy(name: AppName, patch: PolicyPatch): Promise<PolicyOverride>;
   setOwner(name: AppName, owner: Subject): Promise<void>;
-  issueToken(name: string): Promise<{ readonly id: string; readonly token: string; readonly subject: Subject }>;
+  /** `local` only: a service token in DEFAULT_TENANT (ADR 0022 item 4). */
+  issueToken(name: string): Promise<IssuedToken>;
+  /** Copies DEFAULT_QUOTA; `admins` are user ids, at least one. */
+  createTenant(name: TenantName, display: string, admins: readonly string[]): Promise<Tenant>;
+  setQuota(tenant: TenantName, patch: Readonly<Record<string, unknown>>): Promise<Quota>;
+  /** `force` lets a platform admin leave a tenant without an admin; otherwise demoting or removing the last one is a Conflict. */
+  setMember(tenant: TenantName, user: string, role: Role, force: boolean): Promise<void>;
+  removeMember(tenant: TenantName, user: string, force: boolean): Promise<void>;
+  issueTenantToken(tenant: TenantName, subject: Subject, label: string, createdBy: Subject | 'local'): Promise<IssuedToken>;
+  revokeToken(tenant: TenantName, id: string): Promise<void>;
+  setAccess(name: AppName, access: Access): Promise<void>;
+  /** Retires the instance, then moves the row, so quota, labels and tokens switch at once (ADR 0022 item 3). */
+  moveApp(name: AppName, tenant: TenantName): Promise<void>;
   view(name: AppName): RouteView | null;
   nameOf(id: AppId): AppName | null;
   /** The global snapshot; merge with a RouteView's override via effectivePolicy. */
@@ -1085,6 +1105,8 @@ export const HEADERS = {
 } as const;
 
 export const ADMIN_PATHS = {
+  /** Unauthenticated liveness for probes (ADR 0022 item 5). */
+  healthz: '/healthz',
   health: '/api/health',
   apps: '/api/apps',
   metrics: '/api/metrics',
@@ -1104,4 +1126,13 @@ export const ADMIN_PATHS = {
   remove: (name: string) => `/api/apps/${name}/remove`,
   purge: (name: string) => `/api/apps/${name}/purge`,
   unquarantine: (name: string) => `/api/apps/${name}/unquarantine`,
+  access: (name: string) => `/api/apps/${name}/access`,
+  move: (name: string) => `/api/apps/${name}/tenant`,
+  me: '/api/me',
+  tenants: '/api/tenants',
+  quota: (tenant: string) => `/api/tenants/${tenant}/quota`,
+  members: (tenant: string) => `/api/tenants/${tenant}/members`,
+  member: (tenant: string, user: string) => `/api/tenants/${tenant}/members/${user}`,
+  tenantTokens: (tenant: string) => `/api/tenants/${tenant}/tokens`,
+  tenantToken: (tenant: string, id: string) => `/api/tenants/${tenant}/tokens/${id}`,
 } as const;

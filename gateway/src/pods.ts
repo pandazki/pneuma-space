@@ -76,7 +76,7 @@ export type Plane = 'docker' | 'kubernetes';
 export function planeOf(env: NodeJS.ProcessEnv): Plane {
   const plane = env.PNEUMA_SPACE_PLANE?.trim() || 'docker';
   if (plane !== 'docker' && plane !== 'kubernetes') throw new Error(`PNEUMA_SPACE_PLANE must be docker or kubernetes, got "${plane}"`);
-  if (plane === 'kubernetes' && (env.PNEUMA_SPACE_IDENTITY ?? 'local') === 'local') {
+  if (plane === 'kubernetes' && (env.PNEUMA_SPACE_IDENTITY?.trim() || 'local') === 'local') {
     throw new Error('PNEUMA_SPACE_PLANE=kubernetes refuses PNEUMA_SPACE_IDENTITY=local: set PNEUMA_SPACE_IDENTITY=upstream');
   }
   return plane;
@@ -150,7 +150,7 @@ const running = (pod: Pod): string | null => {
 };
 
 const missing = (error: unknown): boolean => error instanceof KubeError && error.status === 404;
-const unavailable = (message: string): Unavailable => Object.assign(new Unavailable('container'), { message });
+const unavailable = (message: string): Unavailable => new Unavailable('container', message);
 
 export type PodDriverOptions = {
   /** In the apps namespace. */
@@ -434,7 +434,7 @@ export class PodDriver implements Driver<ContainerRun, string> {
         const listed = await this.#kube.list('pods', { labelSelector: INSTANCES });
         this.#resync(listed.items);
         failingSince = null;
-        for await (const event of this.#kube.watch('pods', { labelSelector: INSTANCES, resourceVersion: listed.metadata.resourceVersion, signal })) {
+        for await (const event of this.#kube.watch('pods', { labelSelector: INSTANCES, from: listed, signal })) {
           this.#apply(event);
         }
       } catch (error) {

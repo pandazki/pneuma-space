@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash, createHmac, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
+import { once } from 'node:events';
 import { mkdtempSync } from 'node:fs';
 import { createServer, type IncomingHttpHeaders, type IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -9,7 +10,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Authority } from './authz.ts';
 import { events, type LifecycleEvent } from './events.ts';
-import { LocalIdentity, UpstreamIdentity, issueToken, loadOrCreateSecret, type UpstreamConfig } from './identity.ts';
+import { LocalIdentity, UpstreamIdentity, issueToken, loadOrCreateSecret, parseIdentityEnv, type UpstreamConfig } from './identity.ts';
 import { JwtVerifier } from './jwt.ts';
 import { DEFAULT_QUOTA, DEFAULT_TENANT, type Subject, type TenantName, type Token } from './model.ts';
 import { SqliteStore } from './store.ts';
@@ -32,8 +33,8 @@ function cookie(payload: object, key: Buffer = secret): string {
   return `pneuma_space_session=${body}.${createHmac('sha256', key).update(body).digest('base64url')}`;
 }
 
-function login(name: string, next = '/apps/survey/?q=1'): Promise<Response> {
-  return fetch(`${base()}/_pneuma-space/login`, {
+function login(name: string, next = '/apps/survey/?q=1', at = base()): Promise<Response> {
+  return fetch(`${at}/_pneuma-space/login`, {
     method: 'POST',
     body: new URLSearchParams({ name, next }),
     redirect: 'manual',
@@ -89,6 +90,16 @@ test('login never redirects outside /apps/', async () => {
   }
 });
 
+test('under subdomain addressing login returns to any path on the app\'s host and to no other host', async (t) => {
+  const subdomain = new LocalIdentity(secret, { token: async () => null, memberships: async () => [] }, 'subdomain');
+  const host = createServer((request, response) => void subdomain.serve(request, response)).listen(0);
+  t.after(() => host.close());
+  await once(host, 'listening');
+  const at = `http://127.0.0.1:${(host.address() as AddressInfo).port}`;
+  const back = async (next: string) => (await login('ana', next, at)).headers.get('location');
+  assert.deepEqual([await back('/board?id=7'), await back('//evil.example/'), await back('/\\evil.example/')], ['/board?id=7', '/', '/']);
+});
+
 test('the platform secret is created once and read back on the next start', () => {
   const path = join(mkdtempSync(join(tmpdir(), 'pneuma-space-secret-')), 'pneuma-space.secret');
   const first = loadOrCreateSecret(path);
@@ -128,6 +139,13 @@ async function personalToken(user: string, tenant: TenantName): Promise<{ secret
   await store.putToken(row);
   return { secret, row };
 }
+
+test('an empty variable, as compose.yaml passes an unset one, means its default', () => {
+  const upstreamEnv = { PNEUMA_SPACE_IDENTITY: 'upstream', PNEUMA_SPACE_IDENTITY_HEADER: 'x-jwt', PNEUMA_SPACE_IDENTITY_JWKS_URL: 'https://sso.example/jwks', PNEUMA_SPACE_IDENTITY_ISSUER: ISSUER, PNEUMA_SPACE_IDENTITY_AUDIENCE: 'apps' };
+  const empty = Object.fromEntries(['KEYS_FILE', 'USER_CLAIM', 'NAME_CLAIMS', 'GROUPS_CLAIM', 'LOGIN_URL', 'LOGOUT_URL', 'STRIP_COOKIES'].map((k) => [`PNEUMA_SPACE_IDENTITY_${k}`, '']));
+  assert.deepEqual(parseIdentityEnv({ PNEUMA_SPACE_IDENTITY: '' }), { kind: 'local' });
+  assert.deepEqual(parseIdentityEnv({ ...upstreamEnv, ...empty, PNEUMA_SPACE_CONSOLE_AUDIENCE: '' }), parseIdentityEnv(upstreamEnv));
+});
 
 test('upstream: the JWT is read with and without a Bearer prefix', async () => {
   const value = jwt({ name: 'Ana' });
