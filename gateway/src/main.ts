@@ -12,6 +12,9 @@ import { Ingress } from './ingress.ts';
 import { hostSample, httpProbe, Metrics, profileProbe, tcpProbe } from './metrics.ts';
 import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId } from './model.ts';
 import { composeProject, DockerInfra } from './infra.ts';
+import { inClusterClient } from './kube.ts';
+import { KubeInfra } from './kube-infra.ts';
+import { planeOf, podConfig, PodRuntime } from './pods.ts';
 import { createProviders, providerConfig, S3BundleStore } from './providers.ts';
 import { PlatformRegistry } from './registry.ts';
 import { IsolateRuntime, RUNNER_PORT } from './isolate.ts';
@@ -27,11 +30,12 @@ const log = (ev: string, extra: Record<string, unknown> = {}) => emit(ev, null, 
 
 const setup = (() => {
   try {
+    const pods = planeOf(process.env) === 'kubernetes' ? podConfig(process.env) : null;
     const identity = parseIdentityEnv(process.env);
     const admins = parsePlatformAdmins(process.env.PNEUMA_SPACE_PLATFORM_ADMINS);
     const upstream = identity.kind === 'upstream' ? { ...identity.options, verifier: new JwtVerifier(identity.jwt), audiences: identity.jwt.audiences } : null;
     const consoleIdentity = identity.kind === 'upstream' && upstream ? { ...upstream, audiences: identity.consoleAudiences } : null;
-    return { admins, upstream, consoleIdentity, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
+    return { pods, admins, upstream, consoleIdentity, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
   } catch (error) {
     console.error(`pneuma-space: ${(error as Error).message}`);
     process.exit(1);
@@ -50,11 +54,18 @@ const store = new SqliteStore(join(data, 'pneuma-space.sqlite3'));
 const instances = new Instances(store, { replica, leader: true });
 await instances.ready();
 await instances.start();
-const docker = new Docker();
-const infra = new DockerInfra(docker, await composeProject(docker));
 const specFor = (app: AppId) => registry.runSpec(app);
 const guard = new AppGuard({ instances, specFor });
-const container = new DockerRuntime({ docker, network, specFor, instances, guard });
+// The plane swaps the container driver and Infra; everything else is shared (ADR 0019 item 1).
+const { infra, container } = setup.pods
+  ? {
+    infra: new KubeInfra({ registry: process.env.PNEUMA_SPACE_REGISTRY?.trim() || null, authFile: process.env.PNEUMA_SPACE_REGISTRY_AUTH?.trim() || null }),
+    container: new PodRuntime({ kube: await inClusterClient('pneuma-space-apps'), config: setup.pods, specFor, instances, guard }),
+  }
+  : await (async () => {
+    const docker = new Docker();
+    return { infra: new DockerInfra(docker, await composeProject(docker)), container: new DockerRuntime({ docker, network, specFor, instances, guard }) };
+  })();
 const bundles = new S3BundleStore(config.object);
 const isolate = new IsolateRuntime({
   runner: `http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`, bundleUrl: (id) => bundles.presignTar(id), specFor,
