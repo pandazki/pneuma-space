@@ -11,7 +11,7 @@ import { JwtVerifier } from './jwt.ts';
 import { Ingress } from './ingress.ts';
 import { hostSample, httpProbe, Metrics, profileProbe, serveMetrics, Series, tcpProbe } from './metrics.ts';
 import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId } from './model.ts';
-import { composeProject, DockerInfra } from './infra.ts';
+import { DockerInfra } from './infra.ts';
 import { inClusterClient } from './kube.ts';
 import { NodeView, type RunnerHealth } from './nodes.ts';
 import { KubeInfra } from './kube-infra.ts';
@@ -19,7 +19,7 @@ import { planeOf, podConfig, PodRuntime } from './pods.ts';
 import { createProviders, providerConfig, resolvesOnNetwork, S3BundleStore } from './providers.ts';
 import { PlatformRegistry } from './registry.ts';
 import { IsolateRuntime, RUNNER_PORT, StatefulSetPool, StaticPool } from './isolate.ts';
-import { DockerRuntime } from './runtime.ts';
+import { canConnect, DockerRuntime } from './runtime.ts';
 import { AppGuard, Runtimes } from './runtimes.ts';
 import { requests } from './requests.ts';
 import { DeliveryScheduler } from './scheduler.ts';
@@ -82,7 +82,7 @@ const { infra, container, pool } = setup.pods
   : await (async () => {
     const docker = new Docker();
     return {
-      infra: new DockerInfra(docker, await composeProject(docker)), container: new DockerRuntime({ docker, network, specFor, instances, guard }),
+      infra: new DockerInfra(docker), container: new DockerRuntime({ docker, network, specFor, instances, guard }),
       pool: new StaticPool(`http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`),
     };
   })();
@@ -92,8 +92,11 @@ const isolate = new IsolateRuntime({
   hasRun: async (app) => (await store.releases(app)).some((release) => release.runtime === 'isolate'), instances, guard,
 });
 const runtime = new Runtimes({ runtimes: [container, isolate], specFor, instances });
+// A Kubernetes Service name resolves whether or not a Pod serves it, so the cluster probes by connecting.
+const SERVICE_PORTS = { postgres: config.postgres.port, coturn: 3478 } as const;
+const providerProbe = setup.pods ? (service: keyof typeof SERVICE_PORTS) => canConnect(service, SERVICE_PORTS[service]) : resolvesOnNetwork;
 const registry = await PlatformRegistry.open({
-  store, runtime, guard, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => metrics.stats(),
+  store, runtime, guard, infra, bundles, providers: Object.values(createProviders(runtime, config, providerProbe)), statsSource: async () => metrics.stats(),
   addressing: setup.addressing, volumeGb: config.volumeGb, nodeOf: (app) => nodes.nodeOf(app),
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica, policy: () => registry.policy() });

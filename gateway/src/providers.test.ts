@@ -7,8 +7,10 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { Conflict, ENV_BY_KIND, newAppId, type BundleId, type CapabilityKind, type Injection, type JobResult } from './model.ts';
+import { Conflict, ENV_BY_KIND, newAppId, type BundleId, type CapabilityKind, type Injection } from './model.ts';
+import { PgError } from './pg.ts';
 import { createProviders, objectUrl, providerConfig, S3BundleStore, signedFetch } from './providers.ts';
+import { Resp, RespError } from './resp.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const project = 'pneuma-space-u6';
@@ -19,10 +21,18 @@ const stackEnv = {
 };
 const dockerUp = spawnSync('docker', ['info'], { stdio: 'ignore' }).status === 0;
 
+const pgPort = 26432;
+const redisPort = 26379;
+// The gateway reaches postgres and redis on the compose network; this test reaches them through these host ports,
+// and coturn needs none, so a second stack's coturn on 3478 does not block it.
+const override = join(mkdtempSync(join(tmpdir(), 'pneuma-space-u6-')), 'ports.yaml');
+writeFileSync(override, `services:\n  postgres: { ports: ["127.0.0.1:${pgPort}:5432"] }\n  redis: { ports: ["127.0.0.1:${redisPort}:6379"] }\n  coturn: { ports: !reset [] }\n`);
 const compose = (...args: string[]) =>
-  execFileSync('docker', ['compose', '-p', project, '--profile', 'postgres', '--profile', 'rtc', ...args], { cwd: root, env: stackEnv, stdio: 'pipe' });
+  execFileSync('docker', ['compose', '-p', project, '-f', 'compose.yaml', '-f', override, '--profile', 'postgres', '--profile', 'rtc', ...args], { cwd: root, env: stackEnv, stdio: 'pipe' });
 
-function exec(service: string, argv: readonly string[], stdin = ''): Promise<JobResult> {
+type ExecResult = { readonly exitCode: number; readonly stdout: string; readonly stderr: string };
+
+function exec(service: string, argv: readonly string[], stdin = ''): Promise<ExecResult> {
   return new Promise((resolve) => {
     const child = execFile('docker', ['exec', '-i', `${project}-${service}-1`, ...argv], (error, stdout, stderr) =>
       resolve({ exitCode: error ? Number(error.code ?? 1) : 0, stdout, stderr }));
@@ -31,15 +41,19 @@ function exec(service: string, argv: readonly string[], stdin = ''): Promise<Job
 }
 
 const docker = (...args: string[]) => execFileSync('docker', args, { encoding: 'utf8' });
-const infra = { runJob: (job: { service: string; argv: readonly string[]; stdin?: string }) => exec(job.service, job.argv, job.stdin) };
 const destroyed: string[] = [];
 const storage = { destroyStorage: async (_app: string, id: string) => void destroyed.push(id) };
-const config = providerConfig({
+const defaults = providerConfig({
   PNEUMA_SPACE_OBJECT_ENDPOINT: `http://127.0.0.1:${objectPort}`,
   PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT: `http://127.0.0.1:${objectPort}`,
   PNEUMA_SPACE_RTC_SECRET: 'pneuma-local-rtc',
 });
-const providers = createProviders(infra, storage, config, async () => true);
+const config = {
+  ...defaults,
+  postgres: { ...defaults.postgres, host: '127.0.0.1', port: pgPort },
+  redis: { ...defaults.redis, host: '127.0.0.1', port: redisPort },
+};
+const providers = createProviders(storage, config, async () => true);
 
 async function until(probe: () => Promise<boolean>, what: string): Promise<void> {
   for (let i = 0; i < 100; i++) {
@@ -50,7 +64,7 @@ async function until(probe: () => Promise<boolean>, what: string): Promise<void>
 }
 
 const pgReady = async () => (await exec('postgres', ['pg_isready', '-U', 'postgres'])).exitCode === 0;
-const redisReady = async () => (await exec('redis', ['redis-cli'], `AUTH ${config.redisPassword}\nPING\n`)).stdout.includes('PONG');
+const redisReady = async () => (await exec('redis', ['redis-cli'], `AUTH ${config.redis.password}\nPING\n`)).stdout.includes('PONG');
 
 function assertEnvNames(kind: CapabilityKind, injection: Pick<Injection, 'env'>): void {
   assert.deepEqual(Object.keys(injection.env).sort(), [...ENV_BY_KIND[kind]].sort());
@@ -126,6 +140,11 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       assert.equal((await login(url())).stdout.trim(), '1');
     });
 
+    test('a server error rejects with PgError', async () => {
+      const wrong = createProviders(storage, { ...config, postgres: { ...config.postgres, password: 'wrong' } }, async () => true).postgres;
+      await assert.rejects(wrong.ensure(newAppId(), null), PgError);
+    });
+
     test('destroy twice removes database and role', async () => {
       await pg.destroy(app, resource);
       await pg.destroy(app, resource);
@@ -141,7 +160,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
     const asApp = async (...commands: string[]) =>
       (await exec('redis', ['redis-cli'], [`AUTH ${resource.user} ${resource.password}`, ...commands, ''].join('\n'))).stdout;
     const asRoot = async (...commands: string[]) =>
-      (await exec('redis', ['redis-cli'], [`AUTH ${config.redisPassword}`, ...commands, ''].join('\n'))).stdout;
+      (await exec('redis', ['redis-cli'], [`AUTH ${config.redis.password}`, ...commands, ''].join('\n'))).stdout;
 
     test('ensure twice is one ACL user with the prefix', async () => {
       resource = { ...(await kv.ensure(app, null)) };
@@ -178,6 +197,12 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       assert.match(await asApp('PING'), /^WRONGPASS/);
       await kv.ensure(app, resource);
       assert.deepEqual((await asApp('PING')).split('\n').slice(0, 2), ['OK', 'PONG']);
+    });
+
+    test('an error reply rejects with RespError', async () => {
+      const resp = await Resp.open({ host: '127.0.0.1', port: redisPort, password: config.redis.password });
+      await assert.rejects(resp.command('ACL', 'SETUSER', app, 'nosuchrule'), RespError);
+      await resp.close();
     });
 
     test('destroy twice removes the prefix keys and the user, nothing else', async () => {
@@ -262,7 +287,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
     });
 
     test('ensure refuses an empty secret', async () => {
-      const unset = createProviders(infra, storage, providerConfig({}), async () => true).coturn;
+      const unset = createProviders(storage, providerConfig({}), async () => true).coturn;
       await assert.rejects(unset.ensure(app, null), Conflict);
     });
 
@@ -317,7 +342,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
     const probe = () => {
       const script = `
         import { createProviders, providerConfig } from '/src/providers.ts';
-        const p = createProviders({ runJob: async () => ({ exitCode: 0, stdout: '', stderr: '' }) }, { destroyStorage: async () => {} }, providerConfig({ PNEUMA_SPACE_RTC_SECRET: 's' }));
+        const p = createProviders({ destroyStorage: async () => {} }, providerConfig({ PNEUMA_SPACE_RTC_SECRET: 's' }));
         for (const name of ['postgres', 'coturn']) {
           const t = Date.now();
           const outcome = await p[name].ensure('${newAppId()}', null).then(() => 'up', (e) => e.constructor.name);

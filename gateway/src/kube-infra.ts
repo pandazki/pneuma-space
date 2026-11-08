@@ -1,7 +1,7 @@
 // Infra of the kubernetes plane: image references resolve to digests in the organization's registry (ADR 0019 item 6), nodes are listed for the node view (ADR 0024 item 8).
 import { readFile } from 'node:fs/promises';
 import type { KubeClient, Node, Pod } from './kube.ts';
-import { Conflict, type AppId, type ImageId, type Infra, type JobResult, type NodeSample, type PlatformPod } from './model.ts';
+import type { AppId, ImageId, Infra, NodeSample, PlatformPod } from './model.ts';
 
 const MANIFESTS = [
   'application/vnd.oci.image.index.v1+json',
@@ -100,11 +100,6 @@ export class KubeInfra implements Infra {
     this.#namespaces = options.namespaces;
     this.#registry = options.registry;
     this.#authFile = options.authFile;
-  }
-
-  /** Providers stop using jobs with ADR 0025 item 9; until then no job runs on this plane. */
-  async runJob(): Promise<JobResult> {
-    throw new Conflict('the kubernetes plane runs no provisioning jobs (ADR 0025 item 9)');
   }
 
   /** One list of nodes and one list of role-labelled Pods per namespace; never `metrics.k8s.io`. */

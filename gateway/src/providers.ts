@@ -4,17 +4,22 @@ import { Readable } from 'node:stream';
 import {
   CAPABILITIES, Conflict, FILES_DIR, InputError, NotFound, RESERVED_SEGMENT, RUNTIMES,
   type AppId, type BundleFile, type BundleId, type BundleIndex, type BundleStore, type ByteRange, type CapabilityProvider,
-  type Infra, type InfraService, type Injection, type ProviderName, type Resource, type ResourceKind, type Runtime, type RuntimeKind,
+  type Injection, type ProviderName, type Resource, type ResourceKind, type Runtime, type RuntimeKind,
 } from './model.ts';
+import { PgError, Session, type PgOptions } from './pg.ts';
+import { Resp, RespError } from './resp.ts';
 
 export type Credential = { readonly accessKey: string; readonly secretKey: string };
 export type ObjectService = { readonly endpoint: string; readonly root: Credential };
+/** A service the gateway administers as its superuser. */
+export type AdminService = { readonly host: string; readonly port: number; readonly password: string };
 
 export type ProviderConfig = {
   /** Reached by the gateway and by apps on the platform network. */
   readonly object: ObjectService;
   readonly objectPublicEndpoint: string;
-  readonly redisPassword: string;
+  readonly postgres: AdminService;
+  readonly redis: AdminService;
   readonly rtcSecret: string;
   readonly rtcPublicHost: string;
   /** GiB one files or SQLite binding is provisioned with; the tenant's `storage_gb` counts it (ADR 0023 item 4). */
@@ -37,14 +42,14 @@ export function providerConfig(env: Readonly<Record<string, string | undefined>>
       root: { accessKey: env.PNEUMA_SPACE_OBJECT_ROOT_USER ?? 'pneuma-local', secretKey: env.PNEUMA_SPACE_OBJECT_ROOT_PASSWORD ?? 'pneuma-local-secret' },
     },
     objectPublicEndpoint: env.PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT ?? 'http://127.0.0.1:9000',
-    redisPassword: env.PNEUMA_SPACE_REDIS_PASSWORD ?? 'pneuma',
+    postgres: { host: 'postgres', port: 5432, password: env.PNEUMA_SPACE_POSTGRES_PASSWORD ?? 'pneuma-local' },
+    redis: { host: 'redis', port: 6379, password: env.PNEUMA_SPACE_REDIS_PASSWORD ?? 'pneuma' },
     rtcSecret: env.PNEUMA_SPACE_RTC_SECRET ?? '',
     rtcPublicHost: env.PNEUMA_SPACE_RTC_PUBLIC_HOST ?? '127.0.0.1',
     volumeGb: gibibytes((env.PNEUMA_SPACE_PLANE === 'kubernetes' ? env.PNEUMA_SPACE_K8S_VOLUME_SIZE : env.PNEUMA_SPACE_VOLUME_SIZE) ?? '1Gi'),
   };
 }
 
-type ProviderInfra = Pick<Infra, 'runJob'>;
 type Storage = Pick<Runtime, 'destroyStorage'>;
 /** True when a profiled Compose service is on the network. */
 export type ServiceProbe = (service: 'postgres' | 'coturn' | NonNullable<(typeof RUNTIMES)[RuntimeKind]['service']>) => Promise<boolean>;
@@ -52,18 +57,23 @@ export type ServiceProbe = (service: 'postgres' | 'coturn' | NonNullable<(typeof
 // Docker's resolver forwards unknown names upstream and waits about 5 s; a 500 ms single try answers within 1 s (spike S2).
 const resolver = new dns.Resolver({ timeout: 500, tries: 1 });
 export const resolvesOnNetwork: ServiceProbe = (service) => resolver.resolve4(service).then(() => true, () => false);
+type ProviderProbe = (service: 'postgres' | 'coturn') => Promise<boolean>;
 
-async function requireService(probe: ServiceProbe, service: 'postgres' | 'coturn', profile: string, kind: ResourceKind): Promise<void> {
+async function requireService(probe: ProviderProbe, service: 'postgres' | 'coturn', profile: string, kind: ResourceKind): Promise<void> {
   if (!(await probe(service))) {
     throw new Conflict(`capability "${kind}" needs the ${service} service; start the platform with --profile ${profile}`);
   }
 }
 
-async function job(infra: ProviderInfra, service: InfraService, argv: readonly string[], stdin: string): Promise<string> {
-  const result = await infra.runJob({ service, argv, stdin });
-  if (result.exitCode !== 0) throw new Error(`${service} job ${argv[0]} exited ${result.exitCode}: ${result.stderr.trim()}`);
-  return result.stdout;
-}
+/** A failed connect means the service is not running, which publish answers with 409; a server's own error passes through. */
+const unreachable = (kind: ResourceKind, service: string) => (error: Error): never => {
+  if (error instanceof PgError || error instanceof RespError) throw error;
+  throw new Conflict(`capability "${kind}" cannot reach the ${service} service: ${error.message}`);
+};
+
+const quoted = (name: string) => `"${name.replaceAll('"', '""')}"`;
+const literal = (text: string) => `'${text.replaceAll("'", "''")}'`;
+const exists = async (session: Session, sql: string, name: string) => (await session.query(sql, [name])).rows.length > 0;
 
 const secret = () => randomBytes(24).toString('hex');
 
@@ -105,29 +115,36 @@ class PostgresProvider implements CapabilityProvider {
   readonly kind = 'db';
   readonly name = 'postgres';
   readonly service = 'postgres';
-  readonly #infra: ProviderInfra;
-  readonly #probe: ServiceProbe;
+  readonly #admin: PgOptions;
+  readonly #probe: ProviderProbe;
 
-  constructor(infra: ProviderInfra, probe: ServiceProbe) {
-    this.#infra = infra;
+  constructor(service: AdminService, probe: ProviderProbe) {
+    this.#admin = { ...service, user: 'postgres', database: 'postgres', tls: false };
     this.#probe = probe;
   }
 
-  // CREATE DATABASE cannot run in a DO block, so both creates go through \gexec guards; psql reads them from stdin.
-  #psql(sql: string): Promise<string> {
-    return job(this.#infra, 'postgres', ['psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], sql);
+  // One simple query per statement: CREATE and DROP DATABASE refuse to run inside a transaction block.
+  async #sql(work: (session: Session) => Promise<void>): Promise<void> {
+    const session = await Session.open(this.#admin).catch(unreachable(this.kind, 'postgres'));
+    try {
+      await work(session);
+    } finally {
+      await session.close();
+    }
   }
 
   async ensure(app: AppId, current: Resource | null): Promise<Resource> {
     await requireService(this.#probe, 'postgres', 'postgres', this.kind);
     const role = `app_${app}`;
     const password = current?.password ?? secret();
-    await this.#psql(`
-SELECT 'CREATE ROLE ${role}' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${role}')\\gexec
-ALTER ROLE ${role} LOGIN PASSWORD '${password}';
-SELECT 'CREATE DATABASE ${role} OWNER ${role}' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${role}')\\gexec
-REVOKE CONNECT ON DATABASE ${role} FROM PUBLIC;
-`);
+    await this.#sql(async (session) => {
+      if (!(await exists(session, 'SELECT FROM pg_roles WHERE rolname = $1', role))) await session.simple(`CREATE ROLE ${quoted(role)}`);
+      await session.simple(`ALTER ROLE ${quoted(role)} LOGIN PASSWORD ${literal(password)}`);
+      if (!(await exists(session, 'SELECT FROM pg_database WHERE datname = $1', role))) {
+        await session.simple(`CREATE DATABASE ${quoted(role)} OWNER ${quoted(role)}`);
+      }
+      await session.simple(`REVOKE CONNECT ON DATABASE ${quoted(role)} FROM PUBLIC`);
+    });
     return { role, database: role, password };
   }
 
@@ -137,16 +154,21 @@ REVOKE CONNECT ON DATABASE ${role} FROM PUBLIC;
 
   async suspend(app: AppId): Promise<void> {
     const role = `app_${app}`;
-    await this.#psql(`DO $$BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname = '${role}') THEN ALTER ROLE ${role} NOLOGIN; END IF; END$$;`);
+    await this.#sql(async (session) => {
+      if (await exists(session, 'SELECT FROM pg_roles WHERE rolname = $1', role)) await session.simple(`ALTER ROLE ${quoted(role)} NOLOGIN`);
+    });
   }
 
   async destroy(app: AppId): Promise<void> {
-    const role = `app_${app}`;
-    await this.#psql(`DROP DATABASE IF EXISTS ${role} WITH (FORCE);\nDROP ROLE IF EXISTS ${role};\n`);
+    const role = quoted(`app_${app}`);
+    await this.#sql(async (session) => {
+      await session.simple(`DROP DATABASE IF EXISTS ${role} WITH (FORCE)`);
+      await session.simple(`DROP ROLE IF EXISTS ${role}`);
+    });
   }
 }
 
-// Unlinks in the server so destroy is one job, not one round trip per SCAN page.
+// Unlinks in the server so destroy is one round trip, not one per SCAN page.
 const UNLINK_PREFIX =
   "local c = '0' repeat local r = redis.call('SCAN', c, 'MATCH', ARGV[1], 'COUNT', 1000) c = r[1] " +
   "for _, k in ipairs(r[2]) do redis.call('UNLINK', k) end until c == '0' return 1";
@@ -155,25 +177,26 @@ class RedisProvider implements CapabilityProvider {
   readonly kind = 'kv';
   readonly name = 'redis';
   readonly service = 'redis';
-  readonly #infra: ProviderInfra;
-  readonly #password: string;
+  readonly #service: AdminService;
 
-  constructor(infra: ProviderInfra, password: string) {
-    this.#infra = infra;
-    this.#password = password;
+  constructor(service: AdminService) {
+    this.#service = service;
   }
 
-  // redis-cli exits 0 on error replies when reading stdin, and every command here answers OK or an integer.
-  async #cli(...commands: string[]): Promise<void> {
-    const out = await job(this.#infra, 'redis', ['redis-cli'], [`AUTH ${this.#password}`, ...commands, 'ACL SAVE', ''].join('\n'));
-    const unexpected = out.split('\n').find((line) => line !== '' && !/^(OK|\d+)$/.test(line));
-    if (unexpected !== undefined) throw new Error(`redis: ${unexpected}`);
+  /** Runs the commands, then ACL SAVE so the users survive a restart. */
+  async #acl(...commands: readonly string[][]): Promise<void> {
+    const resp = await Resp.open(this.#service).catch(unreachable(this.kind, 'redis'));
+    try {
+      for (const command of [...commands, ['ACL', 'SAVE']]) await resp.command(...command);
+    } finally {
+      await resp.close();
+    }
   }
 
   async ensure(app: AppId, current: Resource | null): Promise<Resource> {
     const user = `app_${app}`;
     const password = current?.password ?? secret();
-    await this.#cli(`ACL SETUSER ${user} reset on >${password} ~${app}:* &${app}:* +@all -@admin -@dangerous`);
+    await this.#acl(['ACL', 'SETUSER', user, 'reset', 'on', `>${password}`, `~${app}:*`, `&${app}:*`, '+@all', '-@admin', '-@dangerous']);
     return { user, password, prefix: `${app}:` };
   }
 
@@ -185,11 +208,11 @@ class RedisProvider implements CapabilityProvider {
   }
 
   async suspend(app: AppId): Promise<void> {
-    await this.#cli(`ACL SETUSER app_${app} off`);
+    await this.#acl(['ACL', 'SETUSER', `app_${app}`, 'off']);
   }
 
   async destroy(app: AppId): Promise<void> {
-    await this.#cli(`EVAL "${UNLINK_PREFIX}" 0 ${app}:*`, `ACL DELUSER app_${app}`);
+    await this.#acl(['EVAL', UNLINK_PREFIX, '0', `${app}:*`], ['ACL', 'DELUSER', `app_${app}`]);
   }
 }
 
@@ -256,9 +279,9 @@ class CoturnProvider implements CapabilityProvider {
   readonly name = 'coturn';
   readonly service = 'coturn';
   readonly #config: ProviderConfig;
-  readonly #probe: ServiceProbe;
+  readonly #probe: ProviderProbe;
 
-  constructor(config: ProviderConfig, probe: ServiceProbe) {
+  constructor(config: ProviderConfig, probe: ProviderProbe) {
     this.#config = config;
     this.#probe = probe;
   }
@@ -287,12 +310,12 @@ class CoturnProvider implements CapabilityProvider {
 
 export type Providers = { readonly [N in ProviderName]: CapabilityProvider };
 
-export function createProviders(infra: ProviderInfra, storage: Storage, config: ProviderConfig, probe: ServiceProbe = resolvesOnNetwork): Providers {
+export function createProviders(storage: Storage, config: ProviderConfig, probe: ProviderProbe = resolvesOnNetwork): Providers {
   const providers: Providers = {
     volume: new StorageProvider('files', 'volume', storage, 'pneuma-space-files-', FILES_DIR, { PNEUMA_SPACE_FILES_DIR: '{dir}' }),
     sqlite: new StorageProvider('db', 'sqlite', storage, 'pneuma-space-db-', '/pneuma/db', { PNEUMA_SPACE_DB_URL: 'sqlite://{dir}/app.sqlite3' }),
-    postgres: new PostgresProvider(infra, probe),
-    redis: new RedisProvider(infra, config.redisPassword),
+    postgres: new PostgresProvider(config.postgres, probe),
+    redis: new RedisProvider(config.redis),
     s3: new S3Provider(config.object, config.objectPublicEndpoint),
     coturn: new CoturnProvider(config, probe),
   };
