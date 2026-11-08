@@ -867,7 +867,7 @@ const I18N = {
     'col.createdBy': '签发人', 'col.display': '显示名', 'col.apps': '应用', 'role.admin': '管理员', 'role.member': '成员',
     'team.title': '团队', 'team.sub': '{tenant} 的成员和令牌。', 'team.subAll': '平台上的每个租户。点一行管理它的成员和令牌。',
     'team.none': '你还不属于任何租户。请租户管理员按你的 id（{id}）添加你。',
-    'sec.members': '成员', 'sec.membersDesc': '按 id 添加，对方不必已经登录过。每个租户至少保留一个管理员。',
+    'sec.members': '成员', 'sec.membersRead': '这个租户的成员和角色。租户管理员负责添加和移除。', 'sec.membersDesc': '按 id 添加，对方不必已经登录过。每个租户至少保留一个管理员。',
     'm.never': '从未登录', 'm.you': '你', 'm.add': '添加成员', 'm.id': '用户 id', 'm.idHint': '上游身份里的用户 id，不带 user:。',
     'm.added': '{id} 已加入，角色是{role}。', 'm.roleSaved': '{id} 的角色改为{role}。', 'm.remove': '移除',
     'm.removeTitle': '从 {tenant} 移除 {id}？', 'm.removeBody': '他在这个租户签发的个人令牌随之失效。30 秒内在每个副本生效。',
@@ -1085,7 +1085,7 @@ const I18N = {
     'col.createdBy': 'Issued by', 'col.display': 'Display name', 'col.apps': 'Apps', 'role.admin': 'admin', 'role.member': 'member',
     'team.title': 'Team', 'team.sub': 'Members and tokens of {tenant}.', 'team.subAll': 'Every tenant on the platform. Click a row to manage its members and tokens.',
     'team.none': 'You are not in any tenant yet. Ask a tenant admin to add you by your id ({id}).',
-    'sec.members': 'Members', 'sec.membersDesc': 'Add by id; the person need not have signed in yet. Every tenant keeps at least one admin.',
+    'sec.members': 'Members', 'sec.membersRead': 'The members of this tenant and their roles. A tenant admin adds and removes them.', 'sec.membersDesc': 'Add by id; the person need not have signed in yet. Every tenant keeps at least one admin.',
     'm.never': 'Never signed in', 'm.you': 'you', 'm.add': 'Add member', 'm.id': 'User id', 'm.idHint': 'The user id from the upstream identity, without user:.',
     'm.added': '{id} added as {role}.', 'm.roleSaved': '{id} is now {role}.', 'm.remove': 'Remove',
     'm.removeTitle': 'Remove {id} from {tenant}?', 'm.removeBody': 'Personal tokens they issued in this tenant stop working too. Every replica applies it within 30 s.',
@@ -3131,7 +3131,7 @@ async function team() {
   await Promise.all([loadMembers(), loadTokens()]);
   show(
     teamHead(t('team.sub', { tenant: scope })),
-    h('section', {}, sectionHead(1, 'sec.members', 'sec.membersDesc'), admin ? addForm : null, members, memberMsg),
+    h('section', {}, sectionHead(1, 'sec.members', admin ? 'sec.membersDesc' : 'sec.membersRead'), admin ? addForm : null, members, memberMsg),
     h('section', {}, sectionHead(2, 'sec.tokens', admin ? 'sec.tokensDesc' : 'sec.tokensMine'), secret, h('div', { class: 'stack' }, issueForm, tokens)),
   );
 }
