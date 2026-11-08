@@ -64,6 +64,7 @@ export type Pod = {
     readonly reason?: string;
     readonly message?: string;
     readonly podIP?: string;
+    readonly conditions?: readonly { readonly type: string; readonly status: 'True' | 'False' | 'Unknown' }[];
     readonly containerStatuses?: readonly { readonly name: string; readonly ready: boolean; readonly state?: ContainerState }[];
   };
 };
