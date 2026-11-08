@@ -15,7 +15,7 @@ import { DEFAULT_QUOTA, DEFAULT_TENANT, type Subject, type TenantName, type Toke
 import { SqliteStore } from './store.ts';
 
 const secret = randomBytes(32);
-const issued = issueToken('ci');
+const issued = issueToken('service:ci' as Subject);
 const tokens = new Map<string, Token>([[issued.hash, { id: '1', tenant: DEFAULT_TENANT, subject: issued.subject, label: 'ci', hash: issued.hash, createdBy: 'local', createdAt: 0, revokedAt: null }]]);
 const identity = new LocalIdentity(secret, { token: async (hash) => tokens.get(hash) ?? null, memberships: async () => [] });
 
@@ -53,7 +53,7 @@ test('a cookie the platform did not sign, a tampered one and an expired one are 
 });
 
 test('a bearer token the platform never issued is challenged', async () => {
-  assert.deepEqual(await identity.authenticate(request({ authorization: `Bearer ${issueToken('ci').token}` })), { status: 401 });
+  assert.deepEqual(await identity.authenticate(request({ authorization: `Bearer ${issueToken('service:ci' as Subject).token}` })), { status: 401 });
 });
 
 test('an issued token authenticates as service:<name>', async () => {

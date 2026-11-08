@@ -30,9 +30,9 @@ export function loadOrCreateSecret(path: string): Buffer {
 }
 
 /** The Registry stores `hash` and shows `token` once. */
-export function issueToken(name: string): { readonly token: string; readonly hash: string; readonly subject: Subject } {
+export function issueToken(who: Subject): { readonly token: string; readonly hash: string; readonly subject: Subject } {
   const token = randomBytes(32).toString('base64url');
-  return { token, hash: sha256(token), subject: subject(`service:${name}`) };
+  return { token, hash: sha256(token), subject: who };
 }
 
 function sha256(text: string): string {
