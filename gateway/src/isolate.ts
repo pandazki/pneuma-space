@@ -242,10 +242,11 @@ class IsolateDriver implements Driver<IsolateRun, string> {
 
   /** The runner is its own failure domain: an untracked worker it cannot stop now is stopped by the recovery poll. */
   async discard(app: AppId, worker: string): Promise<boolean> {
-    const runner = this.#locate(app, worker);
-    runner?.live.delete(worker);
+    let runner: Runner | null = null;
     try {
-      await this.remove(app, worker);
+      runner = this.#reach(app, worker);
+      runner.live.delete(worker);
+      await this.#call(runner, 'DELETE', `/instances/${app}?drain=${STOP_MS}&retire=1`, undefined, STOP_MS + CALL_MS);
       return true;
     } catch (error) {
       if (runner) runner.suspect = true;
