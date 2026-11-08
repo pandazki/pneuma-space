@@ -63,7 +63,7 @@ const isolate = new IsolateRuntime({
 const runtime = new Runtimes({ runtimes: [container, isolate], specFor, instances });
 const registry = await PlatformRegistry.open({
   store, runtime, guard, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => metrics.stats(),
-  addressing: setup.addressing,
+  addressing: setup.addressing, volumeGb: config.volumeGb,
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica });
 const authority = new Authority(store, setup.admins);

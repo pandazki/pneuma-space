@@ -321,7 +321,7 @@ export class SqlOps implements StoreOps {
          (SELECT count(*) FROM instance i JOIN app a ON a.id = i.app WHERE a.tenant = $1 AND i.state <> 'asleep') AS awake,
          (SELECT coalesce(sum(i.cpu_millis), 0) FROM instance i JOIN app a ON a.id = i.app WHERE a.tenant = $1 AND i.state <> 'asleep') AS cpu_millis,
          (SELECT coalesce(sum(i.memory_mb), 0) FROM instance i JOIN app a ON a.id = i.app WHERE a.tenant = $1 AND i.state <> 'asleep') AS memory_mb,
-         (SELECT count(*) FROM binding b JOIN app a ON a.id = b.app WHERE a.tenant = $1 AND (b.kind = 'files' OR b.provider = 'sqlite')) AS volumes`,
+         (SELECT count(*) FROM binding b JOIN app a ON a.id = b.app WHERE a.tenant = $1 AND b.provider IN ('volume', 'sqlite')) AS volumes`,
       [tenant],
     ))!;
     return {
