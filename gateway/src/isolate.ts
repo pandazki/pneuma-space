@@ -94,7 +94,7 @@ export class StatefulSetPool implements RunnerPool {
         const listed = await kube.list('pods', { labelSelector: RUNNER_SELECTOR });
         this.#runners = listed.items.flatMap((pod) => runnerOf(pod) ?? []);
         this.#listed.resolve(true);
-        for await (const event of kube.watch('pods', { labelSelector: RUNNER_SELECTOR, resourceVersion: listed.metadata.resourceVersion, signal })) {
+        for await (const event of kube.watch('pods', { labelSelector: RUNNER_SELECTOR, from: listed, signal })) {
           if (event.type === 'BOOKMARK') continue;
           const others = this.#runners.filter((runner) => runner.id !== event.object.metadata.name);
           const runner = event.type === 'DELETED' ? null : runnerOf(event.object);

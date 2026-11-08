@@ -434,7 +434,7 @@ export class PodDriver implements Driver<ContainerRun, string> {
         const listed = await this.#kube.list('pods', { labelSelector: INSTANCES });
         this.#resync(listed.items);
         failingSince = null;
-        for await (const event of this.#kube.watch('pods', { labelSelector: INSTANCES, resourceVersion: listed.metadata.resourceVersion, signal })) {
+        for await (const event of this.#kube.watch('pods', { labelSelector: INSTANCES, from: listed, signal })) {
           this.#apply(event);
         }
       } catch (error) {

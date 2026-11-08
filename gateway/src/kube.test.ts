@@ -77,7 +77,7 @@ test('watch yields events whose bytes are split across chunks, inside a line and
   });
   const controller = new AbortController();
   const seen: string[] = [];
-  for await (const event of client(server).watch('pods', { resourceVersion: '1', signal: controller.signal })) {
+  for await (const event of client(server).watch('pods', { from: { metadata: { resourceVersion: '1' }, items: [] }, signal: controller.signal })) {
     seen.push(`${event.type} ${event.type === 'BOOKMARK' ? '' : event.object.metadata.labels?.note ?? ''}`);
     if (seen.length === 2) controller.abort();
   }
@@ -96,13 +96,31 @@ test('watch on 410 Gone lists once and continues from the list resourceVersion',
   });
   const controller = new AbortController();
   let first;
-  for await (const event of client(server).watch('pods', { resourceVersion: '10', signal: controller.signal })) {
+  for await (const event of client(server).watch('pods', { from: { metadata: { resourceVersion: '10' }, items: [] }, signal: controller.signal })) {
     first = event;
     controller.abort();
   }
   assert.equal(first?.type === 'ADDED' && first.object.metadata.name, 'fresh');
   assert.equal(seen.filter((s) => !s.url.searchParams.has('watch')).length, 1);
   assert.deepEqual(seen.filter((s) => s.url.searchParams.has('watch')).map((s) => s.url.searchParams.get('resourceVersion')), ['10', '20']);
+});
+
+test('a Pod deleted during a 410 gap arrives as DELETED after the relist', async (t) => {
+  const uid = (p: Pod, id: string): Pod => ({ ...p, metadata: { ...p.metadata, uid: id } });
+  const [gone, kept] = [uid(pod('gone', '9'), 'u-gone'), uid(pod('kept', '9'), 'u-kept')];
+  const { server } = await fake(t, (_req, res, url) => {
+    if (!url.searchParams.has('watch')) return json(res, 200, { metadata: { resourceVersion: '20' }, items: [kept] });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    if (url.searchParams.get('resourceVersion') === '10') res.end(`${JSON.stringify({ type: 'ERROR', object: { kind: 'Status', code: 410, reason: 'Expired' } })}\n`);
+    else res.flushHeaders();
+  });
+  const controller = new AbortController();
+  const seen: string[] = [];
+  for await (const event of client(server).watch('pods', { from: { metadata: { resourceVersion: '10' }, items: [gone, kept] }, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(2000)]) })) {
+    seen.push(`${event.type} ${event.type === 'BOOKMARK' ? '' : event.object.metadata.name}`);
+    if (seen.length === 2) controller.abort();
+  }
+  assert.deepEqual(seen, ['DELETED gone', 'ADDED kept']);
 });
 
 test('watch ends without error when its signal aborts', async (t) => {
