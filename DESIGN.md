@@ -63,7 +63,7 @@ Provider 不知道应用用哪种运行时：`inject` 给出的存储绑定是�
 
 App：`(无) --publish--> registered --remove--> removed --publish--> registered`；`removed --purge--> purging --> (无)`。`remove` 把该 App 的所有 Binding 置 `suspended`（凭据失效，数据保留），地址 404；`publish` 把当前 Release 声明的 kind 置 `active`（`ensure`），未声明的置 `suspended`；`purge` 销毁所有 Binding 的资源，不论状态；`purging` 持久化，重启后续跑。只能从 `removed` 进入 `purging`。
 
-Instance：`asleep --acquire--> waking --就绪--> awake`；`awake --无 Lease 且闲置到期--> stopping --> asleep`；`awake --retire--> draining --Lease 清空或到期--> stopping --> (移除)`；`asleep --retire--> (移除)`，直接删掉停止的容器。`waking` 就绪超时回到 `asleep`，等待者得到 502。所有转换在该实例自己的锁内，没有全局锁；多副本时这把锁是实例行上带 `state` 和 `epoch` 的条件更新（ADR 0020）。`awake -> stopping` 要求 Lease 集合为空，`acquire` 在同一把锁内加 Lease，所以二者不会同时成立。`docker stop` 在锁外执行，期间到达的请求等待后重新唤醒，代价是一次多余的停启，不是被切断的连接。
+Instance：`asleep --acquire--> waking --就绪--> awake`；`awake --无 Lease 且闲置到期--> stopping --> asleep`；`awake --retire--> draining --Lease 清空或到期--> stopping --> asleep`（容器或 Pod 删掉，实例行留下，handle 为空，下次唤醒用新 Release）；`asleep --retire--> asleep`，直接删掉停止的容器。`waking` 就绪超时回到 `asleep`，等待者得到 502。所有转换在该实例自己的锁内，没有全局锁；多副本时这把锁是实例行上带 `state` 和 `epoch` 的条件更新（ADR 0020）。`awake -> stopping` 要求 Lease 集合为空，`acquire` 在同一把锁内加 Lease，所以二者不会同时成立。`docker stop` 在锁外执行，期间到达的请求等待后重新唤醒，代价是一次多余的停启，不是被切断的连接。
 
 Delivery：`due --worker 取走--> delivering --2xx--> done`；非 2xx、超时、连接丢失回到 `due` 并退避，第 5 次失败进入 `failed`；`removed` 或 Trigger 不再声明时 `cancelled`。重启或换领导者时所有 `delivering` 回到 `due`。
 
