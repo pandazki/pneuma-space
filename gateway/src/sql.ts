@@ -590,7 +590,10 @@ export class SqlOps implements StoreOps {
 
   async events(filter: EventFilter) {
     const w = where([['id > ?', filter.after], ['at >= ?', filter.since], ['ev = ?', filter.ev], [`at < ${this.#s.dialect.now} - ?`, filter.settleMs]]);
-    return (await this.#s.all(`SELECT * FROM events ${w.sql} ORDER BY id${limit(filter.limit)}`, w.params)).map(toEvent);
+    const sql = filter.newest === undefined
+      ? `SELECT * FROM events ${w.sql} ORDER BY id${limit(filter.limit)}`
+      : `SELECT * FROM (SELECT * FROM events ${w.sql} ORDER BY id DESC${limit(filter.newest)}) AS newest ORDER BY id`;
+    return (await this.#s.all(sql, w.params)).map(toEvent);
   }
 
   sweepEvents(before: number, maxRows: number) {

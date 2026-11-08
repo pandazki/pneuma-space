@@ -729,6 +729,8 @@ export type EventFilter = {
   /** Leaves out rows younger than this on the library's clock, so a concurrent commit with a lower id is not skipped by a cursor. */
   readonly settleMs?: number;
   readonly limit?: number;
+  /** The newest this many matching rows instead of the oldest, still returned oldest first. */
+  readonly newest?: number;
 };
 export const EVENT_SETTLE_MS = 2000;
 

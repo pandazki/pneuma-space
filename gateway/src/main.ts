@@ -125,7 +125,6 @@ const metrics = new Metrics({
   policy: () => registry.policy(),
   view: (name) => registry.view(name),
   series,
-  quota: store,
   retries: () => (store instanceof PgStore ? store.retries : 0),
   replica,
   leader: () => instances.leading,

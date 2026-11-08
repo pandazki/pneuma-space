@@ -52,11 +52,10 @@ export type MetricsDeps = {
   readonly nameOf: (app: AppId) => AppName | null;
   readonly probes: Readonly<Record<ServiceName, Probe>>;
   readonly host: () => Promise<HostSample>;
-  readonly store: Pick<StoreOps, 'putUsage' | 'usage' | 'sweepUsage' | 'insertEvents' | 'events' | 'sweepEvents'>;
+  readonly store: Pick<StoreOps, 'putUsage' | 'usage' | 'sweepUsage' | 'insertEvents' | 'events' | 'sweepEvents' | 'tenants' | 'quotaUsed'>;
   readonly policy: () => Pick<Policy, 'usage_retention_days' | 'events_retention_days' | 'events_max_rows'>;
   readonly view: (name: AppName) => { readonly app: AppId; readonly tenant: TenantName } | null;
   readonly series: Series;
-  readonly quota: Pick<StoreOps, 'tenants' | 'quotaUsed'>;
   /** Store transactions rerun since start (ADR 0025). */
   readonly retries: () => number;
   readonly replica: ReplicaId;
@@ -264,8 +263,8 @@ export class Metrics {
     if ((this.#deps.leader?.() ?? true) && now - this.#sweptAt >= HOUR) await this.#sweep(now);
     this.#lastFlushAt = now;
     if (this.#deps.leader?.() ?? true) {
-      const tenants = await this.#deps.quota.tenants();
-      this.#quota = await Promise.all(tenants.map(async (t) => ({ tenant: t.name, quota: t.quota, used: await this.#deps.quota.quotaUsed(t.name) })));
+      const tenants = await this.#deps.store.tenants();
+      this.#quota = await Promise.all(tenants.map(async (t) => ({ tenant: t.name, quota: t.quota, used: await this.#deps.store.quotaUsed(t.name) })));
     }
   }
 
@@ -435,8 +434,7 @@ export class Metrics {
   async #readTail(): Promise<void> {
     const now = this.#now();
     const fresh = now - this.#tailAt >= EVENT_TAIL_STALE_MS || this.#tail.length === 0;
-    const after = fresh ? Math.max(0, (await newestEventId(this.#deps.store)) - EVENT_TAIL) : this.#tail.at(-1)!.id;
-    const rows = await this.#deps.store.events({ after, settleMs: EVENT_SETTLE_MS });
+    const rows = await this.#deps.store.events(fresh ? { newest: EVENT_TAIL, settleMs: EVENT_SETTLE_MS } : { after: this.#tail.at(-1)!.id, settleMs: EVENT_SETTLE_MS });
     this.#tail = (fresh ? rows : [...this.#tail, ...rows]).slice(-EVENT_TAIL);
     this.#tailAt = now;
   }
@@ -527,24 +525,6 @@ export class Metrics {
       if (this.#reasons.size > RECENT_FAILURES) this.#reasons.delete(this.#reasons.keys().next().value!);
     } else if (e.ev === 'delivery.due' && Number(e.attempt) > 0) this.#count(app, 'deliveriesRetried');
   }
-}
-
-/**
- * The frozen EventFilter reads oldest first only, so the newest id is found by doubling then halving `after` with limit 1:
- * about 2 log2(id) reads on the primary key, however many rows the table holds.
- */
-async function newestEventId(store: Pick<StoreOps, 'events'>): Promise<number> {
-  const beyond = async (id: number) => (await store.events({ after: id, limit: 1 })).length > 0;
-  if (!(await beyond(0))) return 0;
-  let low = 0;
-  let high = 1;
-  while (await beyond(high)) [low, high] = [high, high * 2];
-  while (high - low > 1) {
-    const mid = Math.floor((low + high) / 2);
-    if (await beyond(mid)) low = mid;
-    else high = mid;
-  }
-  return high;
 }
 
 export const tcpProbe = (host: string, port: number): Probe => async () => ((await canConnect(host, port)) ? 'up' : 'down');

@@ -30,7 +30,6 @@ function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader =
     policy: () => ({ usage_retention_days: 90, events_retention_days: 14, events_max_rows: 1_000_000, ...policy }),
     view: (name) => (name === survey ? { app, tenant: DEFAULT_TENANT } : null),
     series: new Series(),
-    quota: store,
     retries: () => 0,
     replica: replica as ReplicaId,
     leader: () => leader,

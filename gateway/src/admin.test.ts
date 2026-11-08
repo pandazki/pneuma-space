@@ -28,7 +28,6 @@ async function admin(runtime?: Runtimes) {
     policy: () => registry.policy(),
     view: (name) => registry.view(name),
     series: new Series(),
-    quota: store,
     retries: () => 0,
     replica: 'r1' as ReplicaId,
   });
