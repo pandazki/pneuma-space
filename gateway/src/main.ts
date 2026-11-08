@@ -1,3 +1,4 @@
+import type { IncomingMessage } from 'node:http';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { parseAppsOrigin } from './address.ts';
@@ -101,7 +102,11 @@ await runtime.reconcile();
 void registry.resume();
 await scheduler.resume();
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
-const admin = await startAdmin({ registry, bundles, runtime, guard: runtime, metrics, requests, usage: store, ingressPort }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const caller = setup.upstream ? async (request: IncomingMessage) => {
+  const auth = await identity.identify(request);
+  return typeof auth === 'string' ? auth : authority.callerOf(auth);
+} : undefined;
+const admin = await startAdmin({ registry, bundles, runtime, guard: runtime, metrics, requests, store, ingressPort, caller }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {
   ingress.flush().catch((error: Error) => log('flush-failed', { error: error.message }));

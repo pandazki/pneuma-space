@@ -17,7 +17,13 @@ let requests: Recorded[] = [];
 let server: Server;
 let admin: string;
 
+const AUDIT_ROWS = [
+  { id: 2, at: Date.UTC(2026, 10, 9, 1), actor: 'user:alice', actorTenant: 'lab', tenant: 'lab', action: 'app.purge', targetKind: 'app', target: 'survey', result: 'ok', details: {} },
+  { id: 1, at: Date.UTC(2026, 10, 9, 0), actor: 'user:alice', actorTenant: 'lab', tenant: 'lab', action: 'app.purge', targetKind: 'app', target: 'survey', result: 'started', details: {} },
+];
+
 function reply(request: Recorded): unknown {
+  if (request.url.startsWith('/api/audit')) return AUDIT_ROWS;
   if (request.url === '/api/bundles') return { bundle: createHash('sha256').update(request.body).digest('hex') };
   if (request.url.endsWith('/release')) return { app: 'a1b2c3', number: 1 };
   if (request.url === '/api/tokens') return { token: 'one-time-secret-42', subject: 'service:ci' };
@@ -247,4 +253,25 @@ test('init --container is the app scaffold with runtime container and a Dockerfi
   assert.deepEqual(JSON.parse(readFileSync(join(target, 'pneuma-space.json'), 'utf8')), { ...scaffoldManifest, runtime: 'container' });
   assert.ok(existsSync(join(target, 'sdk/serve.ts')));
   assert.ok(existsSync(join(target, 'Dockerfile')));
+});
+
+describe('appctl audit', () => {
+  test('sends the filters as the query, --since as from', async () => {
+    const before = Date.now();
+    const { code } = await appctl(['audit', '--tenant', 'lab', '--since', '7d', '--action', 'app.purge', '--actor', 'user:alice']);
+    assert.equal(code, 0);
+    const query = new URL(requests[0].url, admin).searchParams;
+    assert.deepEqual([query.get('tenant'), query.get('action'), query.get('actor')], ['lab', 'app.purge', 'user:alice']);
+    assert.ok(Math.abs(Number(query.get('from')) - (before - 7 * 86_400_000)) < 5_000);
+  });
+
+  test('prints one TSV line per row: at, actor, action, target, result', async () => {
+    const { stdout } = await appctl(['audit']);
+    assert.equal(stdout, '2026-11-09T01:00:00.000Z\tuser:alice\tapp.purge\tsurvey\tok\n2026-11-09T00:00:00.000Z\tuser:alice\tapp.purge\tsurvey\tstarted\n');
+  });
+
+  test('--json prints the rows as the admin API answered them', async () => {
+    const { stdout } = await appctl(['audit', '--json']);
+    assert.deepEqual(JSON.parse(stdout), AUDIT_ROWS);
+  });
 });

@@ -12,6 +12,8 @@ import {
 } from '../gateway/src/model.ts';
 import { assemble } from './scaffold.ts';
 
+// ADMIN_PATHS lacks it while model.ts is frozen.
+const AUDIT_PATH = '/api/audit';
 const EXIT = { usage: 1, manifest: 2, api: 3, build: 4 } as const;
 
 class Failure extends Error {
@@ -34,12 +36,16 @@ const USAGE = `usage:
   appctl policy [<name>] key=value ...
   appctl owner <name> <subject>
   appctl token create <name>
+  appctl audit [--tenant <t>] [--since 7d|24h|2026-11-01] [--action <action>] [--actor <subject>] [--json]
 admin API: PNEUMA_SPACE_ADMIN (default http://127.0.0.1:${ADMIN_PORT})`;
 
 const usage = (why: string) => new Failure(EXIT.usage, `${why}\n${USAGE}`);
 const admin = (process.env.PNEUMA_SPACE_ADMIN ?? `http://127.0.0.1:${ADMIN_PORT}`).replace(/\/$/, '');
 
-type Options = { owner?: string; tag?: string; manifest?: string; container?: boolean; static?: boolean; yes?: boolean; tail?: string };
+type Options = {
+  owner?: string; tag?: string; manifest?: string; container?: boolean; static?: boolean; yes?: boolean; tail?: string;
+  tenant?: string; since?: string; action?: string; actor?: string; json?: boolean;
+};
 
 async function api(method: string, path: string, body?: unknown): Promise<any> {
   const tar = body instanceof ReadableStream;
@@ -317,6 +323,29 @@ async function token([verb, ...rest]: string[]): Promise<void> {
   console.log(issued.token);
 }
 
+const SPAN_MS = { m: 60_000, h: 3_600_000, d: 86_400_000 } as const;
+
+function since(raw: string): number {
+  const [, count, unit] = /^(\d+)([mhd])$/.exec(raw) ?? [];
+  if (count) return Date.now() - Number(count) * SPAN_MS[unit as keyof typeof SPAN_MS];
+  const at = /^\d{4}-\d{2}-\d{2}/.test(raw) ? Date.parse(raw) : NaN;
+  if (Number.isNaN(at)) throw usage(`--since takes 30m, 24h, 7d or a date like 2026-11-01, got "${raw}"`);
+  return at;
+}
+
+// The server keeps at most 1000; asking for all of them keeps a week's answer from stopping at the default 100.
+async function audit(args: string[], options: Options): Promise<void> {
+  if (args.length) throw usage('audit takes only options');
+  const query = new URLSearchParams({ limit: '1000' });
+  if (options.tenant) query.set('tenant', options.tenant);
+  if (options.since) query.set('from', String(since(options.since)));
+  if (options.action) query.set('action', options.action);
+  if (options.actor) query.set('actor', options.actor);
+  const rows: { at: number; actor: string; action: string; target: string; result: string }[] = await api('GET', `${AUDIT_PATH}?${query}`);
+  if (options.json) return void console.log(JSON.stringify(rows, null, 2));
+  for (const row of rows) console.log([new Date(row.at).toISOString(), row.actor, row.action, row.target, row.result].join('\t'));
+}
+
 const COMMANDS: Record<string, (args: string[], options: Options) => unknown> = {
   publish,
   init,
@@ -340,6 +369,7 @@ const COMMANDS: Record<string, (args: string[], options: Options) => unknown> = 
   policy,
   owner,
   token,
+  audit,
 };
 
 async function main(argv: string[]): Promise<void> {
@@ -356,6 +386,11 @@ async function main(argv: string[]): Promise<void> {
         static: { type: 'boolean' },
         yes: { type: 'boolean' },
         tail: { type: 'string' },
+        tenant: { type: 'string' },
+        since: { type: 'string' },
+        action: { type: 'string' },
+        actor: { type: 'string' },
+        json: { type: 'boolean' },
       },
     });
   } catch (error) {

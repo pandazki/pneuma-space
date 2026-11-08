@@ -328,13 +328,13 @@ export class PlatformRegistry implements Registry {
     log('owner', name, { owner });
   }
 
-  async issueToken(name: string): Promise<{ readonly token: string; readonly subject: Subject }> {
+  /** `id` is beyond the frozen interface; the admin boundary audits it. */
+  async issueToken(name: string): Promise<{ readonly id: string; readonly token: string; readonly subject: Subject }> {
     const { token, hash, subject } = issueToken(name);
-    await this.#store.putToken({
-      id: randomBytes(8).toString('hex'), tenant: DEFAULT_TENANT, subject, label: name, hash, createdBy: 'local', createdAt: Date.now(), revokedAt: null,
-    });
+    const id = randomBytes(8).toString('hex');
+    await this.#store.putToken({ id, tenant: DEFAULT_TENANT, subject, label: name, hash, createdBy: 'local', createdAt: Date.now(), revokedAt: null });
     log('token', null, { subject });
-    return { token, subject };
+    return { id, token, subject };
   }
 
   /** The authentication path's User write: once per user per 5 min on this replica, at once when the name or groups change (ADR 0022 item 1). */
