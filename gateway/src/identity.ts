@@ -312,6 +312,12 @@ export class UpstreamIdentity implements Identity {
   }
 }
 
+/** Whether a header value is a JWT, so Ingress drops the identity header only when it carries one (ADR 0021 item 6). */
+export function carriesJwt(value: string): boolean {
+  const jwt = bearer(value);
+  return jwt !== null && JWT.test(jwt);
+}
+
 function bearer(value: string | string[] | undefined): string | null {
   if (typeof value !== 'string' || value === '') return null;
   return value.replace(/^Bearer /i, '');

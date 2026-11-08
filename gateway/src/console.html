@@ -2609,7 +2609,7 @@ async function detail(name) {
   heat.set(dayRows(usage.buckets, APP_HEAT_DAYS));
   let heatAt = Date.now();
   const { app, releases, bindings, policy, stats, deliveries } = d;
-  d.address = `/apps/${app.name}/`;
+  d.address = apps.find((a) => a.name === app.name)?.address ?? '';
   const reload = () => route();
   const lift = async () => {
     try {
@@ -2641,7 +2641,7 @@ async function detail(name) {
       h('h1', { class: 'mono', style: 'margin-top:12px' }, app.name),
       h('div', { class: 'meta' },
         status(app.status),
-        app.status === 'registered' ? h('a', { href: ingressOrigin(health.ingressPort) + d.address, target: '_blank', rel: 'noopener', class: 'mono', title: t('d.open', { address: d.address }) }, d.address) : h('span', { class: 'mono muted' }, d.address),
+        app.status === 'registered' ? h('a', { href: appUrl(d.address, health.ingressPort), target: '_blank', rel: 'noopener', class: 'mono', title: t('d.open', { address: d.address }) }, d.address) : h('span', { class: 'mono muted' }, d.address),
         row ? runtimeChip(row) : null,
         h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(s.instance), s.since != null ? h('span', { class: 'muted' }, t('d.since', { ago: ago(s.since).textContent })) : null, leaseChips(s.leases)),
         h('span', { class: 'muted' }, t('d.owner', { owner: app.owner }))));
@@ -2708,7 +2708,8 @@ async function detail(name) {
   };
 }
 
-const ingressOrigin = (port) => `${location.protocol}//${location.hostname}:${port}`;
+// A path-mode address is relative to the ingress, which listens on its own port; a subdomain address is absolute.
+const appUrl = (address, port) => new URL(address, `${location.protocol}//${location.hostname}:${port}`).href;
 
 const FIELD_OF = [[/^app name/, 'name'], [/^subject/, 'owner'], [/^image|image "/, 'image'], [/^bundle|static is declared/, 'bundle']];
 

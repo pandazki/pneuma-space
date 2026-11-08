@@ -1,5 +1,6 @@
 import { hostname } from 'node:os';
 import { join } from 'node:path';
+import { parseAppsOrigin } from './address.ts';
 import { startAdmin } from './admin.ts';
 import { Docker } from './docker.ts';
 import { emit, events } from './events.ts';
@@ -28,7 +29,7 @@ const setup = (() => {
     const identity = parseIdentityEnv(process.env);
     const admins = parsePlatformAdmins(process.env.PNEUMA_SPACE_PLATFORM_ADMINS);
     const upstream = identity.kind === 'upstream' ? { ...identity.options, verifier: new JwtVerifier(identity.jwt), audiences: identity.jwt.audiences } : null;
-    return { admins, upstream };
+    return { admins, upstream, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
   } catch (error) {
     console.error(`pneuma-space: ${(error as Error).message}`);
     process.exit(1);
@@ -55,6 +56,7 @@ const isolate = new IsolateRuntime({
 const runtime = new Runtimes({ runtimes: [container, isolate], specFor, events });
 const registry = await PlatformRegistry.open({
   store, runtime, guard: runtime, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => metrics.stats(),
+  addressing: setup.addressing,
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app) });
 const authority = new Authority(store, setup.admins);
@@ -62,7 +64,8 @@ const identity: Identity = setup.upstream
   ? new UpstreamIdentity(setup.upstream, authority, registry)
   : new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), authority);
 const ingress = new Ingress({
-  registry, runtime, identity, bundles, scheduler, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
+  registry, runtime, identity, authority, addressing: setup.addressing, bundles, scheduler,
+  upstream: setup.upstream && { header: setup.upstream.header, stripCookies: setup.upstream.stripCookies }, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
 });
 
 const metrics = new Metrics({

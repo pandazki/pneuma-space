@@ -31,6 +31,21 @@ function endToEnd(raw: readonly string[]): string[] {
   return out;
 }
 
+const DOMAIN_ATTRIBUTE = /;\s*domain\s*(=[^;]*)?(?=;|$)/gi;
+
+/** An app's cookies stay on its own host: `Domain` goes from every `Set-Cookie` (ADR 0021 item 6). */
+function hostOnly(raw: string[]): string[] {
+  for (let i = 0; i < raw.length; i += 2) if (raw[i].toLowerCase() === 'set-cookie') raw[i + 1] = raw[i + 1].replace(DOMAIN_ATTRIBUTE, '');
+  return raw;
+}
+
+/** The same for a raw response head, which the WebSocket path relays as bytes. */
+function hostOnlyHead(head: Buffer): Buffer {
+  const text = head.toString('latin1');
+  const out = text.replace(/^set-cookie:[^\r\n]*/gim, (line) => line.replace(DOMAIN_ATTRIBUTE, ''));
+  return out === text ? head : Buffer.from(out, 'latin1');
+}
+
 /** Resolves once TCP is up, so a failure here is known to precede the request line. */
 export function connect(address: string): Promise<net.Socket> {
   const colon = address.lastIndexOf(':');
@@ -59,7 +74,7 @@ export function forward(
       hold.channel(end);
       res.setTimeout(hold.idleMs, end);
     }
-    res.writeHead(ur.statusCode ?? 502, ur.statusMessage, endToEnd(ur.rawHeaders));
+    res.writeHead(ur.statusCode ?? 502, ur.statusMessage, hostOnly(endToEnd(ur.rawHeaders)));
     ur.pipe(res);
     ur.on('error', () => res.destroy());
   });
@@ -165,10 +180,13 @@ export function tunnel(
 
   up.on('data', (chunk: Buffer) => {
     if (responseHead) {
-      const all = Buffer.concat([responseHead, chunk]);
-      const end = all.indexOf('\r\n\r\n');
-      if (end < 0) return void (responseHead = all);
+      const buffered = Buffer.concat([responseHead, chunk]);
+      const headEnd = buffered.indexOf('\r\n\r\n');
+      if (headEnd < 0) return void (responseHead = buffered);
       responseHead = null;
+      const head = hostOnlyHead(buffered.subarray(0, headEnd + 4));
+      const all = Buffer.concat([head, buffered.subarray(headEnd + 4)]);
+      const end = head.length - 4;
       const status = Number(/^HTTP\/1\.[01] (\d{3})/.exec(all.toString('latin1', 0, all.indexOf('\r\n')))?.[1] ?? 0);
       answered(status);
       if (status !== 101) return send(all);

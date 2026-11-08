@@ -3,12 +3,15 @@ import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from 'node:
 import type net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import {
-  APPS_PATH, HEADERS, InputError, LOGIN_PATH, LOGOUT_PATH, NotFound, RESERVED_HEADER_PREFIX, RESERVED_SEGMENT,
+  APPS_PATH, HEADERS, InputError, LOGIN_PATH, LOGOUT_PATH, NotFound, QuotaExceeded, RESERVED_HEADER_PREFIX, RESERVED_SEGMENT,
   TRIGGER_BODY_LIMIT, appName, effectivePolicy, triggerName,
-  type AppId, type BundleStore, type Challenge, type IdentityProvider, type Lease, type Principal, type Registry,
-  type RouteView, type Runtime, type Scheduler, type Stats,
+  type AppId, type BundleStore, type Lease, type Principal, type Registry,
+  type RouteView, type Runtime, type Scheduler, type Stats, type Subject,
 } from './model.ts';
+import { hostLabel, type Addressing } from './address.ts';
+import { allows, type Authority } from './authz.ts';
 import { emit } from './events.ts';
+import { carriesJwt, type Answer, type Auth, type Failure, type Identity } from './identity.ts';
 import { connect, forward, tunnel, type Hold } from './proxy.ts';
 import { requests, type RequestKind } from './requests.ts';
 import { Backoff, Quarantined, Unavailable } from './runtimes.ts';
@@ -17,7 +20,11 @@ import { serveStatic, staticPath } from './static.ts';
 export type IngressDeps = {
   readonly registry: Pick<Registry, 'view' | 'policy'>;
   readonly runtime: Pick<Runtime, 'acquire' | 'release' | 'channel' | 'state'>;
-  readonly identity: IdentityProvider;
+  readonly identity: Pick<Identity, 'identify' | 'challenge' | 'serve'>;
+  readonly authority: Pick<Authority, 'callerOf'>;
+  readonly addressing: Addressing;
+  /** Null under `local`. Otherwise access is enforced, and the identity header and these cookies never reach an app (ADR 0021 item 6, ADR 0022 item 6). */
+  readonly upstream: Upstream | null;
   readonly bundles: Pick<BundleStore, 'open'>;
   readonly scheduler: Pick<Scheduler, 'invoke'>;
   /** The stored last access per app, loaded at startup (INV-7); counts start at zero in every process. */
@@ -26,14 +33,21 @@ export type IngressDeps = {
   readonly deleteStats: (app: AppId) => Promise<void>;
 };
 
-type Reply = { readonly status: number; readonly headers?: OutgoingHttpHeaders; readonly error?: string };
+/** `header` lowercase. */
+type Upstream = { readonly header: string; readonly stripCookies: readonly string[] };
+
+/** `text` is a plain-text body; `error` becomes `{"error": ...}`. */
+type Reply = { readonly status: number; readonly headers?: OutgoingHttpHeaders; readonly error?: string; readonly text?: string };
+
+/** The request's credential, read on first use and reused for access, identity headers and triggers (ADR 0022 item 6). */
+type Credential = () => Promise<Auth | Failure>;
 
 /** Where the prologue (DESIGN 2.2 steps 1 to 7) sends a request. */
 type Route =
   | { readonly to: 'reply'; readonly reply: Reply }
   | { readonly to: 'identity' }
-  | { readonly to: 'trigger'; readonly view: RouteView; readonly trigger: string }
-  | { readonly to: 'static'; readonly view: RouteView; readonly path: string }
+  | { readonly to: 'trigger'; readonly view: RouteView; readonly trigger: string; readonly caller: Subject }
+  | { readonly to: 'static'; readonly view: RouteView; readonly path: string; readonly shared: boolean }
   | { readonly to: 'app'; readonly view: RouteView; readonly path: string; readonly headers: string[] };
 
 /** What a request record learns on the way through, beyond what the request and response carry; no app, no record. `refused`: the Guard answered, so a 503 is not the app's error. */
@@ -43,41 +57,67 @@ type Counter = { requests: number; errors: number; lastAccessAt: number | null }
 
 const log = emit;
 
+const QUOTA_RETRY_SECONDS = 30;
+
 function reply(status: number, error?: string, headers?: OutgoingHttpHeaders): Route {
   return { to: 'reply', reply: { status, error, headers } };
 }
 
-function challenge(who: Challenge): Reply {
-  return who.status === 303 ? { status: 303, headers: { location: who.location } } : { status: 401, error: 'sign in or send Authorization: Bearer <token>' };
+function challenge(answer: Answer): Reply {
+  switch (answer.status) {
+    case 303: return { status: 303, headers: { location: answer.location } };
+    case 401: return { status: 401, error: 'sign in or send Authorization: Bearer <token>' };
+    case 503: return { status: 503, error: answer.error };
+  }
 }
 
-/** Inbound headers minus every X-Pneuma-Space-* and X-Forwarded-Prefix, plus the ones the platform sets (INV-5). */
-function forwardedHeaders(req: IncomingMessage, view: RouteView, who: Principal | null): string[] {
+/** `%`, control characters and non-ASCII as percent-encoded UTF-8, every other byte literal (docs/app-contract.md, Headers). */
+function encodeName(name: string): string {
+  return name.replace(/[\x00-\x1f%\x7f-\u{10ffff}]/gu, (ch) => [...Buffer.from(ch)].map((byte) => `%${byte.toString(16).toUpperCase().padStart(2, '0')}`).join(''));
+}
+
+function withoutCookies(header: string, names: readonly string[]): string {
+  if (names.length === 0) return header;
+  return header.split(';').map((pair) => pair.trim()).filter((pair) => pair !== '' && !names.includes(pair.split('=')[0]!.trim())).join('; ');
+}
+
+/** Inbound headers minus every X-Pneuma-Space-*, X-Forwarded-Prefix and upstream credential, plus the ones the platform sets (INV-5). */
+function forwardedHeaders(req: IncomingMessage, view: RouteView, who: Principal | null, prefix: string, upstream: Upstream | null): string[] {
   const out: string[] = [];
   const raw = req.rawHeaders;
   for (let i = 0; i < raw.length; i += 2) {
     // CGI-style servers read X_Pneuma_Space_Subject as X-Pneuma-Space-Subject.
     const name = raw[i].toLowerCase().replaceAll('_', '-');
-    if (!name.startsWith(RESERVED_HEADER_PREFIX) && name !== HEADERS.prefix) out.push(raw[i], raw[i + 1]);
+    let value = raw[i + 1];
+    if (name.startsWith(RESERVED_HEADER_PREFIX) || name === HEADERS.prefix) continue;
+    if (upstream && raw[i].toLowerCase() === upstream.header && carriesJwt(value)) continue;
+    if (upstream && name === 'cookie' && (value = withoutCookies(value, upstream.stripCookies)) === '') continue;
+    out.push(raw[i], value);
   }
-  out.push(HEADERS.prefix, `${APPS_PATH}/${view.name}`);
+  out.push(HEADERS.prefix, prefix);
   if (who) {
-    out.push(HEADERS.subject, who.subject, HEADERS.name, who.name);
+    out.push(HEADERS.subject, who.subject, HEADERS.name, encodeName(who.name));
     if (who.subject === view.owner) out.push(HEADERS.owner, '1');
   }
   return out;
 }
 
-function send(res: ServerResponse, { status, headers, error }: Reply): void {
-  const body = error === undefined ? '' : JSON.stringify({ error });
-  res.writeHead(status, { ...headers, ...(body && { 'content-type': 'application/json' }), 'content-length': Buffer.byteLength(body) }).end(body);
+function payload({ error, text }: Reply): { readonly type: string | null; readonly bytes: string } {
+  if (text !== undefined) return { type: 'text/plain; charset=utf-8', bytes: text };
+  return error === undefined ? { type: null, bytes: '' } : { type: 'application/json', bytes: JSON.stringify({ error }) };
 }
 
-function sendRaw(socket: net.Socket, { status, headers, error }: Reply): void {
-  const body = error === undefined ? '' : JSON.stringify({ error });
-  const lines = [`HTTP/1.1 ${status} ${http.STATUS_CODES[status]}`, 'connection: close', `content-length: ${Buffer.byteLength(body)}`];
-  for (const [name, value] of Object.entries(headers ?? {})) lines.push(`${name}: ${value}`);
-  socket.end(`${lines.join('\r\n')}\r\n\r\n${body}`);
+function send(res: ServerResponse, reply: Reply): void {
+  const { type, bytes } = payload(reply);
+  res.writeHead(reply.status, { ...reply.headers, ...(type && { 'content-type': type }), 'content-length': Buffer.byteLength(bytes) }).end(bytes);
+}
+
+function sendRaw(socket: net.Socket, reply: Reply): void {
+  const { type, bytes } = payload(reply);
+  const lines = [`HTTP/1.1 ${reply.status} ${http.STATUS_CODES[reply.status]}`, 'connection: close', `content-length: ${Buffer.byteLength(bytes)}`];
+  if (reply.text !== undefined) lines.push(`content-type: ${type}`);
+  for (const [name, value] of Object.entries(reply.headers ?? {})) lines.push(`${name}: ${value}`);
+  socket.end(`${lines.join('\r\n')}\r\n\r\n${bytes}`);
 }
 
 /**
@@ -181,6 +221,34 @@ export class Ingress {
     return view?.status === 'registered' && view.release !== null ? view : null;
   }
 
+  /** Step 1: the app and the path below its address; subdomain mode reads the name from `Host` and sends the whole path. */
+  #locate(req: IncomingMessage, pathname: string, search: string, trace: Trace): { view: RouteView; rest: string } | Route {
+    const { addressing } = this.#deps;
+    if (addressing.mode === 'subdomain') {
+      const label = hostLabel(addressing.domain, req.headers.host);
+      const view = label === null || !pathname.startsWith('/') ? null : this.#view(label);
+      if (!view) return reply(404, 'no app at this address');
+      trace.app = view.app;
+      return { view, rest: pathname };
+    }
+    const match = /^\/apps\/([^/]+)(\/.*)?$/.exec(pathname);
+    const view = match && this.#view(match[1]);
+    if (!match || !view) return reply(404, 'no app at this address');
+    trace.app = view.app;
+    if (match[2] === undefined) return reply(308, undefined, { location: `${APPS_PATH}/${view.name}/${search}` });
+    return { view, rest: match[2] };
+  }
+
+  /** Step 5 (ADR 0022 item 6); `local` admits everything. */
+  async #admit(req: IncomingMessage, view: RouteView, credential: Credential): Promise<Reply | null> {
+    if (this.#deps.upstream === null || view.access === 'public') return null;
+    const auth = await credential();
+    const caller = typeof auth === 'string' ? null : await this.#deps.authority.callerOf(auth);
+    if (allows(caller, view.access, view.tenant) === 'ok') return null;
+    if (typeof auth === 'string') return challenge(this.#deps.identity.challenge(req, auth));
+    return { status: 403, error: `this app admits members of tenant "${view.tenant}" only` };
+  }
+
   async #route(req: IncomingMessage, upgrade: boolean, trace: Trace): Promise<Route> {
     const raw = req.url ?? '/';
     const q = raw.indexOf('?');
@@ -188,37 +256,46 @@ export class Ingress {
     const search = q < 0 ? '' : raw.slice(q);
     if (!upgrade && (pathname === LOGIN_PATH || pathname === LOGOUT_PATH)) return { to: 'identity' };
 
-    const match = /^\/apps\/([^/]+)(\/.*)?$/.exec(pathname);
-    const view = match && this.#view(match[1]);
-    if (!match || !view) return reply(404, 'no app at this address');
-    trace.app = view.app;
-    if (match[2] === undefined) return reply(308, undefined, { location: `${APPS_PATH}/${view.name}/${search}` });
-    const rest = normalize(match[2]);
+    const located = this.#locate(req, pathname, search, trace);
+    if ('to' in located) return located;
+    const { view } = located;
+    const rest = normalize(located.rest);
     if (rest === null) return reply(400, 'the path climbs above the app root');
+    let read: Promise<Auth | Failure> | null = null;
+    const credential: Credential = () => (read ??= this.#deps.identity.identify(req));
 
     if (rest === `/${RESERVED_SEGMENT}` || rest.startsWith(`/${RESERVED_SEGMENT}/`)) {
       const trigger = /^\/_pneuma-space\/trigger\/([^/]+)$/.exec(rest);
       if (upgrade || req.method !== 'POST' || !trigger) return reply(404, `no platform endpoint at ${rest}`);
-      return { to: 'trigger', view, trigger: trigger[1] };
+      const auth = await credential();
+      if (typeof auth === 'string') return { to: 'reply', reply: challenge(this.#deps.identity.challenge(req, auth)) };
+      trace.subject = auth.subject;
+      const denied = await this.#admit(req, view, credential);
+      if (denied) return { to: 'reply', reply: denied };
+      if (!auth.subject.startsWith('service:') && auth.subject !== view.owner) return reply(403, 'triggers accept a service token or the owner');
+      return { to: 'trigger', view, trigger: trigger[1], caller: auth.subject };
     }
+    const denied = await this.#admit(req, view, credential);
+    if (denied) return { to: 'reply', reply: denied };
     if (!upgrade && view.bundle && (req.method === 'GET' || req.method === 'HEAD')) {
       const path = staticPath(view.bundle, rest, view.staticRoot);
       if (path !== null) {
         trace.kind = 'static';
-        return { to: 'static', view, path };
+        return { to: 'static', view, path, shared: this.#deps.upstream === null || view.access === 'public' };
       }
     }
     if (upgrade && !view.kinds.has('ws')) return reply(426, 'this app does not declare the "ws" capability');
 
     let who: Principal | null = null;
     if (view.identity) {
-      const result = await this.#deps.identity.authenticate(req);
-      if ('subject' in result) who = result;
-      else if (view.identity.required !== false) return { to: 'reply', reply: challenge(result) };
+      const auth = await credential();
+      if (typeof auth !== 'string') who = { subject: auth.subject, name: auth.name };
+      else if (view.identity.required !== false) return { to: 'reply', reply: challenge(this.#deps.identity.challenge(req, auth)) };
     }
     trace.subject = who?.subject ?? null;
     if (view.runtime === null) return reply(404, 'no file at this path');
-    return { to: 'app', view, path: rest + search, headers: forwardedHeaders(req, view, who) };
+    const prefix = this.#deps.addressing.mode === 'path' ? `${APPS_PATH}/${view.name}` : '';
+    return { to: 'app', view, path: rest + search, headers: forwardedHeaders(req, view, who, prefix, this.#deps.upstream) };
   }
 
   /** Step 8: acquire and connect; a connect failure precedes the request line, so it is retried once with a fresh lease. */
@@ -253,6 +330,11 @@ export class Ingress {
       trace.waitMs = performance.now() - from;
       if (error instanceof NotFound) return { status: 404, error: 'no app at this address' };
       trace.error = String(error);
+      if (error instanceof QuotaExceeded) {
+        trace.refused = true;
+        const { tenant, refusal: { resource, used, limit } } = error;
+        return { status: 503, text: `tenant ${tenant} uses ${used} of its ${resource} quota of ${limit}; retry in ${QUOTA_RETRY_SECONDS} s\n`, headers: { 'retry-after': String(QUOTA_RETRY_SECONDS) } };
+      }
       if (error instanceof Backoff || error instanceof Quarantined || error instanceof Unavailable) {
         trace.refused = true;
         return { status: 503, error: error.message, headers: error instanceof Backoff ? { 'retry-after': String(error.retryAfterSeconds) } : undefined };
@@ -271,8 +353,8 @@ export class Ingress {
       switch (route.to) {
         case 'reply': return this.#send(res, route.reply, trace);
         case 'identity': return await this.#deps.identity.serve(req, res);
-        case 'static': return await serveStatic(req, res, this.#deps.bundles, route.view.bundle!, route.path);
-        case 'trigger': return await this.#trigger(req, res, route.view, route.trigger, trace);
+        case 'static': return await serveStatic(req, res, this.#deps.bundles, route.view.bundle!, route.path, route.shared);
+        case 'trigger': return await this.#trigger(req, res, route.view, route.trigger, route.caller, trace);
         case 'app': {
           const upstream = await this.#upstream(route.view, trace);
           if ('status' in upstream) return this.#send(res, upstream, trace);
@@ -326,19 +408,13 @@ export class Ingress {
     }
   }
 
-  async #trigger(req: IncomingMessage, res: ServerResponse, view: RouteView, raw: string, trace: Trace): Promise<void> {
-    const who = await this.#deps.identity.authenticate(req);
-    if (!('subject' in who)) return this.#send(res, challenge(who), trace);
-    trace.subject = who.subject;
-    if (!who.subject.startsWith('service:') && who.subject !== view.owner) {
-      return this.#send(res, { status: 403, error: 'triggers accept a service token or the owner' }, trace);
-    }
+  async #trigger(req: IncomingMessage, res: ServerResponse, view: RouteView, raw: string, caller: Subject, trace: Trace): Promise<void> {
     const body = await readBody(req, TRIGGER_BODY_LIMIT);
     if (body === null) return this.#send(res, { status: 413, error: `trigger body exceeds ${TRIGGER_BODY_LIMIT} bytes`, headers: { connection: 'close' } }, trace);
     try {
       const key = req.headers[HEADERS.idempotencyKey];
       const delivery = await this.#deps.scheduler.invoke({
-        app: view.app, trigger: triggerName(raw), caller: who.subject, idempotencyKey: typeof key === 'string' ? key : null, body,
+        app: view.app, trigger: triggerName(raw), caller, idempotencyKey: typeof key === 'string' ? key : null, body,
       });
       res.writeHead(202, { 'content-type': 'application/json' }).end(JSON.stringify({ delivery }));
     } catch (error) {

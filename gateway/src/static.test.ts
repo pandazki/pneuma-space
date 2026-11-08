@@ -21,7 +21,7 @@ const server = http.createServer((req, res) => {
       opened.push(range);
       return Readable.from([range ? BYTES.subarray(range.start, range.end + 1) : BYTES]);
     },
-  }, INDEX, path);
+  }, INDEX, path, true);
 });
 let port = 0;
 
