@@ -39,11 +39,15 @@ export class FakeProvider implements CapabilityProvider {
 
   async ensure(app: AppId, current: Resource | null): Promise<Resource> {
     this.#record('ensure', app);
-    return current ?? { name: `${this.name}-${app}-${randomUUID()}` };
+    return current ?? { name: `${this.name}-${app}-${randomUUID()}`, password: `secret-${randomUUID()}` };
   }
 
   inject(_app: AppId, resource: Resource) {
     return { env: { [`FAKE_${this.name.toUpperCase()}`]: resource.name }, storage: [] };
+  }
+
+  location(resource: Resource) {
+    return { name: resource.name! };
   }
 
   async suspend(app: AppId): Promise<void> {
