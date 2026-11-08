@@ -21,6 +21,7 @@ function reply(request: Recorded): unknown {
   if (request.url === '/api/bundles') return { bundle: createHash('sha256').update(request.body).digest('hex') };
   if (request.url.endsWith('/release')) return { app: 'a1b2c3', number: 1 };
   if (request.url === '/api/tokens') return { token: 'one-time-secret-42', subject: 'service:ci' };
+  if (request.url === '/api/apps') return requests.filter((r) => r.url.endsWith('/release')).map((r) => ({ name: r.url.split('/')[3], address: `https://${r.url.split('/')[3]}.apps.test/` }));
   return JSON.parse(request.body.toString() || 'null');
 }
 
@@ -101,9 +102,9 @@ test('publish of a dir that declares db builds the image and releases the built 
   const result = await appctl(['publish', 'board', dir, '--tag', 'v1'], { bin });
   assert.equal(result.code, 0, result.stderr);
   assert.equal(readFileSync(log, 'utf8').trim(), `build -q -t pneuma-space-app/board:v1 ${dir}`);
-  assert.deepEqual(requests.map((r) => r.url), ['/api/apps/board/release']);
+  assert.deepEqual(requests.map((r) => r.url), ['/api/apps/board/release', '/api/apps']);
   assert.deepEqual(json(requests[0]), { image: FAKE_IMAGE, manifest: { contract: 1, capabilities: { db: {} } }, bundle: null });
-  assert.match(result.stdout, /board\s+\/apps\/board\/\s+release 1/);
+  assert.match(result.stdout, /board\s+https:\/\/board\.apps\.test\/\s+release 1/);
 });
 
 test('a bad manifest exits 2 with the gateway message before any request', async () => {

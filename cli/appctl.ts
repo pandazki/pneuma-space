@@ -7,7 +7,7 @@ import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
-  ADMIN_PATHS, ADMIN_PORT, APPS_PATH, CAPABILITIES, InputError, ManifestError, appName, declaredKinds, parseManifest, subject,
+  ADMIN_PATHS, ADMIN_PORT, CAPABILITIES, InputError, ManifestError, appName, declaredKinds, parseManifest, subject,
   type Manifest, type RuntimeKind,
 } from '../gateway/src/model.ts';
 import { assemble } from './scaffold.ts';
@@ -228,7 +228,8 @@ async function publish([rawName, target, ...extra]: string[], options: Options):
     const [bundleRoot, bundled] = code ? [code, bundleFiles(code)] : [staticRoot, files];
     const bundle = bundleRoot && bundled ? (await api('POST', ADMIN_PATHS.bundles, ReadableStream.from(tar(bundleRoot, bundled)))).bundle : null;
     const release = await api('PUT', ADMIN_PATHS.release(name), { image, manifest, bundle, ...(owner && { owner }) });
-    console.log(`${name}  ${APPS_PATH}/${name}/  release ${release.number}`);
+    const listed = (await api('GET', ADMIN_PATHS.apps) as { name: string; address: string }[]).find((app) => app.name === name);
+    console.log(`${name}  ${listed?.address ?? '-'}  release ${release.number}`);
   } finally {
     if (code) rmSync(code, { recursive: true, force: true });
   }

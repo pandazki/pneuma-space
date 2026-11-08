@@ -10,6 +10,8 @@ import {
   type AppId, type AppName, type BundleId, type CapabilityKind, type DeliveryId, type ImageId, type InvokeRequest,
   type Principal, type ReleaseNumber, type RouteView, type Stats, type Subject,
 } from './model.ts';
+import { PATH_ADDRESSING } from './address.ts';
+import { LOCAL_CALLER } from './authz.ts';
 import { Ingress } from './ingress.ts';
 import { RING, requests } from './requests.ts';
 import { Unavailable } from './runtimes.ts';
@@ -96,13 +98,18 @@ before(async () => {
       },
     },
     identity: {
-      async authenticate(req) {
-        return PRINCIPALS[req.headers.authorization ?? ''] ?? { status: 401 };
+      async identify(req) {
+        const who = PRINCIPALS[req.headers.authorization ?? ''];
+        return who ? { via: 'local', ...who } : 'absent';
       },
+      challenge: () => ({ status: 401 }),
       async serve(_req, res) {
         res.end('login page');
       },
     },
+    authority: { callerOf: async () => LOCAL_CALLER },
+    addressing: PATH_ADDRESSING,
+    upstream: null,
     bundles: { open: async () => Readable.from([APP_JS]) },
     scheduler: {
       async invoke(request) {

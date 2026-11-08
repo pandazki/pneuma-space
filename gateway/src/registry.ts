@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
-  APPS_PATH, CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_TENANT, InputError, NotFound, RUNTIMES,
+  CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_TENANT, InputError, NotFound, RUNTIMES,
   declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider,
   type App, type AppDetail, type AppId, type AppName, type AppSummary, type Binding, type BindingState,
   type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type Change, type CapabilityProvider, type Guard, type Infra,
@@ -9,6 +9,7 @@ import {
   type PublishRequest, type Registry, type Release, type ReleaseNumber, type ResourceKind, type RouteView,
   type RunSpec, type Runtime, type RuntimeKind, type SchedulerView, type Stats, type Store, type StoreOps, type Subject, type Trigger, type TriggerName,
 } from './model.ts';
+import { address, PATH_ADDRESSING, type Addressing } from './address.ts';
 import { emit } from './events.ts';
 import { issueToken } from './identity.ts';
 import { resolvesOnNetwork, type ServiceProbe } from './providers.ts';
@@ -24,6 +25,7 @@ export type RegistryDeps = {
   readonly probe?: ServiceProbe;
   /** Ingress counters once U8 wires them; the last snapshot otherwise. */
   readonly statsSource?: () => Promise<Stats[]>;
+  readonly addressing?: Addressing;
 };
 
 const SECONDS_FIELDS = ['idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds', 'failure_window_seconds', 'restart_backoff_seconds'] as const;
@@ -92,6 +94,7 @@ export class PlatformRegistry implements Registry {
   readonly #bundles: BundleStore;
   readonly #providers: ReadonlyMap<ProviderName, CapabilityProvider>;
   readonly #stats: () => Promise<Stats[]>;
+  readonly #addressing: Addressing;
   readonly #changed = new EventEmitter();
   readonly #views = new Map<AppName, RouteView>();
   readonly #specs = new Map<AppId, RunSpec>();
@@ -111,6 +114,7 @@ export class PlatformRegistry implements Registry {
     this.#bundles = deps.bundles;
     this.#providers = new Map(deps.providers.map((p) => [p.name, p]));
     this.#stats = deps.statsSource ?? (() => deps.store.stats());
+    this.#addressing = deps.addressing ?? PATH_ADDRESSING;
     this.#policy = policy;
   }
 
@@ -367,7 +371,7 @@ export class PlatformRegistry implements Registry {
       const s = stats.get(view.app);
       return {
         name: view.name,
-        address: `${APPS_PATH}/${view.name}/`,
+        address: address(this.#addressing, view.name),
         release: view.release,
         capabilities: [...view.kinds],
         status: view.status,

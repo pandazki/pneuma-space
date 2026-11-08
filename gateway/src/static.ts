@@ -23,13 +23,13 @@ function byteRange(header: string | undefined, size: number): ByteRange | null |
   return start > end || (from === '' && Number(to) === 0) ? 'unsatisfiable' : { start, end };
 }
 
-/** Path C: GET and HEAD of a bundle file, with no Lease (INV-10). */
+/** Path C: GET and HEAD of a bundle file, with no Lease (INV-10). A file not `shared` must stay out of CDNs and shared caches (ADR 0022 item 6). */
 export async function serveStatic(
-  req: IncomingMessage, res: ServerResponse, bundles: Pick<BundleStore, 'open'>, index: BundleIndex, path: string,
+  req: IncomingMessage, res: ServerResponse, bundles: Pick<BundleStore, 'open'>, index: BundleIndex, path: string, shared: boolean,
 ): Promise<void> {
   const file = index.files[path];
   const etag = `"${file.etag}"`;
-  const headers = { etag, 'cache-control': 'public, max-age=60', 'accept-ranges': 'bytes' };
+  const headers = { etag, 'cache-control': shared ? 'public, max-age=60' : 'private, no-cache', 'accept-ranges': 'bytes' };
   const ifNoneMatch = req.headers['if-none-match'];
   if (ifNoneMatch?.split(',').some((tag) => [etag, `W/${etag}`, '*'].includes(tag.trim()))) {
     return void res.writeHead(304, headers).end();
