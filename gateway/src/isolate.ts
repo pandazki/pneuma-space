@@ -89,6 +89,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
       entry: spec.runtime.entry,
       env: { ...spec.injection.env, [RUNTIME_ENV.app]: spec.name, [RUNTIME_ENV.release]: String(spec.release) },
       storage: spec.injection.storage.map(({ id, env }) => ({ id, env })),
+      heapMb: spec.policy.memory_mb,
       readyMs,
     };
     const address = await this.#resolve();
@@ -105,6 +106,9 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     if (ended) throw new RunnerError(`worker of app ${spec.app} ended as soon as it listened: ${ended.reason ?? ended.ev}`);
     slot.handle = started.worker;
     this.#live.set(started.worker, spec.app);
+    if (Math.min(started.heapMb, started.offheapMb) < request.heapMb) {
+      this.#log('memory-clamped', spec.app, { memoryMb: request.heapMb, heapMb: started.heapMb, offheapMb: started.offheapMb });
+    }
     return `${address}:${started.port}`;
   }
 

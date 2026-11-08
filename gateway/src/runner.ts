@@ -19,9 +19,12 @@ export type StartRequest = {
   readonly entry: string;
   readonly env: Readonly<Record<string, string>>;
   readonly storage: readonly { readonly id: string; readonly env: Readonly<Record<string, string>> }[];
+  /** The app's `memory_mb`: its heap and its off-heap budget, each capped by this runner (ADR 0023 item 1). */
+  readonly heapMb: number;
   readonly readyMs: number;
 };
-export type Started = { readonly worker: string; readonly port: number };
+/** `heapMb` and `offheapMb` are what the worker runs with, below the asked value when a cap applied. */
+export type Started = { readonly worker: string; readonly port: number; readonly heapMb: number; readonly offheapMb: number };
 /** `starting` has not listened yet and has no port; `ending` is stopping or ended and its thread not yet gone. */
 export type Listed = {
   readonly app: string; readonly release: number; readonly spec: string; readonly worker: string;
@@ -43,8 +46,8 @@ export type EventPage = { readonly startedAt: number; readonly seq: number; read
 const env = process.env;
 const DATA = env.PNEUMA_SPACE_DATA ?? '/data';
 const PORT = Number(env.PNEUMA_SPACE_RUNNER_PORT ?? RUNNER_PORT);
-const HEAP_MB = Number(env.PNEUMA_SPACE_RUNNER_WORKER_HEAP_MB ?? 256);
-const OFFHEAP_BYTES = Number(env.PNEUMA_SPACE_RUNNER_WORKER_OFFHEAP_MB ?? 256) * 2 ** 20;
+const HEAP_CAP_MB = Number(env.PNEUMA_SPACE_RUNNER_WORKER_HEAP_MB ?? 256);
+const OFFHEAP_CAP_MB = Number(env.PNEUMA_SPACE_RUNNER_WORKER_OFFHEAP_MB ?? 256);
 const STUCK_LIMIT = Number(env.PNEUMA_SPACE_RUNNER_STUCK_LIMIT ?? 3);
 const PING_MS = 1000;
 const SILENCE_MS = 3000;
@@ -71,6 +74,8 @@ type Instance = {
   readonly since: number;
   /** Allocated by the runner, so a forged `listening` cannot name another app's port. */
   readonly port: number;
+  readonly heapMb: number;
+  readonly offheapMb: number;
   listening: boolean;
   ping: { readonly seq: number; deadline: number } | null;
   /** Set by the first terminal event; later ones for this worker are dropped. The instance stays in the map until its thread is gone. */
@@ -235,7 +240,7 @@ async function code(app: string, release: number, url: string, deadline: number)
 
 async function start(app: string, request: StartRequest): Promise<Started> {
   const current = instances.get(app);
-  if (current && !current.ended && current.listening && current.release === request.release && current.spec === request.spec) return { worker: current.worker, port: current.port };
+  if (current && !current.ended && current.listening && current.release === request.release && current.spec === request.spec) return started(current);
   if (current) await stop(current, 0);
   const deadline = Date.now() + request.readyMs;
   const dir = await code(app, request.release, request.bundleUrl, deadline);
@@ -247,18 +252,20 @@ async function start(app: string, request: StartRequest): Promise<Started> {
     for (const [key, value] of Object.entries(binding.env)) storage[key] = value.replaceAll('{dir}', target);
   }
   const port = await freePort();
+  const heapMb = Math.min(request.heapMb, HEAP_CAP_MB);
+  const offheapMb = Math.min(request.heapMb, OFFHEAP_CAP_MB);
   // No execArgv: any value replaces the inherited --permission, and with it the bans on child_process and addons.
   const thread = new Worker(SHIM, {
     workerData: { entry: pathToFileURL(join(dir, request.entry)).href, port },
     env: { ...request.env, ...storage },
-    resourceLimits: { maxOldGenerationSizeMb: HEAP_MB, maxYoungGenerationSizeMb: Math.max(8, Math.round(HEAP_MB / 8)) },
+    resourceLimits: { maxOldGenerationSizeMb: heapMb, maxYoungGenerationSizeMb: Math.max(8, Math.round(heapMb / 8)) },
     stdout: true,
     stderr: true,
   });
   const exited = Promise.withResolvers<void>();
   const inst: Instance = {
     app, release: request.release, spec: request.spec, worker: `${startedAt}:${++workers}`, thread, since: Date.now(),
-    port, listening: false, ping: null, ended: false, stopping: false, error: null, oom: false, forged: 0, exited: exited.promise, terminating: null,
+    port, heapMb, offheapMb, listening: false, ping: null, ended: false, stopping: false, error: null, oom: false, forged: 0, exited: exited.promise, terminating: null,
   };
   instances.set(app, inst);
   dropNative(app, thread.stdout);
@@ -277,7 +284,7 @@ async function start(app: string, request: StartRequest): Promise<Started> {
       ready.resolve(true);
     } else if (inst.ping?.seq === message.seq) {
       inst.ping = null;
-      if (message.external > OFFHEAP_BYTES && !inst.ended) {
+      if (message.external > inst.offheapMb * 2 ** 20 && !inst.ended) {
         end(inst, 'oom', { reason: 'offheap' });
         void terminate(inst);
       }
@@ -303,8 +310,10 @@ async function start(app: string, request: StartRequest): Promise<Started> {
     throw new Error(`worker did not listen on ${RUNTIME_ENV.port} within ${request.readyMs} ms`);
   }
   record(inst, 'ready', { port });
-  return { worker: inst.worker, port };
+  return started(inst);
 }
+
+const started = (inst: Instance): Started => ({ worker: inst.worker, port: inst.port, heapMb: inst.heapMb, offheapMb: inst.offheapMb });
 
 let tickedAt = performance.now();
 setInterval(() => {

@@ -34,6 +34,8 @@ export type ContainerSpec = {
   readonly labels: Labels;
   readonly mounts: readonly Mount[];
   readonly network: string;
+  readonly cpuMillis: number;
+  readonly memoryMb: number;
 };
 /** `time` is epoch milliseconds. */
 export type DockerEvent = { readonly action: string; readonly id: string; readonly labels: Labels; readonly time: number };
@@ -110,6 +112,10 @@ export class Docker {
       Labels: spec.labels,
       HostConfig: {
         NetworkMode: spec.network,
+        NanoCpus: spec.cpuMillis * 1e6,
+        Memory: spec.memoryMb * 2 ** 20,
+        // Equal to Memory: no swap on top, so an app past memory_mb is killed rather than slowed.
+        MemorySwap: spec.memoryMb * 2 ** 20,
         Mounts: spec.mounts.map((mount) => ({ Type: 'volume', Source: mount.volume, Target: mount.target })),
       },
     });

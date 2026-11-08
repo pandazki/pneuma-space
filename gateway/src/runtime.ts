@@ -11,7 +11,7 @@ const LABEL = { app: 'pneuma-space.app', release: 'pneuma-space.release', spec: 
 const READY_POLL_MS = 50;
 const STOP_SIGNALS: ReadonlySet<string> = new Set(['15', '9']);
 
-type ContainerRun = RunSpec & { readonly runtime: Extract<RunSpec['runtime'], { kind: 'container' }> };
+export type ContainerRun = RunSpec & { readonly runtime: Extract<RunSpec['runtime'], { kind: 'container' }> };
 
 export type RuntimeOptions = {
   readonly docker: Docker;
@@ -173,22 +173,28 @@ class DockerDriver implements Driver<ContainerRun, string> {
   }
 
   async #create(spec: ContainerRun): Promise<string> {
-    const { storage } = spec.injection;
-    for (const { id } of storage) await this.#docker.createVolume(id);
-    const container: ContainerSpec = {
-      image: spec.runtime.image,
-      env: {
-        ...spec.injection.env, ...Object.assign({}, ...storage.map((s) => fill(s.env, s.target))),
-        [RUNTIME_ENV.app]: spec.name, [RUNTIME_ENV.release]: String(spec.release), [RUNTIME_ENV.port]: String(APP_PORT),
-      },
-      labels: {
-        [LABEL.app]: spec.app, [LABEL.release]: String(spec.release), [LABEL.spec]: specHash(spec), [LABEL.network]: this.#network, [LABEL.role]: 'instance',
-      },
-      mounts: storage.map(({ id, target }) => ({ volume: id, target })),
-      network: this.#network,
-    };
-    return this.#docker.create(`pneuma-space-${spec.app}-${spec.release}`, container);
+    for (const { id } of spec.injection.storage) await this.#docker.createVolume(id);
+    return this.#docker.create(`pneuma-space-${spec.app}-${spec.release}`, containerSpec(spec, this.#network));
   }
+}
+
+/** The instance's shape comes from the effective policy (ADR 0023 item 1); the spec label changes with it, so a changed limit retires the container. */
+export function containerSpec(spec: ContainerRun, network: string): ContainerSpec {
+  const { storage } = spec.injection;
+  return {
+    image: spec.runtime.image,
+    env: {
+      ...spec.injection.env, ...Object.assign({}, ...storage.map((s) => fill(s.env, s.target))),
+      [RUNTIME_ENV.app]: spec.name, [RUNTIME_ENV.release]: String(spec.release), [RUNTIME_ENV.port]: String(APP_PORT),
+    },
+    labels: {
+      [LABEL.app]: spec.app, [LABEL.release]: String(spec.release), [LABEL.spec]: specHash(spec), [LABEL.network]: network, [LABEL.role]: 'instance',
+    },
+    mounts: storage.map(({ id, target }) => ({ volume: id, target })),
+    network,
+    cpuMillis: spec.policy.cpu_millis,
+    memoryMb: spec.policy.memory_mb,
+  };
 }
 
 export class DockerRuntime extends Lifecycle<ContainerRun, string> {
