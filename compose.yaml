@@ -30,6 +30,7 @@ services:
       PNEUMA_SPACE_RTC_SECRET: ${PNEUMA_SPACE_RTC_SECRET:-pneuma-local-rtc}
       PNEUMA_SPACE_RTC_PUBLIC_HOST: ${PNEUMA_SPACE_RTC_PUBLIC_HOST:-127.0.0.1}
       PNEUMA_SPACE_REDIS_PASSWORD: ${PNEUMA_SPACE_REDIS_PASSWORD:-pneuma}
+      PNEUMA_SPACE_POSTGRES_PASSWORD: ${PNEUMA_SPACE_POSTGRES_PASSWORD:-pneuma-local}
       PNEUMA_SPACE_VOLUME_SIZE: ${PNEUMA_SPACE_VOLUME_SIZE:-1Gi}
       # Empty is the default: local identity, path addressing, no /metrics port (docs/app-contract.md).
       PNEUMA_SPACE_IDENTITY: ${PNEUMA_SPACE_IDENTITY:-}
