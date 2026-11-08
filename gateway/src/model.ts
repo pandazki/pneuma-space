@@ -623,11 +623,6 @@ export type Challenge = { readonly status: 303; readonly location: string } | { 
 
 export type ByteRange = { readonly start: number; readonly end: number };
 
-/** Compose services a provider administers through `Infra.runJob`. */
-export type InfraService = 'postgres' | 'redis';
-export type Job = { readonly service: InfraService; readonly argv: readonly string[]; readonly stdin?: string };
-export type JobResult = { readonly exitCode: number; readonly stdout: string; readonly stderr: string };
-
 export type DeliveryFilter = {
   readonly app?: AppId;
   readonly state?: DeliveryState;
@@ -973,9 +968,8 @@ export type NodeSample = {
   readonly pods: readonly PlatformPod[];
 };
 
-/** Docker for Providers and publish, whatever runtime an app uses. */
+/** What the plane answers for publish and the nodes view, whatever runtime an app uses. */
 export interface Infra {
-  runJob(job: Job): Promise<JobResult>;
   resolveImage(reference: string): Promise<ImageId | null>;
   /** The cluster's nodes with the platform's Pods on them; null on a single host. */
   nodes(): Promise<NodeSample[] | null>;

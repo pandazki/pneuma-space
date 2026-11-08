@@ -326,26 +326,7 @@ function inner(image: ImageId, network: string): void {
     assert.equal(await answer(lease.address), 'fixture 1');
   });
 
-  async function helper(t: TestContext): Promise<void> {
-    const helper = await raw.request('POST', `/containers/create?name=pneuma-space-u3-helper-${randomBytes(4).toString('hex')}`, {
-      Image: image, Labels: { 'pneuma-space.test': '1', 'com.docker.compose.project': network, 'com.docker.compose.service': 'redis' }, HostConfig: { NetworkMode: network },
-    });
-    const { Id } = JSON.parse(helper.body.toString());
-    t.after(() => raw.remove(Id));
-    await raw.start(Id);
-  }
-
-  const infra = new DockerInfra(raw, network);
-
-  test('runJob runs in the compose service container and returns its output', async (t) => {
-    await helper(t);
-    assert.deepEqual(await infra.runJob({ service: 'redis', argv: ['echo', 'hi'] }), { exitCode: 0, stdout: 'hi\n', stderr: '' });
-  });
-
-  test('runJob feeds stdin to the job', async (t) => {
-    await helper(t);
-    assert.deepEqual(await infra.runJob({ service: 'redis', argv: ['sh'], stdin: 'echo hi' }), { exitCode: 0, stdout: 'hi\n', stderr: '' });
-  });
+  const infra = new DockerInfra(raw);
 
   test('resolveImage returns the id of an existing image and null for a missing one', async () => {
     assert.equal(await infra.resolveImage(image), image);

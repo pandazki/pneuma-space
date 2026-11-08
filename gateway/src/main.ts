@@ -11,7 +11,7 @@ import { JwtVerifier } from './jwt.ts';
 import { Ingress } from './ingress.ts';
 import { hostSample, httpProbe, Metrics, profileProbe, serveMetrics, Series, tcpProbe } from './metrics.ts';
 import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId } from './model.ts';
-import { composeProject, DockerInfra } from './infra.ts';
+import { DockerInfra } from './infra.ts';
 import { inClusterClient } from './kube.ts';
 import { NodeView, type RunnerHealth } from './nodes.ts';
 import { KubeInfra } from './kube-infra.ts';
@@ -82,7 +82,7 @@ const { infra, container, pool } = setup.pods
   : await (async () => {
     const docker = new Docker();
     return {
-      infra: new DockerInfra(docker, await composeProject(docker)), container: new DockerRuntime({ docker, network, specFor, instances, guard }),
+      infra: new DockerInfra(docker), container: new DockerRuntime({ docker, network, specFor, instances, guard }),
       pool: new StaticPool(`http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`),
     };
   })();

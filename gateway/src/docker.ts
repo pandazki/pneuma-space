@@ -1,7 +1,7 @@
 // Docker Engine API 1.52 over the unix socket (spike/node/findings.md). The only module that talks to Docker.
 import http from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { ImageId, JobResult } from './model.ts';
+import type { ImageId } from './model.ts';
 
 export class DockerError extends Error {
   readonly status: number;
@@ -150,37 +150,6 @@ export class Docker {
   /** Throws DockerError 409 when a container still uses the volume. */
   async removeVolume(name: string): Promise<void> {
     await this.expect('DELETE', `/volumes/${name}`, [204, 404]);
-  }
-
-  async exec(id: string, argv: readonly string[], stdin = ''): Promise<JobResult> {
-    const created = await this.expect<{ Id: string }>('POST', `/containers/${id}/exec`, [201], {
-      Cmd: argv, AttachStdin: true, AttachStdout: true, AttachStderr: true,
-    });
-    const path = `/exec/${created.json.Id}/start`;
-    // The upgraded socket lets us half-close after stdin, which is how the exec sees end of input.
-    const raw = await new Promise<Buffer>((resolve, reject) => {
-      const payload = JSON.stringify({ Detach: false, Tty: false });
-      const req = http.request({
-        socketPath: this.socketPath, method: 'POST', path,
-        headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload), connection: 'Upgrade', upgrade: 'tcp' },
-      });
-      req.on('upgrade', (_res, socket, head) => {
-        const chunks: Buffer[] = [head];
-        socket.on('data', (chunk: Buffer) => chunks.push(chunk));
-        socket.on('end', () => resolve(Buffer.concat(chunks)));
-        socket.on('error', reject);
-        socket.end(stdin);
-      });
-      req.on('response', (res) => {
-        res.resume();
-        reject(new DockerError('POST', path, res.statusCode ?? 0, 'exec start did not upgrade'));
-      });
-      req.on('error', reject);
-      req.end(payload);
-    });
-    const info = await this.expect<{ ExitCode: number }>('GET', `/exec/${created.json.Id}/json`, [200]);
-    const { stdout, stderr } = demux(raw);
-    return { exitCode: info.json.ExitCode, stdout, stderr };
   }
 
   /** Container events from `since` (epoch seconds) on; reconnects after a lost stream and replays from the last event seen. */

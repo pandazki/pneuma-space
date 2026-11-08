@@ -84,7 +84,6 @@ export class FakeRuntime implements Runtime, Infra, Guard {
   async destroyStorage(): Promise<void> {}
   quarantine(app: AppId): Quarantine | null { return this.quarantined.get(app) ?? null; }
   unquarantine(app: AppId): void { this.quarantined.delete(app); }
-  async runJob(): Promise<never> { throw new Error('not used'); }
   async nodes(): Promise<null> { return null; }
   async resolveImage(reference: string): Promise<ImageId | null> {
     this.calls.push(`resolveImage ${reference}`);
