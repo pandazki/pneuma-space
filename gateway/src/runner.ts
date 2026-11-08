@@ -201,10 +201,13 @@ function reject(inst: Instance): void {
   void terminate(inst);
 }
 
+/** The wildcard bind the worker makes, and loopback, where a listener bound to 127.0.0.1 alone would take the worker's local connections. */
 async function bindable(port: number): Promise<boolean> {
-  const probe = new Server();
-  if (!(await new Promise<boolean>((ok) => probe.once('error', () => ok(false)).listen(port, () => ok(true))))) return false;
-  await new Promise((ok) => probe.close(ok));
+  for (const host of [undefined, '127.0.0.1']) {
+    const probe = new Server();
+    if (!(await new Promise<boolean>((ok) => probe.once('error', () => ok(false)).listen(port, host, () => ok(true))))) return false;
+    await new Promise((ok) => probe.close(ok));
+  }
   return true;
 }
 
