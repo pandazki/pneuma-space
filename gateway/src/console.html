@@ -743,6 +743,9 @@ const I18N = {
     'rt.f.seq': '序号', 'rt.f.app': '应用', 'rt.f.kind': '类别', 'rt.f.request': '请求', 'rt.f.status': '状态码', 'rt.f.ms': '总耗时',
     'rt.f.open': '连接存续', 'rt.f.wait': '等上游就绪', 'rt.f.waitHint': '含唤醒', 'rt.f.cold': '冷启动', 'rt.f.subject': '主体', 'rt.f.error': '错误',
     'nav.topology': '拓扑',
+    'nav.team': '团队', 'team.title': '团队', 'team.tenant': '租户', 'team.none': '你不在任何租户里',
+    'team.quota': '配额', 'team.quotaDesc': '已用对上限；留空表示不限', 'team.unlimited': '不限', 'team.limit': '上限',
+    'q.apps': '应用', 'q.awake': '醒着的实例', 'q.cpu_millis': 'CPU（千分之一核）', 'q.memory_mb': '内存（MiB）', 'q.storage_gb': '已供应存储（GiB）',
     'svc.volumes': 'Docker 卷',
     'col.runtime': '运行时',
     'st.quarantined': '已隔离',
@@ -928,6 +931,9 @@ const I18N = {
     'rt.f.seq': 'Seq', 'rt.f.app': 'App', 'rt.f.kind': 'Kind', 'rt.f.request': 'Request', 'rt.f.status': 'Status', 'rt.f.ms': 'Duration',
     'rt.f.open': 'Open for', 'rt.f.wait': 'Upstream ready after', 'rt.f.waitHint': 'wake included', 'rt.f.cold': 'Cold', 'rt.f.subject': 'Subject', 'rt.f.error': 'Error',
     'nav.topology': 'Topology',
+    'nav.team': 'Team', 'team.title': 'Team', 'team.tenant': 'Tenant', 'team.none': 'You are not in any tenant',
+    'team.quota': 'Quota', 'team.quotaDesc': 'Used over limit; empty means unlimited', 'team.unlimited': 'unlimited', 'team.limit': 'Limit',
+    'q.apps': 'Apps', 'q.awake': 'Awake instances', 'q.cpu_millis': 'CPU (millicores)', 'q.memory_mb': 'Memory (MiB)', 'q.storage_gb': 'Provisioned storage (GiB)',
     'svc.volumes': 'Docker volumes',
     'col.runtime': 'Runtime',
     'st.quarantined': 'quarantined',
@@ -1166,6 +1172,7 @@ const ICON = {
   'nav-realtime': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="1.25" fill="currentColor" stroke="none"/><path d="M6.2 5.7a4.4 4.4 0 0 0 0 6.6M11.8 5.7a4.4 4.4 0 0 1 0 6.6M3.9 3.4a7.6 7.6 0 0 0 0 11.2M14.1 3.4a7.6 7.6 0 0 1 0 11.2"/></svg>',
   'nav-topology': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="9" r="2"/><circle cx="13.5" cy="4.5" r="2"/><circle cx="13.5" cy="13.5" r="2"/><path d="m6.3 8.1 5.4-2.7M6.3 9.9l5.4 2.7"/></svg>',
   'nav-apps': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="10" width="5.5" height="5.5" rx="1.5"/></svg>',
+  'nav-team': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="6" r="2.5"/><circle cx="12.5" cy="7" r="2"/><path d="M2.25 15c0-2.5 1.9-4.25 4.25-4.25S10.75 12.5 10.75 15"/><path d="M11 11.1c.45-.2.95-.35 1.5-.35 1.9 0 3.25 1.45 3.25 3.5"/></svg>',
   'nav-publish': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.75v8.5M5.75 6 9 2.75 12.25 6"/><path d="M2.75 11.25v1.75a2 2 0 0 0 2 2h8.5a2 2 0 0 0 2-2v-1.75"/></svg>',
   'panel': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.25" y="2.25" width="13.5" height="13.5" rx="3.5"/><path d="M6.75 2.25v13.5M12.25 7.25 10.5 9l1.75 1.75"/></svg>',
   moon: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"/></svg>',
@@ -3560,7 +3567,44 @@ function topology() {
   };
 }
 
-const NAV = [['overview', '#/'], ['realtime', '#/realtime'], ['topology', '#/topology'], ['apps', '#/apps'], ['publish', '#/publish']];
+const NAV = [['overview', '#/'], ['realtime', '#/realtime'], ['topology', '#/topology'], ['apps', '#/apps'], ['publish', '#/publish'], ['team', '#/team']];
+const QUOTA_RESOURCES = ['apps', 'awake', 'cpu_millis', 'memory_mb', 'storage_gb'];
+
+/** The selected tenant's quota as used over limit per resource; a platform admin edits a limit in place (PUT quota). */
+async function team() {
+  const me = await api('GET', '/api/me');
+  const tenants = me.platformAdmin ? (await api('GET', '/api/tenants')).map((x) => x.name) : Object.keys(me.roles ?? {});
+  const asked = new URLSearchParams(location.hash.split('?')[1] ?? '').get('tenant');
+  const tenant = tenants.includes(asked) ? asked : tenants[0];
+  const head = h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('team.title'))),
+    tenants.length > 1 && h('label', { class: 'field' }, h('span', {}, t('team.tenant')),
+      h('select', { onchange: (e) => { location.hash = `#/team?tenant=${encodeURIComponent(e.target.value)}`; } },
+        tenants.map((name) => h('option', { value: name, selected: name === tenant }, name)))));
+  if (!tenant) return show(head, h('div', { class: 'card' }, h('div', { class: 'empty' }, t('team.none'))));
+  const path = `/api/tenants/${encodeURIComponent(tenant)}/quota`;
+  const grid = h('div', { class: 'tiles' });
+  const paint = ({ quota, used }) => grid.replaceChildren(...QUOTA_RESOURCES.map((r) => {
+    const limit = quota[r];
+    const shown = Number.isInteger(used[r]) ? String(used[r]) : used[r].toFixed(2);
+    const edit = me.platformAdmin && h('input', {
+      type: 'number', min: 0, step: 1, value: limit ?? '', placeholder: t('team.unlimited'), 'aria-label': `${t(`q.${r}`)} ${t('team.limit')}`,
+      onchange: async (e) => {
+        e.target.disabled = true;
+        try {
+          await api('PUT', path, { [r]: e.target.value === '' ? null : Number(e.target.value) });
+          paint(await api('GET', path));
+        } catch (error) {
+          e.target.disabled = false;
+          e.target.setCustomValidity(error.message);
+          e.target.reportValidity();
+        }
+      },
+    });
+    return tile(t(`q.${r}`), `${shown} / ${limit ?? t('team.unlimited')}`, edit || '', limit == null ? null : limit === 0 ? 1 : used[r] / limit);
+  }));
+  paint(await api('GET', path));
+  show(head, h('section', {}, sectionHead(1, 'team.quota', 'team.quotaDesc'), grid));
+}
 
 function shell() {
   const [, view] = location.hash.split('?')[0].split('/');
@@ -3643,7 +3687,8 @@ async function route() {
         : view === 'publish' ? (await publish(target), null)
           : view === 'realtime' ? realtime()
             : view === 'topology' ? topology()
-            : await overview();
+              : view === 'team' ? await team()
+                : await overview();
     if (gen !== generation) return;
     if (typeof live === 'function') {
       await live();
