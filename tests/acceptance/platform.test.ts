@@ -150,6 +150,8 @@ test('AC-P-16', { timeout: 60_000 }, async (t) => {
   assert.equal(listed.dbBackend, body.policy.db_backend);
 });
 
+const CLOCK_SKEW_MS = 250;
+
 test('AC-P-14', { timeout: 90_000 }, async (t) => {
   const app = await deploy(t, { image: images.echo, capabilities: { ws: {} } });
   await setIdle(app.name, 5);
@@ -160,7 +162,8 @@ test('AC-P-14', { timeout: 90_000 }, async (t) => {
   const sleepsAt = await waitFor(async () => (await summary(app.name)).sleepsAt, 5000, 'sleepsAt after the lease is released');
   const after = Date.now();
   t.diagnostic(`sleepsAt is ${sleepsAt - before} ms after the close was sent`);
-  assert.ok(sleepsAt >= before + 5000 && sleepsAt <= after + 5000, 'last release plus idle_seconds');
+  // The gateway stamps the release with the Docker VM's clock, which drifts a few ms from the host's.
+  assert.ok(sleepsAt >= before + 5000 - CLOCK_SKEW_MS && sleepsAt <= after + 5000 + CLOCK_SKEW_MS, 'last release plus idle_seconds');
   await waitInstance(app.name, 'asleep', 20_000);
   assert.ok(Date.now() <= sleepsAt + 10_000, `asleep ${Date.now() - sleepsAt} ms after sleepsAt`);
 
