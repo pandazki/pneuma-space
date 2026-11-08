@@ -19,6 +19,7 @@ import { DockerRuntime } from './runtime.ts';
 import { AppGuard, Runtimes } from './runtimes.ts';
 import { requests } from './requests.ts';
 import { DeliveryScheduler } from './scheduler.ts';
+import { PgStore } from './store-pg.ts';
 import { SqliteStore } from './store.ts';
 
 const SAMPLE_MS = 10_000;
@@ -45,9 +46,13 @@ const ingressPort = Number(process.env.PNEUMA_SPACE_HTTP_PORT ?? INGRESS_PORT);
 const config = providerConfig(process.env);
 const replica = (process.env.PNEUMA_SPACE_REPLICA ?? hostname()) as ReplicaId;
 
-const store = new SqliteStore(join(data, 'pneuma-space.sqlite3'));
-// SQLite: one replica, which leads at once (ADR 0020 item 7).
-const instances = new Instances(store, { replica, leader: true });
+const storeUrl = process.env.PNEUMA_SPACE_STORE_URL;
+const store = storeUrl
+  ? await PgStore.open(storeUrl, {
+    commands: Number(process.env.PNEUMA_SPACE_STORE_COMMANDS ?? 4), testRetry: process.env.PNEUMA_SPACE_STORE_TEST_RETRY === '1',
+  })
+  : new SqliteStore(join(data, 'pneuma-space.sqlite3'));
+const instances = new Instances(store, { replica });
 await instances.ready();
 await instances.start();
 const docker = new Docker();
@@ -93,6 +98,7 @@ const metrics = new Metrics({
   policy: () => registry.policy(),
   view: (name) => registry.view(name),
   replica,
+  leader: () => instances.leading,
 });
 
 process.on('unhandledRejection', (error) => log('unhandled-rejection', { error: String(error) }));
@@ -105,8 +111,12 @@ registry.onAppChanged((app) => {
 
 // Reconcile first so a resumed purge retires the containers it finds; Providers converge in the background (DESIGN 2.3).
 await runtime.reconcile();
-void registry.resume();
-await instances.onLeader((leading) => (leading ? scheduler.resume() : scheduler.stop()));
+await instances.onLeader((leading) => {
+  log('leader', { replica, leading });
+  if (!leading) return scheduler.stop();
+  void registry.resume();
+  return scheduler.resume();
+});
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
 // The console audience keeps a JWT leaked from an app request from replaying on the admin API (ADR 0021 item 1).
 const upstream = setup.consoleIdentity ? { identity: new UpstreamIdentity(setup.consoleIdentity, authority, registry), authority } : undefined;
@@ -117,7 +127,7 @@ const flusher = setInterval(() => {
   void sample();
 }, SAMPLE_MS);
 void sample();
-log('gateway-ready', { network, data, replica });
+log('gateway-ready', { network, data, replica, store: storeUrl ? 'postgres' : 'sqlite' });
 
 process.once('SIGTERM', async () => {
   clearInterval(flusher);

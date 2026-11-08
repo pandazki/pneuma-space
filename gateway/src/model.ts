@@ -802,6 +802,8 @@ export function parseChange(key: string): Change | null {
 export interface StoreOps {
   app(name: AppName): Promise<App | null>;
   apps(): Promise<App[]>;
+  /** Every app with its current release, in one read; the Registry's resync (ADR 0025 item 5). */
+  appsWithCurrent(): Promise<{ readonly app: App; readonly release: Release | null }[]>;
   putApp(app: App): Promise<void>;
   /** Deletes the app and its Registry rows (release, trigger, binding); the end of purge. */
   deleteApp(app: AppId): Promise<void>;
@@ -917,6 +919,16 @@ export interface Store extends StoreOps {
   onChange(listener: (change: Change) => void): void;
   /** Called when changes may have been missed; listeners re-read everything. */
   onResync(listener: () => void): void;
+  /** Takes the leader lock if it is free: this replica's tenure, or null while another replica leads. SQLite always leads (ADR 0020 item 7). */
+  leader(): Promise<Leadership | null>;
+}
+
+/** One tenure as the leader (ADR 0020 item 4); once ended it stays ended, and the replica asks `Store.leader` again. */
+export interface Leadership {
+  held(): boolean;
+  /** Called once when the tenure ends other than by `release`: the lock's session died or missed its probe. */
+  onLost(listener: () => void): void;
+  release(): Promise<void>;
 }
 
 /** Hides how instances run: instances, leases, the reaper and their lifecycle. The M2 multi-node seam. */

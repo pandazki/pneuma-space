@@ -25,7 +25,7 @@ function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader =
     policy: () => ({ usage_retention_days: 90 }),
     view: (name) => (name === survey ? { app, tenant: DEFAULT_TENANT } : null),
     replica: replica as ReplicaId,
-    leader,
+    leader: () => leader,
     now: () => clock.now,
   });
   const last = (series: readonly (number | null)[]) => series.at(-1);

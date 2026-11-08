@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { Ingress } from './ingress.ts';
-import { Conflict, InputError, appName, parseManifest, subject, triggerName, type AppId, type BundleId, type Capabilities } from './model.ts';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { Conflict, InputError, appName, parseManifest, subject, triggerName, type App, type AppId, type BundleId, type Capabilities, type Change, type Store, type StoreOps } from './model.ts';
 import { PlatformRegistry } from './registry.ts';
 import { FakeRuntime, world } from './registry.fakes.ts';
 import { DeliveryScheduler } from './scheduler.ts';
@@ -264,4 +265,31 @@ test('republishing an unchanged isolate app returns the current release while th
   const first = await registry.publish(request);
   w.services.delete('runner');
   assert.deepEqual(await registry.publish(request), first);
+});
+
+test('a refresh that read an older app version than the view holds is not applied', async () => {
+  const w = world();
+  const { store } = await w.open();
+  let stale: App | null = null;
+  const listeners: ((change: Change) => void)[] = [];
+  const reads = new Proxy(store, {
+    get(target, key) {
+      if (key === 'onChange') return (listener: (change: Change) => void) => listeners.push(listener);
+      if (key === 'transaction') {
+        return <T>(fn: (tx: StoreOps) => Promise<T>) => target.transaction((tx) => fn(stale ? { ...tx, app: async () => stale } : tx));
+      }
+      const value = Reflect.get(target, key);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  }) as Store;
+  const registry = await PlatformRegistry.open({
+    store: reads, runtime: w.runtime, guard: w.runtime, infra: w.runtime, bundles: w.bundles, providers: [...w.providers.values()],
+  });
+  await publish(registry, {});
+  const older = await store.app(survey);
+  await registry.setOwner(survey, subject('user:bob'));
+  stale = older;
+  for (const listener of listeners) listener({ kind: 'app', name: survey });
+  await sleep(50);
+  assert.equal(registry.view(survey)?.owner, 'user:bob');
 });

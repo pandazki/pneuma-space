@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
-import { DEFAULT_TENANT, QUOTA_RESOURCES, changeKey, type AppName, type Change, type Store, type StoreOps } from './model.ts';
+import { DEFAULT_TENANT, QUOTA_RESOURCES, changeKey, type AppName, type Change, type Leadership, type Store, type StoreOps } from './model.ts';
 import { SQLITE, STORE_OPS, SqlOps, type Row, type Session } from './sql.ts';
 
 /** The migrated `default` tenant is unlimited (ADR 0022 item 4, ADR 0023 item 2). */
@@ -208,6 +208,12 @@ export class SqliteStore implements Store {
 
   /** In-process announcements are never missed, so there is never a resync. */
   onResync(_listener: () => void): void {}
+
+  /** One process owns the file, so it leads at once and never loses it (ADR 0020 item 7). */
+  async leader(): Promise<Leadership> {
+    let held = true;
+    return { held: () => held, onLost: () => {}, release: async () => void (held = false) };
+  }
 
   #announce(changes: readonly Change[]): void {
     for (const change of changes) {
