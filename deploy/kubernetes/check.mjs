@@ -14,6 +14,7 @@ const NOT_ON_THIS_PLANE = {
   PNEUMA_SPACE_HTTP_PORT: 'host port compose publishes; subdomain addresses come from PNEUMA_SPACE_APPS_ORIGIN',
   PNEUMA_SPACE_VOLUME_SIZE: 'single-host nominal volume size (ADR 0023)',
   PNEUMA_SPACE_TOKEN: "appctl's platform token, not the gateway's",
+  PNEUMA_SPACE_STORE_TEST_RETRY: 'test switch (store-pg.ts)',
 };
 // Well-known labels on objects the platform does not own (namespaces, kube-dns).
 const FOREIGN_SELECTOR_KEYS = new Set(['kubernetes.io/metadata.name', 'k8s-app']);

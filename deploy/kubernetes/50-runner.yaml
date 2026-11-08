@@ -55,6 +55,9 @@ spec:
               value: "256"
             - name: PNEUMA_SPACE_RUNNER_STUCK_LIMIT
               value: "3"
+            # The worker port range the runner-from-gateway NetworkPolicy opens.
+            - name: PNEUMA_SPACE_RUNNER_PORT_RANGE
+              value: "32768-60999"
           ports:
             - name: control
               containerPort: 8082
