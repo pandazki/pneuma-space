@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
   ADMIN_PATHS, ADMIN_PORT, CAPABILITIES, InputError, ManifestError, appName, declaredKinds, parseManifest, subject,
-  type Manifest, type RuntimeKind,
+  type Manifest, type RuntimeKind, type StateInventory,
 } from '../gateway/src/model.ts';
 import { assemble } from './scaffold.ts';
 
@@ -31,6 +31,7 @@ const USAGE = `usage:
   appctl list
   appctl show <name>
   appctl logs <name> [--tail <lines>]
+  appctl state <name> [--json]
   appctl unquarantine <name>
   appctl remove <name>
   appctl purge <name> [--yes|-y]
@@ -410,6 +411,14 @@ async function audit(args: string[], options: Options): Promise<void> {
   for (const row of rows) console.log([new Date(row.at).toISOString(), row.actor, row.action, row.target, row.result].join('\t'));
 }
 
+async function state(args: string[], options: Options): Promise<void> {
+  const inventory: StateInventory = await api('GET', ADMIN_PATHS.state(one(args, 'state')));
+  if (options.json) return void console.log(JSON.stringify(inventory, null, 2));
+  for (const { kind, provider, state, location } of inventory.bindings) {
+    console.log([kind, provider, state, Object.entries(location).map(([k, v]) => `${k}=${v}`).join(' ')].join('\t'));
+  }
+}
+
 const COMMANDS: Record<string, (args: string[], options: Options) => unknown> = {
   publish,
   init,
@@ -444,6 +453,7 @@ const COMMANDS: Record<string, (args: string[], options: Options) => unknown> = 
   token,
   quota,
   audit,
+  state,
 };
 
 async function main(argv: string[]): Promise<void> {
