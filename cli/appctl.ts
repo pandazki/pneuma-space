@@ -12,19 +12,32 @@ import {
 } from '../gateway/src/model.ts';
 import { assemble } from './scaffold.ts';
 
-// ADMIN_PATHS lacks it while model.ts is frozen.
+// ADMIN_PATHS lacks these while model.ts is frozen; the copy in admin.ts is the gateway's.
+const TENANT_PATHS = {
+  me: '/api/me',
+  tenants: '/api/tenants',
+  access: (name: string) => `/api/apps/${name}/access`,
+  quota: (tenant: string) => `/api/tenants/${tenant}/quota`,
+  member: (tenant: string, user: string) => `/api/tenants/${tenant}/members/${user}`,
+  tokens: (tenant: string) => `/api/tenants/${tenant}/tokens`,
+  token: (tenant: string, id: string) => `/api/tenants/${tenant}/tokens/${id}`,
+} as const;
+
 const EXIT = { usage: 1, manifest: 2, api: 3, build: 4 } as const;
 
 class Failure extends Error {
   readonly code: number;
-  constructor(code: number, message: string) {
+  /** The admin API's answer, when there was one. */
+  readonly status: number | null;
+  constructor(code: number, message: string, status: number | null = null) {
     super(message);
     this.code = code;
+    this.status = status;
   }
 }
 
 const USAGE = `usage:
-  appctl publish <name> <dir|image> [--owner <subject>] [--tag <tag>] [--manifest <file>]
+  appctl publish <name> <dir|image> [--owner <subject>] [--tenant <t>] [--tag <tag>] [--manifest <file>]
   appctl init <dir> [--container|--static]
   appctl list
   appctl show <name>
@@ -34,23 +47,31 @@ const USAGE = `usage:
   appctl purge <name> [--yes]
   appctl policy [<name>] key=value ...
   appctl owner <name> <subject>
-  appctl token create <name>
+  appctl access <name> tenant|org|public
+  appctl whoami
+  appctl tenant list | create <tenant> <admin-id>... [--display <name>]
+  appctl member add <tenant> <user-id> [admin|member] | role <tenant> <user-id> admin|member | remove <tenant> <user-id>
+  appctl token create <name>                                     (local)
+  appctl token create [<name>] --tenant <t> --kind service|personal [--label <label>]
+  appctl token revoke <id> --tenant <t>
+  appctl quota <tenant> [key=value ...]
   appctl audit [--tenant <t>] [--since 7d|24h|2026-11-01] [--action <action>] [--actor <subject>] [--json]
-admin API: PNEUMA_SPACE_ADMIN (default http://127.0.0.1:${ADMIN_PORT})`;
+admin API: PNEUMA_SPACE_ADMIN (default http://127.0.0.1:${ADMIN_PORT}), PNEUMA_SPACE_TOKEN sent as Authorization: Bearer`;
 
 const usage = (why: string) => new Failure(EXIT.usage, `${why}\n${USAGE}`);
 const admin = (process.env.PNEUMA_SPACE_ADMIN ?? `http://127.0.0.1:${ADMIN_PORT}`).replace(/\/$/, '');
+const bearer: Record<string, string> = process.env.PNEUMA_SPACE_TOKEN ? { authorization: `Bearer ${process.env.PNEUMA_SPACE_TOKEN}` } : {};
 
 type Options = {
   owner?: string; tag?: string; manifest?: string; container?: boolean; static?: boolean; yes?: boolean; tail?: string;
-  tenant?: string; since?: string; action?: string; actor?: string; json?: boolean;
+  tenant?: string; since?: string; action?: string; actor?: string; json?: boolean; kind?: string; label?: string; display?: string;
 };
 
 async function api(method: string, path: string, body?: unknown): Promise<any> {
   const tar = body instanceof ReadableStream;
-  const init = body === undefined ? { method } : {
+  const init = body === undefined ? { method, headers: bearer } : {
     method,
-    headers: { 'content-type': tar ? 'application/x-tar' : 'application/json' },
+    headers: { ...bearer, 'content-type': tar ? 'application/x-tar' : 'application/json' },
     body: tar ? body : JSON.stringify(body),
     duplex: 'half',
   };
@@ -64,7 +85,7 @@ async function api(method: string, path: string, body?: unknown): Promise<any> {
   } catch {
     parsed = { error: text };
   }
-  if (!response.ok) throw new Failure(EXIT.api, `${method} ${path}: ${response.status} ${parsed?.error ?? text}`);
+  if (!response.ok) throw new Failure(EXIT.api, `${method} ${path}: ${response.status} ${parsed?.error ?? text}`, response.status);
   return response.headers.get('content-type')?.startsWith('text/plain') ? text : parsed;
 }
 
@@ -232,7 +253,7 @@ async function publish([rawName, target, ...extra]: string[], options: Options):
     if (code) codeBundle(target, code);
     const [bundleRoot, bundled] = code ? [code, bundleFiles(code)] : [staticRoot, files];
     const bundle = bundleRoot && bundled ? (await api('POST', ADMIN_PATHS.bundles, ReadableStream.from(tar(bundleRoot, bundled)))).bundle : null;
-    const release = await api('PUT', ADMIN_PATHS.release(name), { image, manifest, bundle, ...(owner && { owner }) });
+    const release = await api('PUT', ADMIN_PATHS.release(name), { image, manifest, bundle, ...(owner && { owner }), ...(options.tenant && { tenant: options.tenant }) });
     const listed = (await api('GET', ADMIN_PATHS.apps) as { name: string; address: string }[]).find((app) => app.name === name);
     console.log(`${name}  ${listed?.address ?? '-'}  release ${release.number}`);
   } finally {
@@ -295,15 +316,17 @@ function policyValue(raw: string): string | number | null {
   return /^\d+$/.test(raw) ? Number(raw) : raw;
 }
 
-async function policy(args: string[]): Promise<void> {
-  const name = args[0] && !args[0].includes('=') ? appName(args[0]) : null;
-  const pairs = name ? args.slice(1) : args;
-  if (!pairs.length || pairs.some((pair) => !/^[a-z_]+=./.test(pair))) throw usage('policy takes key=value pairs');
-  const fields = Object.fromEntries(pairs.map((pair) => {
+function fields(pairs: string[], what: string): Record<string, string | number | null> {
+  if (!pairs.length || pairs.some((pair) => !/^[a-z_]+=./.test(pair))) throw usage(`${what} takes key=value pairs`);
+  return Object.fromEntries(pairs.map((pair) => {
     const at = pair.indexOf('=');
     return [pair.slice(0, at), policyValue(pair.slice(at + 1))];
   }));
-  const result = await api('PUT', name ? ADMIN_PATHS.appPolicy(name) : ADMIN_PATHS.policy, fields);
+}
+
+async function policy(args: string[]): Promise<void> {
+  const name = args[0] && !args[0].includes('=') ? appName(args[0]) : null;
+  const result = await api('PUT', name ? ADMIN_PATHS.appPolicy(name) : ADMIN_PATHS.policy, fields(name ? args.slice(1) : args, 'policy'));
   console.log(JSON.stringify(result, null, 2));
 }
 
@@ -314,12 +337,64 @@ async function owner(args: string[]): Promise<void> {
   console.log(`${name} owner ${args[1]}`);
 }
 
-async function token([verb, ...rest]: string[]): Promise<void> {
-  if (verb !== 'create') throw usage('token takes create <name>');
-  const name = one(rest, 'token create');
-  const issued = await api('POST', ADMIN_PATHS.tokens, { name });
-  console.error(`subject ${issued.subject}; the secret below is shown once and never again`);
+async function token([verb, ...rest]: string[], options: Options): Promise<void> {
+  if (verb === 'revoke') {
+    if (rest.length !== 1 || !options.tenant) throw usage('token revoke takes <id> --tenant <t>');
+    await api('DELETE', TENANT_PATHS.token(options.tenant, rest[0]));
+    return void console.log(`revoked ${rest[0]}`);
+  }
+  if (verb !== 'create') throw usage('token takes create or revoke');
+  let issued;
+  if (!options.tenant) {
+    issued = await api('POST', ADMIN_PATHS.tokens, { name: one(rest, 'token create') });
+  } else {
+    if (rest.length > 1 || (options.kind === 'service') !== (rest.length === 1)) throw usage('token create takes <name> for --kind service and none for --kind personal');
+    const body = { kind: options.kind, ...(rest[0] && { name: rest[0] }), ...(options.label && { label: options.label }) };
+    issued = await api('POST', TENANT_PATHS.tokens(options.tenant), body).catch((error: Error) => {
+      if (error instanceof Failure && error.status === 403 && process.env.PNEUMA_SPACE_TOKEN) throw new Failure(EXIT.api, 'a token cannot issue a token; sign a personal token in the console', 403);
+      throw error;
+    });
+  }
+  console.error(`subject ${issued.subject}, id ${issued.id}; the secret below is shown once and never again`);
   console.log(issued.token);
+}
+
+async function whoami(args: string[]): Promise<void> {
+  if (args.length) throw usage('whoami takes no arguments');
+  const me = await api('GET', TENANT_PATHS.me);
+  if (me.local) return void console.log('local\tplatform admin, unauthenticated');
+  const roles = Object.entries(me.roles as Record<string, string>).map(([tenant, role]) => `${tenant}:${role}`);
+  console.log([me.subject, me.name, ...roles, ...(me.platformAdmin ? ['platform admin'] : [])].join('\t'));
+}
+
+async function tenant([verb, ...rest]: string[], options: Options): Promise<void> {
+  if (verb === 'list' && !rest.length) {
+    for (const t of await api('GET', TENANT_PATHS.tenants)) console.log([t.name, t.display].join('\t'));
+    return;
+  }
+  if (verb !== 'create' || rest.length < 2) throw usage('tenant takes list, or create <tenant> <admin-id>...');
+  const [name, ...admins] = rest;
+  await api('POST', TENANT_PATHS.tenants, { name, admins, ...(options.display && { display: options.display }) });
+  console.log(`created ${name} with admins ${admins.join(', ')}`);
+}
+
+async function member([verb, tenant, user, role, ...extra]: string[]): Promise<void> {
+  if (!tenant || !user || extra.length) throw usage('member takes add|role|remove <tenant> <user-id>');
+  if (verb === 'remove' && role === undefined) {
+    await api('DELETE', TENANT_PATHS.member(tenant, user));
+    return void console.log(`removed ${user} from ${tenant}`);
+  }
+  if (!(verb === 'add' || (verb === 'role' && role !== undefined))) throw usage('member takes add <tenant> <user-id> [role], role <tenant> <user-id> <role>, or remove <tenant> <user-id>');
+  await api('PUT', TENANT_PATHS.member(tenant, user), { role: role ?? 'member' });
+  console.log(`${user} is ${role ?? 'member'} of ${tenant}`);
+}
+
+async function quota([tenant, ...pairs]: string[]): Promise<void> {
+  if (!tenant) throw usage('quota takes <tenant> [key=value ...]');
+  const result = pairs.length
+    ? await api('PUT', TENANT_PATHS.quota(tenant), fields(pairs, 'quota'))
+    : await api('GET', TENANT_PATHS.quota(tenant));
+  console.log(JSON.stringify(result, null, 2));
 }
 
 const SPAN_MS = { m: 60_000, h: 3_600_000, d: 86_400_000 } as const;
@@ -367,7 +442,17 @@ const COMMANDS: Record<string, (args: string[], options: Options) => unknown> = 
   purge,
   policy,
   owner,
+  access: async (args) => {
+    if (args.length !== 2) throw usage('access takes <name> tenant|org|public');
+    const name = appName(args[0]);
+    await api('PUT', TENANT_PATHS.access(name), { access: args[1] });
+    console.log(`${name} access ${args[1]}`);
+  },
+  whoami,
+  tenant,
+  member,
   token,
+  quota,
   audit,
 };
 
@@ -390,6 +475,9 @@ async function main(argv: string[]): Promise<void> {
         action: { type: 'string' },
         actor: { type: 'string' },
         json: { type: 'boolean' },
+        kind: { type: 'string' },
+        label: { type: 'string' },
+        display: { type: 'string' },
       },
     });
   } catch (error) {

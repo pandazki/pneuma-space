@@ -1,4 +1,3 @@
-import type { IncomingMessage } from 'node:http';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { parseAppsOrigin } from './address.ts';
@@ -30,7 +29,8 @@ const setup = (() => {
     const identity = parseIdentityEnv(process.env);
     const admins = parsePlatformAdmins(process.env.PNEUMA_SPACE_PLATFORM_ADMINS);
     const upstream = identity.kind === 'upstream' ? { ...identity.options, verifier: new JwtVerifier(identity.jwt), audiences: identity.jwt.audiences } : null;
-    return { admins, upstream, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
+    const consoleIdentity = identity.kind === 'upstream' && upstream ? { ...upstream, audiences: identity.consoleAudiences } : null;
+    return { admins, upstream, consoleIdentity, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
   } catch (error) {
     console.error(`pneuma-space: ${(error as Error).message}`);
     process.exit(1);
@@ -102,11 +102,9 @@ await runtime.reconcile();
 void registry.resume();
 await scheduler.resume();
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
-const caller = setup.upstream ? async (request: IncomingMessage) => {
-  const auth = await identity.identify(request);
-  return typeof auth === 'string' ? auth : authority.callerOf(auth);
-} : undefined;
-const admin = await startAdmin({ registry, bundles, runtime, guard: runtime, metrics, requests, store, ingressPort, caller }, { port: ADMIN_PORT, host: '0.0.0.0' });
+// The console audience keeps a JWT leaked from an app request from replaying on the admin API (ADR 0021 item 1).
+const upstream = setup.consoleIdentity ? { identity: new UpstreamIdentity(setup.consoleIdentity, authority, registry), authority } : undefined;
+const admin = await startAdmin({ registry, bundles, runtime, guard: runtime, metrics, requests, store, ingressPort, upstream }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {
   ingress.flush().catch((error: Error) => log('flush-failed', { error: error.message }));

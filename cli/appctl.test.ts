@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 const repo = fileURLToPath(new URL('../', import.meta.url));
 const FAKE_IMAGE = `sha256:${'ab'.repeat(32)}`;
 
-type Recorded = { method: string; url: string; body: Buffer };
+type Recorded = { method: string; url: string; body: Buffer; authorization?: string };
 let requests: Recorded[] = [];
 let server: Server;
 let admin: string;
@@ -24,6 +24,7 @@ const AUDIT_ROWS = [
 
 function reply(request: Recorded): unknown {
   if (request.url.startsWith('/api/audit')) return AUDIT_ROWS;
+  if (request.url === '/api/me') return { subject: 'user:bob', name: 'Bob', roles: { lab: 'member' }, platformAdmin: false };
   if (request.url === '/api/bundles') return { bundle: createHash('sha256').update(request.body).digest('hex') };
   if (request.url.endsWith('/release')) return { app: 'a1b2c3', number: 1 };
   if (request.url === '/api/tokens') return { token: 'one-time-secret-42', subject: 'service:ci' };
@@ -35,8 +36,11 @@ before(async () => {
   server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk);
-    const recorded = { method: req.method!, url: req.url!, body: Buffer.concat(chunks) };
+    const recorded = { method: req.method!, url: req.url!, body: Buffer.concat(chunks), authorization: req.headers.authorization };
     requests.push(recorded);
+    if (recorded.authorization && /^\/api\/tenants\/[^/]+\/tokens$/.test(recorded.url)) {
+      return void res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'tokens.issue.personal accepts a signed-in user, not a token' }));
+    }
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(reply(recorded)));
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -56,10 +60,10 @@ function stub(tools: Record<string, string>): string {
 const stubDocker = (script: string) => stub({ docker: script });
 const dockerMustNotRun = stubDocker('echo "docker must not be invoked: $*" >&2; exit 99');
 
-function appctl(args: string[], { bin = dockerMustNotRun, cli = join(repo, 'cli/appctl.ts') } = {}) {
+function appctl(args: string[], { bin = dockerMustNotRun, cli = join(repo, 'cli/appctl.ts'), token = '' } = {}) {
   return new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
-    const { PNEUMA_SPACE_OWNER: _, ...inherited } = process.env;
-    const env = { ...inherited, PNEUMA_SPACE_ADMIN: admin, PATH: `${bin}:${process.env.PATH}` };
+    const { PNEUMA_SPACE_OWNER: _, PNEUMA_SPACE_TOKEN: __, ...inherited } = process.env;
+    const env = { ...inherited, PNEUMA_SPACE_ADMIN: admin, PATH: `${bin}:${process.env.PATH}`, ...(token && { PNEUMA_SPACE_TOKEN: token }) };
     execFile(process.execPath, [cli, ...args], { env }, (error, stdout, stderr) =>
       resolve({ code: error ? Number(error.code) : 0, stdout, stderr }));
   });
@@ -274,4 +278,17 @@ describe('appctl audit', () => {
     const { stdout } = await appctl(['audit', '--json']);
     assert.deepEqual(JSON.parse(stdout), AUDIT_ROWS);
   });
+});
+
+test('whoami sends PNEUMA_SPACE_TOKEN as the bearer and prints subject, name and roles', async () => {
+  const { code, stdout } = await appctl(['whoami'], { token: 'personal-secret' });
+  assert.equal(code, 0);
+  assert.equal(requests[0].authorization, 'Bearer personal-secret');
+  assert.equal(stdout, 'user:bob\tBob\tlab:member\n');
+});
+
+test('token create through a token tells the caller to sign a personal token in the console', async () => {
+  const { code, stderr } = await appctl(['token', 'create', '--tenant', 'lab', '--kind', 'personal'], { token: 'personal-secret' });
+  assert.equal(code, 3);
+  assert.match(stderr, /sign a personal token in the console/);
 });

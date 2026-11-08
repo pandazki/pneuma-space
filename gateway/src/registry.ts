@@ -1,13 +1,14 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
-  CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_TENANT, GLOBAL_ONLY_POLICY, InputError, NotFound, RUNTIMES,
-  declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider,
-  type App, type AppDetail, type AppId, type AppName, type AppSummary, type Binding, type BindingState,
+  CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_QUOTA, DEFAULT_TENANT, GLOBAL_ONLY_POLICY, InputError, NotFound, QUOTA_RESOURCES, RUNTIMES,
+  declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider, subject,
+  type Access, type App, type AppDetail, type AppId, type AppName, type AppSummary, type Binding, type BindingState,
   type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type Change, type CapabilityProvider, type Guard, type Infra,
-  type Manifest, type Policy, type PolicyOverride, type PolicyPatch, type ProviderName,
+  type Manifest, type Policy, type PolicyOverride, type PolicyPatch, type ProviderName, type Quota, type Role,
   type PublishRequest, type Registry, type Release, type ReleaseNumber, type ResourceKind, type RouteView,
-  type RunSpec, type Runtime, type RuntimeKind, type SchedulerView, type Stats, type Store, type StoreOps, type Subject, type Trigger, type TriggerName,
+  type RunSpec, type Runtime, type RuntimeKind, type SchedulerView, type Stats, type Store, type StoreOps, type Subject, type Tenant, type TenantName,
+  type Trigger, type TriggerName,
 } from './model.ts';
 import { address, PATH_ADDRESSING, type Addressing } from './address.ts';
 import { emit } from './events.ts';
@@ -35,6 +36,29 @@ const DETAIL_DELIVERIES = 50;
 const SIGHTING_MS = 5 * 60_000;
 
 const log = emit;
+
+/** A listing row with the columns AppSummary lacks while model.ts is frozen. */
+export type Listed = AppSummary & { readonly tenant: TenantName; readonly access: Access };
+
+/** What the admin API calls: the frozen interface, the tenant commands and the wider listing. */
+export type AdminRegistry = Omit<Registry, 'listing'> & TenantCommands & { listing(): Promise<Listed[]> };
+
+export type IssuedToken = { readonly id: string; readonly token: string; readonly subject: Subject };
+
+/** Commands beyond the frozen Registry interface; actor-free, since the admin boundary audits them (ADR 0024 item 6). */
+export type TenantCommands = {
+  /** Copies DEFAULT_QUOTA; `admins` are user ids, at least one. */
+  createTenant(name: TenantName, display: string, admins: readonly string[]): Promise<Tenant>;
+  setQuota(tenant: TenantName, patch: Readonly<Record<string, unknown>>): Promise<Quota>;
+  /** `force` lets a platform admin leave a tenant without an admin; otherwise demoting or removing the last one is a Conflict. */
+  setMember(tenant: TenantName, user: string, role: Role, force: boolean): Promise<void>;
+  removeMember(tenant: TenantName, user: string, force: boolean): Promise<void>;
+  issueTenantToken(tenant: TenantName, subject: Subject, label: string, createdBy: Subject | 'local'): Promise<IssuedToken>;
+  revokeToken(tenant: TenantName, id: string): Promise<void>;
+  setAccess(name: AppName, access: Access): Promise<void>;
+  /** Retires the instance, then moves the row, so quota, labels and tokens switch at once (ADR 0022 item 3). */
+  moveApp(name: AppName, tenant: TenantName): Promise<void>;
+};
 
 const isResourceKind = (kind: CapabilityKind): kind is ResourceKind => CAPABILITIES[kind].class === 'resource';
 
@@ -87,7 +111,7 @@ function triggersOf(app: AppId, manifest: Manifest): Trigger[] {
   }));
 }
 
-export class PlatformRegistry implements Registry {
+export class PlatformRegistry implements Registry, TenantCommands {
   readonly #store: Store;
   readonly #runtime: RegistryDeps['runtime'];
   readonly #guard: RegistryDeps['guard'];
@@ -328,13 +352,96 @@ export class PlatformRegistry implements Registry {
     log('owner', name, { owner });
   }
 
-  /** `id` is beyond the frozen interface; the admin boundary audits it. */
-  async issueToken(name: string): Promise<{ readonly id: string; readonly token: string; readonly subject: Subject }> {
-    const { token, hash, subject } = issueToken(name);
+  /** `id` is beyond the frozen interface; the admin boundary audits it. Under `local` every token lands in `default` (ADR 0022 item 4). */
+  issueToken(name: string): Promise<IssuedToken> {
+    return this.issueTenantToken(DEFAULT_TENANT, subject(`service:${name}`), name, 'local');
+  }
+
+  async issueTenantToken(tenant: TenantName, who: Subject, label: string, createdBy: Subject | 'local'): Promise<IssuedToken> {
+    await this.#mustTenant(this.#store, tenant);
+    const { token, hash } = issueToken(who);
     const id = randomBytes(8).toString('hex');
-    await this.#store.putToken({ id, tenant: DEFAULT_TENANT, subject, label: name, hash, createdBy: 'local', createdAt: Date.now(), revokedAt: null });
-    log('token', null, { subject });
-    return { id, token, subject };
+    await this.#store.putToken({ id, tenant, subject: who, label, hash, createdBy, createdAt: Date.now(), revokedAt: null });
+    log('token', null, { tenant, subject: who });
+    return { id, token, subject: who };
+  }
+
+  /** Revoking a revoked token succeeds, so a retry converges. */
+  async revokeToken(tenant: TenantName, id: string): Promise<void> {
+    if (!(await this.#store.tokens(tenant)).some((t) => t.id === id)) throw new NotFound(`no token "${id}" in tenant "${tenant}"`);
+    await this.#store.revokeToken(id, Date.now());
+    log('token-revoked', null, { tenant, token: id });
+  }
+
+  async createTenant(name: TenantName, display: string, admins: readonly string[]): Promise<Tenant> {
+    if (admins.length === 0) throw new InputError('a tenant needs at least one admin');
+    const tenant: Tenant = { name, display, quota: DEFAULT_QUOTA, createdAt: Date.now() };
+    await this.#store.transaction(async (tx) => {
+      if (await tx.tenant(name)) throw new Conflict(`tenant "${name}" exists`);
+      await tx.putTenant(tenant);
+      for (const user of admins) await tx.putMembership({ tenant: name, user, role: 'admin' });
+    });
+    log('tenant', null, { tenant: name, admins });
+    return tenant;
+  }
+
+  async setQuota(name: TenantName, patch: Readonly<Record<string, unknown>>): Promise<Quota> {
+    for (const [key, value] of Object.entries(patch)) {
+      if (!(QUOTA_RESOURCES as readonly string[]).includes(key)) throw new InputError(`quota field "${key}" is not one of ${QUOTA_RESOURCES.join(', ')}`);
+      if (value !== null && !(Number.isInteger(value) && (value as number) >= 0)) throw new InputError(`${key} must be a whole number or null for unlimited, got ${JSON.stringify(value)}`);
+    }
+    const quota = await this.#store.transaction(async (tx) => {
+      const tenant = await this.#mustTenant(tx, name, 'update');
+      const quota = { ...tenant.quota, ...patch } as Quota;
+      await tx.putTenant({ ...tenant, quota });
+      return quota;
+    });
+    log('quota', null, { tenant: name, quota });
+    return quota;
+  }
+
+  async setMember(tenant: TenantName, user: string, role: Role, force: boolean): Promise<void> {
+    await this.#store.transaction(async (tx) => {
+      await this.#mustTenant(tx, tenant, 'update');
+      if (role !== 'admin') await this.#keepAdmin(tx, tenant, user, force);
+      await tx.putMembership({ tenant, user, role });
+    });
+    log('member', null, { tenant, user, role });
+  }
+
+  async removeMember(tenant: TenantName, user: string, force: boolean): Promise<void> {
+    await this.#store.transaction(async (tx) => {
+      await this.#mustTenant(tx, tenant, 'update');
+      if (!(await tx.memberships({ tenant, user })).length) throw new NotFound(`"${user}" is not a member of tenant "${tenant}"`);
+      await this.#keepAdmin(tx, tenant, user, force);
+      await tx.deleteMembership(tenant, user);
+    });
+    log('member-removed', null, { tenant, user });
+  }
+
+  async #keepAdmin(tx: StoreOps, tenant: TenantName, leaving: string, force: boolean): Promise<void> {
+    const admins = (await tx.memberships({ tenant })).filter((m) => m.role === 'admin');
+    if (!force && admins.length === 1 && admins[0]!.user === leaving) throw new Conflict(`"${leaving}" is the last admin of tenant "${tenant}"; make another member admin first`);
+  }
+
+  async setAccess(name: AppName, access: Access): Promise<void> {
+    await this.#updateApp(name, (app) => ({ ...app, access }));
+    await this.#refresh(name);
+    log('access', name, { access });
+  }
+
+  moveApp(name: AppName, tenant: TenantName): Promise<void> {
+    return this.#store.exclusive(name, async () => {
+      const app = await this.#mustApp(name);
+      await this.#mustTenant(this.#store, tenant);
+      if (app.status === 'purging') throw new Conflict(`app "${name}" is being purged`);
+      if (app.tenant === tenant) return;
+      await this.#runtime.retire(app.id);
+      await this.#updateApp(name, (fresh) => ({ ...fresh, tenant }));
+      await this.#refresh(name);
+      this.#emit(app.id);
+      log('move', name, { from: app.tenant, to: tenant });
+    });
   }
 
   /** The authentication path's User write: once per user per 5 min on this replica, at once when the name or groups change (ADR 0022 item 1). */
@@ -367,13 +474,15 @@ export class PlatformRegistry implements Registry {
     return this.#schedules.get(id) ?? null;
   }
 
-  async listing(): Promise<AppSummary[]> {
+  async listing(): Promise<Listed[]> {
     const stats = new Map((await this.#stats()).map((s) => [s.app, s]));
     return [...this.#views.values()].map((view) => {
       const s = stats.get(view.app);
       return {
         name: view.name,
         address: address(this.#addressing, view.name),
+        tenant: view.tenant,
+        access: view.access,
         release: view.release,
         capabilities: [...view.kinds],
         status: view.status,
@@ -542,6 +651,12 @@ export class PlatformRegistry implements Registry {
       },
       policy,
     };
+  }
+
+  async #mustTenant(store: StoreOps, name: TenantName, lock?: 'update'): Promise<Tenant> {
+    const tenant = await store.tenant(name, lock);
+    if (!tenant) throw new NotFound(`no tenant named "${name}"`);
+    return tenant;
   }
 
   async #mustApp(name: AppName): Promise<App> {
