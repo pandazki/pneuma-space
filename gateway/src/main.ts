@@ -2,7 +2,9 @@ import { join } from 'node:path';
 import { startAdmin } from './admin.ts';
 import { Docker } from './docker.ts';
 import { emit, events } from './events.ts';
-import { loadOrCreateSecret, LocalIdentity } from './identity.ts';
+import { Authority, parsePlatformAdmins } from './authz.ts';
+import { loadOrCreateSecret, LocalIdentity, parseIdentityEnv, UpstreamIdentity, type Identity } from './identity.ts';
+import { JwtVerifier } from './jwt.ts';
 import { Ingress } from './ingress.ts';
 import { hostSample, httpProbe, Metrics, profileProbe, tcpProbe } from './metrics.ts';
 import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId } from './model.ts';
@@ -19,6 +21,18 @@ import { SqliteStore } from './store.ts';
 const SAMPLE_MS = 10_000;
 
 const log = (ev: string, extra: Record<string, unknown> = {}) => emit(ev, null, extra);
+
+const setup = (() => {
+  try {
+    const identity = parseIdentityEnv(process.env);
+    const admins = parsePlatformAdmins(process.env.PNEUMA_SPACE_PLATFORM_ADMINS);
+    const upstream = identity.kind === 'upstream' ? { ...identity.options, verifier: new JwtVerifier(identity.jwt), audiences: identity.jwt.audiences } : null;
+    return { admins, upstream };
+  } catch (error) {
+    console.error(`pneuma-space: ${(error as Error).message}`);
+    process.exit(1);
+  }
+})();
 
 const data = process.env.PNEUMA_SPACE_DATA ?? '/data';
 const network = process.env.PNEUMA_SPACE_NETWORK ?? 'pneuma-space';
@@ -41,7 +55,10 @@ const registry = await PlatformRegistry.open({
   store, runtime, guard: runtime, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => ingress.snapshot(),
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app) });
-const identity = new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), (hash) => store.token(hash));
+const authority = new Authority(store, setup.admins);
+const identity: Identity = setup.upstream
+  ? new UpstreamIdentity(setup.upstream, authority, registry)
+  : new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), authority);
 const ingress = new Ingress({
   registry, runtime, identity, bundles, scheduler, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
 });

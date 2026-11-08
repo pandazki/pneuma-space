@@ -1,6 +1,9 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Authority } from './authz.ts';
+import { emit } from './events.ts';
+import { JwtError, type JwtConfig, type JwtVerifier } from './jwt.ts';
 import {
   LOGIN_PATH, LOGOUT_PATH, subject,
   type Challenge, type IdentityProvider, type Principal, type Subject, type Token,
@@ -36,18 +39,75 @@ function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex');
 }
 
-/** M1 stub: the login name is self-reported, so a user subject identifies and does not authenticate (ADR 0008). */
-export class LocalIdentity implements IdentityProvider {
-  readonly #secret: Buffer;
-  readonly #tokenByHash: (hash: string) => Promise<Token | null>;
+/** One request's credential, read at most once and reused for access, identity headers and triggers (ADR 0022 item 6). */
+export type Auth =
+  | { readonly via: 'local'; readonly subject: Subject; readonly name: string }
+  | { readonly via: 'upstream'; readonly subject: Subject; readonly name: string; readonly groups: readonly string[] }
+  | { readonly via: 'token'; readonly subject: Subject; readonly name: string; readonly token: Token };
 
-  constructor(secret: Buffer, tokenByHash: (hash: string) => Promise<Token | null>) {
+/** `unmapped` is a valid JWT whose user claim breaks the subject grammar: 401 even for a browser, since signing in again changes nothing. */
+export type Failure = 'absent' | 'invalid' | 'unmapped' | 'keys-unavailable';
+
+export type Answer = Challenge | { readonly status: 503; readonly error: string };
+
+/** `IdentityProvider` plus the split Ingress and the admin API need: one read, then a Caller or a challenge. */
+export interface Identity extends IdentityProvider {
+  identify(request: IncomingMessage): Promise<Auth | Failure>;
+  challenge(request: IncomingMessage, failure: Failure): Answer;
+}
+
+type Tokens = Pick<Authority, 'token' | 'memberships'>;
+
+/** Both providers' token rule: known, not revoked, and a personal token's issuer still a member of its tenant (ADR 0022 item 2). */
+async function tokenOf(tokens: Tokens, secret: string): Promise<Token | null> {
+  const token = await tokens.token(sha256(secret));
+  if (!token || token.revokedAt !== null) return null;
+  if (token.subject.startsWith('user:')) {
+    const user = token.subject.slice('user:'.length);
+    if (!(await tokens.memberships(user)).some((m) => m.tenant === token.tenant)) return null;
+  }
+  return token;
+}
+
+function bareName(who: Subject): string {
+  return who.slice(who.indexOf(':') + 1);
+}
+
+/** The frozen interface has no 503, so a keys outage reaches an `authenticate` caller as a throw rather than a Challenge. */
+async function principalOrChallenge(identity: Identity, request: IncomingMessage): Promise<Principal | Challenge> {
+  const auth = await identity.identify(request);
+  if (typeof auth !== 'string') return { subject: auth.subject, name: auth.name };
+  const answer = identity.challenge(request, auth);
+  if (answer.status === 503) throw new JwtError('keys-unavailable');
+  return answer;
+}
+
+function isBrowser(request: IncomingMessage): boolean {
+  return request.method === 'GET' && (request.headers.accept ?? '').includes('text/html');
+}
+
+/** M1 stub: the login name is self-reported, so a user subject identifies and does not authenticate (ADR 0008). */
+export class LocalIdentity implements Identity {
+  readonly #secret: Buffer;
+  readonly #tokens: Tokens;
+
+  constructor(secret: Buffer, tokens: Tokens) {
     this.#secret = secret;
-    this.#tokenByHash = tokenByHash;
+    this.#tokens = tokens;
   }
 
-  async authenticate(request: IncomingMessage): Promise<Principal | Challenge> {
-    return (await this.#principal(request)) ?? challenge(request);
+  authenticate(request: IncomingMessage): Promise<Principal | Challenge> {
+    return principalOrChallenge(this, request);
+  }
+
+  async identify(request: IncomingMessage): Promise<Auth | Failure> {
+    if (request.headers.authorization === undefined && request.headers.cookie === undefined) return 'absent';
+    const who = await this.#principal(request);
+    return who ? { via: 'local', ...who } : 'invalid';
+  }
+
+  challenge(request: IncomingMessage): Answer {
+    return isBrowser(request) ? { status: 303, location: `${LOGIN_PATH}?next=${encodeURIComponent(request.url ?? '/')}` } : { status: 401 };
   }
 
   async serve(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -66,9 +126,9 @@ export class LocalIdentity implements IdentityProvider {
   async #principal(request: IncomingMessage): Promise<Principal | null> {
     const authorization = request.headers.authorization;
     if (authorization !== undefined) {
-      const token = /^Bearer (\S+)$/i.exec(authorization)?.[1];
-      const row = token === undefined ? null : await this.#tokenByHash(sha256(token));
-      return row && { subject: row.subject, name: row.subject.slice(row.subject.indexOf(':') + 1) };
+      const secret = /^Bearer (\S+)$/i.exec(authorization)?.[1];
+      const token = secret === undefined ? null : await tokenOf(this.#tokens, secret);
+      return token && { subject: token.subject, name: bareName(token.subject) };
     }
     return this.#session(request.headers.cookie);
   }
@@ -104,9 +164,171 @@ export class LocalIdentity implements IdentityProvider {
   }
 }
 
-function challenge(request: IncomingMessage): Challenge {
-  const browser = request.method === 'GET' && (request.headers.accept ?? '').includes('text/html');
-  return browser ? { status: 303, location: `${LOGIN_PATH}?next=${encodeURIComponent(request.url ?? '/')}` } : { status: 401 };
+/** What `main.ts` builds the provider from; `upstream` without a required key throws, so the gateway exits before it listens. */
+export type IdentitySetup =
+  | { readonly kind: 'local' }
+  | {
+    readonly kind: 'upstream';
+    readonly jwt: JwtConfig;
+    readonly consoleAudiences: readonly string[];
+    readonly options: Omit<UpstreamConfig, 'verifier' | 'audiences'>;
+  };
+
+export function parseIdentityEnv(env: NodeJS.ProcessEnv): IdentitySetup {
+  const kind = env.PNEUMA_SPACE_IDENTITY ?? 'local';
+  if (kind === 'local') return { kind };
+  if (kind !== 'upstream') throw new Error(`PNEUMA_SPACE_IDENTITY must be local or upstream, got "${kind}"`);
+  const required = (key: string) => {
+    const value = env[key]?.trim();
+    if (!value) throw new Error(`${key} is required when PNEUMA_SPACE_IDENTITY=upstream`);
+    return value;
+  };
+  const header = required('PNEUMA_SPACE_IDENTITY_HEADER').toLowerCase();
+  const list = (key: string, fallback = '') => (env[key] ?? fallback).split(',').map((part) => part.trim()).filter(Boolean);
+  const url = env.PNEUMA_SPACE_IDENTITY_JWKS_URL?.trim();
+  const file = env.PNEUMA_SPACE_IDENTITY_KEYS_FILE?.trim();
+  if (!url === !file) throw new Error('set exactly one of PNEUMA_SPACE_IDENTITY_JWKS_URL and PNEUMA_SPACE_IDENTITY_KEYS_FILE when PNEUMA_SPACE_IDENTITY=upstream');
+  const audiences = list('PNEUMA_SPACE_IDENTITY_AUDIENCE');
+  if (audiences.length === 0) required('PNEUMA_SPACE_IDENTITY_AUDIENCE');
+  const consoleAudiences = list('PNEUMA_SPACE_CONSOLE_AUDIENCE');
+  return {
+    kind,
+    jwt: { issuer: required('PNEUMA_SPACE_IDENTITY_ISSUER'), audiences, keys: url ? { kind: 'jwks', url } : { kind: 'static', text: readFileSync(file!, 'utf8') } },
+    consoleAudiences: consoleAudiences.length > 0 ? consoleAudiences : audiences,
+    options: {
+      header,
+      userClaim: env.PNEUMA_SPACE_IDENTITY_USER_CLAIM?.trim() || 'sub',
+      nameClaims: list('PNEUMA_SPACE_IDENTITY_NAME_CLAIMS', 'name,email'),
+      groupsClaim: env.PNEUMA_SPACE_IDENTITY_GROUPS_CLAIM?.trim() || 'groups',
+      loginUrl: env.PNEUMA_SPACE_IDENTITY_LOGIN_URL?.trim() || null,
+      logoutUrl: env.PNEUMA_SPACE_IDENTITY_LOGOUT_URL?.trim() || null,
+      stripCookies: list('PNEUMA_SPACE_IDENTITY_STRIP_COOKIES'),
+    },
+  };
+}
+
+/** ADR 0021 item 1; one verifier serves both audiences, so the app host and the console share its key set and cache. */
+export type UpstreamConfig = {
+  /** Lowercase. */
+  readonly header: string;
+  readonly verifier: Pick<JwtVerifier, 'verify'>;
+  /** The app hosts' audiences, or the console's for the admin API's instance. */
+  readonly audiences: readonly string[];
+  readonly userClaim: string;
+  readonly nameClaims: readonly string[];
+  readonly groupsClaim: string;
+  /** `{url}` becomes the encoded absolute return address. */
+  readonly loginUrl: string | null;
+  readonly logoutUrl: string | null;
+  readonly stripCookies: readonly string[];
+};
+
+type Sightings = { sighted(id: string, name: string, groups: readonly string[]): Promise<void> };
+
+const JWT = /^[^.]+\.[^.]+\.[^.]*$/;
+
+/** A signed JWT from the organization's own auth proxy; the platform runs no login protocol and keeps no session (ADR 0021). */
+export class UpstreamIdentity implements Identity {
+  readonly #config: UpstreamConfig;
+  readonly #tokens: Tokens;
+  readonly #users: Sightings;
+
+  constructor(config: UpstreamConfig, tokens: Tokens, users: Sightings) {
+    this.#config = config;
+    this.#tokens = tokens;
+    this.#users = users;
+  }
+
+  authenticate(request: IncomingMessage): Promise<Principal | Challenge> {
+    return principalOrChallenge(this, request);
+  }
+
+  /** A valid JWT in the configured header wins; otherwise `Authorization: Bearer` with a non-JWT value is a platform token (ADR 0021 items 2, 5). */
+  async identify(request: IncomingMessage): Promise<Auth | Failure> {
+    let failure: Failure = 'absent';
+    const jwt = bearer(request.headers[this.#config.header]);
+    if (jwt !== null && JWT.test(jwt)) {
+      const user = await this.#user(jwt);
+      if (typeof user !== 'string') return user;
+      failure = user;
+    }
+    const secret = bearer(request.headers.authorization);
+    if (secret !== null && !JWT.test(secret)) {
+      const token = await tokenOf(this.#tokens, secret);
+      return token ? { via: 'token', subject: token.subject, name: bareName(token.subject), token } : 'invalid';
+    }
+    return jwt !== null && failure === 'absent' ? 'invalid' : failure;
+  }
+
+  challenge(request: IncomingMessage, failure: Failure): Answer {
+    if (failure === 'keys-unavailable') return { status: 503, error: 'identity keys unavailable' };
+    if (failure === 'unmapped' || !isBrowser(request) || this.#config.loginUrl === null) return { status: 401 };
+    return { status: 303, location: this.#login(absolute(request, request.url ?? '/')) };
+  }
+
+  async serve(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const url = new URL(request.url ?? '/', 'http://gateway');
+    if (url.pathname === LOGIN_PATH) {
+      const next = url.searchParams.get('next') ?? '/';
+      if (!sameHostPath(next)) return json(response, 400, { error: 'next must be a path on this host starting with /' });
+      const auth = await this.identify(request);
+      if (typeof auth !== 'string') return redirect(response, next);
+      const answer = this.challenge(request, auth);
+      if (answer.status === 503) return json(response, 503, { error: answer.error });
+      if (this.#config.loginUrl === null) return json(response, 401, { error: 'not signed in and PNEUMA_SPACE_IDENTITY_LOGIN_URL is not set' });
+      return redirect(response, this.#login(absolute(request, next)));
+    }
+    if (url.pathname === LOGOUT_PATH && this.#config.logoutUrl !== null) return redirect(response, this.#config.logoutUrl);
+    json(response, 404, { error: 'not found' });
+  }
+
+  async #user(jwt: string): Promise<Auth | Failure> {
+    let claims: Record<string, unknown>;
+    try {
+      claims = await this.#config.verifier.verify(jwt, this.#config.audiences);
+    } catch (error) {
+      if (!(error instanceof JwtError)) throw error;
+      return error.reason === 'keys-unavailable' ? 'keys-unavailable' : 'invalid';
+    }
+    const { userClaim, nameClaims, groupsClaim } = this.#config;
+    const id = claims[userClaim];
+    let who: Subject;
+    try {
+      who = subject(`user:${typeof id === 'string' ? id : ''}`);
+    } catch {
+      emit('identity-rejected', null, { claim: userClaim });
+      return 'unmapped';
+    }
+    const user = bareName(who);
+    const name = nameClaims.map((claim) => claims[claim]).find((value): value is string => typeof value === 'string' && value !== '') ?? user;
+    const raw = claims[groupsClaim];
+    const groups = Array.isArray(raw) ? raw.filter((group): group is string => typeof group === 'string') : [];
+    await this.#users.sighted(user, name, groups);
+    return { via: 'upstream', subject: who, name, groups };
+  }
+
+  #login(returnTo: string): string {
+    return this.#config.loginUrl!.replaceAll('{url}', encodeURIComponent(returnTo));
+  }
+}
+
+function bearer(value: string | string[] | undefined): string | null {
+  if (typeof value !== 'string' || value === '') return null;
+  return value.replace(/^Bearer /i, '');
+}
+
+function absolute(request: IncomingMessage, path: string): string {
+  const proto = String(request.headers['x-forwarded-proto'] ?? 'http').split(',')[0]!.trim();
+  return `${proto}://${request.headers.host ?? 'localhost'}${path}`;
+}
+
+/** Rejects `//host` and `/\host`, which browsers read as another host. */
+function sameHostPath(next: string): boolean {
+  return /^\/(?![/\\])[\x21-\x7e]*$/.test(next);
+}
+
+function json(response: ServerResponse, status: number, body: object): void {
+  response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
 }
 
 /** Only app paths, so the login page cannot redirect off this gateway. */
@@ -114,8 +336,8 @@ function safeNext(next: string | null): string {
   return next !== null && /^\/apps\/[\x21-\x7e]*$/.test(next) ? next : '/';
 }
 
-function redirect(response: ServerResponse, location: string, cookie: string): void {
-  response.writeHead(303, { location, 'set-cookie': cookie }).end();
+function redirect(response: ServerResponse, location: string, cookie?: string): void {
+  response.writeHead(303, cookie === undefined ? { location } : { location, 'set-cookie': cookie }).end();
 }
 
 function page(response: ServerResponse, status: number, html: string): void {
