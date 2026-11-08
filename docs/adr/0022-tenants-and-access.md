@@ -38,7 +38,8 @@
    | `PUT /api/policy` | 平台管理员 | id 列出者 |
    | `GET`、`POST /api/tenants`（新，建租户带首批 admin） | 平台管理员 | 否 |
    | `PUT /api/tenants/<t>/quota`（新） | 平台管理员 | id 列出者 |
-   | `GET /api/tenants/<t>/quota`、`/members`、`/audit`（ADR 0024） | member(T) | 是 |
+   | `GET /api/tenants/<t>/quota`、`/members` | member(T) | 是 |
+   | `GET /api/audit`、`/api/usage`、`/api/usage/apps`、`/api/state`（ADR 0024） | member(T)，`T` 是查询参数 `tenant`；不带 `tenant` 时要平台管理员 | 是 |
    | `PUT`、`DELETE /api/tenants/<t>/members/<user>`（新） | admin(T) | 否 |
    | `GET /api/tenants/<t>/tokens`（新） | admin(T) 看全部；member 只看自己的 | 否 |
    | `POST /api/tenants/<t>/tokens`（取代 `POST /api/tokens`，`kind: service / personal`） | service 要 admin(T)，personal 要 member(T) | 否 |

@@ -28,7 +28,7 @@
    - 领导者：一个专用连接持有 advisory lock，会话设 `tcp_keepalives_idle=10`、`interval=5`、`count=3`，每 2 s `SELECT 1`，失败即卸任。领导者跑回收器、Scheduler（取得领导权时 `resume()`，`delivering` 回到 `due`）、接管、孤儿 Pod 和 worker 清理、死副本行清理、Provider 收敛、ADR 0024 的采样和清扫。
 5. **Guard 跨副本。** 状态从内存 Map 搬到 `guard` 行。失败只由 CAS 赢家或唤醒者记录，在 `FOR UPDATE` 事务里过滤时间窗、追加、判定隔离。`unquarantine` 删行并发通知。规则和 Policy 字段不变。
 6. **副本优雅退出。** readiness 先失败，`preStop` 等 5 s 让 Endpoints 收敛，再关连接、删自己的 `lease_tally` 和 `replica` 行。流经它的 WebSocket 断开，客户端经别的副本重连，和 M1 重启的后果相同。
-7. **单机 Compose 是 N=1 的特例。** 领导锁立即取得，通知是进程内事件，SQLite 的 `transaction` 本来独占。不保留一份内存版 Lifecycle，两份状态机迟早漂移。
+7. **单机 Compose 是 N=1 的特例。** 领导锁立即取得，通知是进程内事件，SQLite 的 `transaction` 本来独占。启动时按 `managed-by` 标签列容器，与实例行比对，规则同 ADR 0019 第 5 条的收养。不保留一份内存版 Lifecycle，两份状态机迟早漂移。
 
 理由：热请求零 IO 靠本地租约和镜像，正确性靠 CAS，两者分开，库上只有边沿写。领导者承担周期性工作但不承担互斥，所以领导者的任何故障都只让回收和投递延迟。
 
