@@ -280,6 +280,11 @@ describe('appctl audit', () => {
   });
 });
 
+test('purge -y purges without asking', async () => {
+  const { code } = await appctl(['purge', 'survey', '-y']);
+  assert.deepEqual([code, requests.map((r) => `${r.method} ${r.url}`)], [0, ['POST /api/apps/survey/purge']]);
+});
+
 test('whoami sends PNEUMA_SPACE_TOKEN as the bearer and prints subject, name and roles', async () => {
   const { code, stdout } = await appctl(['whoami'], { token: 'personal-secret' });
   assert.equal(code, 0);

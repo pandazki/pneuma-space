@@ -26,7 +26,7 @@ open http://127.0.0.1:8080/apps/myapp/
 
 `publish` reads the manifest. An isolate app is uploaded as a bundle with its `node_modules` (`npm ci --omit=dev --ignore-scripts` runs on your machine); a container app is built with Docker; a declared `static` directory is uploaded beside it. Publishing the same inputs again changes nothing. A new image or manifest makes a new release and keeps every volume, database, key prefix and bucket.
 
-The other commands are `list`, `show`, `logs`, `unquarantine`, `remove` (the address answers 404, the data stays), `purge` (deletes the data, only after `remove`), `policy`, `owner` and `token create`; `node cli/appctl.ts` prints their arguments. `PNEUMA_SPACE_ADMIN` points the CLI at another admin port. Seven example apps across the three runtimes, and how to publish them, are in [`examples/`](examples/README.md).
+The other commands are `list`, `show`, `logs`, `unquarantine`, `remove` (the address answers 404, the data stays), `purge` (deletes the data, only after `remove`; `--yes` skips the prompt), `policy`, `owner` and `token create`; `node cli/appctl.ts` prints their arguments. `PNEUMA_SPACE_ADMIN` points the CLI at another admin port. Seven example apps across the three runtimes, and how to publish them, are in [`examples/`](examples/README.md).
 
 ## How it runs
 

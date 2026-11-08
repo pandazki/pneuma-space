@@ -33,7 +33,7 @@ const USAGE = `usage:
   appctl logs <name> [--tail <lines>]
   appctl unquarantine <name>
   appctl remove <name>
-  appctl purge <name> [--yes]
+  appctl purge <name> [--yes|-y]
   appctl policy [<name>] key=value ...
   appctl owner <name> <subject>
   appctl access <name> tenant|org|public
@@ -458,7 +458,7 @@ async function main(argv: string[]): Promise<void> {
         manifest: { type: 'string' },
         container: { type: 'boolean' },
         static: { type: 'boolean' },
-        yes: { type: 'boolean' },
+        yes: { type: 'boolean', short: 'y' },
         tail: { type: 'string' },
         tenant: { type: 'string' },
         since: { type: 'string' },

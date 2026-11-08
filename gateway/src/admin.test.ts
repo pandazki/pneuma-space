@@ -78,6 +78,7 @@ test('every contract endpoint answers 200 on valid input', async (t) => {
   assert.deepEqual(await call('PUT', '/api/apps/survey/policy', { idle_seconds: 5 }), { status: 200, body: { idle_seconds: 5 } });
   assert.equal((await call('PUT', '/api/policy', { idle_seconds: 5, timezone: 'Asia/Shanghai' })).body.timezone, 'Asia/Shanghai');
   assert.deepEqual(await call('PUT', '/api/apps/survey/owner', { owner: 'user:bob' }), { status: 200, body: { owner: 'user:bob' } });
+  assert.deepEqual(await call('PUT', '/api/apps/survey/access', { access: 'public' }), { status: 200, body: { access: 'public' } });
   const token = await call('POST', '/api/tokens', { name: 'ci' });
   assert.deepEqual([token.status, token.body.subject, typeof token.body.token], [200, 'service:ci', 'string']);
   assert.equal((await call('POST', '/api/apps/survey/remove')).status, 200);
