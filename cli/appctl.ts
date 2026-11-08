@@ -85,7 +85,8 @@ async function api(method: string, path: string, body?: unknown): Promise<any> {
   } catch {
     parsed = { error: text };
   }
-  if (!response.ok) throw new Failure(EXIT.api, `${method} ${path}: ${response.status} ${parsed?.error ?? text}`, response.status);
+  const quota = parsed?.quota ? `\nquota ${JSON.stringify(parsed.quota)}` : '';
+  if (!response.ok) throw new Failure(EXIT.api, `${method} ${path}: ${response.status} ${parsed?.error ?? text}${quota}`, response.status);
   return response.headers.get('content-type')?.startsWith('text/plain') ? text : parsed;
 }
 

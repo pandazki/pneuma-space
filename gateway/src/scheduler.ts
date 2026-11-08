@@ -4,8 +4,9 @@ import { hostname } from 'node:os';
 import { emit, type Emit } from './events.ts';
 import { DEAD_MS } from './instances.ts';
 import { requests } from './requests.ts';
+import { QUOTA_RETRY_SECONDS } from './runtimes.ts';
 import {
-  HEADERS, MAX_ATTEMPTS, NotFound, TRIGGER_PATH,
+  HEADERS, MAX_ATTEMPTS, NotFound, QuotaExceeded, TRIGGER_PATH,
   type AppId, type CronExpr, type Delivery, type DeliveryId, type InvokeRequest, type Lease, type ReplicaId,
   type Runtime, type Scheduler, type SchedulerView, type Store, type TriggerName,
 } from './model.ts';
@@ -23,7 +24,8 @@ export type SchedulerDeps = {
 const TICK_MS = 1000;
 const BACKOFF_MS = 10_000;
 
-type Outcome = { readonly ok: boolean; readonly cancel: boolean; readonly reason?: string };
+/** `refused`: the tenant's quota turned the wake away; the attempt does not count (ADR 0023 item 5). */
+type Outcome = { readonly ok: boolean; readonly cancel: boolean; readonly refused?: boolean; readonly reason?: string };
 
 export class DeliveryScheduler implements Scheduler {
   readonly #store: SchedulerDeps['store'];
@@ -133,6 +135,7 @@ export class DeliveryScheduler implements Scheduler {
     this.#emit(d);
     const outcome = await this.#attempt(d, view.policy.trigger_timeout_seconds * 1000);
     if (outcome.ok) await this.#write({ ...d, state: 'done' });
+    else if (outcome.refused) await this.#write({ ...d, state: 'due', attempts: due.attempts, nextAttemptAt: this.#now() + QUOTA_RETRY_SECONDS * 1000 }, 'refused');
     else if (outcome.cancel || !declares(this.#view(d.app), d.trigger)) await this.#write({ ...d, state: 'cancelled' }, outcome.reason);
     else if (d.attempts >= MAX_ATTEMPTS) await this.#write({ ...d, state: 'failed' }, outcome.reason);
     else await this.#write({ ...d, state: 'due', nextAttemptAt: this.#now() + BACKOFF_MS * 2 ** (d.attempts - 1) }, outcome.reason);
@@ -153,7 +156,7 @@ export class DeliveryScheduler implements Scheduler {
       const reason = `wake failed: ${(error as Error).message}`;
       waitMs = performance.now() - started;
       record(0, reason);
-      return { ok: false, cancel: error instanceof NotFound, reason };
+      return { ok: false, cancel: error instanceof NotFound, refused: error instanceof QuotaExceeded, reason };
     }
     waitMs = performance.now() - started;
     try {

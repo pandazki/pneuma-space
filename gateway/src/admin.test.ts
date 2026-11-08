@@ -235,3 +235,27 @@ test('GET /api/audit filters by tenant, time range, action and actor, newest fir
   assert.deepEqual(await ats('tenant=lab&from=20&to=40&action=app.remove&actor=user:ann'), [30, 20]);
   assert.deepEqual(await ats('tenant=lab&action=app.remove&actor=user:ann&limit=3'), [40, 30, 20]);
 });
+
+test('a first publish past the tenant\'s apps quota answers 409 with the quota field', async (t) => {
+  const { call, server } = await admin();
+  t.after(() => server.close());
+  await call('POST', '/api/tenants', { name: 'blue', admins: ['ann'] });
+  await call('PUT', '/api/tenants/blue/quota', { apps: 1 });
+  assert.equal((await call('PUT', '/api/apps/one/release', { ...kvApp, tenant: 'blue' })).status, 200);
+  const refused = await call('PUT', '/api/apps/two/release', { ...kvApp, tenant: 'blue' });
+  assert.deepEqual([refused.status, refused.body.quota], [409, { tenant: 'blue', resource: 'apps', used: 1, limit: 1, ask: 1 }]);
+});
+
+test('a per-app cpu_millis or memory_mb above the tenant\'s total answers 400', async (t) => {
+  const { call, server } = await admin();
+  t.after(() => server.close());
+  await call('POST', '/api/tenants', { name: 'blue', admins: ['ann'] });
+  await call('PUT', '/api/tenants/blue/quota', { cpu_millis: 2000, memory_mb: 1024 });
+  await call('PUT', '/api/apps/one/release', { ...kvApp, tenant: 'blue' });
+  const statuses = await Promise.all([
+    call('PUT', '/api/apps/one/policy', { cpu_millis: 2001 }),
+    call('PUT', '/api/apps/one/policy', { memory_mb: 1025 }),
+    call('PUT', '/api/apps/one/policy', { cpu_millis: 2000, memory_mb: 1024 }),
+  ]);
+  assert.deepEqual(statuses.map((r) => r.status), [400, 400, 200]);
+});

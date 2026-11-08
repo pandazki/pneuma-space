@@ -25,7 +25,7 @@ async function call<T>(runner: RunnerProcess, method: string, path: string, body
 type Started2 = Started & { get(path: string): Promise<string>; fire(path: string): void };
 
 async function start(runner: RunnerProcess, bundleUrl: string, app: string, extra: Partial<StartRequest> = {}): Promise<Started2> {
-  const request: StartRequest = { release: 1, spec: 's', bundleUrl, entry: 'app.mjs', env: { PNEUMA_SPACE_APP: app, PNEUMA_SPACE_RELEASE: '1' }, storage: [], readyMs: 5000, ...extra };
+  const request: StartRequest = { release: 1, spec: 's', bundleUrl, entry: 'app.mjs', env: { PNEUMA_SPACE_APP: app, PNEUMA_SPACE_RELEASE: '1' }, storage: [], heapMb: 1024, readyMs: 5000, ...extra };
   const started = await call<Started>(runner, 'POST', `/instances/${app}`, request);
   const url = (path: string) => `http://127.0.0.1:${started.port}${path}`;
   return { ...started, get: async (path) => (await fetch(url(path))).text(), fire: (path) => void fetch(url(path)).catch(() => {}) };
@@ -106,6 +106,20 @@ test('a worker holding Buffers past the off-heap budget is reported oom and the 
   assert.equal(await stopWitness(), 0);
 });
 
+test('a start asking more memory than the runner\'s caps runs at the caps and reports them', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const app = await start(runner, await serveBundle(t), 'greedy', { heapMb: 1024 });
+  assert.deepEqual([app.heapMb, app.offheapMb], [64, 128]);
+});
+
+test('a worker started with memory_mb 64 under higher caps is ended oom holding Buffers past 64 MiB (AC-OPS-3)', async (t) => {
+  const runner = await startRunner(t, { PNEUMA_SPACE_RUNNER_WORKER_HEAP_MB: '64', PNEUMA_SPACE_RUNNER_WORKER_OFFHEAP_MB: '512' });
+  const app = await start(runner, await serveBundle(t), 'small', { heapMb: 64 });
+  assert.equal(await app.get('/buffers'), 'held');
+  const { event } = await nextEvent(runner, app.worker, 3000);
+  assert.deepEqual([event.ev, event.reason], ['oom', 'offheap']);
+});
+
 // Atomics.wait is not this case: terminate() interrupts it in about 1 ms (spike S4, and measured again in node:24-alpine).
 test('a worker blocked in a native call is reported stuck within 10 s and a new worker for the app starts', async (t) => {
   const { runner, bundleUrl, stopWitness } = await drill(t);
@@ -138,7 +152,7 @@ const post = (runner: RunnerProcess, app: string, request: StartRequest) => fetc
 
 test('a worker blocked before it listens fails its start at the ready timeout', async (t) => {
   const runner = await startRunner(t, HEALTHY);
-  const request: StartRequest = { release: 1, spec: 's', bundleUrl: await serveBundle(t), entry: 'app.mjs', env: { START_FIFO: fifo(runner) }, storage: [], readyMs: 6000 };
+  const request: StartRequest = { release: 1, spec: 's', bundleUrl: await serveBundle(t), entry: 'app.mjs', env: { START_FIFO: fifo(runner) }, storage: [], heapMb: 1024, readyMs: 6000 };
   const response = await post(runner, 'blocked', request);
   assert.deepEqual([response.status, (await response.json()).error], [502, 'worker did not listen on PNEUMA_SPACE_PORT within 6000 ms']);
 });
@@ -157,7 +171,7 @@ test('a hung worker that is also stopped while it is being terminated counts onc
 test('a worker past the off-heap budget before it listens is ended oom inside the ready timeout', async (t) => {
   const runner = await startRunner(t, HEALTHY);
   const started = performance.now();
-  const response = await post(runner, 'early', { release: 1, spec: 's', bundleUrl: await serveBundle(t), entry: 'app.mjs', env: { START_BUFFERS: '1' }, storage: [], readyMs: 8000 });
+  const response = await post(runner, 'early', { release: 1, spec: 's', bundleUrl: await serveBundle(t), entry: 'app.mjs', env: { START_BUFFERS: '1' }, storage: [], heapMb: 1024, readyMs: 8000 });
   assert.equal(response.status, 502);
   assert.ok(performance.now() - started < 8000, 'ended before the ready timeout');
   const page = await call<EventPage>(runner, 'GET', '/events?after=0');
@@ -245,7 +259,7 @@ test('a bundle download that does not finish fails the start at the ready timeou
   const silent = createServer(() => {}).listen(0, '127.0.0.1');
   t.after(() => { silent.closeAllConnections(); silent.close(); });
   await once(silent, 'listening');
-  const response = await post(runner, 'slow', { release: 1, spec: 's', bundleUrl: `http://127.0.0.1:${(silent.address() as AddressInfo).port}/b.tar`, entry: 'app.mjs', env: {}, storage: [], readyMs: 1000 });
+  const response = await post(runner, 'slow', { release: 1, spec: 's', bundleUrl: `http://127.0.0.1:${(silent.address() as AddressInfo).port}/b.tar`, entry: 'app.mjs', env: {}, storage: [], heapMb: 1024, readyMs: 1000 });
   assert.deepEqual([response.status, (await response.json()).error], [502, 'bundle download did not finish within the ready timeout']);
 });
 
@@ -335,7 +349,7 @@ test('a runner stopped for 10 s while a worker is 1.5 s busy reports no worker h
 
 test('/instances lists a worker that has not listened yet as starting', async (t) => {
   const runner = await startRunner(t, HEALTHY);
-  void post(runner, 'early', { release: 1, spec: 's', bundleUrl: await serveBundle(t), entry: 'app.mjs', env: { START_BUSY_MS: '2000' }, storage: [], readyMs: 5000 }).catch(() => {});
+  void post(runner, 'early', { release: 1, spec: 's', bundleUrl: await serveBundle(t), entry: 'app.mjs', env: { START_BUSY_MS: '2000' }, storage: [], heapMb: 1024, readyMs: 5000 }).catch(() => {});
   let listed: Listed[] = [];
   for (const end = performance.now() + 3000; listed.length === 0; await sleep(50)) {
     assert.ok(performance.now() < end, 'the worker is listed');

@@ -72,7 +72,7 @@ async function fixture(t: TestContext, policy: Partial<Policy> = {}, storage: re
   const guarded = () => Object.assign(new Runtimes({ runtimes: [runtime], specFor, instances: shared.instances }), { quarantine: (id: AppId) => shared.guard.quarantine(id) });
   /** A start from outside this gateway, as one that died mid-start would have left it. */
   const startElsewhere = (id: AppId, env: Record<string, string>) => void fetch(`${runner.url}/instances/${id}`, {
-    method: 'POST', body: JSON.stringify({ release: 1, spec: 'elsewhere', bundleUrl, entry: 'app.mjs', env, storage: [], readyMs: 8000 }),
+    method: 'POST', body: JSON.stringify({ release: 1, spec: 'elsewhere', bundleUrl, entry: 'app.mjs', env, storage: [], heapMb: 1024, readyMs: 8000 }),
   }).catch(() => {});
   return { app, other, events, publish, start, startElsewhere, stopRunner, pauseRunner, resumeRunner, startRunnerAgain, restartRunner, workers, runnerEvents, guarded, runtime };
 }

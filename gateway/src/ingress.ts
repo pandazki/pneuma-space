@@ -14,7 +14,7 @@ import { emit } from './events.ts';
 import { carriesJwt, type Answer, type Auth, type Failure, type Identity } from './identity.ts';
 import { connect, forward, tunnel, type Hold } from './proxy.ts';
 import { requests, type RequestKind } from './requests.ts';
-import { Backoff, Quarantined, Unavailable } from './runtimes.ts';
+import { Backoff, QUOTA_RETRY_SECONDS, Quarantined, Unavailable } from './runtimes.ts';
 import { serveStatic, staticPath } from './static.ts';
 
 export type IngressDeps = {
@@ -56,8 +56,6 @@ type Trace = { app: AppId | null; kind: RequestKind; subject: string | null; wai
 type Counter = { requests: number; errors: number; lastAccessAt: number | null };
 
 const log = emit;
-
-const QUOTA_RETRY_SECONDS = 30;
 
 function reply(status: number, error?: string, headers?: OutgoingHttpHeaders): Route {
   return { to: 'reply', reply: { status, error, headers } };

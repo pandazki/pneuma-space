@@ -191,6 +191,8 @@ class Tenure implements Leadership {
 export type PgStoreOptions = {
   /** Commands in flight at once, each on its own session (`PNEUMA_SPACE_STORE_COMMANDS`). */
   readonly commands?: number;
+  /** Provisioned size of one files or SQLite binding in GiB, what `storage_gb` counts (ADR 0023 item 4). */
+  readonly volumeGb?: number;
   /** Fails every transaction's first commit once, so a `fn` that is not safe to rerun shows (`PNEUMA_SPACE_STORE_TEST_RETRY=1`). */
   readonly testRetry?: boolean;
 };
@@ -202,6 +204,7 @@ export interface PgStore extends StoreOps {}
  * and one dedicated session that listens for changes and holds the leader lock.
  */
 export class PgStore implements Store {
+  readonly #volumeGb: number;
   #retries = 0;
   readonly #options: PgOptions;
   readonly #pool: Pool;
@@ -219,7 +222,8 @@ export class PgStore implements Store {
   #probe: NodeJS.Timeout | null = null;
   #closed = false;
 
-  private constructor(options: PgOptions, { commands = 4, testRetry = false }: PgStoreOptions) {
+  private constructor(options: PgOptions, { commands = 4, testRetry = false, volumeGb = 1 }: PgStoreOptions) {
+    this.#volumeGb = volumeGb;
     this.#options = options;
     this.#pool = new Pool(options, POOL_SIZE);
     this.#commands = commands;
@@ -252,7 +256,7 @@ export class PgStore implements Store {
   transaction<T>(fn: (tx: StoreOps) => Promise<T>): Promise<T> {
     return this.#enter((context, begin) => begin(async (session) => {
       const state = { open: true };
-      const ops = new SqlOps(new PgSql(session, (f) => f(session), session));
+      const ops = new SqlOps(new PgSql(session, (f) => f(session), session), this.#volumeGb);
       const tx = wrap(ops, (work) => (state.open ? work() : Promise.reject(new Error('tx used after its transaction settled'))));
       try {
         return await this.#context.run({ ...context, tx: state }, () => fn(tx));
@@ -294,7 +298,7 @@ export class PgStore implements Store {
   }
 
   #call<T>(work: (ops: StoreOps) => Promise<T>): Promise<T> {
-    return this.#enter((_, begin, base) => work(new SqlOps(new PgSql(base, begin))));
+    return this.#enter((_, begin, base) => work(new SqlOps(new PgSql(base, begin), this.#volumeGb)));
   }
 
   /** Runs on the current command's session, one call at a time, or on the pool; `begin` opens a serializable transaction there. */

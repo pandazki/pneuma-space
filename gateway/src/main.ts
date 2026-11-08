@@ -49,9 +49,9 @@ const replica = (process.env.PNEUMA_SPACE_REPLICA ?? hostname()) as ReplicaId;
 const storeUrl = process.env.PNEUMA_SPACE_STORE_URL;
 const store = storeUrl
   ? await PgStore.open(storeUrl, {
-    commands: Number(process.env.PNEUMA_SPACE_STORE_COMMANDS ?? 4), testRetry: process.env.PNEUMA_SPACE_STORE_TEST_RETRY === '1',
+    commands: Number(process.env.PNEUMA_SPACE_STORE_COMMANDS ?? 4), testRetry: process.env.PNEUMA_SPACE_STORE_TEST_RETRY === '1', volumeGb: config.volumeGb,
   })
-  : new SqliteStore(join(data, 'pneuma-space.sqlite3'));
+  : new SqliteStore(join(data, 'pneuma-space.sqlite3'), { volumeGb: config.volumeGb });
 const instances = new Instances(store, { replica });
 await instances.ready();
 await instances.start();
@@ -68,7 +68,7 @@ const isolate = new IsolateRuntime({
 const runtime = new Runtimes({ runtimes: [container, isolate], specFor, instances });
 const registry = await PlatformRegistry.open({
   store, runtime, guard, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => metrics.stats(),
-  addressing: setup.addressing,
+  addressing: setup.addressing, volumeGb: config.volumeGb,
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica });
 const authority = new Authority(store, setup.admins);

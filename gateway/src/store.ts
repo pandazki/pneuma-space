@@ -82,6 +82,8 @@ export const MIGRATIONS = [
   `ALTER TABLE app ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE delivery ADD COLUMN replica TEXT;
    UPDATE tenant SET quota = '${UNLIMITED}' WHERE name = '${DEFAULT_TENANT}';`,
+  // ADR 0023 item 4: storage counts provisioned capacity, never a measurement.
+  'DROP TABLE storage_usage',
 ];
 
 /** `$n` placeholders become `?n`, which node:sqlite binds by position. */
@@ -154,7 +156,7 @@ export class SqliteStore implements Store {
   readonly #changeListeners: ((change: Change) => void)[] = [];
   #tail: Promise<unknown> = Promise.resolve();
 
-  constructor(path: string) {
+  constructor(path: string, { volumeGb = 1 }: { readonly volumeGb?: number } = {}) {
     this.#db = new DatabaseSync(path);
     this.#db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
     const { user_version: applied } = this.#db.prepare('PRAGMA user_version').get() as { user_version: number };
@@ -168,7 +170,7 @@ export class SqliteStore implements Store {
       throw error;
     }
     this.#session = new SqliteSession(this.#db, (changes) => this.#announce(changes));
-    this.#ops = new SqlOps(this.#session);
+    this.#ops = new SqlOps(this.#session, volumeGb);
     Object.assign(this, wrap(this.#ops, (work) => this.#queue(work)));
   }
 

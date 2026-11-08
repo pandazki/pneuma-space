@@ -1,17 +1,17 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
-  CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_QUOTA, DEFAULT_TENANT, GLOBAL_ONLY_POLICY, InputError, NotFound, QUOTA_RESOURCES, RUNTIMES,
-  declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider, subject,
+  CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_QUOTA, DEFAULT_TENANT, GLOBAL_ONLY_POLICY, InputError, NotFound, QUOTA_RESOURCES, QuotaExceeded, RUNTIMES,
+  admits, declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider, subject,
   type Access, type App, type AppDetail, type AppId, type AppName, type AppSummary, type Binding, type BindingState,
   type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type Change, type CapabilityProvider, type Guard, type Infra,
-  type Manifest, type Policy, type PolicyOverride, type PolicyPatch, type ProviderName, type Quota, type Role,
+  type Manifest, type Policy, type PolicyOverride, type PolicyPatch, type ProviderName, type Quota, type QuotaUsage, type Role,
   type PublishRequest, type Registry, type Release, type ReleaseNumber, type ResourceKind, type RouteView,
   type RunSpec, type Runtime, type RuntimeKind, type SchedulerView, type Stats, type Store, type StoreOps, type Subject, type Tenant, type TenantName,
   type Trigger, type TriggerName,
 } from './model.ts';
 import { address, PATH_ADDRESSING, type Addressing } from './address.ts';
-import { emit } from './events.ts';
+import { emit, quotaRefused, type QuotaRefused } from './events.ts';
 import { issueToken } from './identity.ts';
 import { resolvesOnNetwork, type ServiceProbe } from './providers.ts';
 
@@ -27,12 +27,17 @@ export type RegistryDeps = {
   /** The 24 h counts and last access per app; the stored last access otherwise. */
   readonly statsSource?: () => Promise<Stats[]>;
   readonly addressing?: Addressing;
+  /** GiB a new files or SQLite binding asks of the tenant's `storage_gb`; the Store counts existing ones at the same size. */
+  readonly volumeGb?: number;
+  readonly quotaRefused?: QuotaRefused;
 };
 
 const SECONDS_FIELDS = ['idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds', 'failure_window_seconds', 'restart_backoff_seconds'] as const;
 const WHOLE_FIELDS = ['max_failures', 'cpu_millis', 'memory_mb', 'usage_retention_days', 'events_retention_days', 'events_max_rows'] as const;
 const POLICY_FIELDS: readonly string[] = [...SECONDS_FIELDS, ...WHOLE_FIELDS, 'db_backend', 'timezone'];
 const DETAIL_DELIVERIES = 50;
+/** The providers whose binding is a provisioned volume, what `storage_gb` counts (ADR 0023 item 4). */
+const PROVISIONED: ReadonlySet<ProviderName> = new Set(['volume', 'sqlite']);
 const SIGHTING_MS = 5 * 60_000;
 
 const log = emit;
@@ -121,6 +126,8 @@ export class PlatformRegistry implements Registry, TenantCommands {
   readonly #providers: ReadonlyMap<ProviderName, CapabilityProvider>;
   readonly #stats: () => Promise<Stats[]>;
   readonly #addressing: Addressing;
+  readonly #volumeGb: number;
+  readonly #quotaRefused: QuotaRefused;
   readonly #changed = new EventEmitter();
   readonly #views = new Map<AppName, RouteView>();
   readonly #specs = new Map<AppId, RunSpec>();
@@ -141,6 +148,8 @@ export class PlatformRegistry implements Registry, TenantCommands {
     this.#providers = new Map(deps.providers.map((p) => [p.name, p]));
     this.#stats = deps.statsSource ?? (() => deps.store.stats());
     this.#addressing = deps.addressing ?? PATH_ADDRESSING;
+    this.#volumeGb = deps.volumeGb ?? 1;
+    this.#quotaRefused = deps.quotaRefused ?? quotaRefused;
     this.#policy = policy;
   }
 
@@ -187,7 +196,10 @@ export class PlatformRegistry implements Registry, TenantCommands {
   }
 
   publish(request: PublishRequest): Promise<Release> {
-    return this.#store.exclusive(request.name, () => this.#publish(request));
+    return this.#store.exclusive(request.name, () => this.#publish(request)).catch((error: unknown) => {
+      if (error instanceof QuotaExceeded) this.#quotaRefused(error, request.name, 'publish');
+      throw error;
+    });
   }
 
   async #publish({ name, image: reference, manifest, bundle, owner, tenant = DEFAULT_TENANT }: PublishRequest): Promise<Release> {
@@ -222,16 +234,24 @@ export class PlatformRegistry implements Registry, TenantCommands {
     const policy = effectivePolicy(this.#policy, pinned);
     const resourceKinds = kinds.filter(isResourceKind);
     const providers = resourceKinds.map((kind) => this.#provider(selectProvider(kind, policy)));
+    const bound = app ? await this.#store.bindings(app.id) : [];
+    const volumes = providers.filter((p) => PROVISIONED.has(p.name) && !bound.some((b) => b.kind === p.kind && b.provider === p.name)).length;
+    const storage = volumes > 0 ? { storage_gb: volumes * this.#volumeGb } : {};
 
     if (!app) {
       if (owner === null) throw new InputError(`owner is required on the first publish of "${name}"; pass user:<name> or service:<name>`);
-      if (!(await this.#store.tenant(tenant))) throw new NotFound(`no tenant named "${tenant}"`);
-      app = { name, id: newAppId(), tenant, access: 'org', owner, status: 'registered', current: null, policyOverride: pinned, registeredAt: Date.now() };
-      await this.#store.putApp(app);
+      const created: App = { name, id: newAppId(), tenant, access: 'org', owner, status: 'registered', current: null, policyOverride: pinned, registeredAt: Date.now() };
+      await this.#store.transaction(async (tx) => {
+        await this.#admit(tx, tenant, { apps: 1, ...storage });
+        await tx.putApp(created);
+      });
+      app = created;
       await this.#refresh(name);
       log('app-created', name, { id: app.id });
-    } else if (pinned !== override) {
-      await this.#updateApp(name, (fresh) => ({ ...fresh, policyOverride: pinned }));
+    } else {
+      const { tenant: own } = app;
+      if (volumes > 0) await this.#store.transaction((tx) => this.#admit(tx, own, storage));
+      if (pinned !== override) await this.#updateApp(name, (fresh) => ({ ...fresh, policyOverride: pinned }));
     }
 
     for (const provider of providers) await this.#ensure(app.id, provider);
@@ -332,6 +352,14 @@ export class PlatformRegistry implements Registry, TenantCommands {
     const fields = parsePolicyPatch(patch, 'app');
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
+      const { quota } = await this.#mustTenant(this.#store, app.tenant);
+      for (const field of ['cpu_millis', 'memory_mb'] as const) {
+        const value = fields[field];
+        const limit = quota[field];
+        if (typeof value === 'number' && limit !== null && value > limit) {
+          throw new InputError(`${field} ${value} is above tenant "${app.tenant}"'s ${field} quota of ${limit}`);
+        }
+      }
       const override: Record<string, unknown> = { ...app.policyOverride };
       for (const [key, value] of Object.entries(fields)) {
         if (value === null) delete override[key];
@@ -675,6 +703,13 @@ export class PlatformRegistry implements Registry, TenantCommands {
       policy,
       version: app.version,
     };
+  }
+
+  /** Under the tenant's row lock, so concurrent publishes into one tenant are counted one after another (ADR 0023 item 3). */
+  async #admit(tx: StoreOps, name: TenantName, ask: Partial<QuotaUsage>): Promise<void> {
+    const tenant = await this.#mustTenant(tx, name, 'update');
+    const refusal = admits(tenant.quota, await tx.quotaUsed(name), ask);
+    if (refusal) throw new QuotaExceeded(name, refusal);
   }
 
   async #mustTenant(store: StoreOps, name: TenantName, lock?: 'update'): Promise<Tenant> {
