@@ -2619,10 +2619,8 @@ function realtime() {
       page.records.push(...batch.records);
       page.records.splice(0, Math.max(0, page.records.length - KEEP_REQUESTS));
       if (!page.seeded) requests.seed(batch.records);
-      else if (batch.records.length || marks.length) {
-        requests.push(marks, batch.records);
-        header.beat();
-      }
+      if (marks.length || (page.seeded && batch.records.length)) requests.push(marks, page.seeded ? batch.records : []);
+      if (page.seeded && batch.records.length) header.beat();
       page.seeded = true;
       if (batch.records.length < REQUEST_PAGE) break;
     }
