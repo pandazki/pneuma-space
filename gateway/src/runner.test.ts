@@ -490,7 +490,7 @@ test('worker ports advance round-robin and a freed port is not handed out again 
     ports.push((await start(runner, bundleUrl, 'a')).port);
     await call(runner, 'DELETE', '/instances/a');
   }
-  assert.deepEqual(ports, [low, low + 1]);
+  assert.deepEqual(ports.toSorted(), [low, low + 1]);
   const third = await fetch(`${runner.url}/instances/a`, {
     method: 'POST', body: JSON.stringify({ release: 1, spec: 's', bundleUrl, entry: 'app.mjs', env: {}, storage: [], heapMb: 64, readyMs: 5000 }),
   });

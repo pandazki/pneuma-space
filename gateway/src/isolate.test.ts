@@ -280,7 +280,7 @@ test('a stale worker whose removal failed at gateway start is removed by the rec
   const { runner, runtime, logged } = await staleRunner(t);
   await runtime.reconcile();
   for (const end = Date.now() + 8000; runner.listed.length > 0; await sleep(100)) assert.ok(Date.now() < end, 'the stale worker is removed');
-  assert.deepEqual(logged.find((e) => e.ev === 'runner-recovered'), { ev: 'runner-recovered', stopped: 1, failed: 0 });
+  assert.deepEqual(logged.find((e) => e.ev === 'runner-recovered'), { ev: 'runner-recovered', runner: 'runner', stopped: 1, failed: 0 });
 });
 
 test('a worker another gateway started that has not listened yet is stopped by the recovery poll', async (t) => {

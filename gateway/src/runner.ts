@@ -101,7 +101,8 @@ const queues = new Map<string, Promise<unknown>>();
 /** Ports a worker holds from allocation until its thread exits, and when each freed port was released. */
 const held = new Set<number>();
 const freed = new Map<number, number>();
-let nextPort = PORT_LOW;
+/** A random start, so a restarted runner, whose cooldowns are gone, does not hand out the ports its predecessor just freed. */
+let nextPort = PORT_LOW + Math.floor(Math.random() * (PORT_HIGH - PORT_LOW + 1));
 let seq = 0;
 let workers = 0;
 let pings = 0;
