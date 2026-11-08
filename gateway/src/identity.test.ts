@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Authority } from './authz.ts';
 import { events, type LifecycleEvent } from './events.ts';
-import { LocalIdentity, UpstreamIdentity, issueToken, loadOrCreateSecret, type UpstreamConfig } from './identity.ts';
+import { LocalIdentity, UpstreamIdentity, issueToken, loadOrCreateSecret, parseIdentityEnv, type UpstreamConfig } from './identity.ts';
 import { JwtVerifier } from './jwt.ts';
 import { DEFAULT_QUOTA, DEFAULT_TENANT, type Subject, type TenantName, type Token } from './model.ts';
 import { SqliteStore } from './store.ts';
@@ -128,6 +128,13 @@ async function personalToken(user: string, tenant: TenantName): Promise<{ secret
   await store.putToken(row);
   return { secret, row };
 }
+
+test('an empty variable, as compose.yaml passes an unset one, means its default', () => {
+  const upstreamEnv = { PNEUMA_SPACE_IDENTITY: 'upstream', PNEUMA_SPACE_IDENTITY_HEADER: 'x-jwt', PNEUMA_SPACE_IDENTITY_JWKS_URL: 'https://sso.example/jwks', PNEUMA_SPACE_IDENTITY_ISSUER: ISSUER, PNEUMA_SPACE_IDENTITY_AUDIENCE: 'apps' };
+  const empty = Object.fromEntries(['KEYS_FILE', 'USER_CLAIM', 'NAME_CLAIMS', 'GROUPS_CLAIM', 'LOGIN_URL', 'LOGOUT_URL', 'STRIP_COOKIES'].map((k) => [`PNEUMA_SPACE_IDENTITY_${k}`, '']));
+  assert.deepEqual(parseIdentityEnv({ PNEUMA_SPACE_IDENTITY: '' }), { kind: 'local' });
+  assert.deepEqual(parseIdentityEnv({ ...upstreamEnv, ...empty, PNEUMA_SPACE_CONSOLE_AUDIENCE: '' }), parseIdentityEnv(upstreamEnv));
+});
 
 test('upstream: the JWT is read with and without a Bearer prefix', async () => {
   const value = jwt({ name: 'Ana' });

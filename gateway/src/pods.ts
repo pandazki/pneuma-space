@@ -76,7 +76,7 @@ export type Plane = 'docker' | 'kubernetes';
 export function planeOf(env: NodeJS.ProcessEnv): Plane {
   const plane = env.PNEUMA_SPACE_PLANE?.trim() || 'docker';
   if (plane !== 'docker' && plane !== 'kubernetes') throw new Error(`PNEUMA_SPACE_PLANE must be docker or kubernetes, got "${plane}"`);
-  if (plane === 'kubernetes' && (env.PNEUMA_SPACE_IDENTITY ?? 'local') === 'local') {
+  if (plane === 'kubernetes' && (env.PNEUMA_SPACE_IDENTITY?.trim() || 'local') === 'local') {
     throw new Error('PNEUMA_SPACE_PLANE=kubernetes refuses PNEUMA_SPACE_IDENTITY=local: set PNEUMA_SPACE_IDENTITY=upstream');
   }
   return plane;

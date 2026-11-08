@@ -175,7 +175,7 @@ export type IdentitySetup =
   };
 
 export function parseIdentityEnv(env: NodeJS.ProcessEnv): IdentitySetup {
-  const kind = env.PNEUMA_SPACE_IDENTITY ?? 'local';
+  const kind = env.PNEUMA_SPACE_IDENTITY?.trim() || 'local';
   if (kind === 'local') return { kind };
   if (kind !== 'upstream') throw new Error(`PNEUMA_SPACE_IDENTITY must be local or upstream, got "${kind}"`);
   const required = (key: string) => {
@@ -184,7 +184,7 @@ export function parseIdentityEnv(env: NodeJS.ProcessEnv): IdentitySetup {
     return value;
   };
   const header = required('PNEUMA_SPACE_IDENTITY_HEADER').toLowerCase();
-  const list = (key: string, fallback = '') => (env[key] ?? fallback).split(',').map((part) => part.trim()).filter(Boolean);
+  const list = (key: string, fallback = '') => (env[key]?.trim() || fallback).split(',').map((part) => part.trim()).filter(Boolean);
   const url = env.PNEUMA_SPACE_IDENTITY_JWKS_URL?.trim();
   const file = env.PNEUMA_SPACE_IDENTITY_KEYS_FILE?.trim();
   if (!url === !file) throw new Error('set exactly one of PNEUMA_SPACE_IDENTITY_JWKS_URL and PNEUMA_SPACE_IDENTITY_KEYS_FILE when PNEUMA_SPACE_IDENTITY=upstream');

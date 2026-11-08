@@ -15,7 +15,7 @@ docker compose up -d                              # the same without the runner,
 docker compose --profile postgres --profile rtc up -d   # also PostgreSQL and TURN
 ```
 
-The console is at http://127.0.0.1:8081/, apps at `http://127.0.0.1:8080/apps/<name>/`, the object store at http://127.0.0.1:9000. Every port binds loopback. Ports, network name, credentials and the TURN public host are `PNEUMA_SPACE_*` variables in `compose.yaml`, overridden in `.env`; the defaults suit one trusted machine only.
+The console is at http://127.0.0.1:8081/, apps at `http://127.0.0.1:8080/apps/<name>/`, the object store at http://127.0.0.1:9000. Every port binds loopback. Ports, network name, credentials and the TURN public host are `PNEUMA_SPACE_*` variables in `compose.yaml`, overridden in `.env`; the defaults suit one trusted machine only. The same file passes through, empty by default, the variables that put the platform behind an organization's authenticating proxy (`PNEUMA_SPACE_IDENTITY=upstream`) and give each app its own subdomain (`PNEUMA_SPACE_APPS_ORIGIN`); [`docs/app-contract.md`](docs/app-contract.md) says what they change and [ADR 0021](docs/adr/0021-trusted-upstream-identity.md) lists the identity keys.
 
 ```sh
 node cli/appctl.ts init myapp                     # templates/app, an isolate app; --container adds a Dockerfile, --static copies templates/static
