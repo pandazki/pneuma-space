@@ -86,6 +86,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   margin: 0; min-height: 100vh; color: var(--ink);
   font: 14px/21px var(--font); letter-spacing: -0.01em; -webkit-font-smoothing: antialiased;
@@ -610,7 +611,6 @@ dialog .actions { justify-content: flex-end; }
 dialog .field { margin: 0 0 20px; }
 .frame { position: relative; }
 .topbar { position: absolute; top: 14px; right: 32px; z-index: 4; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-2); }
-.topbar[hidden] { display: none; }
 .topbar select { height: 27px; border-radius: 999px; padding: 0 8px 0 12px; font-weight: 500; max-width: 220px; }
 .topbar .sep { width: 1px; height: 16px; background: var(--line-strong); flex: none; }
 .who { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
@@ -628,8 +628,9 @@ td select { height: 26px; }
 .secret header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .secret header b { font-size: 12.5px; font-weight: 600; }
 .secret code { display: block; font: 12.5px/18px var(--mono); overflow-wrap: anywhere; padding: 8px 10px; background: var(--surface); border-radius: 8px; box-shadow: 0 0 0 1px var(--line); user-select: all; }
-.stack { display: grid; gap: 12px; }
+.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .you { margin-left: 6px; }
+.chip.text { font-family: var(--font); font-size: 11.5px; }
 @media (max-width: 900px) {
   .frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; box-shadow: none; }
   aside { position: relative; width: auto; height: auto; padding: 16px 20px; border-right: 0; border-bottom: 1px dashed var(--line); }
@@ -644,7 +645,9 @@ td select { height: 26px; }
   .head { padding: 32px 20px 24px; }
   section { padding: 24px 20px; }
   .frame:has(> .topbar:not([hidden])) { grid-template-rows: auto auto 1fr; }
-  .topbar { position: static; padding: 12px 20px 0; justify-content: flex-end; flex-wrap: wrap; }
+  .topbar { position: static; padding: 12px 20px 0; justify-content: flex-end; }
+  .topbar select { max-width: 140px; }
+  .who .chip, .topbar .sep { display: none; }
   .rowkv > p { margin-left: 0; }
   .split { grid-template-columns: minmax(0, 1fr); }
   .toolbar input { width: 100%; }
@@ -871,7 +874,7 @@ const I18N = {
     'sec.tokens': '令牌', 'sec.tokensDesc': '服务令牌给自动化，个人令牌给你自己的 appctl。权限不超过成员，明文只显示一次。',
     'sec.tokensMine': '你在这个租户签发的令牌。管理员能看到全部。',
     'tk.kind': '类型', 'tk.kind.service': '服务', 'tk.kind.personal': '个人', 'tk.issue': '签发令牌', 'tk.name': '名称',
-    'tk.nameHint': '小写字母开头，最多 23 个字符；主体是 service:{tenant}.<名称>。', 'tk.personalHint': '主体是你自己（{subject}），appctl 用它发布的应用所有者就是你。',
+    'tk.nameHint': '主体 service:{tenant}.<名称>', 'tk.personalHint': '主体是你自己（{subject}），appctl 用它发布的应用所有者就是你。',
     'tk.label': '标签（可选）', 'tk.serviceAdmin': '服务令牌由租户管理员签发。',
     'tk.secretTitle': '现在复制这个令牌，它不会再显示', 'tk.secretFor': '主体 {subject}', 'tk.copy': '复制', 'tk.copied': '已复制', 'tk.done': '我已保存',
     'tk.revoke': '吊销', 'tk.revokeTitle': '吊销 {label}？', 'tk.revokeBody': '用它的请求 30 秒内在每个副本开始被拒绝。无法撤销。',
@@ -1089,7 +1092,7 @@ const I18N = {
     'sec.tokens': 'Tokens', 'sec.tokensDesc': 'Service tokens for automation, personal tokens for your own appctl. A token never exceeds member; its secret is shown once.',
     'sec.tokensMine': 'The tokens you issued in this tenant. An admin sees all of them.',
     'tk.kind': 'Kind', 'tk.kind.service': 'Service', 'tk.kind.personal': 'Personal', 'tk.issue': 'Issue token', 'tk.name': 'Name',
-    'tk.nameHint': 'Starts with a lowercase letter, up to 23 characters; the subject is service:{tenant}.<name>.', 'tk.personalHint': 'The subject is you ({subject}), so apps appctl publishes with it are owned by you.',
+    'tk.nameHint': 'Subject service:{tenant}.<name>', 'tk.personalHint': 'The subject is you ({subject}), so apps appctl publishes with it are owned by you.',
     'tk.label': 'Label (optional)', 'tk.serviceAdmin': 'A tenant admin issues service tokens.',
     'tk.secretTitle': 'Copy this token now; it will not be shown again', 'tk.secretFor': 'Subject {subject}', 'tk.copy': 'Copy', 'tk.copied': 'Copied', 'tk.done': 'I saved it',
     'tk.revoke': 'Revoke', 'tk.revokeTitle': 'Revoke {label}?', 'tk.revokeBody': 'Requests with it start failing on every replica within 30 s. This cannot be undone.',
@@ -1320,7 +1323,7 @@ function topbar() {
     h('span', { class: 'who', title: me.subject },
       h('span', { class: 'av', 'aria-hidden': 'true' }, [...me.name][0]?.toUpperCase() ?? '?'),
       h('b', {}, me.name),
-      me.platformAdmin ? h('span', { class: 'chip' }, t('top.platformAdmin')) : null),
+      me.platformAdmin ? h('span', { class: 'chip text' }, t('top.platformAdmin')) : null),
     h('a', { class: 'btn ghost', href: '/_pneuma-space/logout' }, t('top.signOut')));
 }
 
@@ -2993,7 +2996,7 @@ async function publish(prefill) {
 const tokenKind = (token) => (token.subject.startsWith('service:') ? 'service' : 'personal');
 const say = (el, text, ok = false) => { el.className = ok ? 'msg' : 'msg err'; el.textContent = text; };
 const teamHead = (sub) => h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('team.title')), h('p', { class: 'sub' }, sub)));
-const youChip = (subject) => (subject === session.me.subject ? h('span', { class: 'chip you' }, t('m.you')) : null);
+const youChip = (subject) => (subject === session.me.subject ? h('span', { class: 'chip text you' }, t('m.you')) : null);
 
 async function team() {
   const { scope } = session;
@@ -3033,7 +3036,7 @@ async function team() {
         h('span', {}, h('span', { class: 'mono' }, m.id), m.name && m.name !== m.id ? h('span', { class: 'muted' }, ` · ${m.name}`) : null, youChip(`user:${m.id}`)),
         admin ? h('select', { 'aria-label': t('col.role'), onchange: (e) => setRole(m, e.target) }, ['admin', 'member'].map((r) => h('option', { value: r, selected: r === m.role }, t(`role.${r}`))))
           : t(`role.${m.role}`),
-        m.lastSeen == null ? h('span', { class: 'chip' }, t('m.never')) : ago(m.lastSeen),
+        m.lastSeen == null ? h('span', { class: 'chip text' }, t('m.never')) : ago(m.lastSeen),
         admin && h('button', { class: 'btn danger small', type: 'button', onclick: () => remove(m) }, t('m.remove')),
       ].filter((cell) => cell !== false) })), 'empty.members'));
   };
@@ -3050,7 +3053,7 @@ async function team() {
     tokens.replaceChildren(table(
       [['tk.kind'], ['col.label'], ['col.subject'], ['col.createdBy'], ['col.created'], ['col.state'], ['col.actions', 'r']],
       rows.map((token) => ({ cells: [
-        chip(t(`tk.kind.${tokenKind(token)}`)),
+        h('span', { class: 'chip text' }, t(`tk.kind.${tokenKind(token)}`)),
         token.label,
         h('span', { class: 'mono' }, token.subject),
         h('span', {}, h('span', { class: 'mono' }, token.createdBy), youChip(token.createdBy)),
@@ -3061,7 +3064,7 @@ async function team() {
       ] })), 'empty.tokens'));
   };
 
-  const id = h('input', { placeholder: 'ana', 'aria-label': t('m.id'), title: t('m.idHint'), autocomplete: 'off', spellcheck: 'false' });
+  const id = h('input', { placeholder: t('m.id'), 'aria-label': t('m.id'), title: t('m.idHint'), autocomplete: 'off', spellcheck: 'false' });
   const role = h('select', { 'aria-label': t('col.role') }, ['member', 'admin'].map((r) => h('option', { value: r }, t(`role.${r}`))));
   const addForm = h('form', { class: 'toolbar', onsubmit: async (event) => {
     event.preventDefault();
@@ -3077,10 +3080,10 @@ async function team() {
 
   const kinds = admin ? ['service', 'personal'] : ['personal'];
   let kind = kinds[0];
-  const name = h('input', { placeholder: 'ci', pattern: '[a-z][a-z0-9\\-]{0,22}', autocomplete: 'off', spellcheck: 'false' });
+  const name = h('input', { placeholder: 'deploy', pattern: '[a-z][a-z0-9\\-]{0,22}', maxlength: 23, autocomplete: 'off', spellcheck: 'false' });
   const label = h('input', { autocomplete: 'off' });
   const kindPick = h('span');
-  const nameField = h('label', { class: 'field' }, h('span', {}, t('tk.name')), name, h('small', {}, t('tk.nameHint', { tenant: scope })));
+  const nameField = h('label', { class: 'field' }, h('span', {}, t('tk.name')), name, h('small', { class: 'mono' }, t('tk.nameHint', { tenant: scope })));
   const personalNote = h('small', { class: 'muted' }, t('tk.personalHint', { subject: session.me.subject }));
   const syncKind = () => {
     kindPick.replaceChildren(segmented(kinds.map((k) => [k, t(`tk.kind.${k}`)]), kind, (k) => { kind = k; syncKind(); }, t('tk.kind')));
