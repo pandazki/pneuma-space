@@ -33,7 +33,6 @@ const MAX_TAIL = 10_000;
 const HOUR = 3_600_000;
 const USAGE_SPAN_MS = 30 * 24 * HOUR;
 // ADMIN_PATHS lacks it while model.ts is frozen.
-const AUDIT_PATH = '/api/audit';
 
 type Body = Readonly<Record<string, unknown>>;
 /** A string result is sent as text/plain, anything else as JSON. */
@@ -178,7 +177,7 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, store, i
           .slice(0, wholeParam(request, 'limit', 50, 1, 1000));
       },
     },
-    { method: 'GET', path: at(AUDIT_PATH), handle: (request) => store.audit(auditFilter(request)) },
+    { method: 'GET', path: at(ADMIN_PATHS.audit), handle: (request) => store.audit(auditFilter(request)) },
     {
       method: 'GET', path: at(ADMIN_PATHS.requests), handle: (request) => requests
         .after(wholeParam(request, 'after', 0, 0, Number.MAX_SAFE_INTEGER), wholeParam(request, 'limit', 500, 1, RING))
@@ -275,7 +274,7 @@ async function audited(store: AdminDeps['store'], caller: Caller, audit: Audit, 
     action: audit.action,
     targetKind: target.kind,
     target: target.id,
-    result: result as AuditRecord['result'],
+    result,
     details: { ...who.details, ...details },
   });
   const settle = (result: AuditResult, details: Record<string, unknown>) =>

@@ -13,7 +13,6 @@ import {
 import { assemble } from './scaffold.ts';
 
 // ADMIN_PATHS lacks it while model.ts is frozen.
-const AUDIT_PATH = '/api/audit';
 const EXIT = { usage: 1, manifest: 2, api: 3, build: 4 } as const;
 
 class Failure extends Error {
@@ -341,7 +340,7 @@ async function audit(args: string[], options: Options): Promise<void> {
   if (options.since) query.set('from', String(since(options.since)));
   if (options.action) query.set('action', options.action);
   if (options.actor) query.set('actor', options.actor);
-  const rows: { at: number; actor: string; action: string; target: string; result: string }[] = await api('GET', `${AUDIT_PATH}?${query}`);
+  const rows: { at: number; actor: string; action: string; target: string; result: string }[] = await api('GET', `${ADMIN_PATHS.audit}?${query}`);
   if (options.json) return void console.log(JSON.stringify(rows, null, 2));
   for (const row of rows) console.log([new Date(row.at).toISOString(), row.actor, row.action, row.target, row.result].join('\t'));
 }

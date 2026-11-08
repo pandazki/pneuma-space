@@ -738,7 +738,7 @@ export type AuditRecord = {
   readonly action: AuditAction;
   readonly targetKind: 'app' | 'tenant' | 'token' | 'member' | 'policy';
   readonly target: string;
-  readonly result: 'ok' | 'refused' | 'error';
+  readonly result: 'started' | 'ok' | 'refused' | 'error';
   /** Never a secret. */
   readonly details: Readonly<Record<string, unknown>>;
 };
@@ -1003,7 +1003,7 @@ export interface Registry {
   setGlobalPolicy(patch: Partial<Policy>): Promise<Policy>;
   setAppPolicy(name: AppName, patch: PolicyPatch): Promise<PolicyOverride>;
   setOwner(name: AppName, owner: Subject): Promise<void>;
-  issueToken(name: string): Promise<{ readonly token: string; readonly subject: Subject }>;
+  issueToken(name: string): Promise<{ readonly id: string; readonly token: string; readonly subject: Subject }>;
   view(name: AppName): RouteView | null;
   nameOf(id: AppId): AppName | null;
   /** The global snapshot; merge with a RouteView's override via effectivePolicy. */
@@ -1053,6 +1053,7 @@ export const ADMIN_PATHS = {
   requests: '/api/requests',
   usage: '/api/usage',
   usageApps: '/api/usage/apps',
+  audit: '/api/audit',
   bundles: '/api/bundles',
   policy: '/api/policy',
   tokens: '/api/tokens',
