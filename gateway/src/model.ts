@@ -605,6 +605,15 @@ export type AppSummary = {
   readonly node: string | null;
 };
 
+export type StateEntry = Omit<Binding, 'app' | 'resource'> & { readonly location: Readonly<Record<string, string>> };
+/** One app's answer on ADMIN_PATHS.state; `bundle` is null for an image release. */
+export type StateInventory = {
+  readonly app: AppName;
+  readonly release: ReleaseNumber | null;
+  readonly bundle: BundleId | null;
+  readonly bindings: readonly StateEntry[];
+};
+
 export type AppDetail = {
   readonly app: App;
   readonly releases: readonly Release[];
@@ -984,6 +993,8 @@ export interface CapabilityProvider {
   /** Creates or converges the resource and re-enables it if suspended; `current` is the binding's last record. Throws Conflict when the backend is not running. */
   ensure(app: AppId, current: Resource | null): Promise<Resource>;
   inject(app: AppId, resource: Resource): Omit<Injection, 'services'>;
+  /** Where the resource's data lives, without credentials (ADR 0024 item 10). */
+  location(resource: Resource): Readonly<Record<string, string>>;
   suspend(app: AppId, resource: Resource): Promise<void>;
   destroy(app: AppId, resource: Resource): Promise<void>;
 }
@@ -1113,6 +1124,8 @@ export const ADMIN_PATHS = {
   tokens: '/api/tokens',
   app: (name: string) => `/api/apps/${name}`,
   logs: (name: string) => `/api/apps/${name}/logs`,
+  state: (name: string) => `/api/apps/${name}/state`,
+  states: '/api/state',
   release: (name: string) => `/api/apps/${name}/release`,
   appPolicy: (name: string) => `/api/apps/${name}/policy`,
   owner: (name: string) => `/api/apps/${name}/owner`,

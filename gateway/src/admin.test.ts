@@ -43,7 +43,7 @@ async function admin(runtime?: Runtimes) {
   });
   const requests = new RequestLog(() => {});
   const logs = { logs: (app: AppId, tail: number) => w.runtime.logs(app, tail), healthOf: () => [] };
-  const server = await startAdmin({ registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, nodes, requests, replica: 'r1' as ReplicaId, store, ingressPort: 18080 }, { port: 0 });
+  const server = await startAdmin({ registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, nodes, requests, replica: 'r1' as ReplicaId, store, ingressPort: 18080, providers: [...w.providers.values()] }, { port: 0 });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
     const raw = typeof body === 'string' ? body : body === undefined ? undefined : JSON.stringify(body);
@@ -257,6 +257,22 @@ test('GET /api/audit filters by tenant, time range, action and actor, newest fir
   const ats = async (query: string) => (await call('GET', `/api/audit?${query}`)).body.map((r: AuditRecord) => r.at);
   assert.deepEqual(await ats('tenant=lab&from=20&to=40&action=app.remove&actor=user:ann'), [30, 20]);
   assert.deepEqual(await ats('tenant=lab&action=app.remove&actor=user:ann&limit=3'), [40, 30, 20]);
+});
+
+test('the state inventory lists every binding\'s location and the release\'s bundle, and no credential (AC-OPS-9)', async (t) => {
+  const { call, server, store } = await admin();
+  t.after(() => server.close());
+  const manifest = { contract: 1, capabilities: { files: {}, db: {}, kv: {}, object: {} } };
+  assert.equal((await call('PUT', '/api/apps/vault/release', { ...kvApp, manifest })).status, 200);
+  const secrets = (await store.bindings()).map((b) => b.resource.password!);
+  assert.equal(secrets.length, 4);
+
+  const one = await call('GET', '/api/apps/vault/state');
+  assert.deepEqual([one.body.app, one.body.release, one.body.bundle], ['vault', 1, null]);
+  assert.deepEqual(one.body.bindings.map((b: { kind: string }) => b.kind).sort(), ['db', 'files', 'kv', 'object']);
+  const tenant = await call('GET', `/api/state?tenant=${DEFAULT_TENANT}`);
+  assert.deepEqual(tenant.body.apps, [one.body]);
+  for (const secret of secrets) assert.ok(!JSON.stringify([one.body, tenant.body]).includes(secret), 'no credential in the inventory');
 });
 
 test('a first publish past the tenant\'s apps quota answers 409 with the quota field', async (t) => {

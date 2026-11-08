@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  OWNER, adminClient, adminUrl, appJson, appPut, appUrl, bucketExists, cleanup, connect, containerIp, deploy, docker, images, inNetwork,
+  OWNER, adminClient, adminUrl, appctl, appJson, appPut, appUrl, bucketExists, cleanup, connect, containerIp, deploy, docker, images, inNetwork,
   median, publish, restartGateway, runningContainerFor, scratch, serviceToken, setIdle, setupSuite, sleep, stack, summary, teardownSuite,
   uniqueName, volumeExists, waitFor, waitInstance,
 } from './harness.ts';
@@ -311,6 +311,31 @@ test('AC-P-10', { timeout: 180_000 }, async (t) => {
   assert.deepEqual([await durable(worker.name), await durable(sleeper.name)], before);
   assert.equal((await appJson(sleeper.name, '/files/n')).value, 'kept', 'sleeping app wakes on request');
   await waitFor(async () => (await starts()) >= 2, 60_000, 'the delivering trigger to re-run');
+});
+
+test('AC-OPS-9', { timeout: 120_000 }, async (t) => {
+  const app = await deploy(t, { image: images.echo, capabilities: { files: {}, kv: {}, object: {} } });
+  const switched = await adminClient.setAppPolicy(app.name, { db_backend: 'postgres' });
+  assert.ok(switched.status < 300, `db_backend=postgres: ${switched.status} ${JSON.stringify(switched.body)}`);
+  publish(app.name, { image: images.echo, capabilities: { files: {}, db: {}, kv: {}, object: {} } });
+
+  const printed = appctl('state', app.name);
+  assert.deepEqual(printed.trim().split('\n').sort(), [
+    `db\tpostgres\tactive\tservice=postgres:5432 database=app_${app.id}`,
+    `files\tvolume\tactive\tvolume=pneuma-space-files-${app.id}`,
+    `kv\tredis\tactive\tservice=redis:6379 prefix=${app.id}:`,
+    `object\ts3\tactive\tendpoint=http://rustfs:9000 bucket=app-${app.id}`,
+  ]);
+  const env = await appJson(app.name, '/env');
+  const secrets = [
+    new URL(env.PNEUMA_SPACE_DB_URL).password, new URL(env.PNEUMA_SPACE_KV_URL).password, env.PNEUMA_SPACE_OBJECT_SECRET_KEY,
+  ];
+  assert.ok(secrets.every((secret) => typeof secret === 'string' && secret.length > 8), 'the app holds its credentials');
+
+  const tenant = await (await fetch(`${adminUrl}/api/state?tenant=default`)).json();
+  const listed = tenant.apps.find((entry: { app: string }) => entry.app === app.name);
+  assert.deepEqual(listed, JSON.parse(appctl('state', app.name, '--json')));
+  for (const secret of secrets) assert.ok(!printed.includes(secret) && !JSON.stringify(tenant).includes(secret), 'no credential in the inventory');
 });
 
 test('TH-cold-start', { timeout: 180_000 }, async (t) => {

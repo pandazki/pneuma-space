@@ -22,7 +22,16 @@ const AUDIT_ROWS = [
   { id: 1, at: Date.UTC(2026, 10, 9, 0), actor: 'user:alice', actorTenant: 'lab', tenant: 'lab', action: 'app.purge', targetKind: 'app', target: 'survey', result: 'started', details: {} },
 ];
 
+const STATE = {
+  app: 'notes', release: 2, bundle: null,
+  bindings: [
+    { kind: 'files', provider: 'volume', state: 'active', location: { volume: 'pneuma-space-files-a1' } },
+    { kind: 'db', provider: 'postgres', state: 'suspended', location: { service: 'postgres:5432', database: 'app_a1' } },
+  ],
+};
+
 function reply(request: Recorded): unknown {
+  if (request.url.endsWith('/state')) return STATE;
   if (request.url.startsWith('/api/audit')) return AUDIT_ROWS;
   if (request.url === '/api/me') return { subject: 'user:bob', name: 'Bob', roles: { lab: 'member' }, platformAdmin: false };
   if (request.url === '/api/bundles') return { bundle: createHash('sha256').update(request.body).digest('hex') };
@@ -277,6 +286,19 @@ describe('appctl audit', () => {
   test('--json prints the rows as the admin API answered them', async () => {
     const { stdout } = await appctl(['audit', '--json']);
     assert.deepEqual(JSON.parse(stdout), AUDIT_ROWS);
+  });
+});
+
+describe('appctl state', () => {
+  test('prints one TSV line per binding: kind, provider, state, location as k=v pairs', async () => {
+    const { code, stdout } = await appctl(['state', 'notes']);
+    assert.deepEqual([code, requests[0].url], [0, '/api/apps/notes/state']);
+    assert.equal(stdout, 'files\tvolume\tactive\tvolume=pneuma-space-files-a1\ndb\tpostgres\tsuspended\tservice=postgres:5432 database=app_a1\n');
+  });
+
+  test('--json prints the inventory as the admin API answered it', async () => {
+    const { stdout } = await appctl(['state', 'notes', '--json']);
+    assert.deepEqual(JSON.parse(stdout), STATE);
   });
 });
 

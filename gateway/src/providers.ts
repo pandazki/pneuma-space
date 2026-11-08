@@ -104,6 +104,10 @@ class StorageProvider implements CapabilityProvider {
     return { env: {}, storage: [{ id: this.#prefix + app, target: this.#target, env: this.#env }] };
   }
 
+  location(resource: Resource): Record<string, string> {
+    return { volume: resource.id! };
+  }
+
   async suspend(): Promise<void> {}
 
   async destroy(app: AppId): Promise<void> {
@@ -150,6 +154,10 @@ class PostgresProvider implements CapabilityProvider {
 
   inject(_app: AppId, resource: Resource): Omit<Injection, 'services'> {
     return { env: { PNEUMA_SPACE_DB_URL: `postgresql://${resource.role}:${resource.password}@postgres:5432/${resource.database}` }, storage: [] };
+  }
+
+  location(resource: Resource): Record<string, string> {
+    return { service: `${this.#admin.host}:${this.#admin.port}`, database: resource.database! };
   }
 
   async suspend(app: AppId): Promise<void> {
@@ -207,6 +215,10 @@ class RedisProvider implements CapabilityProvider {
     };
   }
 
+  location(resource: Resource): Record<string, string> {
+    return { service: `${this.#service.host}:${this.#service.port}`, prefix: resource.prefix! };
+  }
+
   async suspend(app: AppId): Promise<void> {
     await this.#acl(['ACL', 'SETUSER', `app_${app}`, 'off']);
   }
@@ -250,6 +262,10 @@ class S3Provider implements CapabilityProvider {
       },
       storage: [],
     };
+  }
+
+  location(resource: Resource): Record<string, string> {
+    return { endpoint: this.#store.endpoint, bucket: resource.bucket! };
   }
 
   async suspend(app: AppId): Promise<void> {
@@ -302,6 +318,10 @@ class CoturnProvider implements CapabilityProvider {
       },
       storage: [],
     };
+  }
+
+  location(): Record<string, string> {
+    return {};
   }
 
   async suspend(): Promise<void> {}
