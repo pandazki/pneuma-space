@@ -8,11 +8,12 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import {
   DEFAULT_POLICY, DEFAULT_TENANT, NotFound,
   type AppId, type AppName, type BundleId, type CapabilityKind, type DeliveryId, type ImageId, type InvokeRequest,
-  type Principal, type ReleaseNumber, type RouteView, type Stats, type Subject,
+  type Principal, type ReleaseNumber, type RouteView, type Stats, type Subject, type TenantName,
 } from './model.ts';
 import { PATH_ADDRESSING } from './address.ts';
 import { LOCAL_CALLER } from './authz.ts';
 import { Ingress } from './ingress.ts';
+import { Series } from './metrics.ts';
 import { RING, requests } from './requests.ts';
 import { Unavailable } from './runtimes.ts';
 
@@ -34,6 +35,7 @@ const VIEWS = new Map([
   view('chat', ['ws']),
   view('mixed', ['static'], { bundle: { id: 'b'.repeat(64) as BundleId, files: { 'app.js': { size: APP_JS.length, etag: 'e1', contentType: 'text/javascript' } } } }),
   view('gone', [], { status: 'removed' }),
+  view('counted', [], { tenant: 'acme' as TenantName, runtime: 'isolate' }),
 ].map((v) => [v.name as string, v]));
 
 const PRINCIPALS: Record<string, Principal> = {
@@ -76,6 +78,7 @@ let addresses: string[] = [];
 let flushed: Stats[][] = [];
 let instance: 'asleep' | 'awake' = 'awake';
 let waking: Promise<void> = Promise.resolve();
+const series = new Series();
 
 before(async () => {
   await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
@@ -121,6 +124,7 @@ before(async () => {
     stats: [],
     flushStats: async (stats) => void flushed.push(stats),
     async deleteStats() {},
+    series,
   });
   port = await ingress.listen(0, '127.0.0.1');
 });
@@ -452,4 +456,9 @@ test('a Guard answer counts as a request but not as an app error', async () => {
   await waitFor(() => (ingress.snapshot().find((s) => s.app === 'id-parked')?.requests ?? 0) > before.requests);
   const after = ingress.snapshot().find((s) => s.app === 'id-parked')!;
   assert.deepEqual([after.requests - before.requests, after.errors], [1, before.errors]);
+});
+
+test('a request counts under its tenant, runtime and kind', async () => {
+  await request('/apps/counted/echo');
+  await waitFor(() => series.render().includes('pneuma_space_requests_total{tenant="acme",runtime="isolate",kind="request"} 1\n'));
 });
