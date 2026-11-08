@@ -23,6 +23,7 @@
    | 端点 | 所需 | 令牌可用 |
    | --- | --- | --- |
    | `GET /api/me`（新）：主体、显示名、各租户角色、`platformAdmin` | 已认证 | 是 |
+   | `GET /healthz`（新）：进程活着就答 200，无正文，不认证，给 K8s 的探针和 Compose 的 healthcheck 用 | 无 | 是 |
    | `GET /api/health` | 已认证 | 是 |
    | `GET /api/apps` | 已认证；只返回调用者所在租户的应用；平台管理员可加 `?tenant=`，不加时返回全部并带 `tenant` 列 | 是 |
    | `GET /api/apps/<name>`、`/logs`、`/state` | member(T) | 是 |
