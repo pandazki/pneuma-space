@@ -15,8 +15,11 @@ const TAKEOVER_MS = 5000;
 /** How long a wake waits for the Registry to catch up with a newer app row before reading the RunSpec again. */
 const STALE_MS = 50;
 
-/** What a driver realized for an instance, persisted in its row: `handle` survives sleep when the driver keeps it (a stopped container), with the release and spec hash it was made for. */
-export type Slot<H extends string> = { handle: H | null; release: ReleaseNumber; specHash: string };
+/**
+ * What a driver realized for an instance, persisted in its row: `handle` survives sleep when the driver keeps it (a stopped container), with the release
+ * and spec hash it was made for; `home` is where a driver that places instances runs this app, fixed at its first wake.
+ */
+export type Slot<H extends string> = { handle: H | null; release: ReleaseNumber; specHash: string; readonly home: string | null };
 
 /** An instance found at startup; `address` null means it exists but is not running. */
 export type Adopted<H> = { readonly app: AppId; readonly handle: H; readonly release: string; readonly spec: string; readonly address: string | null };
@@ -34,6 +37,8 @@ export interface Driver<S extends RunSpec, H extends string> {
   /** The key a handle is logged under in lifecycle events. */
   readonly handleKey: string;
   accepts(spec: RunSpec): spec is S;
+  /** A home for an app whose row names none, written in the waking CAS (ADR 0020); throws Unavailable when there is nowhere to place it. */
+  place?(): string;
   /** Starts `spec`, keeping `slot` current as it goes; resolves with the address once ready, else cleans up and throws. */
   start(slot: Slot<H>, spec: S): Promise<string>;
   /** Idle stop; the driver may keep the handle for the next start. */
@@ -346,7 +351,7 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
 
   async #wake(app: AppId, spec: S, kind: LeaseKind): Promise<Lease | null> {
     const local = this.#localOf(app);
-    const slot: Slot<H> = { handle: null, release: spec.release, specHash: specHash(spec) };
+    let slot: Slot<H> = { handle: null, release: spec.release, specHash: specHash(spec), home: null };
     const outcome = await this.#store.transaction(async (tx): Promise<Instance | 'lost' | 'stale' | 'gone'> => {
       const appRow = await tx.app(spec.name);
       if (!appRow || appRow.id !== app || appRow.status !== 'registered') return 'gone';
@@ -362,12 +367,13 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
       if (current.state !== 'asleep') return 'lost';
       await this.#guard.admit(tx, spec);
       const own = current.runtime === this.kind;
-      slot.handle = own ? (current.handle as H | null) : null;
-      slot.release = own ? current.release : spec.release;
-      slot.specHash = own ? current.specHash : specHash(spec);
+      slot = {
+        handle: own ? (current.handle as H | null) : null, release: own ? current.release : spec.release, specHash: own ? current.specHash : specHash(spec),
+        home: current.home ?? this.#driver.place?.() ?? null,
+      };
       const waking: Instance = {
         ...current, ...instanceShape(spec), runtime: this.kind, release: spec.release, specHash: specHash(spec), epoch: current.epoch + 1,
-        state: 'waking', actor: this.#me, handle: slot.handle, address: null, since: Date.now(), awakeAt: null,
+        state: 'waking', actor: this.#me, handle: slot.handle, address: null, home: slot.home, since: Date.now(), awakeAt: null,
       };
       return (await tx.casInstance(current, waking)) ? waking : 'lost';
     });
@@ -546,7 +552,7 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
     }
     this.#instances.putRow(stopping);
     this.#emit('stopping', app);
-    const slot: Slot<H> = { handle: stopping.handle as H | null, release: stopping.release, specHash: stopping.specHash };
+    const slot: Slot<H> = { handle: stopping.handle as H | null, release: stopping.release, specHash: stopping.specHash, home: stopping.home };
     try {
       await this.#driver.sleep(app, slot);
       await this.#cas(stopping, { ...stopping, state: 'asleep', actor: null, handle: slot.handle, address: null });

@@ -14,7 +14,8 @@ import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId } from '
 import { composeProject, DockerInfra } from './infra.ts';
 import { createProviders, providerConfig, S3BundleStore } from './providers.ts';
 import { PlatformRegistry } from './registry.ts';
-import { IsolateRuntime, RUNNER_PORT } from './isolate.ts';
+import { IsolateRuntime, RUNNER_PORT, StatefulSetPool, StaticPool } from './isolate.ts';
+import { inClusterClient } from './kube.ts';
 import { DockerRuntime } from './runtime.ts';
 import { AppGuard, Runtimes } from './runtimes.ts';
 import { requests } from './requests.ts';
@@ -61,8 +62,10 @@ const specFor = (app: AppId) => registry.runSpec(app);
 const guard = new AppGuard({ instances, specFor });
 const container = new DockerRuntime({ docker, network, specFor, instances, guard });
 const bundles = new S3BundleStore(config.object);
+// The platform namespace is the gateway's own, where the runner StatefulSet runs (ADR 0019 item 3).
+const pool = process.env.PNEUMA_SPACE_PLANE === 'kubernetes' ? new StatefulSetPool(await inClusterClient()) : new StaticPool(`http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`);
 const isolate = new IsolateRuntime({
-  runner: `http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`, bundleUrl: (id) => bundles.presignTar(id), specFor,
+  pool, bundleUrl: (id) => bundles.presignTar(id), specFor,
   hasRun: async (app) => (await store.releases(app)).some((release) => release.runtime === 'isolate'), instances, guard,
 });
 const runtime = new Runtimes({ runtimes: [container, isolate], specFor, instances });

@@ -7,7 +7,7 @@ import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { EventLog } from './events.ts';
 import { Instances } from './instances.ts';
-import { IsolateRuntime } from './isolate.ts';
+import { IsolateRuntime, StaticPool } from './isolate.ts';
 import { CURRENT, register, tempStore } from './lifecycle.fakes.ts';
 import {
   appName, DEFAULT_POLICY, DEFAULT_TENANT, newAppId, NotFound, type AppId, type BundleId, type Policy, type ReleaseNumber, type ReplicaId, type RunSpec, type StorageBinding,
@@ -46,7 +46,7 @@ async function fixture(t: TestContext, policy: Partial<Policy> = {}, storage: re
     instances = new Instances(store, { replica: 'gateway' as ReplicaId });
     guard = new AppGuard({ instances, specFor, log: bus.emit });
     const runtime = new IsolateRuntime({
-      runner: url, bundleUrl: () => bundleUrl, specFor, hasRun: async () => true, instances, guard,
+      pool: new StaticPool(url), bundleUrl: () => bundleUrl, specFor, hasRun: async () => true, instances, guard,
       log: (ev, id, extra) => {
         if (id === app) events.push({ ev, ...extra });
         bus.emit(ev, id, extra);
@@ -265,7 +265,7 @@ const staleRunner = async (t: TestContext) => {
     json({ ok: true, startedAt: 1, stuck: 0, workers: runner.listed.length });
   }).listen(0, '127.0.0.1');
   await once(fake, 'listening');
-  const runtime = new IsolateRuntime({ runner: `http://127.0.0.1:${(fake.address() as AddressInfo).port}`, bundleUrl: () => '', specFor: () => null, hasRun: async () => true, instances: new Instances(tempStore()), log: (ev, _app, extra) => logged.push({ ev, ...extra }) });
+  const runtime = new IsolateRuntime({ pool: new StaticPool(`http://127.0.0.1:${(fake.address() as AddressInfo).port}`), bundleUrl: () => '', specFor: () => null, hasRun: async () => true, instances: new Instances(tempStore()), log: (ev, _app, extra) => logged.push({ ev, ...extra }) });
   t.after(() => { runtime.close(); fake.close(); });
   return { runner, runtime, logged };
 };
