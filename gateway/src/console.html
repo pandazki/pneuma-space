@@ -1276,10 +1276,12 @@ const TENANT_KEY = 'pneuma-space-tenant';
 /** { me, tenants: names the switcher offers besides ALL, scope: a tenant name, ALL, or null for a user in no tenant } */
 let session = null;
 
+const offeredOf = ({ me, tenants }) => (me.platformAdmin ? [ALL, ...tenants] : tenants);
+
 async function loadSession() {
   const me = await api('GET', '/api/me');
   const tenants = me.local ? [] : me.platformAdmin ? (await api('GET', '/api/tenants')).map((x) => x.name) : Object.keys(me.roles).sort();
-  const offered = me.platformAdmin ? [ALL, ...tenants] : tenants;
+  const offered = offeredOf({ me, tenants });
   const stored = store.get(TENANT_KEY);
   return { me, tenants, scope: me.local ? ALL : offered.includes(stored) ? stored : offered[0] ?? null };
 }
@@ -1289,7 +1291,6 @@ const isPlatformAdmin = () => session?.me.platformAdmin === true;
 const mayAdmin = (tenant) => isPlatformAdmin() || session.me.roles?.[tenant] === 'admin';
 const userId = () => session.me.subject.slice('user:'.length);
 const scoped = (apps) => (session.scope === ALL ? apps : apps.filter((a) => a.tenant === session.scope));
-const listApps = async () => scoped(await api('GET', isPlatformAdmin() && upstream() && session.scope !== ALL ? `/api/apps?tenant=${encodeURIComponent(session.scope)}` : '/api/apps'));
 const failText = (error) => (error.status === 403 ? t('err.forbidden', { msg: error.message }) : error.status === 409 ? t('err.conflict', { msg: error.message }) : error.message);
 
 /** The address any app would get, read off a listed app's address, since the deployment picks path or subdomain addressing (ADR 0019 item 9). */
@@ -1311,8 +1312,8 @@ function topbar() {
   const bar = document.querySelector('.topbar');
   bar.hidden = !upstream();
   if (bar.hidden) return bar.replaceChildren();
-  const { me, tenants, scope } = session;
-  const offered = me.platformAdmin ? [ALL, ...tenants] : tenants;
+  const { me, scope } = session;
+  const offered = offeredOf(session);
   const label = (x) => (x === ALL ? t('tn.all') : x);
   const tenant = offered.length > 1
     ? h('select', { 'aria-label': t('top.tenant'), title: t('top.tenant'), onchange: (e) => setScope(e.target.value) },
@@ -2686,7 +2687,7 @@ async function projects() {
     h('section', {}, h('div', { class: 'toolbar' }, text, state), body),
   );
   return async function update() {
-    apps = await listApps();
+    apps = scoped(await api('GET', '/api/apps'));
     render();
   };
 }
