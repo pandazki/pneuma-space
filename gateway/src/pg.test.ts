@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -182,6 +184,17 @@ describe('pg against a real PostgreSQL 16', { skip: !dockerUp && 'Docker is not 
     await s.query('SELECT * FROM widened');
     await s.simple('ALTER TABLE widened ADD COLUMN b int DEFAULT 2');
     assert.deepEqual((await s.query('SELECT * FROM widened')).rows, [{ a: 1, b: 2 }]);
+  });
+
+  test('a server that accepts and never answers rejects open within the connect timeout', async () => {
+    const silent = createServer(() => {}).listen(0, '127.0.0.1');
+    await once(silent, 'listening');
+    try {
+      const port = (silent.address() as AddressInfo).port;
+      await assert.rejects(Session.open({ ...plain, port, connectTimeoutMs: 200 }), /did not finish the handshake within 200 ms/);
+    } finally {
+      silent.close();
+    }
   });
 
   test('statement_timeout from the options ends a long query with 57014', async () => {

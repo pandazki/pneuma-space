@@ -22,6 +22,8 @@ export type PgOptions = {
   readonly tls: false | { readonly caFile?: string };
   /** 0 turns it off; absent keeps the server's setting. */
   readonly statementTimeoutMs?: number;
+  /** Bounds the TCP connect, the TLS handshake and the startup exchange, each; default 10 s. */
+  readonly connectTimeoutMs?: number;
 };
 
 export class PgError extends Error {
@@ -118,21 +120,26 @@ function saslPassword(password: string): string {
   return password;
 }
 
+const connectTimeout = (options: PgOptions) => options.connectTimeoutMs ?? 10_000;
+
+/** A host that never answers fails within the connect timeout instead of waiting on the OS. */
 async function connectSocket(options: PgOptions): Promise<Socket> {
   const ca = options.tls && options.tls.caFile ? await readFile(options.tls.caFile) : undefined;
   const raw = tcpConnect({ host: options.host, port: options.port, noDelay: true, keepAlive: true, keepAliveInitialDelay: 60_000 });
+  const timeoutMs = connectTimeout(options);
+  const signal = AbortSignal.timeout(timeoutMs);
   try {
-    await once(raw, 'connect');
+    await once(raw, 'connect', { signal });
     if (!options.tls) return raw;
     raw.write(Buffer.concat([int32(8), int32(80877103)]));
-    const [answer] = (await once(raw, 'data')) as [Buffer];
+    const [answer] = (await once(raw, 'data', { signal })) as [Buffer];
     if (answer.length !== 1 || answer[0] !== 0x53) throw new Error('the PostgreSQL server refused TLS');
     const secure = tlsConnect({ socket: raw, ca, host: options.host, servername: isIP(options.host) ? undefined : options.host });
-    await once(secure, 'secureConnect');
+    await once(secure, 'secureConnect', { signal });
     return secure;
   } catch (error) {
     raw.destroy();
-    throw error;
+    throw signal.aborted ? new Error(`PostgreSQL at ${options.host}:${options.port} did not answer within ${timeoutMs} ms`) : error;
   }
 }
 export class Session {
@@ -164,12 +171,16 @@ export class Session {
   static async open(options: PgOptions): Promise<Session> {
     const password = saslPassword(options.password);
     const session = new Session(options, await connectSocket(options));
+    const socket = session.#socket;
+    const timeoutMs = connectTimeout(options);
+    socket.setTimeout(timeoutMs, () => socket.destroy(new Error(`PostgreSQL at ${options.host}:${options.port} did not finish the handshake within ${timeoutMs} ms`)));
     try {
       await session.#startup(password);
     } catch (error) {
-      session.#socket.destroy();
+      socket.destroy();
       throw error;
     }
+    socket.setTimeout(0);
     return session;
   }
 
