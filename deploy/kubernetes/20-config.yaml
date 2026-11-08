@@ -57,17 +57,6 @@ stringData:
   PNEUMA_SPACE_OBJECT_ROOT_PASSWORD: REPLACE_ME_OBJECT_ROOT_PASSWORD
   PNEUMA_SPACE_RTC_SECRET: REPLACE_ME_RTC_SECRET
 ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: pneuma-space-store
-  namespace: pneuma-space
-  labels:
-    app.kubernetes.io/part-of: pneuma-space
-type: Opaque
-stringData:
-  POSTGRES_PASSWORD: REPLACE_ME_STORE_PASSWORD
----
 # The gateway reads it to resolve tags to digests and pulls its own image with it.
 apiVersion: v1
 kind: Secret

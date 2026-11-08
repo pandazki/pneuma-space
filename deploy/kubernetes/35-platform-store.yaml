@@ -1,0 +1,89 @@
+# The platform library (ADR 0025 item 7). For an organization-hosted PostgreSQL, drop this file from kustomization.yaml
+# and point PNEUMA_SPACE_STORE_URL at the instance (README.md).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pneuma-space-store
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: REPLACE_ME_STORE_PASSWORD
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pneuma-space-store
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+    pneuma-space.service: store
+spec:
+  serviceName: pneuma-space-store
+  replicas: 1
+  selector:
+    matchLabels:
+      pneuma-space.service: store
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: pneuma-space
+        pneuma-space.service: store
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              value: pneuma_space
+            - name: POSTGRES_DB
+              value: pneuma_space
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pneuma-space-store
+                  key: POSTGRES_PASSWORD
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, pneuma_space, -d, pneuma_space]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/part-of: pneuma-space
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pneuma-space-store
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  selector:
+    pneuma-space.service: store
+  ports:
+    - name: postgres
+      port: 5432

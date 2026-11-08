@@ -5,6 +5,7 @@ resources:
   - 10-rbac.yaml
   - 20-config.yaml
   - 30-platform-services.yaml
+  - 35-platform-store.yaml
   - 40-gateway.yaml
   - 50-runner.yaml
   - 60-network-policies.yaml
