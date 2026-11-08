@@ -6,6 +6,8 @@ services:
   gateway:
     build: ./gateway
     restart: unless-stopped
+    # Every request and lifecycle event is a stdout line (ADR 0024 item 5); the log driver bounds what the host keeps.
+    logging: { driver: json-file, options: { max-size: "50m", max-file: "5" } }
     depends_on:
       rustfs: { condition: service_healthy }
       redis: { condition: service_started }
