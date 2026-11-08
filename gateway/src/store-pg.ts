@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { DEFAULT_TENANT, QUOTA_RESOURCES, parseChange, type AppName, type Change, type Leadership, type Store, type StoreOps } from './model.ts';
 import { parsePgUrl, PgError, Pool, Session, type Param, type PgOptions, type Result } from './pg.ts';
-import { POSTGRES, STORE_OPS, SqlOps, type Row, type Session as SqlSession } from './sql.ts';
+import { POSTGRES, STORE_OPS, SqlOps, wrap, type Row, type Session as SqlSession } from './sql.ts';
 
 const CHANNEL = 'pneuma_space';
 const POOL_SIZE = 8;
@@ -202,8 +202,7 @@ export interface PgStore extends StoreOps {}
  * and one dedicated session that listens for changes and holds the leader lock.
  */
 export class PgStore implements Store {
-  /** Transactions rerun after a serialization failure or deadlock. */
-  retries = 0;
+  #retries = 0;
   readonly #options: PgOptions;
   readonly #pool: Pool;
   readonly #commands: number;
@@ -228,6 +227,11 @@ export class PgStore implements Store {
     Object.assign(this, Object.fromEntries(STORE_OPS.map((name) => [name, (...args: unknown[]) => this.#call((ops) => (ops[name] as (...a: unknown[]) => Promise<unknown>)(...args))])));
   }
 
+  /** Transactions rerun after a serialization failure or deadlock. */
+  get retries(): number {
+    return this.#retries;
+  }
+
   /** `url` is the libpq subset `parsePgUrl` reads; migrates before it resolves. */
   static async open(url: string, options: PgStoreOptions = {}): Promise<PgStore> {
     const pg = parsePgUrl(url);
@@ -249,11 +253,9 @@ export class PgStore implements Store {
     return this.#enter((context, begin) => begin(async (session) => {
       const state = { open: true };
       const ops = new SqlOps(new PgSql(session, (f) => f(session), session));
-      const tx = Object.fromEntries(STORE_OPS.map((name) => [name, (...args: unknown[]) => state.open
-        ? (ops[name] as (...a: unknown[]) => Promise<unknown>)(...args)
-        : Promise.reject(new Error('tx used after its transaction settled'))]));
+      const tx = wrap(ops, (work) => (state.open ? work() : Promise.reject(new Error('tx used after its transaction settled'))));
       try {
-        return await this.#context.run({ ...context, tx: state }, () => fn(tx as unknown as StoreOps));
+        return await this.#context.run({ ...context, tx: state }, () => fn(tx));
       } finally {
         state.open = false;
       }
@@ -324,7 +326,7 @@ export class PgStore implements Store {
         });
       } catch (error) {
         if (!(error instanceof PgError && RETRYABLE.has(error.code)) || attempt >= RETRIES) throw error;
-        this.retries++;
+        this.#retries++;
       }
     }
   }

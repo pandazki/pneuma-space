@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
 import { DEFAULT_TENANT, QUOTA_RESOURCES, changeKey, type AppName, type Change, type Leadership, type Store, type StoreOps } from './model.ts';
-import { SQLITE, STORE_OPS, SqlOps, type Row, type Session } from './sql.ts';
+import { SQLITE, SqlOps, wrap, type Row, type Session } from './sql.ts';
 
 /** The migrated `default` tenant is unlimited (ADR 0022 item 4, ADR 0023 item 2). */
 const UNLIMITED = JSON.stringify(Object.fromEntries(QUOTA_RESOURCES.map((resource) => [resource, null])));
@@ -140,11 +140,6 @@ export class SqliteSession implements Session {
     if (!statement) this.#statements.set(sql, (statement = this.#db.prepare(positional(sql))));
     return statement;
   }
-}
-
-function wrap(ops: StoreOps, call: <T>(work: () => Promise<T>) => Promise<T>): StoreOps {
-  const wrapped = Object.fromEntries(STORE_OPS.map((name) => [name, (...args: unknown[]) => call(() => (ops[name] as (...a: unknown[]) => Promise<unknown>)(...args))]));
-  return wrapped as unknown as StoreOps;
 }
 
 export interface SqliteStore extends StoreOps {}

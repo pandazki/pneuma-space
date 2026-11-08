@@ -658,3 +658,9 @@ export class SqlOps implements StoreOps {
 
 /** Every StoreOps method name, for stores that wrap each call (a queue, a pool session). */
 export const STORE_OPS = Object.getOwnPropertyNames(SqlOps.prototype).filter((name) => name !== 'constructor') as (keyof StoreOps)[];
+
+/** `ops` with each call passed through `call`. */
+export function wrap(ops: StoreOps, call: <T>(work: () => Promise<T>) => Promise<T>): StoreOps {
+  const wrapped = Object.fromEntries(STORE_OPS.map((name) => [name, (...args: unknown[]) => call(() => (ops[name] as (...a: unknown[]) => Promise<unknown>)(...args))]));
+  return wrapped as unknown as StoreOps;
+}
