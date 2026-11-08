@@ -63,7 +63,7 @@ after(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-if (!skip) storeContract('PostgreSQL', () => open());
+if (!skip) storeContract('PostgreSQL', (options) => open(options));
 
 describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () => {
   test('two stores on one database see each other\'s app change within 1 s', async () => {
