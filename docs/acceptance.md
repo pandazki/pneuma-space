@@ -1,6 +1,6 @@
-# Acceptance (M1)
+# Acceptance
 
-One check per M1 story in `docs/user-stories.md`, plus the numeric thresholds. A check passes only against the real platform started with `docker compose up -d`, never against a mock. Thresholds are gates, not capacity claims, measured on a 4-core, 8 GB host.
+One check per M1 story in `docs/user-stories.md`, plus the numeric thresholds; the M2 section follows them. A check passes only against the real platform started with `docker compose up -d`, never against a mock. Thresholds are gates, not capacity claims, measured on a 4-core, 8 GB host.
 
 ## Story checks
 
@@ -67,3 +67,56 @@ One check per M1 story in `docs/user-stories.md`, plus the numeric thresholds. A
 | Static site first byte | under 50 ms, no cold start |
 | Trigger to a sleeping app | runs within 5 s of wake |
 | Two local pages open a datachannel | success; cross-NAT relay not verified in M1 |
+
+## M2
+
+Checks for the organization edition (`REQUIREMENTS-M2.md`, stories US-O-1 to US-O-8). A row that names a Pod, a node, a PVC, a runner Pod or more than one gateway replica runs against the operator's Kubernetes cluster with a three-replica gateway; these cluster-only rows run in `test:k8s`. Every M1 row also passes on that cluster. AC-ID rows except AC-ID-12 run with `PNEUMA_SPACE_IDENTITY=upstream` against a fake upstream inside the test: it generates RSA, P-256 and Ed25519 keys, gives them to the gateway as `PNEUMA_SPACE_IDENTITY_KEYS_FILE` or its own JWKS endpoint, and signs JWTs into the configured header. Other rows run against `docker compose up -d` in `test:acceptance`.
+
+| ID | Check |
+| --- | --- |
+| AC-K8S-1 | Publish a container app by registry tag; the release stores a digest; the first request answers; exactly one Pod carries `pneuma-space.app=<id>`, with no service account token mounted and limits equal to the app's policy. After the idle timeout no Pod remains and the PVC still exists. |
+| AC-K8S-2 | 50 concurrent first requests to a sleeping app, spread over all gateway replicas, all answer, and the Pod watch shows exactly one ADDED for the app. |
+| AC-K8S-3 | A WebSocket held through replica A keeps the app awake while HTTP requests come through replica B. After the WebSocket closes, every replica's listing shows the same `sleepsAt`, and the app is asleep within 10 s of it. |
+| AC-K8S-4 | Publish through replica A while a WebSocket is open through replica B; B's client gets 1001; the new release's Pod is created only after the old Pod is gone; data written before is present. |
+| AC-K8S-5 | Force-delete the replica that is waking an app; within 15 s the app is awake or asleep, never stuck in `waking`; the next request answers; at most one Pod exists throughout. |
+| AC-K8S-6 | Force-delete the leader; a `* * * * *` trigger keeps firing every minute, and idle apps keep going to sleep. |
+| AC-K8S-7 | An app that crashes `max_failures` times, with its requests spread across replicas, is quarantined on every replica's listing; one `unquarantine` lifts it on all. |
+| AC-K8S-8 | `remove` keeps the PVCs; `purge` deletes them; a file under `/data` survives sleep, a new release and `kubectl rollout restart` of the gateway. |
+| AC-K8S-9 | From inside an app Pod: another app's Pod IP on 8000 is refused; redis is unreachable unless `kv` is declared; the platform database is unreachable; `/var/run/secrets/kubernetes.io/serviceaccount` does not exist. |
+| AC-K8S-10 | With `PNEUMA_SPACE_APPS_ORIGIN` set, `<name>.<domain>/` answers with `X-Forwarded-Prefix` present and empty; an unknown label is 404. Without it, `/apps/<name>/` behaves as in M1. |
+| AC-K8S-11 | With two runners, an isolate app without storage answers after either runner is deleted. An app with `files` answers 503 while its home runner is down, without counting a failure, and afterwards its data is present. |
+| AC-K8S-12 | Publishing an app that declares `kv` and `db` on postgres provisions both over the services' own protocols, with no Job and no exec into a Pod; the app writes and reads through both. |
+| AC-K8S-13 | The console log tail of an app answers from any replica, and after the instance sleeps it still shows the last lines. |
+| AC-K8S-14 | `kubectl rollout restart` of the gateway adopts every awake Pod (the Pod UID is unchanged) and creates none. |
+| AC-K8S-15 | With `PNEUMA_SPACE_K8S_NODE_SELECTOR` set, app Pods land only on matching nodes; a non-root image writes `/data`. |
+| AC-K8S-16 | On Compose, every M1 row, `test:runner` and `test:docker` pass with the store-backed lifecycle. |
+| AC-ID-1 | A request carrying a JWT signed with each of RS256, ES256 and EdDSA reaches an app declaring `identity` with `X-Pneuma-Space-Subject: user:<claim>` and a percent-encoded non-ASCII `X-Pneuma-Space-Name`; the app sees neither the JWT header nor the cookies named in `PNEUMA_SPACE_IDENTITY_STRIP_COOKIES`. |
+| AC-ID-2 | A bad signature, a wrong `iss`, a wrong `aud`, `exp` more than 60 s past, `alg: none`, `alg: HS256`, or an ES256 header on an RSA key yields 401 for an API client and a 303 to `PNEUMA_SPACE_IDENTITY_LOGIN_URL` with the original absolute URL for a browser; a forged `X-Pneuma-Space-Subject` never reaches the app. |
+| AC-ID-3 | After the JWKS endpoint switches to a new key with a new `kid`, the first request signed with it succeeds; 100 requests with unknown `kid`s cause at most one JWKS fetch per 30 s; with the JWKS endpoint down and no keys cached, requests get 503, not a redirect. |
+| AC-ID-4 | For one app per `access` value, a request with no JWT, with a JWT of a user outside the app's tenant, with a member's JWT and with a token of another tenant gets the result in the app contract's access table, for a static file and for a dynamic path alike. |
+| AC-ID-5 | Removing a member or revoking a token takes effect on every gateway replica within 30 s; a removed member's personal token stops working at the same time. |
+| AC-ID-6 | For every row of the admin endpoint table, one caller with the required role succeeds and one without it gets 403, or 404 for an app in another tenant; a token gets 403 on every row marked `*`. |
+| AC-ID-7 | A JWT-authenticated `POST` to the admin API without `Sec-Fetch-Site: same-origin` gets 403; the same request with a platform token succeeds. |
+| AC-ID-8 | With only `PNEUMA_SPACE_ADMIN` and `PNEUMA_SPACE_TOKEN` set, `appctl publish` registers the app in the token's tenant; for a personal token the owner is the issuer, and that user's JWT request gets `X-Pneuma-Space-Owner: 1`. |
+| AC-ID-9 | On the trigger endpoint, another tenant's service token gets 202 on an `org` app and 403 on a `tenant` app; a personal token of a non-owner gets 403. |
+| AC-ID-10 | An app response with `Set-Cookie: a=1; Domain=<apps-domain>` reaches the client without `Domain`; under subdomain addressing a browser-driven check shows app B never receives app A's cookie or storage. |
+| AC-ID-11 | A user is registered on first JWT with first and last seen; after the upstream changes issuer and keys but maps the same user claim, the same id keeps its memberships and owned apps. |
+| AC-ID-12 | With `PNEUMA_SPACE_IDENTITY=local` every M1 row passes unchanged, every app is in tenant `default`, and the console shows no tenant switcher and no team page. |
+| AC-OPS-1 | A tenant with quota `apps: 1` and one app gets 409 on a second app's first publish; the body's `quota` names the tenant, `apps`, used 1 and limit 1; `appctl publish` prints it; the event tail shows `quota-refused`; an app in another tenant publishes in the same minute; `GET /api/tenants/<t>/quota` reports used 1. |
+| AC-OPS-2 | With quota `awake: 1` and two apps in one tenant, a request to the second while the first is awake answers 503 with `Retry-After: 30`; ten such refusals do not quarantine it; after the first sleeps the second wakes. With two gateway replicas, simultaneous requests to both apps through different replicas leave exactly one awake. |
+| AC-OPS-3 | A container app's Pod carries `limits.cpu` from `cpu_millis`, `requests.memory` and `limits.memory` from `memory_mb`; an app allocating past `memory_mb` is killed and shows as a failed wake or crash. An isolate app with `memory_mb: 64` that holds a 128 MiB Buffer is terminated; other isolate apps answer throughout. |
+| AC-OPS-4 | Ten requests to one app through two replicas give `GET /api/usage?app=<name>` ten requests and one wake in the current hour; the counts survive a rollout of every replica; the overview series and the project page's hour grid show them. Rows older than `usage_retention_days` are gone after the next sweep. |
+| AC-OPS-5 | A wake handled by replica A appears in the event tail served by replica B within 5 s with a global, increasing `id`, and stays after both replicas restart. The realtime page served by one replica shows a request handled by the other within 3 s; with one replica unreachable the page shows a gap row naming it. |
+| AC-OPS-6 | After `user:alice` purges an app, `appctl audit --tenant <t> --since 1h` lists one row with actor `user:alice`, action `app.purge`, the app, result `ok`; a refused publish is listed with result `refused`; no row holds a token secret; an `UPDATE` or `DELETE` on the audit table fails. |
+| AC-OPS-7 | With `PNEUMA_SPACE_METRICS_PORT` set, `/metrics` passes `promtool check metrics`, carries `pneuma_space_requests_total` for an app that was requested, and never more than `PNEUMA_SPACE_METRICS_MAX_APPS` distinct `app` values; instance gauges appear on exactly one replica. |
+| AC-OPS-8 | On a cluster of two or more nodes `GET /api/nodes` lists every node with allocatable and requested resources and each awake app on the node its Pod or runner runs on; a cordoned node shows unschedulable; the topology node view groups apps by node. On `docker compose up -d` it returns `source: host` with one node. |
+| AC-OPS-9 | `appctl state <name>` for an app with `files`, `db` on PostgreSQL, `kv` and `object` lists the volume, database, key prefix and bucket with no credentials; `GET /api/state?tenant=<t>` lists the same for every app of the tenant. |
+| AC-OPS-10 | A line a container app prints is shown by `GET /api/apps/<name>/logs` from either replica, and still after the app sleeps and its Pod is deleted; an isolate app's line appears in the runner Pod's log as JSON naming the app. |
+| AC-STORE-1 | The `Store` contract suite passes against `SqliteStore` and `PgStore`. |
+| AC-STORE-2 | Two replicas publish the same new name with different images at once: one app row, releases numbered 1 and 2, no error surfaces to either caller. |
+| AC-STORE-3 | Publish through replica A; replica B serves the new release within 1 s. `appctl policy` through A changes B's effective policy within 1 s. |
+| AC-STORE-4 | `SIGKILL` replica A while it holds an app's command lock; a publish of that app through B completes. |
+| AC-STORE-5 | Terminate replica B's listen session; a publish through A during the gap is served by B after B reconnects. |
+| AC-STORE-6 | Two replicas start against an empty database at once; the schema is applied once and both serve. |
+| AC-STORE-7 | `PNEUMA_SPACE_STORE_URL` with `sslmode=verify-full` connects with the right CA and fails to start with a wrong one. |
+| AC-STORE-8 | `package.json` declares no `dependencies`. |
