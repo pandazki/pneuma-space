@@ -34,7 +34,7 @@ export type IngressDeps = {
 };
 
 /** `header` lowercase. */
-export type Upstream = { readonly header: string; readonly stripCookies: readonly string[] };
+type Upstream = { readonly header: string; readonly stripCookies: readonly string[] };
 
 /** `text` is a plain-text body; `error` becomes `{"error": ...}`. */
 type Reply = { readonly status: number; readonly headers?: OutgoingHttpHeaders; readonly error?: string; readonly text?: string };
@@ -72,7 +72,7 @@ function challenge(answer: Answer): Reply {
 }
 
 /** `%`, control characters and non-ASCII as percent-encoded UTF-8, every other byte literal (docs/app-contract.md, Headers). */
-export function encodeName(name: string): string {
+function encodeName(name: string): string {
   return name.replace(/[\x00-\x1f%\x7f-\u{10ffff}]/gu, (ch) => [...Buffer.from(ch)].map((byte) => `%${byte.toString(16).toUpperCase().padStart(2, '0')}`).join(''));
 }
 
