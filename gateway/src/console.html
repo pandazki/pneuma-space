@@ -3588,10 +3588,14 @@ async function team() {
     const shown = Number.isInteger(used[r]) ? String(used[r]) : used[r].toFixed(2);
     const edit = me.platformAdmin && h('input', {
       type: 'number', min: 0, step: 1, value: limit ?? '', placeholder: t('team.unlimited'), 'aria-label': `${t(`q.${r}`)} ${t('team.limit')}`,
-      onchange: async (e) => {
+      onkeydown: (e) => { if (e.key === 'Enter') e.target.blur(); },
+      // Not onchange: clearing a number input to mean unlimited does not always fire it.
+      onblur: async (e) => {
+        const next = e.target.value === '' ? null : Number(e.target.value);
+        if (next === limit) return;
         e.target.disabled = true;
         try {
-          await api('PUT', path, { [r]: e.target.value === '' ? null : Number(e.target.value) });
+          await api('PUT', path, { [r]: next });
           paint(await api('GET', path));
         } catch (error) {
           e.target.disabled = false;
