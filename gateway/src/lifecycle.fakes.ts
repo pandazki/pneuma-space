@@ -28,6 +28,7 @@ export class FakeDriver implements Driver<RunSpec, string> {
   readonly removed: string[] = [];
   failure: Error | null = null;
   serving = true;
+  node: string | undefined = undefined;
   adopted: Adopted<string>[] = [];
   #gone: Gone<string> = () => {};
 
@@ -44,6 +45,7 @@ export class FakeDriver implements Driver<RunSpec, string> {
     await Promise.resolve();
     if (this.failure) throw this.failure;
     slot.handle = `${spec.app}-${this.starts}`;
+    slot.node = this.node;
     return `fake:${this.starts}`;
   }
 

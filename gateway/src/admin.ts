@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import { emit } from './events.ts';
 import type { Metrics } from './metrics.ts';
+import type { NodeView } from './nodes.ts';
 import type { Runtimes } from './runtimes.ts';
 import { gather, peerSources, RING, seqIn, type RequestLog, type Source } from './requests.ts';
 import { can, LOCAL_CALLER, type Action, type Authority } from './authz.ts';
@@ -21,6 +22,7 @@ export type AdminDeps = {
   readonly runtime: Pick<Runtimes, 'logs' | 'healthOf'>;
   readonly guard: Guard;
   readonly metrics: Pick<Metrics, 'snapshot' | 'events'>;
+  readonly nodes: Pick<NodeView, 'snapshot'>;
   readonly requests: Pick<RequestLog, 'after'>;
   /** This replica, named in its request records and cursor entries. */
   readonly replica: ReplicaId;
@@ -169,7 +171,7 @@ function firstTenant({ body, caller }: Ctx): TenantName {
   throw new InputError(`tenant is required on a first publish${mine.length ? `; you are in ${mine.join(', ')}` : ''}`);
 }
 
-function routes({ registry, bundles, runtime, guard, metrics, requests, replica, peers, store, ingressPort, upstream }: AdminDeps): Route[] {
+function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, replica, peers, store, ingressPort, upstream }: AdminDeps): Route[] {
   const app = (name: string | undefined) => appName(name!);
   const found = <T>(value: T | null, name: string | undefined): T => {
     if (value === null) throw new NotFound(`no app named "${name}"`);
@@ -228,6 +230,7 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, replica,
       },
     },
     { method: 'GET', path: at(ADMIN_PATHS.metrics), action: 'platform.read', handle: async () => ({ ...metrics.snapshot(), events: await metrics.events() }) },
+    { method: 'GET', path: at(ADMIN_PATHS.nodes), action: 'platform.read', handle: () => nodes.snapshot() },
     {
       method: 'GET', path: at(ADMIN_PATHS.usage),
       action: ({ query }) => (query.get('app') ?? '*') === '*' ? 'records' : 'app.read',

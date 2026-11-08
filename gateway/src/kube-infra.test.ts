@@ -6,8 +6,10 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
+import { KubeClient, type Node, type Pod } from './kube.ts';
 import { KubeInfra } from './kube-infra.ts';
 
+const nowhere = new KubeClient({ server: 'http://127.0.0.1:9', token: async () => 't', namespace: 'pneuma-space' });
 const BASIC = `Basic ${Buffer.from('ann:secret').toString('base64')}`;
 const DIGEST = 'sha256:4f1c0e2a';
 
@@ -30,7 +32,7 @@ async function registry(t: TestContext, challenge: (host: string) => string, acc
   const host = `127.0.0.1:${(server.address() as AddressInfo).port}`;
   const authFile = join(await mkdtemp(join(tmpdir(), 'registry-')), '.dockerconfigjson');
   await writeFile(authFile, JSON.stringify({ auths: { [host]: { auth: BASIC.slice('Basic '.length) } } }));
-  return { host, seen, infra: new KubeInfra({ registry: host, authFile }) };
+  return { host, seen, infra: new KubeInfra({ namespaces: [nowhere], registry: host, authFile }) };
 }
 
 test('resolveImage answers a Basic challenge with the dockerconfigjson credentials and returns the digest reference', async (t) => {
@@ -49,4 +51,38 @@ test('resolveImage exchanges the credentials for a Bearer token at the challenge
   });
   assert.equal(await infra.resolveImage('team/notes:1'), `${host}/team/notes@${DIGEST}`);
   assert.equal(scope, 'repository:team/notes:pull');
+});
+
+const node = (name: string, unschedulable = false): Node => ({
+  metadata: { name, labels: { zone: 'a' } },
+  spec: { unschedulable, taints: unschedulable ? [{ key: 'node.kubernetes.io/unschedulable', effect: 'NoSchedule' }] : [] },
+  status: { conditions: [{ type: 'Ready', status: 'True' }], allocatable: { cpu: '3500m', memory: '8Gi', pods: '110' } },
+});
+const rolePod = (name: string, role: string, nodeName: string, requests: { cpu?: string; memory?: string }, phase: 'Running' | 'Succeeded' = 'Running'): Pod => ({
+  metadata: { name, labels: { 'pneuma-space.role': role } },
+  spec: { nodeName, containers: [{ name: 'c', image: 'i', resources: { requests } }] },
+  status: { phase, podIP: '10.0.0.1', containerStatuses: [{ name: 'c', ready: true, restartCount: 2 }] },
+});
+
+test('nodes sums the requests of the platform Pods on each node across both namespaces and marks a cordoned node unschedulable', async (t) => {
+  const listed: string[] = [];
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url!, 'http://fake');
+    listed.push(`${url.pathname}?${url.searchParams.get('labelSelector') ?? ''}`);
+    const items = url.pathname === '/api/v1/nodes' ? [node('n1'), node('n2', true)]
+      : url.pathname === '/api/v1/namespaces/pneuma-space/pods' ? [rolePod('gw', 'gateway', 'n1', { cpu: '250m', memory: '256Mi' }), rolePod('runner-0', 'runner', 'n2', { cpu: '1', memory: '1Gi' })]
+        : [rolePod('app-a', 'instance', 'n1', { cpu: '100m', memory: '128Mi' }), rolePod('app-done', 'instance', 'n1', { cpu: '2', memory: '1Gi' }, 'Succeeded')];
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ metadata: { resourceVersion: '1' }, items }));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => server.close());
+  const at = (namespace: string) => new KubeClient({ server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, token: async () => 't', namespace });
+  const nodes = await new KubeInfra({ namespaces: [at('pneuma-space'), at('pneuma-space-apps')], registry: null, authFile: null }).nodes();
+  assert.deepEqual(nodes.map((n) => [n.name, n.schedulable, n.requested, n.allocatable]), [
+    ['n1', true, { cpuMillis: 350, memoryBytes: 384 * 2 ** 20, pods: 2 }, { cpuMillis: 3500, memoryBytes: 8 * 2 ** 30, pods: 110 }],
+    ['n2', false, { cpuMillis: 1000, memoryBytes: 2 ** 30, pods: 1 }, { cpuMillis: 3500, memoryBytes: 8 * 2 ** 30, pods: 110 }],
+  ]);
+  assert.deepEqual(nodes[1]!.pods.map((p) => [p.name, p.role, p.ready, p.restarts]), [['runner-0', 'runner', true, 2]]);
+  assert.deepEqual(listed.filter((l) => l.includes('/pods')).sort(), ['/api/v1/namespaces/pneuma-space-apps/pods?pneuma-space.role', '/api/v1/namespaces/pneuma-space/pods?pneuma-space.role']);
 });

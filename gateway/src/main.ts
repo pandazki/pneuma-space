@@ -13,9 +13,10 @@ import { hostSample, httpProbe, Metrics, profileProbe, serveMetrics, Series, tcp
 import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId } from './model.ts';
 import { composeProject, DockerInfra } from './infra.ts';
 import { inClusterClient } from './kube.ts';
+import { NodeView, type RunnerHealth } from './nodes.ts';
 import { KubeInfra } from './kube-infra.ts';
 import { planeOf, podConfig, PodRuntime } from './pods.ts';
-import { createProviders, providerConfig, S3BundleStore } from './providers.ts';
+import { createProviders, providerConfig, resolvesOnNetwork, S3BundleStore } from './providers.ts';
 import { PlatformRegistry } from './registry.ts';
 import { IsolateRuntime, RUNNER_PORT, StatefulSetPool, StaticPool } from './isolate.ts';
 import { DockerRuntime } from './runtime.ts';
@@ -26,6 +27,8 @@ import { PgStore } from './store-pg.ts';
 import { SqliteStore } from './store.ts';
 
 const SAMPLE_MS = 10_000;
+const NODES_MS = 15_000;
+const RUNNER_HEALTH_MS = 1000;
 
 const log = (ev: string, extra: Record<string, unknown> = {}) => emit(ev, null, extra);
 
@@ -64,12 +67,18 @@ const specFor = (app: AppId) => registry.runSpec(app);
 const guard = new AppGuard({ instances, specFor, series });
 // The plane swaps the container driver, the runner pool and Infra; everything else is shared (ADR 0019 item 1).
 const { infra, container, pool } = setup.pods
-  ? {
-    infra: new KubeInfra({ registry: process.env.PNEUMA_SPACE_REGISTRY?.trim() || null, authFile: process.env.PNEUMA_SPACE_REGISTRY_AUTH?.trim() || null }),
-    container: new PodRuntime({ kube: await inClusterClient('pneuma-space-apps'), config: setup.pods, specFor, instances, guard }),
+  ? await (async (pods) => {
+    const apps = await inClusterClient('pneuma-space-apps');
     // The gateway's own namespace is the platform namespace, where the runner StatefulSet runs (ADR 0019 item 3).
-    pool: new StatefulSetPool(await inClusterClient()),
-  }
+    const platform = await inClusterClient();
+    return {
+      infra: new KubeInfra({
+        namespaces: [platform, apps], registry: process.env.PNEUMA_SPACE_REGISTRY?.trim() || null, authFile: process.env.PNEUMA_SPACE_REGISTRY_AUTH?.trim() || null,
+      }),
+      container: new PodRuntime({ kube: apps, config: pods, specFor, instances, guard }),
+      pool: new StatefulSetPool(platform),
+    };
+  })(setup.pods)
   : await (async () => {
     const docker = new Docker();
     return {
@@ -85,7 +94,7 @@ const isolate = new IsolateRuntime({
 const runtime = new Runtimes({ runtimes: [container, isolate], specFor, instances });
 const registry = await PlatformRegistry.open({
   store, runtime, guard, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => metrics.stats(),
-  addressing: setup.addressing, volumeGb: config.volumeGb,
+  addressing: setup.addressing, volumeGb: config.volumeGb, nodeOf: (app) => nodes.nodeOf(app),
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica, policy: () => registry.policy() });
 const authority = new Authority(store, setup.admins);
@@ -122,6 +131,19 @@ const metrics = new Metrics({
   leader: () => instances.leading,
 });
 
+const nodes = new NodeView({
+  infra,
+  apps: () => registry.listing(),
+  instances,
+  host: () => hostSample(data),
+  runner: async (host) => {
+    const res = await fetch(`http://${host}:${RUNNER_PORT}/health`, { signal: AbortSignal.timeout(RUNNER_HEALTH_MS) }).catch(() => null);
+    return res?.ok ? ((await res.json()) as RunnerHealth) : null;
+  },
+  runnerOnHost: () => resolvesOnNetwork(RUNTIMES.isolate.service),
+  replica,
+});
+
 process.on('unhandledRejection', (error) => log('unhandled-rejection', { error: String(error) }));
 
 registry.onAppChanged((app) => {
@@ -144,7 +166,7 @@ const upstream = setup.consoleIdentity ? { identity: new UpstreamIdentity(setup.
 const peers = process.env.PNEUMA_SPACE_PEERS
   ? { host: process.env.PNEUMA_SPACE_PEERS, forward: ['authorization', ...(setup.upstream ? [setup.upstream.header] : [])] }
   : undefined;
-const admin = await startAdmin({ registry, bundles, runtime, guard, metrics, requests, replica, peers, store, ingressPort, upstream }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const admin = await startAdmin({ registry, bundles, runtime, guard, metrics, nodes, requests, replica, peers, store, ingressPort, upstream }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const exporter = await serveMetrics(process.env.PNEUMA_SPACE_METRICS_PORT, () => metrics.prometheus());
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {
@@ -152,10 +174,14 @@ const flusher = setInterval(() => {
   void sample();
 }, SAMPLE_MS);
 void sample();
+const sampleNodes = () => nodes.sample().catch((error: Error) => log('nodes-sample-failed', { error: error.message }));
+const nodeSampler = setInterval(() => void sampleNodes(), NODES_MS);
+void sampleNodes();
 log('gateway-ready', { network, data, replica, store: storeUrl ? 'postgres' : 'sqlite' });
 
 process.once('SIGTERM', async () => {
   clearInterval(flusher);
+  clearInterval(nodeSampler);
   scheduler.stop();
   container.close();
   isolate.close();

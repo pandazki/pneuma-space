@@ -65,7 +65,7 @@ export type Pod = {
     readonly message?: string;
     readonly podIP?: string;
     readonly conditions?: readonly { readonly type: string; readonly status: 'True' | 'False' | 'Unknown' }[];
-    readonly containerStatuses?: readonly { readonly name: string; readonly ready: boolean; readonly state?: ContainerState }[];
+    readonly containerStatuses?: readonly { readonly name: string; readonly ready: boolean; readonly restartCount?: number; readonly state?: ContainerState }[];
   };
 };
 
@@ -81,8 +81,11 @@ export type PersistentVolumeClaim = {
 
 export type Node = {
   readonly metadata: ObjectMeta;
-  readonly spec?: { readonly taints?: readonly { readonly key: string; readonly value?: string; readonly effect: string }[] };
-  readonly status?: { readonly conditions?: readonly { readonly type: string; readonly status: 'True' | 'False' | 'Unknown' }[] };
+  readonly spec?: { readonly unschedulable?: boolean; readonly taints?: readonly { readonly key: string; readonly value?: string; readonly effect: string }[] };
+  readonly status?: {
+    readonly conditions?: readonly { readonly type: string; readonly status: 'True' | 'False' | 'Unknown' }[];
+    readonly allocatable?: Readonly<Partial<Record<'cpu' | 'memory' | 'pods', string>>>;
+  };
 };
 
 type Objects = { pods: Pod; persistentvolumeclaims: PersistentVolumeClaim; nodes: Node };

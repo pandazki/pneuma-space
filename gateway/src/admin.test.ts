@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { startAdmin } from './admin.ts';
 import { EventLog } from './events.ts';
 import { Metrics, Series } from './metrics.ts';
+import { NodeView } from './nodes.ts';
 import {
   appName, DEFAULT_POLICY, DEFAULT_TENANT, parseManifest, subject, USAGE_COUNTERS,
   type AppId, type AuditRecord, type HealthCheck, type ReplicaId, type Runtime, type RuntimeKind, type TenantName, type Usage,
@@ -31,16 +32,26 @@ async function admin(runtime?: Runtimes) {
     retries: () => 0,
     replica: 'r1' as ReplicaId,
   });
+  const nodeCalls = { n: 0 };
+  const nodes = new NodeView({
+    infra: { nodes: async () => (nodeCalls.n++, null) },
+    apps: () => registry.listing(),
+    instances: { row: () => null, rows: () => [][Symbol.iterator]() },
+    host: async () => ({ cpus: 1, load: [0, 0, 0], memory: { totalBytes: 1, freeBytes: 1 }, data: null }),
+    runner: async () => null,
+    runnerOnHost: async () => false,
+    replica: 'r1' as ReplicaId,
+  });
   const requests = new RequestLog(() => {});
   const logs = { logs: (app: AppId, tail: number) => w.runtime.logs(app, tail), healthOf: () => [] };
-  const server = await startAdmin({ registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, requests, replica: 'r1' as ReplicaId, store, ingressPort: 18080 }, { port: 0 });
+  const server = await startAdmin({ registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, nodes, requests, replica: 'r1' as ReplicaId, store, ingressPort: 18080 }, { port: 0 });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
     const raw = typeof body === 'string' ? body : body === undefined ? undefined : JSON.stringify(body);
     const response = await fetch(base + path, { method, body: raw });
     return { status: response.status, body: await response.json() };
   };
-  return { w, registry, store, server, call, base, metrics, requests };
+  return { w, registry, store, server, call, base, metrics, nodes, nodeCalls, requests };
 }
 
 const kvApp = { image: 'example:1', manifest: { contract: 1, capabilities: { kv: {} } }, owner: 'user:ann' };
@@ -72,6 +83,14 @@ test('every contract endpoint answers 200 on valid input', async (t) => {
   assert.equal((await call('POST', '/api/apps/survey/remove')).status, 200);
   assert.equal((await call('POST', '/api/apps/survey/purge')).status, 200);
   assert.equal((await call('GET', '/api/apps/survey')).status, 404);
+});
+
+test('GET /api/nodes answers the sampler\'s last sample without asking Infra', async (t) => {
+  const { call, server, nodes, nodeCalls } = await admin();
+  t.after(() => server.close());
+  await nodes.sample();
+  const [first, second] = [await call('GET', '/api/nodes'), await call('GET', '/api/nodes')];
+  assert.deepEqual([first.status, first.body.source, first.body.nodes.length, second.body.sampledAt, nodeCalls.n], [200, 'host', 1, first.body.sampledAt, 1]);
 });
 
 test('input errors answer 400, unknown apps and images 404, conflicts 409', async (t) => {

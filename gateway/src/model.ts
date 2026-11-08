@@ -945,10 +945,35 @@ export interface Runtime {
   destroyStorage(app: AppId, id: string): Promise<void>;
 }
 
+export type NodeResources = { readonly cpuMillis: number; readonly memoryBytes: number; readonly pods: number };
+/** A Pod carrying a `pneuma-space.role` label in a platform namespace. */
+export type PlatformPod = {
+  readonly name: string;
+  readonly role: string;
+  readonly app: AppId | null;
+  readonly ip: string | null;
+  readonly phase: string;
+  readonly ready: boolean;
+  readonly restarts: number;
+};
+/** One cluster node (ADR 0024 item 8); `requested` sums the platform's own Pods on it, not every Pod. */
+export type NodeSample = {
+  readonly name: string;
+  readonly ready: boolean;
+  readonly schedulable: boolean;
+  readonly labels: Readonly<Record<string, string>>;
+  readonly taints: readonly { readonly key: string; readonly value?: string; readonly effect: string }[];
+  readonly allocatable: NodeResources;
+  readonly requested: NodeResources;
+  readonly pods: readonly PlatformPod[];
+};
+
 /** Docker for Providers and publish, whatever runtime an app uses. */
 export interface Infra {
   runJob(job: Job): Promise<JobResult>;
   resolveImage(reference: string): Promise<ImageId | null>;
+  /** The cluster's nodes with the platform's Pods on them; null on a single host. */
+  nodes(): Promise<NodeSample[] | null>;
 }
 
 /** Hides one backend for one resource kind. Every method is idempotent. */
@@ -1064,6 +1089,7 @@ export const ADMIN_PATHS = {
   apps: '/api/apps',
   metrics: '/api/metrics',
   requests: '/api/requests',
+  nodes: '/api/nodes',
   usage: '/api/usage',
   usageApps: '/api/usage/apps',
   audit: '/api/audit',

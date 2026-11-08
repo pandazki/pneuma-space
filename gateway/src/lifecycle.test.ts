@@ -30,6 +30,15 @@ test('two replicas acquiring an asleep app at once start one instance: one wakin
   assert.equal(one.address, two.address);
 });
 
+test('the awake row carries the node the driver started the instance on', async () => {
+  const store = tempStore();
+  const { app, specFor } = await registered(store);
+  const { lifecycle, driver } = replica(store, specFor);
+  driver.node = 'n3';
+  await lifecycle.acquire(app, 'request');
+  assert.equal((await store.instance(app))?.node, 'n3');
+});
+
 test('an acquire on an awake app whose tally this replica holds makes no store call', async () => {
   const { store, calls } = counting(tempStore());
   const { app, specFor } = await registered(store as never);
