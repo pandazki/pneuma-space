@@ -1,0 +1,61 @@
+# Example for ingress-nginx, not in kustomization.yaml. The organization's authenticating proxy, which adds the signed JWT
+# (ADR 0021), sits in front of these hosts or is wired in through the controller's auth annotations.
+# The read and send timeouts equal the default connection_idle_seconds, so WebSocket and SSE connections are not cut early.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pneuma-space-gateway
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "21600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "21600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["*.apps.example.com", console.example.com, api.example.com, objects.example.com]
+      secretName: pneuma-space-tls
+  rules:
+    - host: "*.apps.example.com"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pneuma-space-gateway
+                port:
+                  number: 8080
+    - host: console.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pneuma-space-gateway
+                port:
+                  number: 8081
+    - host: api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pneuma-space-gateway
+                port:
+                  number: 8081
+    # PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT: browsers fetch presigned object URLs here, straight from the object store.
+    - host: objects.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rustfs
+                port:
+                  number: 9000

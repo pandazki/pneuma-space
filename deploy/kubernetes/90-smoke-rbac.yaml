@@ -1,0 +1,39 @@
+# Optional and not in kustomization.yaml: only `npm run test:k8s` uses this account (gateway/src/kube.smoke.test.ts).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pneuma-space-smoke
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pneuma-space-smoke
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pneuma-space-smoke
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pneuma-space-smoke
+subjects:
+  - kind: ServiceAccount
+    name: pneuma-space-smoke
+    namespace: pneuma-space-apps

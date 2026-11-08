@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - 00-namespaces.yaml
+  - 10-rbac.yaml
+  - 20-config.yaml
+  - 30-platform-services.yaml
+  - 40-gateway.yaml
+  - 50-runner.yaml
+  - 60-network-policies.yaml
+images:
+  - name: pneuma-space-gateway
+    newName: REPLACE_ME_REGISTRY/pneuma-space-gateway
+    newTag: REPLACE_ME_TAG
