@@ -292,6 +292,8 @@ test('a refresh that read an older app version than the view holds is not applie
   for (const listener of listeners) listener({ kind: 'app', name: survey });
   await sleep(50);
   assert.equal(registry.view(survey)?.owner, 'user:bob');
+});
+
 async function quotaWorld(quota: Record<string, number | null>) {
   const w = world();
   const opened = await w.open();
