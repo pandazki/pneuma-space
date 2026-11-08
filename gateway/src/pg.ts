@@ -135,8 +135,6 @@ async function connectSocket(options: PgOptions): Promise<Socket> {
     throw error;
   }
 }
-
-/** One PostgreSQL session over protocol 3.0. Calls run one at a time in call order. */
 export class Session {
   /** Resolves with the reason once the session is gone; it never rejects. */
   readonly closed: Promise<Error>;
@@ -186,8 +184,6 @@ export class Session {
   get pid(): number {
     return this.#pid;
   }
-
-  /** Extended protocol, text parameters, one statement. Each distinct SQL is parsed once per session. */
   query(sql: string, params: readonly Param[] = []): Promise<Result> {
     return this.#serial(async () => {
       try {
@@ -198,8 +194,6 @@ export class Session {
       }
     });
   }
-
-  /** Simple protocol: DDL, multi-statement scripts, LISTEN. One Result per statement. */
   simple(sql: string): Promise<Result[]> {
     return this.#serial(() => this.#run(message('Q', cstr(sql))));
   }
@@ -207,8 +201,6 @@ export class Session {
   onNotification(listener: (n: Notification) => void): void {
     this.#listeners.add(listener);
   }
-
-  /** Asks the server to cancel whatever this session is running, over a second short connection. */
   async cancel(): Promise<void> {
     const socket = await connectSocket(this.#options);
     socket.end(Buffer.concat([int32(12 + this.#secret.length), int32(80877102), int32(this.#pid), this.#secret]));
@@ -377,8 +369,6 @@ export class Session {
 }
 
 type Waiter = { readonly resolve: (s: Session) => void; readonly reject: (e: Error) => void; readonly timer: NodeJS.Timeout };
-
-/** Up to `size` sessions opened on demand; a caller waits FIFO for at most `waitMs` when all are busy. */
 export class Pool {
   readonly #options: PgOptions;
   readonly #size: number;
@@ -403,8 +393,6 @@ export class Pool {
   simple(sql: string): Promise<Result[]> {
     return this.with((s) => s.simple(sql));
   }
-
-  /** BEGIN, `fn`, COMMIT on one session; ROLLBACK when `fn` throws. */
   transaction<T>(fn: (s: Session) => Promise<T>, isolation?: Isolation): Promise<T> {
     return this.with(async (s) => {
       await s.simple(isolation ? `BEGIN ISOLATION LEVEL ${isolation.toUpperCase()}` : 'BEGIN');
@@ -429,8 +417,6 @@ export class Pool {
       this.#release(session);
     }
   }
-
-  /** Refuses new callers, waits for held sessions to come back, and closes every session. */
   close(): Promise<void> {
     if (!this.#closed) {
       this.#closed = new Promise((resolve) => (this.#drained = resolve));
