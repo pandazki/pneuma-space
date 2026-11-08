@@ -161,17 +161,28 @@ export class PlatformRegistry implements Registry, TenantCommands {
     for (const name of [...this.#views.keys()]) await this.#refresh(name);
   }
 
+  /** Two batch reads instead of one refresh per app (ADR 0025 item 5). */
   async #reload(): Promise<void> {
-    this.#policy = await this.#store.policy();
-    const names = new Set((await this.#store.apps()).map((app) => app.name));
-    for (const name of new Set([...names, ...this.#views.keys()])) await this.#load(name);
+    const { policy, pairs, bindings } = await this.#store.transaction(async (tx) => ({
+      policy: await tx.policy(), pairs: await tx.appsWithCurrent(), bindings: await tx.bindings(),
+    }));
+    this.#policy = policy;
+    for (const { release } of pairs) await this.#index(release);
+    const names = new Set(pairs.map(({ app }) => app.name));
+    for (const name of [...this.#views.keys()]) if (!names.has(name)) this.#forget(name);
+    const byApp = Map.groupBy(bindings, (b) => b.app);
+    for (const { app, release } of pairs) this.#apply(app.name, { app, release, bindings: byApp.get(app.id) ?? [] });
+  }
+
+  async #index(release: Release | null): Promise<void> {
+    const bundle = release?.bundle;
+    if (bundle && !this.#indexes.has(bundle)) this.#indexes.set(bundle, await this.#bundles.index(bundle));
   }
 
   /** Fetches the current release's bundle index if this replica has not seen it, then refreshes. */
   async #load(name: AppName): Promise<void> {
     const app = await this.#store.app(name);
-    const bundle = app && (await currentRelease(this.#store, app))?.bundle;
-    if (bundle && !this.#indexes.has(bundle)) this.#indexes.set(bundle, await this.#bundles.index(bundle));
+    await this.#index(app && (await currentRelease(this.#store, app)));
     await this.#refresh(name);
   }
 
@@ -589,47 +600,58 @@ export class PlatformRegistry implements Registry, TenantCommands {
     }
   }
 
-  /** Rebuilds the app's RouteView, RunSpec and SchedulerView from one read; inside the transaction, so a refresh that read older rows never lands last. */
-  #refresh(name: AppName): Promise<void> {
-    return this.#store.transaction(async (tx) => {
+  /** Rebuilds the app's RouteView, RunSpec and SchedulerView from one read. */
+  async #refresh(name: AppName): Promise<void> {
+    const rows = await this.#store.transaction(async (tx) => {
       const app = await tx.app(name);
-      if (!app) return this.#forget(name);
-      const release = await currentRelease(tx, app);
-      const policy = effectivePolicy(this.#policy, app.policyOverride);
-      const view: RouteView = Object.freeze({
-        app: app.id,
-        name,
-        tenant: app.tenant,
-        access: app.access,
-        status: app.status,
-        owner: app.owner,
-        release: release?.number ?? null,
-        image: release?.image ?? null,
-        runtime: release?.runtime ?? null,
-        kinds: new Set(release ? declaredKinds(release.manifest) : []),
-        bundle: (release?.manifest.capabilities.static && release.bundle && this.#indexes.get(release.bundle)) || null,
-        staticRoot: release?.runtime === 'isolate' && release.manifest.capabilities.static ? `${release.manifest.capabilities.static.dir}/` : '',
-        identity: release?.manifest.capabilities.identity ?? null,
-        policyOverride: Object.freeze({ ...app.policyOverride }),
-        version: app.version,
-      });
-      this.#views.set(name, view);
-      this.#names.set(app.id, name);
-      this.#runtimes.set(app.id, release?.runtime ?? null);
-      const spec = release?.runtime && app.status === 'registered' ? this.#spec(app, release, await tx.bindings(app.id), policy) : null;
-      if (spec) this.#specs.set(app.id, spec);
-      else this.#specs.delete(app.id);
-      if (release) {
-        this.#schedules.set(app.id, {
-          status: app.status,
-          publishedAt: Math.max(release.publishedAt, app.registeredAt),
-          triggers: triggersOf(app.id, release.manifest),
-          policy,
-        });
-      } else {
-        this.#schedules.delete(app.id);
-      }
+      return app && { app, release: await currentRelease(tx, app), bindings: await tx.bindings(app.id) };
     });
+    this.#apply(name, rows);
+  }
+
+  /**
+   * Skips rows older than the view: refreshes read on different sessions may land out of order (ADR 0025 item 5).
+   * Rows of the same version are applied, since a global policy change re-applies them.
+   */
+  #apply(name: AppName, rows: { readonly app: App; readonly release: Release | null; readonly bindings: readonly Binding[] } | null): void {
+    if (!rows) return this.#forget(name);
+    const { app, release, bindings } = rows;
+    const held = this.#views.get(name);
+    if (held && held.app === app.id && held.version > app.version) return;
+    const policy = effectivePolicy(this.#policy, app.policyOverride);
+    const view: RouteView = Object.freeze({
+      app: app.id,
+      name,
+      tenant: app.tenant,
+      access: app.access,
+      status: app.status,
+      owner: app.owner,
+      release: release?.number ?? null,
+      image: release?.image ?? null,
+      runtime: release?.runtime ?? null,
+      kinds: new Set(release ? declaredKinds(release.manifest) : []),
+      bundle: (release?.manifest.capabilities.static && release.bundle && this.#indexes.get(release.bundle)) || null,
+      staticRoot: release?.runtime === 'isolate' && release.manifest.capabilities.static ? `${release.manifest.capabilities.static.dir}/` : '',
+      identity: release?.manifest.capabilities.identity ?? null,
+      policyOverride: Object.freeze({ ...app.policyOverride }),
+      version: app.version,
+    });
+    this.#views.set(name, view);
+    this.#names.set(app.id, name);
+    this.#runtimes.set(app.id, release?.runtime ?? null);
+    const spec = release?.runtime && app.status === 'registered' ? this.#spec(app, release, bindings, policy) : null;
+    if (spec) this.#specs.set(app.id, spec);
+    else this.#specs.delete(app.id);
+    if (release) {
+      this.#schedules.set(app.id, {
+        status: app.status,
+        publishedAt: Math.max(release.publishedAt, app.registeredAt),
+        triggers: triggersOf(app.id, release.manifest),
+        policy,
+      });
+    } else {
+      this.#schedules.delete(app.id);
+    }
   }
 
   #spec(app: App, release: Release, bindings: readonly Binding[], policy: Policy): RunSpec {

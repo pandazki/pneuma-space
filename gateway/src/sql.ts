@@ -59,6 +59,8 @@ const toRelease = (r: Row): Release => ({
   publishedAt: num(r.published_at),
 });
 
+const RELEASE_COLUMNS = ['number', 'image', 'manifest', 'bundle', 'runtime', 'release_key', 'published_at'] as const;
+
 const toBinding = (r: Row): Binding => ({
   app: r.app as AppId,
   kind: r.kind as Binding['kind'],
@@ -190,6 +192,17 @@ export class SqlOps implements StoreOps {
 
   async apps() {
     return (await this.#s.all('SELECT * FROM app ORDER BY name')).map(toApp);
+  }
+
+  async appsWithCurrent() {
+    const rows = await this.#s.all(
+      `SELECT a.*, ${RELEASE_COLUMNS.map((c) => `r.${c} AS r_${c}`).join(', ')}
+       FROM app a LEFT JOIN release r ON r.app = a.id AND r.number = a.current ORDER BY a.name`,
+    );
+    return rows.map((r) => ({
+      app: toApp(r),
+      release: r.r_number === null ? null : toRelease({ app: r.id, ...Object.fromEntries(RELEASE_COLUMNS.map((c) => [c, r[`r_${c}`]])) }),
+    }));
   }
 
   /** A write that changes nothing raises no version and announces nothing, so restart convergence leaves the rows as they were. */
@@ -645,3 +658,9 @@ export class SqlOps implements StoreOps {
 
 /** Every StoreOps method name, for stores that wrap each call (a queue, a pool session). */
 export const STORE_OPS = Object.getOwnPropertyNames(SqlOps.prototype).filter((name) => name !== 'constructor') as (keyof StoreOps)[];
+
+/** `ops` with each call passed through `call`. */
+export function wrap(ops: StoreOps, call: <T>(work: () => Promise<T>) => Promise<T>): StoreOps {
+  const wrapped = Object.fromEntries(STORE_OPS.map((name) => [name, (...args: unknown[]) => call(() => (ops[name] as (...a: unknown[]) => Promise<unknown>)(...args))]));
+  return wrapped as unknown as StoreOps;
+}

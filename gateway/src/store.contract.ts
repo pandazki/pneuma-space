@@ -1,11 +1,11 @@
-// The Store contract, run against every Store (ADR 0025 item 2). A later PgStore passes its own factory.
+// The Store contract, run against every Store (ADR 0025 item 2).
 
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { after, before, describe, test } from 'node:test';
 import {
   DEFAULT_POLICY, DEFAULT_QUOTA, DEFAULT_TENANT, IDEMPOTENCY_WINDOW_MS, USAGE_COUNTERS, changeKey,
-  type App, type AppId, type AppName, type Delivery, type DeliveryId, type Instance, type ReleaseNumber, type ReplicaId, type Store,
+  type App, type AppId, type AppName, type Delivery, type DeliveryId, type ImageId, type Instance, type ReleaseNumber, type ReplicaId, type Store,
   type Subject, type TenantName, type TriggerName, type Usage,
 } from './model.ts';
 
@@ -61,15 +61,15 @@ export function storeContract(name: string, open: OpenStore): void {
       assert.equal((await store.insertDelivery(delivery('k3', { idempotencyKey: 'job-7', createdAt: t0 + IDEMPOTENCY_WINDOW_MS + 1 }))).id, 'k3');
     });
 
-    test('two concurrent transactions serialize: the second sees the first one commit', async () => {
-      const first = store.transaction(async (tx) => {
-        const seen = await tx.app(app('one').name);
+    test('two concurrent read-modify-write transactions on one row both take effect', async () => {
+      await store.putApp(app('one'));
+      const bump = () => store.transaction(async (tx) => {
+        const row = (await tx.app(app('one').name))!;
         await sleep(20);
-        await tx.putApp(app('one'));
-        return seen;
+        await tx.putApp({ ...row, registeredAt: row.registeredAt + 1 });
       });
-      const second = store.transaction(async (tx) => tx.app(app('one').name));
-      assert.deepEqual(await Promise.all([first, second]), [null, app('one')]);
+      await Promise.all([bump(), bump()]);
+      assert.equal((await store.app(app('one').name))?.registeredAt, 2);
     });
 
     test('exclusive runs commands on one name one at a time and on another name meanwhile', async () => {
@@ -188,6 +188,19 @@ export function storeContract(name: string, open: OpenStore): void {
         app: appId('versioned'), number: 1 as ReleaseNumber, image: null, manifest: { contract: 1, capabilities: {} }, bundle: null, runtime: null, releaseKey: 'k', publishedAt: 0,
       });
       assert.equal((await store.app('versioned' as AppName))?.version, 2);
+    });
+
+    test('appsWithCurrent pairs every app with its current release or null', async () => {
+      const release = {
+        app: appId('paired'), number: 2 as ReleaseNumber, image: 'sha256:2' as ImageId, manifest: { contract: 1, capabilities: {} }, bundle: null, runtime: 'container', releaseKey: 'k2', publishedAt: 7,
+      } as const;
+      await store.putApp(app('paired'));
+      await store.putRelease({ ...release, number: 1 as ReleaseNumber, image: 'sha256:1' as ImageId });
+      await store.putRelease(release);
+      await store.putApp(app('paired', { current: 2 as ReleaseNumber, version: 4 }));
+      await store.putApp(app('unpaired'));
+      const pairs = (await store.appsWithCurrent()).filter((p) => ['paired', 'unpaired'].includes(p.app.name));
+      assert.deepEqual(pairs.map((p) => [p.app.name, p.release]), [['paired', release], ['unpaired', null]]);
     });
 
     test('rewriting a binding unchanged leaves the app version as it was', async () => {
