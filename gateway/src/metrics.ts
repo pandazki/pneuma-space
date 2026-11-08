@@ -1,12 +1,14 @@
 import { statfs } from 'node:fs/promises';
+import { createServer, type Server } from 'node:http';
 import { availableParallelism, freemem, loadavg, totalmem } from 'node:os';
 import type { EventLog, LifecycleEvent } from './events.ts';
 import { resolvesOnNetwork } from './providers.ts';
+import type { RequestKind } from './requests.ts';
 import { canConnect } from './runtime.ts';
 import {
-  EVENT_SETTLE_MS, USAGE_COUNTERS,
+  EVENT_SETTLE_MS, QUOTA_RESOURCES, USAGE_COUNTERS,
   type AppId, type AppName, type AppStatus, type AppSummary, type Delivery, type DeliveryState, type EventRecord, type InstanceState, type LeaseKind,
-  type Policy, type ReplicaId, type Stats, type StoreOps, type TenantName, type UsageBucket, type UsageStep,
+  type Policy, type Quota, type QuotaResource, type QuotaUsage, type ReplicaId, type RuntimeKind, type Stats, type StoreOps, type TenantName, type UsageBucket, type UsageStep,
 } from './model.ts';
 
 const MINUTE = 60_000;
@@ -23,6 +25,8 @@ const EVENT_TAIL_MS = 1000;
 const EVENT_TAIL_STALE_MS = MINUTE;
 const PROBE_TIMEOUT_MS = 1000;
 const RECENT_FAILURES = 20;
+const WAKE_BUCKETS = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 15] as const;
+export const EXPOSITION_TYPE = 'text/plain; version=0.0.4; charset=utf-8';
 
 export type ServiceName = 'redis' | 'object' | 'postgres' | 'coturn' | 'runner';
 export type ServiceStatus = 'up' | 'down' | 'off';
@@ -51,6 +55,10 @@ export type MetricsDeps = {
   readonly store: Pick<StoreOps, 'putUsage' | 'usage' | 'sweepUsage' | 'insertEvents' | 'events' | 'sweepEvents'>;
   readonly policy: () => Pick<Policy, 'usage_retention_days' | 'events_retention_days' | 'events_max_rows'>;
   readonly view: (name: AppName) => { readonly app: AppId; readonly tenant: TenantName } | null;
+  readonly series: Series;
+  readonly quota: Pick<StoreOps, 'tenants' | 'quotaUsed'>;
+  /** Store transactions rerun since start (ADR 0025). */
+  readonly retries: () => number;
   readonly replica: ReplicaId;
   /** Whether this replica leads now; only the leader accrues awake time and sweeps (ADR 0024 items 2 and 4). */
   readonly leader?: () => boolean;
@@ -83,6 +91,80 @@ const emptyFleet = () => ({
 
 function percentile(sorted: readonly number[], p: number): number | null {
   return sorted.length ? sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)] : null;
+}
+
+const escapeLabel = (value: string) => value.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\n', '\\n');
+/** The label block `{k="v",...}`, empty without labels; also the key a series is counted under. */
+const labels = (pairs: Readonly<Record<string, string>>): string => {
+  const block = Object.entries(pairs).map(([k, v]) => `${k}="${escapeLabel(v)}"`).join(',');
+  return block && `{${block}}`;
+};
+const family = (name: string, type: 'counter' | 'gauge' | 'histogram', help: string, samples: Iterable<readonly [string, number]>): string =>
+  `# HELP ${name} ${help}\n# TYPE ${name} ${type}\n${[...samples].map(([series, value]) => `${series} ${value}\n`).join('')}`;
+const keyed = (name: string, counts: ReadonlyMap<string, number>) => [...counts].map(([block, n]) => [name + block, n] as const);
+const bump = (counts: Map<string, number>, key: string, n = 1) => counts.set(key, (counts.get(key) ?? 0) + n);
+
+type TenantQuota = { readonly tenant: TenantName; readonly quota: Quota; readonly used: QuotaUsage };
+type Histogram = { readonly buckets: number[]; sum: number; count: number };
+
+/** This process's counters for `/metrics` (ADR 0024 item 7): they start at zero, and Prometheus sums replicas and handles restarts. */
+export class Series {
+  readonly #requests = new Map<string, number>();
+  readonly #errors = new Map<string, number>();
+  readonly #wakes = new Map<string, number>();
+  readonly #durations = new Map<RuntimeKind, Histogram>();
+  readonly #events = new Map<string, number>();
+
+  /** A static-only app has no runtime: `runtime="none"`. */
+  request(tenant: TenantName, runtime: RuntimeKind | null, kind: RequestKind, error: boolean): void {
+    bump(this.#requests, labels({ tenant, runtime: runtime ?? 'none', kind }));
+    if (error) bump(this.#errors, labels({ tenant, runtime: runtime ?? 'none' }));
+  }
+
+  awake(tenant: TenantName, runtime: RuntimeKind, ms: number): void {
+    bump(this.#wakes, labels({ tenant, runtime, result: 'ok' }));
+    const h = this.#durations.get(runtime) ?? this.#durations.set(runtime, { buckets: WAKE_BUCKETS.map(() => 0), sum: 0, count: 0 }).get(runtime)!;
+    const seconds = ms / 1000;
+    WAKE_BUCKETS.forEach((le, i) => { if (seconds <= le) h.buckets[i]++; });
+    h.sum += seconds;
+    h.count++;
+  }
+
+  wake(tenant: TenantName, runtime: RuntimeKind, result: 'failed' | 'refused'): void {
+    bump(this.#wakes, labels({ tenant, runtime, result }));
+  }
+
+  event(ev: string): void {
+    bump(this.#events, labels({ ev }));
+  }
+
+  render(): string {
+    const name = 'pneuma_space_wake_duration_seconds';
+    const durations = [...this.#durations].flatMap(([runtime, h]) => [
+      ...WAKE_BUCKETS.map((le, i) => [`${name}_bucket${labels({ runtime, le: String(le) })}`, h.buckets[i]] as const),
+      [`${name}_bucket${labels({ runtime, le: '+Inf' })}`, h.count] as const,
+      [`${name}_sum${labels({ runtime })}`, h.sum] as const,
+      [`${name}_count${labels({ runtime })}`, h.count] as const,
+    ]);
+    return [
+      family('pneuma_space_requests_total', 'counter', 'Requests this replica answered.', keyed('pneuma_space_requests_total', this.#requests)),
+      family('pneuma_space_errors_total', 'counter', 'Requests answered with a 5xx that the Guard did not refuse.', keyed('pneuma_space_errors_total', this.#errors)),
+      family('pneuma_space_wakes_total', 'counter', 'Wakes this replica attempted, by result.', keyed('pneuma_space_wakes_total', this.#wakes)),
+      family(name, 'histogram', 'Time from waking to awake of successful wakes.', durations),
+      family('pneuma_space_events_total', 'counter', 'Lifecycle events this replica emitted.', keyed('pneuma_space_events_total', this.#events)),
+    ].join('');
+  }
+}
+
+/** Answers `GET /metrics` on `port`; null when the port is unset. No authentication: a NetworkPolicy fences the port (ADR 0024 item 7). */
+export async function serveMetrics(port: string | undefined, render: () => string): Promise<Server | null> {
+  if (!port) return null;
+  const server = createServer((req, res) => {
+    if (req.method === 'GET' && req.url?.split('?')[0] === '/metrics') res.writeHead(200, { 'content-type': EXPOSITION_TYPE }).end(render());
+    else res.writeHead(404).end();
+  });
+  await new Promise<void>((resolve, reject) => server.once('error', reject).listen(Number(port), '0.0.0.0', resolve));
+  return server;
 }
 
 /**
@@ -122,6 +204,11 @@ export class Metrics {
   #services: Readonly<Record<string, ServiceSample>> = {};
   #fleet = emptyFleet();
   #deliveries = { due: 0, delivering: 0, failed: 0, recentFailures: [] as unknown[] };
+  #deliveryCounts: Readonly<Record<DeliveryState, number>> | null = null;
+  /** Label block of `{state,runtime,tenant}` to instance count, as of the last sample. */
+  #instances = new Map<string, number>();
+  /** Read only while leading. */
+  #quota: readonly TenantQuota[] = [];
 
   constructor(deps: MetricsDeps) {
     this.#deps = deps;
@@ -150,13 +237,18 @@ export class Metrics {
     ]);
     this.#services = Object.fromEntries(services);
     const fleet = emptyFleet();
+    const instances = new Map<string, number>();
     for (const app of apps) {
       fleet.apps[app.status]++;
+      const tenant = app.instance === 'none' ? undefined : this.#deps.view(app.name)?.tenant;
       if (app.instance !== 'none') fleet.instances[app.instance]++;
+      if (tenant) bump(instances, labels({ state: app.instance, runtime: app.runtime ?? 'none', tenant }));
       for (const kind of Object.keys(fleet.leases) as LeaseKind[]) fleet.leases[kind] += app.leases[kind];
       if (app.lastAccessAt !== null && now - app.lastAccessAt < DAY) fleet.activeLast24h++;
     }
     this.#fleet = fleet;
+    this.#instances = instances;
+    this.#deliveryCounts = counts;
     this.#deliveries = {
       due: counts.due, delivering: counts.delivering, failed: counts.failed,
       recentFailures: failed.map((d) => ({
@@ -171,6 +263,10 @@ export class Metrics {
     await this.#flush(now);
     if ((this.#deps.leader?.() ?? true) && now - this.#sweptAt >= HOUR) await this.#sweep(now);
     this.#lastFlushAt = now;
+    if (this.#deps.leader?.() ?? true) {
+      const tenants = await this.#deps.quota.tenants();
+      this.#quota = await Promise.all(tenants.map(async (t) => ({ tenant: t.name, quota: t.quota, used: await this.#deps.quota.quotaUsed(t.name) })));
+    }
   }
 
   /** Memory only: safe on the request path. */
@@ -230,6 +326,33 @@ export class Metrics {
       }
     });
     return this.#inserting;
+  }
+
+  /** Memory only. The fleet gauges are left to the leader: every replica would report the same values, and Prometheus would sum them N times. */
+  prometheus(): string {
+    const gauge = (name: string, help: string, value: number) => family(name, 'gauge', help, [[name, value]]);
+    const out = [
+      this.#deps.series.render(),
+      gauge('pneuma_space_gateway_resident_memory_bytes', 'Resident memory of this gateway process.', process.memoryUsage.rss()),
+      gauge('pneuma_space_gateway_start_time_seconds', 'Start of this gateway process since the Unix epoch.', this.#startedAt / 1000),
+      family('pneuma_space_store_retries_total', 'counter', 'Store transactions rerun after a serialization failure or deadlock.', [['pneuma_space_store_retries_total', this.#deps.retries()]]),
+    ];
+    if (this.#deps.leader?.() ?? true) {
+      const quota = (name: string, help: string, value: (q: TenantQuota, resource: QuotaResource) => number | null) =>
+        family(name, 'gauge', help, this.#quota.flatMap((q) => QUOTA_RESOURCES.flatMap((resource) => {
+          const v = value(q, resource);
+          return v === null ? [] : [[name + labels({ tenant: q.tenant, resource }), v] as const];
+        })));
+      const services = Object.entries(this.#services).filter(([, s]) => s.status !== 'off');
+      out.push(
+        family('pneuma_space_instances', 'gauge', 'Instances by state, runtime and tenant.', keyed('pneuma_space_instances', this.#instances)),
+        quota('pneuma_space_tenant_quota_used', 'What the tenant uses of each quota resource.', (q, r) => q.used[r]),
+        quota('pneuma_space_tenant_quota_limit', 'The tenant quota per resource; absent when unlimited.', (q, r) => q.quota[r]),
+        family('pneuma_space_deliveries', 'gauge', 'Deliveries by state.', Object.entries(this.#deliveryCounts ?? {}).map(([state, n]) => [`pneuma_space_deliveries${labels({ state })}`, n] as const)),
+        family('pneuma_space_service_up', 'gauge', '1 when the platform service answers its probe; a service not deployed is absent.', services.map(([service, s]) => [`pneuma_space_service_up${labels({ service })}`, s.status === 'up' ? 1 : 0] as const)),
+      );
+    }
+    return out.join('');
   }
 
   /** Memory only. Per app: requests and errors over the last 24 hourly buckets, and this replica's last access. */
@@ -382,13 +505,19 @@ export class Metrics {
   #record(e: LifecycleEvent): void {
     this.#queueEvent(e);
     const app = e.app as AppId | null;
+    this.#deps.series.event(e.ev);
+    const origin = typeof e.tenant === 'string' && typeof e.runtime === 'string' ? { tenant: e.tenant as TenantName, runtime: e.runtime as RuntimeKind } : null;
     if (app !== null && isInstanceState(e.ev)) {
       const before = this.#states.get(app);
       this.#states.set(app, e.ev);
       if (e.ev === 'awake' && typeof e.ms === 'number') {
+        if (origin) this.#deps.series.awake(origin.tenant, origin.runtime, e.ms);
         this.#count(app, 'wakes');
         this.#count(app, 'wakeMs', e.ms);
-      } else if (e.ev === 'asleep' && before === 'waking' && e.error !== undefined) this.#count(app, 'wakeFailures');
+      } else if (e.ev === 'asleep' && before === 'waking' && e.error !== undefined) {
+        if (origin) this.#deps.series.wake(origin.tenant, origin.runtime, 'failed');
+        this.#count(app, 'wakeFailures');
+      }
       else if (e.ev === 'asleep' && before === 'stopping' && e.error === undefined) this.#count(app, 'sleeps');
     } else if (e.ev === 'removed' && app !== null) this.#states.delete(app);
     else if (e.ev === 'delivery.done') this.#count(app, 'deliveriesDone');

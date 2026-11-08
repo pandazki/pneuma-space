@@ -9,7 +9,7 @@ import { Authority, parsePlatformAdmins } from './authz.ts';
 import { loadOrCreateSecret, LocalIdentity, parseIdentityEnv, UpstreamIdentity, type Identity } from './identity.ts';
 import { JwtVerifier } from './jwt.ts';
 import { Ingress } from './ingress.ts';
-import { hostSample, httpProbe, Metrics, profileProbe, tcpProbe } from './metrics.ts';
+import { hostSample, httpProbe, Metrics, profileProbe, serveMetrics, Series, tcpProbe } from './metrics.ts';
 import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId } from './model.ts';
 import { composeProject, DockerInfra } from './infra.ts';
 import { inClusterClient } from './kube.ts';
@@ -56,11 +56,12 @@ const store = storeUrl
     commands: Number(process.env.PNEUMA_SPACE_STORE_COMMANDS ?? 4), testRetry: process.env.PNEUMA_SPACE_STORE_TEST_RETRY === '1', volumeGb: config.volumeGb,
   })
   : new SqliteStore(join(data, 'pneuma-space.sqlite3'), { volumeGb: config.volumeGb });
+const series = new Series();
 const instances = new Instances(store, { replica });
 await instances.ready();
 await instances.start();
 const specFor = (app: AppId) => registry.runSpec(app);
-const guard = new AppGuard({ instances, specFor });
+const guard = new AppGuard({ instances, specFor, series });
 // The plane swaps the container driver, the runner pool and Infra; everything else is shared (ADR 0019 item 1).
 const { infra, container, pool } = setup.pods
   ? {
@@ -94,6 +95,7 @@ const identity: Identity = setup.upstream
 const ingress = new Ingress({
   registry, runtime, identity, authority, addressing: setup.addressing, bundles, scheduler,
   upstream: setup.upstream && { header: setup.upstream.header, stripCookies: setup.upstream.stripCookies }, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
+  series,
 });
 
 const metrics = new Metrics({
@@ -113,6 +115,9 @@ const metrics = new Metrics({
   store,
   policy: () => registry.policy(),
   view: (name) => registry.view(name),
+  series,
+  quota: store,
+  retries: () => (store instanceof PgStore ? store.retries : 0),
   replica,
   leader: () => instances.leading,
 });
@@ -140,6 +145,7 @@ const peers = process.env.PNEUMA_SPACE_PEERS
   ? { host: process.env.PNEUMA_SPACE_PEERS, forward: ['authorization', ...(setup.upstream ? [setup.upstream.header] : [])] }
   : undefined;
 const admin = await startAdmin({ registry, bundles, runtime, guard, metrics, requests, replica, peers, store, ingressPort, upstream }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const exporter = await serveMetrics(process.env.PNEUMA_SPACE_METRICS_PORT, () => metrics.prometheus());
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {
   ingress.flush().catch((error: Error) => log('flush-failed', { error: error.message }));
@@ -154,6 +160,8 @@ process.once('SIGTERM', async () => {
   container.close();
   isolate.close();
   admin.closeAllConnections();
+  exporter?.close();
+  exporter?.closeAllConnections();
   await Promise.all([ingress.close(), new Promise((resolve) => admin.close(resolve))]);
   await ingress.flush();
   await instances.close();

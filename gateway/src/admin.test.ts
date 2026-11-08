@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
 import { startAdmin } from './admin.ts';
 import { EventLog } from './events.ts';
-import { Metrics } from './metrics.ts';
+import { Metrics, Series } from './metrics.ts';
 import {
   appName, DEFAULT_POLICY, DEFAULT_TENANT, parseManifest, subject, USAGE_COUNTERS,
   type AppId, type AuditRecord, type HealthCheck, type ReplicaId, type Runtime, type RuntimeKind, type TenantName, type Usage,
@@ -26,6 +26,9 @@ async function admin(runtime?: Runtimes) {
     store,
     policy: () => registry.policy(),
     view: (name) => registry.view(name),
+    series: new Series(),
+    quota: store,
+    retries: () => 0,
     replica: 'r1' as ReplicaId,
   });
   const requests = new RequestLog(() => {});

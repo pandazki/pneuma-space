@@ -9,6 +9,7 @@ import { DEFAULT_POLICY, DEFAULT_TENANT, type AppId, type AppName, type ImageId,
 import { PATH_ADDRESSING } from './address.ts';
 import { LOCAL_CALLER } from './authz.ts';
 import { Ingress } from './ingress.ts';
+import { Series } from './metrics.ts';
 
 const MiB = 2 ** 20;
 const GiB = 2 ** 30;
@@ -34,6 +35,7 @@ async function serveIngress(upstreamPort: number): Promise<void> {
     stats: [],
     async flushStats() {},
     async deleteStats() {},
+    series: new Series(),
   });
   const port = await ingress.listen(0, '127.0.0.1');
   process.send!({ port });
