@@ -441,7 +441,7 @@ export type QuotaResource = (typeof QUOTA_RESOURCES)[number];
 export type Quota = { readonly [R in QuotaResource]: number | null };
 export type QuotaUsage = { readonly [R in QuotaResource]: number };
 /** Copied into a tenant when it is created; changing it leaves existing tenants as they are. */
-export const DEFAULT_QUOTA: Quota = { apps: 100, awake: 20, cpu_millis: 20000, memory_mb: 8192, storage_gb: 20 };
+export const DEFAULT_QUOTA: Quota = { apps: 100, awake: 20, cpu_millis: 20000, memory_mb: 10240, storage_gb: 20 };
 
 export type Refusal = { readonly resource: QuotaResource; readonly used: number; readonly limit: number; readonly ask: number };
 
