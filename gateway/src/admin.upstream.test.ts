@@ -9,8 +9,9 @@ import { startAdmin } from './admin.ts';
 import { Authority } from './authz.ts';
 import { UpstreamIdentity, type UpstreamConfig } from './identity.ts';
 import { Ingress } from './ingress.ts';
+import { Series } from './metrics.ts';
 import { JwtVerifier } from './jwt.ts';
-import { appName, parseManifest, subject, type AppId, type AuditRecord, type DeliveryId, type TenantName } from './model.ts';
+import { appName, parseManifest, subject, type AppId, type AuditRecord, type DeliveryId, type ReplicaId, type TenantName } from './model.ts';
 import { world } from './registry.fakes.ts';
 import type { PlatformRegistry } from './registry.ts';
 import type { SqliteStore } from './store.ts';
@@ -59,7 +60,7 @@ before(async () => {
   const identity = new UpstreamIdentity(config('console'), authority, registry);
   const server = await startAdmin({
     registry, bundles: w.bundles, runtime: { logs: async () => '', healthOf: () => [] }, guard: w.runtime,
-    metrics: { snapshot: () => ({}) as never }, nodes: { snapshot: () => ({ source: null, sampledAt: null, nodes: [] }) }, requests: { after: () => [] }, store, ingressPort: 18080, upstream: { identity, authority },
+    metrics: { snapshot: () => ({}) as never, events: async () => [] }, nodes: { snapshot: () => ({ source: null, sampledAt: null, nodes: [] }) }, requests: { after: () => [] }, replica: 'r1' as ReplicaId, store, ingressPort: 18080, upstream: { identity, authority },
   }, { port: 0 });
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   close = async () => void server.close();
@@ -215,7 +216,7 @@ test('a personal token publishes into its tenant with the issuer as owner, and t
   const ingress = new Ingress({
     registry, authority, identity, addressing: parseAppsOrigin('https://*.apps.test'), upstream: { header: 'x-upstream-jwt', stripCookies: [] },
     runtime: { acquire: async (app: AppId) => ({ app, address: `127.0.0.1:${(echo.address() as AddressInfo).port}` }), release() {}, channel() {}, state: () => 'awake' },
-    bundles: { open: async () => Readable.from([]) }, scheduler: { invoke: async () => 'd-1' as DeliveryId }, stats: [], async flushStats() {}, async deleteStats() {},
+    bundles: { open: async () => Readable.from([]) }, scheduler: { invoke: async () => 'd-1' as DeliveryId }, stats: [], async flushStats() {}, async deleteStats() {}, series: new Series(),
   });
   const port = await ingress.listen(0, '127.0.0.1');
   t.after(async () => { await ingress.close(); echo.close(); });

@@ -6,19 +6,20 @@ import { DEAD_MS } from './instances.ts';
 import { requests } from './requests.ts';
 import { QUOTA_RETRY_SECONDS } from './runtimes.ts';
 import {
-  HEADERS, MAX_ATTEMPTS, NotFound, QuotaExceeded, TRIGGER_PATH,
-  type AppId, type CronExpr, type Delivery, type DeliveryId, type InvokeRequest, type Lease, type ReplicaId,
+  DEFAULT_POLICY, HEADERS, MAX_ATTEMPTS, NotFound, QuotaExceeded, TRIGGER_PATH,
+  type AppId, type CronExpr, type Delivery, type DeliveryId, type InvokeRequest, type Lease, type Policy, type ReplicaId,
   type Runtime, type Scheduler, type SchedulerView, type Store, type TriggerName,
 } from './model.ts';
 
 export type SchedulerDeps = {
-  readonly store: Pick<Store, 'apps' | 'insertDelivery' | 'updateDelivery' | 'claimDelivery' | 'deliveries' | 'lastScheduledFor' | 'deleteDeliveries' | 'replicas'>;
+  readonly store: Pick<Store, 'apps' | 'insertDelivery' | 'updateDelivery' | 'claimDelivery' | 'deliveries' | 'lastScheduledFor' | 'deleteDeliveries' | 'replicas' | 'sweepDeliveries'>;
   readonly runtime: Pick<Runtime, 'acquire' | 'release' | 'state'>;
   readonly view: (app: AppId) => SchedulerView | null;
   readonly now?: () => number;
   readonly log?: Emit;
   /** This replica, named in the deliveries it claims. */
   readonly replica?: ReplicaId;
+  readonly policy?: () => Pick<Policy, 'events_retention_days'>;
 };
 
 const TICK_MS = 1000;
@@ -34,6 +35,8 @@ export class DeliveryScheduler implements Scheduler {
   readonly #now: () => number;
   readonly #log: Emit;
   readonly #replica: ReplicaId;
+  readonly #policy: () => Pick<Policy, 'events_retention_days'>;
+  #sweptAt = -Infinity;
   readonly #inFlight = new Set<AppId>();
   #timer: ReturnType<typeof setInterval> | null = null;
 
@@ -44,6 +47,7 @@ export class DeliveryScheduler implements Scheduler {
     this.#now = deps.now ?? Date.now;
     this.#log = deps.log ?? emit;
     this.#replica = deps.replica ?? (hostname() as ReplicaId);
+    this.#policy = deps.policy ?? (() => DEFAULT_POLICY);
   }
 
   async invoke(req: InvokeRequest): Promise<DeliveryId> {
@@ -80,10 +84,18 @@ export class DeliveryScheduler implements Scheduler {
     this.#timer = null;
   }
 
-  /** Materializes due cron slots, then starts at most one delivery per app; resolves when the started ones settle. Never rejects. */
+  /**
+   * Materializes due cron slots, then starts at most one delivery per app; resolves when the started ones settle. Never rejects.
+   * Ticks run on the leader only, which also sweeps finished deliveries once an hour (ADR 0024 item 4; failed ones stay, INV-4).
+   */
   async tick(): Promise<void> {
     try {
       const now = this.#now();
+      if (now - this.#sweptAt >= HOUR) {
+        this.#sweptAt = now;
+        await this.#store.sweepDeliveries(now - this.#policy().events_retention_days * DAY)
+          .catch((error) => this.#log('sweep-failed', null, { error: String(error) }));
+      }
       await this.#materialize(now);
       const started: Promise<void>[] = [];
       const due = (await this.#store.deliveries({ state: 'due', dueBefore: now }))

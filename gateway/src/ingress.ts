@@ -6,13 +6,14 @@ import {
   APPS_PATH, HEADERS, InputError, LOGIN_PATH, LOGOUT_PATH, NotFound, QuotaExceeded, RESERVED_HEADER_PREFIX, RESERVED_SEGMENT,
   TRIGGER_BODY_LIMIT, appName, effectivePolicy, triggerName,
   type AppId, type BundleStore, type Lease, type Principal, type Registry,
-  type RouteView, type Runtime, type Scheduler, type Stats, type Subject,
+  type RouteView, type Runtime, type RuntimeKind, type Scheduler, type Stats, type Subject, type TenantName,
 } from './model.ts';
 import { hostLabel, type Addressing } from './address.ts';
 import { allows, type Authority } from './authz.ts';
 import { emit } from './events.ts';
 import { carriesJwt, type Answer, type Auth, type Failure, type Identity } from './identity.ts';
 import { connect, forward, tunnel, type Hold } from './proxy.ts';
+import type { Series } from './metrics.ts';
 import { requests, type RequestKind } from './requests.ts';
 import { Backoff, QUOTA_RETRY_SECONDS, Quarantined, Unavailable } from './runtimes.ts';
 import { serveStatic, staticPath } from './static.ts';
@@ -31,6 +32,7 @@ export type IngressDeps = {
   readonly stats: readonly Stats[];
   readonly flushStats: (stats: Stats[]) => Promise<void>;
   readonly deleteStats: (app: AppId) => Promise<void>;
+  readonly series: Pick<Series, 'request'>;
 };
 
 /** `header` lowercase. */
@@ -51,7 +53,7 @@ type Route =
   | { readonly to: 'app'; readonly view: RouteView; readonly path: string; readonly headers: string[] };
 
 /** What a request record learns on the way through, beyond what the request and response carry; no app, no record. `refused`: the Guard answered, so a 503 is not the app's error. */
-type Trace = { app: AppId | null; kind: RequestKind; subject: string | null; waitMs: number | null; cold: boolean; error: string | null; refused?: boolean };
+type Trace = { app: AppId | null; tenant?: TenantName; runtime?: RuntimeKind | null; kind: RequestKind; subject: string | null; waitMs: number | null; cold: boolean; error: string | null; refused?: boolean };
 
 type Counter = { requests: number; errors: number; lastAccessAt: number | null };
 
@@ -184,10 +186,10 @@ export class Ingress {
     return this.#deps.deleteStats(app);
   }
 
-  #count(app: AppId, status: number, refused: boolean): void {
+  #count(app: AppId, error: boolean): void {
     const counter = this.#stats.get(app) ?? { requests: 0, errors: 0, lastAccessAt: null };
     counter.requests += 1;
-    if (status >= 500 && !refused) counter.errors += 1;
+    if (error) counter.errors += 1;
     counter.lastAccessAt = Date.now();
     this.#stats.set(app, counter);
   }
@@ -197,8 +199,10 @@ export class Ingress {
     const { app } = trace;
     if (!app) return;
     if (status === 0) trace.error ??= 'client closed the connection';
-    const { refused = false, ...record } = trace;
-    this.#count(app, status, refused);
+    const { refused = false, tenant, runtime, ...record } = trace;
+    const error = status >= 500 && !refused;
+    this.#count(app, error);
+    if (tenant !== undefined) this.#deps.series.request(tenant, runtime ?? null, record.kind, error);
     requests.record({ ...record, app, method: req.method ?? 'GET', path: (req.url ?? '/').split('?')[0], status, ms: performance.now() - started });
   }
 
@@ -227,12 +231,16 @@ export class Ingress {
       const view = label === null || !pathname.startsWith('/') ? null : this.#view(label);
       if (!view) return reply(404, 'no app at this address');
       trace.app = view.app;
+      trace.tenant = view.tenant;
+      trace.runtime = view.runtime;
       return { view, rest: pathname };
     }
     const match = /^\/apps\/([^/]+)(\/.*)?$/.exec(pathname);
     const view = match && this.#view(match[1]);
     if (!match || !view) return reply(404, 'no app at this address');
     trace.app = view.app;
+    trace.tenant = view.tenant;
+    trace.runtime = view.runtime;
     if (match[2] === undefined) return reply(308, undefined, { location: `${APPS_PATH}/${view.name}/${search}` });
     return { view, rest: match[2] };
   }

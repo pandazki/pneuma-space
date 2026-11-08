@@ -85,8 +85,8 @@ test('AC-ISO-2', { timeout: 120_000 }, async (t) => {
   const quarantine = await waitFor(async () => (await summary(app.name)).quarantine, 10_000, 'quarantine');
   assert.equal(quarantine.failures, 2);
   assert.equal(await status(app.name), 503);
-  const metrics = await (await fetch(`${adminUrl}/api/metrics`)).json();
-  assert.ok(metrics.events.some((e: { ev: string; app: string }) => e.ev === 'quarantined'), 'the quarantine is a lifecycle event');
+  const quarantined = async () => (await (await fetch(`${adminUrl}/api/metrics`)).json()).events.some((e: { ev: string }) => e.ev === 'quarantined');
+  await waitFor(quarantined, 5000, 'the quarantine as a lifecycle event');
   assert.match(await (await fetch(`${adminUrl}/`)).text(), /if \(a\.quarantine\) items\.push/, 'the attention inbox lists quarantined apps');
   assert.ok((await fetch(`${adminUrl}/api/apps/${app.name}/unquarantine`, { method: 'POST' })).ok);
   assert.equal((await summary(app.name)).quarantine, null);
