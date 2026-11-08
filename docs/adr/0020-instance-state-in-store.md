@@ -14,7 +14,7 @@
    | `lease_tally` | `(app, replica)` | `epoch`, `request`, `channel`, `trigger`, `released_at` | 该副本自己；领导者删死副本的行 |
    | `guard` | `app` | `release`, `failures`（时间数组）, `quarantine_reason`, `quarantined_at` | Guard，事务里读改写 |
 
-   一把会话级 advisory lock `pneuma-space.leader`；行锁 `FOR SHARE` 和 `FOR UPDATE`；通知通道 `pneuma_space_instance`，载荷是 app id，三张表的每次写都发。Registry 的变更也走通知（ADR 0025），其他副本据此重建 RouteView。
+   一把会话级 advisory lock `pneuma-space.leader`；行锁 `FOR SHARE` 和 `FOR UPDATE`；`instance`、`lease_tally`、`guard` 的每次写由行触发器在提交时发通知，通道 `pneuma_space`，载荷 `instance/<app id>`（ADR 0025）。Registry 的变更走同一通道，其他副本据此重建 RouteView。
 3. **每个副本在内存里维护三张表的镜像。** 收到通知就重读那一行；监听连接重连后全量重读；每 30 s 全量重读一次兜底。`Runtime` 的同步读接口 `state`、`since`、`leases`（各副本计数之和）、`sleepsAt` 和 Guard 的 `quarantine` 都读镜像，列表仍然零 IO（AC-P-8）。
 4. **流程。** 每个 CAS 带 `WHERE app=$1 AND state=<预期> AND epoch=<预期>`，然后发通知。
    - acquire 快路径：镜像里实例 `awake`，本副本对当前 epoch 的计数大于 0，本副本的 Pod watch 没报这个 handle 结束：内存里加租约，零 IO。热请求都走这里。

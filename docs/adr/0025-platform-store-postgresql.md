@@ -1,0 +1,23 @@
+# ADR 0025：平台库上 PostgreSQL，内置线协议客户端，供应直接说协议
+
+状态：**M2 决定**。取代 ADR 0005 拒绝项里的"网关内置 PostgreSQL 线协议客户端"和 ADR 0013 的"网关里没有数据库驱动"。证据：spike S5（分支 `S5-pg`，`spike/pg/`，对 PostgreSQL 16.14 全部 16 项通过）。设计探索稿 M2-D2。
+
+决定：
+
+1. **网关内置 PostgreSQL 线协议客户端 `gateway/src/pg.ts`，不加 `pg`。** 只用 `node:net`、`node:tls`、`node:crypto`：启动、SCRAM-SHA-256、SSLRequest 加 TLS、扩展协议（文本参数，每会话每条 SQL 只 Parse 一次）、简单协议、ErrorResponse 转 `PgError(code, message, detail, constraint)`、NotificationResponse、固定大小的池、`statement_timeout` 经启动参数、CancelRequest 取消卡住的调用、丢失的会话补新、`0A000` 时丢掉缓存语句重试一次。spike 353 行（池 59 行），加固后约 450 到 500 行。网关仍然零运行时依赖。
+2. **两个 Store，一份 DML。** `SqliteStore`（单机）和 `PgStore`（集群）都实现 `Store`，每条 SQL 只写一次，占位符 `$n`，SQLite 会话在 prepare 时改写成 `?n`（`node:sqlite` 按位置绑定 `?NNN`，实测不绑 `$1`）。共用 DML 和行映射抽到 `gateway/src/sql.ts`。方言只在 DDL 和会话层：epoch 毫秒用 `BIGINT`；字节 `BYTEA`；事务 `BEGIN IMMEDIATE` 对 `BEGIN ISOLATION LEVEL SERIALIZABLE`；版本 `PRAGMA user_version` 对 `schema_migration` 表；自增 `GENERATED ALWAYS AS IDENTITY`，插入不写该列用 `RETURNING`；没有 limit 时不拼 `LIMIT` 子句；标量最大值写 `CASE WHEN`；表名 `users`。JSON 列是 `TEXT`，没有外键：每张表一个写者，删除由 `deleteApp` 显式做。`PNEUMA_SPACE_STORE_URL` 存在时用 `PgStore`，取 libpq URL 的子集 `postgres://user:pass@host:port/db?sslmode=verify-full&sslrootcert=<path>`，`sslmode` 只认 `disable` 和 `verify-full`。
+3. **`Store.transaction` 在 PostgreSQL 上是 `SERIALIZABLE` 加重试**：遇 `40001`、`40P01` 重跑 `fn`，至多 5 次。契约从"其间没有别的事在跑"改为"效果如同独占运行；`fn` 可能被重跑，除了经 `tx` 的读写只许有幂等的内存写"。现有的每个 `fn` 都满足，调用方不改。`PgStore` 在测试模式下故意让每个事务第一次提交失败一次，把违反约定的 `fn` 暴露出来。
+4. **跨副本的命令互斥用每 App 的会话级 advisory lock。** `Store.exclusive(name, fn)` 取代 `Registry.#exclusive`：PostgreSQL 进程内先按名字排队，再借一个会话 `pg_advisory_lock(1, hashtext(name))`，结束后解锁归还，这个会话关掉 `statement_timeout`；SQLite 是现有的 promise 链。按名字而不是 id 加锁，因为首次发布时还没有 id。会话断开时服务端释放锁。
+5. **变更通知由行触发器在提交时发**，一个通道 `pneuma_space`，载荷四种：`app/<name>`（`app`、`release`、`trigger`、`binding` 的任何写）、`policy`、`instance/<app id>`（`instance`、`lease_tally`、`guard`）、`tenant/<name>`（`tenant`、`membership`、`token`）。提交时才投递，回滚不投递，同一事务里相同载荷只投一次。Registry 不加 `notify` 调用，"触发器是否覆盖了全部表"由一条测试守住。`SqliteStore` 在写方法里记下触及的键，`COMMIT` 后在进程内发同样的事件，单机和集群走同一条接收路径。接收：`app/<name>` 让 Registry `#refresh(name)` 重建 RouteView、RunSpec 和 SchedulerView；`policy` 重读全局 Policy；`instance/<id>` 让 Runtime 镜像重读该行（ADR 0020）；`tenant/<name>` 让 ADR 0022 的成员和令牌缓存失效，30 s TTL 只是兜底。监听会话重连后全量重读，Registry 用两条批量查询（app 连当前 release，全部 binding）代替逐个刷新。`Runtime.retire` 和 `Scheduler.reload` 不随通知执行，仍由执行命令的副本做一次。
+6. **每副本一个 8 会话的池加一个专用会话**，专用会话 `LISTEN pneuma_space` 并持有领导锁（ADR 0020）。3 副本 27 个连接。不支持事务模式的 PgBouncer（advisory lock、LISTEN、具名语句都要会话）。
+7. **平台库是独立的 PostgreSQL**，不和应用的 `db` 后端共用实例，`platform-db` 网络策略（ADR 0019）才表达得出"应用到不了平台库"；可以指向组织托管的实例。
+8. **迁移。** `PgStore` 打开时取 `pg_advisory_lock(0, 0)`，按 `schema_migration` 补跑缺的步骤，每步一个事务，同时启动的副本不会重复迁移。滚动发布时新旧副本共用一个 schema，步骤只做加法：加表、加可空列，删列放到下一个版本。PostgreSQL 的步骤 1 就是完整的 M2 schema；`SqliteStore` 的 `MIGRATIONS` 加第 4 步建同样的 M2 表，建租户 `default` 并把现有 App 和令牌归给它。M1 单机到集群不迁数据。
+9. **供应直接说协议，两个平面相同，没有供应任务。** `db` Provider 用 `pg.ts` 以平台的管理角色连应用数据库服务做 `CREATE ROLE`、`CREATE DATABASE`、`GRANT`、暂停和销毁；`kv` Provider 用一个不到百行的 RESP 客户端做 `ACL SETUSER` 一类命令；`object` 本来就是签名 HTTP（ADR 0013）。`Infra.runJob` 和 Docker 平面里 exec 进基础设施容器的做法一并删除，`Infra` 只剩 `resolveImage`（Docker 是本地镜像 id，K8s 是仓库 digest）。`REQUIREMENTS-M2.md` 集群一节随之改写。
+
+理由：`pg` 8.x 有 6 个直接依赖再拉几个间接依赖，会带来网关的第一个 `package.json` 依赖、镜像里的 `node_modules` 和一份要审计的锁文件，ADR 0012 的零依赖不再成立；而它在这条路径上也快不了：spike 量出 `SELECT 1` 和按键查询只比一个空的 Sync 多 0.01 到 0.05 ms，查询延迟受限于往返，不受限于客户端。我们用到的协议面很小，和 Docker API 客户端、SigV4 签名一样，是网关已经在做的"用内置模块讲一个协议"。可串行化以零调用点改动关掉丢更新：不在命令锁里的写（`setOwner`、Scheduler 的插入）在 READ COMMITTED 下会互相覆盖。触发器写在一个地方，显式 `notify` 要在六个以上的调用点各加一行。供应说协议是因为客户端已经在网关里了：K8s 上每次 `ensure` 起一个 Job 要几秒、要运营者镜像 Job 镜像、领导者启动时对上万条 Binding 收敛要按小时算，直接连只要几毫秒，还删掉整个任务子系统。
+
+拒绝：加 `pg`；事务改用 `FOR UPDATE` 锁 app 行（首次发布没有行，锁要跨 Provider 的网络调用）；乐观版本号（冲突时要重跑带副作用的整条命令）；只用 advisory lock 配 READ COMMITTED；显式 `tx.notify()`；投递用 `FOR UPDATE SKIP LOCKED` 让所有副本一起投（领导者一个就满足至少一次，吞吐不是 M2 的瓶颈）；供应保留为 K8s Job 或 exec 进常驻工具 Pod；`JSONB` 和外键。
+
+spike 数字（Apple M4 Max，Docker Desktop，宿主机负载 11 到 12，四次运行的范围，中位数 / p90，ms）：Sync 到 ReadyForQuery 不带语句 0.21–0.25 / 0.24–0.63（TCP）；`SELECT 1` 200 次 0.21–0.30 / 0.28–0.55；按键查询 1000 行 200 次 0.22–0.27 / 0.35–0.52；TLS 各项相近；建连到就绪 4.4–5.6（TCP）、7.7–10.4（TLS），由服务端 fork、TLS 握手和 SCRAM 三次往返决定，客户端的 PBKDF2 只占 0.35 ms，建连每个池槽付一次，不在请求路径上。这台机器上的往返下限是 Docker Desktop 到 Linux VM 的端口转发。
+
+后果：自写客户端的边角（跨块的消息、服务端重启、`57P01` 管理员断连、大结果集）靠契约测试守，每个会话出错直接丢弃不修复。只支持 SCRAM，还在用 `md5` 的老实例连不上并报明原因；云厂商要求通道绑定时再加约 20 行。锁会话在命令中途丢失时另一个副本会进来，命令本身幂等，最坏重复执行一次。监听会话断开期间的通知会丢，重连后全量重读，ADR 0020 另有每 30 s 的兜底。`registered_at`、`next_attempt_at`、`usage.start` 取各副本时钟，假设节点有 NTP。SERIALIZABLE 的重试率预计很低，没测过，指标端点加一个重试计数。AGENTS.md 的边界句改为：Provider 不用 npm 驱动，PostgreSQL 和 Redis 经网关自己的最小客户端访问。
