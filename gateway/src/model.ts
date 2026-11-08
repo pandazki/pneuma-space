@@ -1085,6 +1085,8 @@ export const HEADERS = {
 } as const;
 
 export const ADMIN_PATHS = {
+  /** Unauthenticated liveness for probes (ADR 0022 item 5). */
+  healthz: '/healthz',
   health: '/api/health',
   apps: '/api/apps',
   metrics: '/api/metrics',

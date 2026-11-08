@@ -518,6 +518,7 @@ export function createAdmin(deps: AdminDeps): Server {
     const url = new URL(request.url ?? '/', 'http://admin');
     const path = url.pathname;
     try {
+      if (path === ADMIN_PATHS.healthz && READS.has(request.method ?? '')) return void response.writeHead(200).end();
       if (request.method === 'GET' && path === '/') {
         const page = await readFile(consoleFile).catch(() => null);
         if (page) return void ((await callerOf(request, response)) && response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page));

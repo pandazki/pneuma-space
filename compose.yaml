@@ -12,7 +12,7 @@ services:
       rustfs: { condition: service_healthy }
       redis: { condition: service_started }
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/api/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/healthz"]
       interval: 2s
       retries: 30
     ports:

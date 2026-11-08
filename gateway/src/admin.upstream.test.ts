@@ -147,6 +147,11 @@ test('a signed-in write without Sec-Fetch-Site: same-origin gets 403; a token\'s
   assert.equal((await policy('token:ci', true)).status, 200);
 });
 
+test('GET /healthz answers 200 with no body and no credential while /api/health answers 401', async () => {
+  const healthz = await call(null, 'GET', '/healthz');
+  assert.deepEqual([healthz.status, healthz.body, (await call(null, 'GET', '/api/health')).status], [200, '', 401]);
+});
+
 test('without a credential a browser is sent to the login URL and a program gets 401', async () => {
   const browser = await call(null, 'GET', '/api/apps', undefined, { accept: 'text/html' });
   assert.deepEqual([browser.status, browser.location?.startsWith('https://sso.test/start?rd=')], [303, true]);

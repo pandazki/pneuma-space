@@ -53,10 +53,17 @@ spec:
               containerPort: 9090
           readinessProbe:
             httpGet:
-              path: /api/health
+              path: /healthz
               port: admin
             periodSeconds: 2
             failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: admin
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
           lifecycle:
             preStop:
               exec:
