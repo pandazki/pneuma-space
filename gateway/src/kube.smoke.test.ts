@@ -1,41 +1,13 @@
-// `PNEUMA_SPACE_TEST_KUBECONTEXT=<context> npm run test:k8s` against the operator's cluster; skipped when unset.
-// The client gets the context's server and CA plus a 10-minute token for this ServiceAccount, which the operator creates once:
-//
-//   apiVersion: v1
-//   kind: ServiceAccount
-//   metadata: { name: pneuma-space-smoke, namespace: pneuma-space-apps, labels: { app.kubernetes.io/part-of: pneuma-space } }
-//   ---
-//   apiVersion: rbac.authorization.k8s.io/v1
-//   kind: Role
-//   metadata: { name: pneuma-space-smoke, namespace: pneuma-space-apps, labels: { app.kubernetes.io/part-of: pneuma-space } }
-//   rules:
-//     - { apiGroups: [""], resources: [pods], verbs: [create, get, list, watch, delete] }
-//     - { apiGroups: [""], resources: [pods/log], verbs: [get] }
-//   ---
-//   apiVersion: rbac.authorization.k8s.io/v1
-//   kind: RoleBinding
-//   metadata: { name: pneuma-space-smoke, namespace: pneuma-space-apps, labels: { app.kubernetes.io/part-of: pneuma-space } }
-//   roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: pneuma-space-smoke }
-//   subjects: [{ kind: ServiceAccount, name: pneuma-space-smoke, namespace: pneuma-space-apps }]
-//
-// The context itself needs `create serviceaccounts/token` on that account. PNEUMA_SPACE_TEST_IMAGE overrides the busybox image.
+// See kube.harness.ts. PNEUMA_SPACE_TEST_IMAGE overrides the busybox image.
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
-import { promisify } from 'node:util';
-import { KubeClient, KubeError, type Pod, type WatchEvent } from './kube.ts';
+import { context, skip, smokeClient } from './kube.harness.ts';
+import { KubeError, type KubeClient, type Pod, type WatchEvent } from './kube.ts';
 
-const context = process.env.PNEUMA_SPACE_TEST_KUBECONTEXT;
-const skip = context ? false : 'PNEUMA_SPACE_TEST_KUBECONTEXT is unset; set it to a kubectl context to run the Kubernetes smoke';
-const NAMESPACE = 'pneuma-space-apps';
 const SELECTOR = 'app.kubernetes.io/part-of=pneuma-space,pneuma-space.role=smoke';
 const name = `pneuma-space-smoke-${randomBytes(3).toString('hex')}`;
 let kube: KubeClient;
-
-const kubectl = async (...args: string[]): Promise<string> =>
-  (await promisify(execFile)('kubectl', ['--context', context!, ...args])).stdout;
 
 async function until(resourceVersion: string, match: (event: WatchEvent<Pod>) => boolean): Promise<WatchEvent<Pod> | undefined> {
   for await (const event of kube.watch('pods', { labelSelector: SELECTOR, resourceVersion, signal: AbortSignal.timeout(120_000) })) {
@@ -47,14 +19,7 @@ async function until(resourceVersion: string, match: (event: WatchEvent<Pod>) =>
 const ours = (event: WatchEvent<Pod>): event is Extract<WatchEvent<Pod>, { object: Pod }> => event.type !== 'BOOKMARK' && event.object.metadata.name === name;
 
 before(async () => {
-  if (!context) return;
-  const config = JSON.parse(await kubectl('config', 'view', '--raw', '--minify', '-o', 'json'));
-  const cluster = config.clusters[0].cluster;
-  const ca = cluster['certificate-authority-data']
-    ? Buffer.from(cluster['certificate-authority-data'], 'base64')
-    : cluster['certificate-authority'] && (await readFile(cluster['certificate-authority']));
-  const token = (await kubectl('-n', NAMESPACE, 'create', 'token', 'pneuma-space-smoke', '--duration=10m')).trim();
-  kube = new KubeClient({ server: cluster.server, ca, token: async () => token, namespace: NAMESPACE });
+  if (context) kube = await smokeClient();
 });
 
 after(async () => {

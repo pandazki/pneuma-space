@@ -10,7 +10,7 @@ import { Authority } from './authz.ts';
 import { UpstreamIdentity, type UpstreamConfig } from './identity.ts';
 import { Ingress } from './ingress.ts';
 import { JwtVerifier } from './jwt.ts';
-import { appName, parseManifest, subject, type AppId, type AuditRecord, type DeliveryId, type TenantName } from './model.ts';
+import { appName, parseManifest, subject, type AppId, type AuditRecord, type DeliveryId, type ReplicaId, type TenantName } from './model.ts';
 import { world } from './registry.fakes.ts';
 import type { PlatformRegistry } from './registry.ts';
 import type { SqliteStore } from './store.ts';
@@ -59,7 +59,7 @@ before(async () => {
   const identity = new UpstreamIdentity(config('console'), authority, registry);
   const server = await startAdmin({
     registry, bundles: w.bundles, runtime: { logs: async () => '', healthOf: () => [] }, guard: w.runtime,
-    metrics: { snapshot: () => ({}) as never }, requests: { after: () => [] }, store, ingressPort: 18080, upstream: { identity, authority },
+    metrics: { snapshot: () => ({}) as never, events: async () => [] }, requests: { after: () => [] }, replica: 'r1' as ReplicaId, store, ingressPort: 18080, upstream: { identity, authority },
   }, { port: 0 });
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   close = async () => void server.close();

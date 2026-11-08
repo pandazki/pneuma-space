@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { registered, replica, tempStore, until } from './lifecycle.fakes.ts';
+import { Unavailable } from './runtimes.ts';
 import { changeKey, DEFAULT_QUOTA, DEFAULT_TENANT, QuotaExceeded, type ReleaseNumber, type ReplicaId, type Store } from './model.ts';
 
 /** Counts the calls made through it. */
@@ -100,4 +101,13 @@ test('unquarantine deletes the guard row and a change notice for the app follows
   store.onChange((change) => seen.push(changeKey(change)));
   await guard.unquarantine(app);
   assert.deepEqual([await store.guard(app), seen], [null, [`instance/${app}`]]);
+});
+
+test('an acquire on an awake app whose address the driver no longer maps to its handle answers Unavailable', async () => {
+  const store = tempStore();
+  const { app, specFor } = await registered(store);
+  const { driver, lifecycle } = replica(store, specFor);
+  await lifecycle.acquire(app, 'request');
+  driver.serving = false;
+  await assert.rejects(lifecycle.acquire(app, 'request'), Unavailable);
 });

@@ -9,6 +9,7 @@ import {
 } from './model.ts';
 import { RING, requests } from './requests.ts';
 import { DeliveryScheduler, latestSlot, nextSlot, type SchedulerDeps } from './scheduler.ts';
+import { SqliteStore } from './store.ts';
 
 type Received = { headers: IncomingMessage['headers']; body: string };
 let handle: (req: IncomingMessage, res: ServerResponse, received: Received) => void = (_req, res) => res.end();
@@ -68,6 +69,7 @@ function harness(triggers: Record<string, string | null> = { run: null }) {
       return i >= 0;
     },
     replicas: async () => state.replicas,
+    sweepDeliveries: async () => 0,
     deliveries: async (f: DeliveryFilter) => rows.filter((r) => (f.app === undefined || r.app === f.app) &&
       (f.state === undefined || r.state === f.state) && (f.dueBefore === undefined || r.nextAttemptAt <= f.dueBefore)),
     deleteDeliveries: async (app) => void rows.splice(0, rows.length, ...rows.filter((r) => r.app !== app)),
@@ -237,6 +239,22 @@ test('resume returns a delivering row to due and redelivers it with the same id'
   await scheduler.tick();
   scheduler.stop();
   assert.deepEqual([rows[0].state, received[0].headers['x-pneuma-space-delivery'], received[0].headers['x-pneuma-space-attempt']], ['done', id, '2']);
+});
+
+test("the leader's hourly tick sweeps done and cancelled deliveries past the event retention and keeps failed ones (INV-4)", async () => {
+  const store = new SqliteStore(':memory:');
+  const day = 24 * 3_600_000;
+  const row = (id: string, state: Delivery['state'], age: number): Delivery => ({
+    id: id as Delivery['id'], app: APP, trigger: 'run' as TriggerName, scheduledFor: null, caller: null, idempotencyKey: id, body: new Uint8Array(),
+    state, attempts: 1, nextAttemptAt: T0 - age, createdAt: T0 - age, replica: null,
+  });
+  for (const d of [row('old-done', 'done', 15 * day), row('old-cancelled', 'cancelled', 15 * day), row('old-failed', 'failed', 15 * day), row('new-done', 'done', day)]) {
+    await store.insertDelivery(d);
+  }
+  const runtime = { acquire: async () => { throw new Error('unused'); }, release: () => {}, state: () => 'asleep' as const };
+  const scheduler = new DeliveryScheduler({ store, runtime, view: () => null, now: () => T0, log: () => {}, policy: () => ({ events_retention_days: 14 }) });
+  await scheduler.tick();
+  assert.deepEqual((await store.deliveries({})).map((d) => d.id).sort(), ['new-done', 'old-failed']);
 });
 
 test('nextSlot follows the America/New_York wall clock across the 2026 DST changes', () => {

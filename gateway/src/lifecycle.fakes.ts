@@ -27,6 +27,7 @@ export class FakeDriver implements Driver<RunSpec, string> {
   starts = 0;
   readonly removed: string[] = [];
   failure: Error | null = null;
+  serving = true;
   adopted: Adopted<string>[] = [];
   #gone: Gone<string> = () => {};
 
@@ -76,6 +77,10 @@ export class FakeDriver implements Driver<RunSpec, string> {
   }
 
   async destroyStorage(): Promise<void> {}
+
+  serves(): boolean {
+    return this.serving;
+  }
 }
 
 /** An app registered in `store` with a container RunSpec the test can change. */

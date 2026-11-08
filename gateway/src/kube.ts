@@ -57,9 +57,12 @@ export type Pod = {
       readonly runAsNonRoot?: boolean;
     };
     readonly volumes?: readonly { readonly name: string; readonly persistentVolumeClaim: { readonly claimName: string } }[];
+    readonly nodeName?: string;
   };
   readonly status?: {
     readonly phase?: 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Unknown';
+    readonly reason?: string;
+    readonly message?: string;
     readonly podIP?: string;
     readonly conditions?: readonly { readonly type: string; readonly status: 'True' | 'False' | 'Unknown' }[];
     readonly containerStatuses?: readonly { readonly name: string; readonly ready: boolean; readonly state?: ContainerState }[];
@@ -78,6 +81,7 @@ export type PersistentVolumeClaim = {
 
 export type Node = {
   readonly metadata: ObjectMeta;
+  readonly spec?: { readonly taints?: readonly { readonly key: string; readonly value?: string; readonly effect: string }[] };
   readonly status?: { readonly conditions?: readonly { readonly type: string; readonly status: 'True' | 'False' | 'Unknown' }[] };
 };
 
@@ -189,8 +193,11 @@ export class KubeClient {
     return JSON.parse(await this.#call('GET', this.#path(kind, name)));
   }
 
-  async delete<K extends Writable>(kind: K, name: string, options: { readonly gracePeriodSeconds?: number } = {}): Promise<Objects[K]> {
-    return JSON.parse(await this.#call('DELETE', this.#path(kind, name) + query(options)));
+  /** With `uid`, only the object of that uid is deleted; another one under the name answers 409 Conflict. */
+  async delete<K extends Writable>(kind: K, name: string, options: { readonly gracePeriodSeconds?: number; readonly uid?: string } = {}): Promise<Objects[K]> {
+    const { gracePeriodSeconds, uid } = options;
+    const body = { apiVersion: 'v1', kind: 'DeleteOptions', gracePeriodSeconds, preconditions: uid === undefined ? undefined : { uid } };
+    return JSON.parse(await this.#call('DELETE', this.#path(kind, name), body));
   }
 
   async list<K extends Listable>(kind: K, selectors: Selectors = {}): Promise<List<Objects[K]>> {

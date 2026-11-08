@@ -113,7 +113,9 @@ test('AC-P-13', { timeout: 60_000 }, async (t) => {
   await appJson(app.name, '/');
   const after = await metrics();
   assert.equal(after.wakes.last24h.count - before.wakes.last24h.count, 1, 'one wake');
-  assert.equal(typeof after.events.findLast((e: any) => e.ev === 'awake' && e.app === app.name)?.ms, 'number', 'the wake carries its latency');
+  assert.equal(typeof after.series.wakeMeanMs.findLast((ms: number | null) => ms !== null), 'number', 'the wake carries its latency');
+  // The event tail reads the platform store behind its settle window (ADR 0024 item 4).
+  await waitFor(async () => (await metrics()).events.findLast((e: any) => e.ev === 'awake' && e.app === app.name && typeof e.ms === 'number'), 5000, 'the wake in the event tail');
   assert.equal(total(after.series.requests) - total(before.series.requests), 1, 'one request');
 
   const page = await (await fetch(adminUrl + '/')).text();
@@ -162,8 +164,8 @@ test('AC-P-14', { timeout: 90_000 }, async (t) => {
   await waitInstance(app.name, 'asleep', 20_000);
   assert.ok(Date.now() <= sleepsAt + 10_000, `asleep ${Date.now() - sleepsAt} ms after sleepsAt`);
 
-  const seqs = (await (await fetch(adminUrl + '/api/metrics')).json()).events.map((e: { seq: number }) => e.seq);
-  assert.ok(seqs.length > 1 && seqs.every((seq: number, i: number) => i === 0 || seq > seqs[i - 1]), 'seq strictly increases');
+  const ids = (await (await fetch(adminUrl + '/api/metrics')).json()).events.map((e: { id: number }) => e.id);
+  assert.ok(ids.length > 1 && ids.every((id: number, i: number) => i === 0 || id > ids[i - 1]), 'id strictly increases');
 
   const page = await (await fetch(adminUrl + '/')).text();
   assert.ok(page.includes('data-live'), 'overview has the live indicator');
@@ -172,14 +174,17 @@ test('AC-P-14', { timeout: 90_000 }, async (t) => {
 
 test('AC-P-15', { timeout: 120_000 }, async (t) => {
   const app = await deploy(t, { image: images.echo, capabilities: { files: {}, ws: {}, cron: { triggers: { report: {} } } } });
-  const requests = async (after: number) => (await fetch(`${adminUrl}/api/requests?after=${after}&limit=1000`)).json();
-  const newer = (after: number, kind: string) => waitFor(async () => (await requests(after)).filter((r: any) => r.app === app.name && r.kind === kind).at(-1), 15_000, `a ${kind} record`);
-  const start = (await requests(0)).at(-1)?.seq ?? 0;
+  const requests = async (after: string) => (await fetch(`${adminUrl}/api/requests?after=${encodeURIComponent(after)}&limit=1000`)).json();
+  const records = async (after: string) => (await requests(after)).records;
+  const cursor = async () => (await requests('')).cursor as string;
+  const seqIn = (after: string, replica: string) => Number(after.split(',').find((e) => e.startsWith(`${replica}:`))?.slice(replica.length + 1) ?? 0);
+  const newer = (after: string, kind: string) => waitFor(async () => (await records(after)).filter((r: any) => r.app === app.name && r.kind === kind).at(-1), 15_000, `a ${kind} record`);
+  const start = await cursor();
 
   await appJson(app.name, '/');
   const cold = await newer(start, 'request');
-  const wake = (await (await fetch(adminUrl + '/api/metrics')).json()).events.findLast((e: any) => e.ev === 'awake' && e.app === app.name);
-  assert.ok((await requests(start)).every((r: any) => r.seq > start), 'only records after the cursor');
+  const wake = await waitFor(async () => (await (await fetch(adminUrl + '/api/metrics')).json()).events.findLast((e: any) => e.ev === 'awake' && e.app === app.name), 5000, 'the wake in the event tail');
+  assert.ok((await records(start)).every((r: any) => r.seq > seqIn(start, r.replica)), 'only records after the cursor');
   assert.equal(cold.cold, true, 'the first request found the app asleep');
   assert.ok(cold.ms >= wake.ms, `ms ${cold.ms} against a wake of ${wake.ms} ms`);
 
@@ -187,7 +192,7 @@ test('AC-P-15', { timeout: 120_000 }, async (t) => {
   const timings: number[] = [];
   for (let i = 0; i < 7; i++) {
     const begun = performance.now();
-    await requests(0);
+    await requests('');
     timings.push(performance.now() - begun);
   }
   const until = Date.now() / 1000 + 1;
@@ -196,20 +201,20 @@ test('AC-P-15', { timeout: 120_000 }, async (t) => {
   assert.ok(median(timings) < 50, `median ${median(timings).toFixed(1)} ms, gate 50 ms`);
   assert.equal(events, '', 'no Docker activity while answering requests');
 
-  const beforeWs = (await requests(0)).at(-1).seq;
+  const beforeWs = await cursor();
   const socket = await connect(app.name, '/ws?mode=echo');
   await sleep(300);
   socket.ws.close();
   await socket.closed;
   const ws = await newer(beforeWs, 'ws');
-  assert.equal((await requests(beforeWs)).filter((r: any) => r.app === app.name && r.kind === 'ws').length, 1, 'one ws record');
+  assert.equal((await records(beforeWs)).filter((r: any) => r.app === app.name && r.kind === 'ws').length, 1, 'one ws record');
   assert.ok(ws.status === 101 && ws.ms >= 300, `ws record ${ws.status} ${ws.ms} ms`);
 
-  const beforeTrigger = (await requests(0)).at(-1).seq;
+  const beforeTrigger = await cursor();
   const invoked = await fetch(appUrl(app.name, '/_pneuma-space/trigger/report'), { method: 'POST', headers: { authorization: `Bearer ${await serviceToken(uniqueName('svc'))}` } });
   assert.equal(invoked.status, 202);
   await newer(beforeTrigger, 'trigger');
-  const triggers = (await requests(beforeTrigger)).filter((r: any) => r.app === app.name && r.kind === 'trigger');
+  const triggers = (await records(beforeTrigger)).filter((r: any) => r.app === app.name && r.kind === 'trigger');
   assert.deepEqual(triggers.map((r: any) => [r.status, r.path]), [[200, '/_pneuma-space/trigger/report']], 'one trigger record with the app\'s answer');
 
   const page = await (await fetch(adminUrl + '/')).text();
