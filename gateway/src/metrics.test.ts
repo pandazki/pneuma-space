@@ -1,4 +1,9 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { setImmediate as tick } from 'node:timers/promises';
 import { test } from 'node:test';
 import { EventLog } from './events.ts';
 import { Metrics } from './metrics.ts';
@@ -9,7 +14,7 @@ const HOUR = 3_600_000;
 const app = 'a1b2c3d4e5f6' as AppId;
 const survey = appName('survey');
 
-function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader = true, clock = { now: 1_800_000_000_000 } } = {}) {
+function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader = true, clock = { now: 1_800_000_000_000 }, policy = {} } = {}) {
   const events = new EventLog(() => {});
   const stats: Stats[] = [];
   const apps: AppSummary[] = [];
@@ -21,8 +26,8 @@ function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader =
     nameOf: (id) => (id === app ? survey : null),
     probes: { redis: async () => 'up' },
     host: async () => ({ cpus: 1, load: [0, 0, 0], memory: { totalBytes: 1, freeBytes: 1 }, data: null }),
-    usage: store,
-    policy: () => ({ usage_retention_days: 90 }),
+    store,
+    policy: () => ({ usage_retention_days: 90, events_retention_days: 14, events_max_rows: 1_000_000, ...policy }),
     view: (name) => (name === survey ? { app, tenant: DEFAULT_TENANT } : null),
     replica: replica as ReplicaId,
     leader: () => leader,
@@ -44,14 +49,39 @@ const stored = (app: AppId | '*', step: 60 | 3600, start: number, requests: numb
   app, tenant: app === '*' ? null : DEFAULT_TENANT, step, start, replica: 'elsewhere' as ReplicaId, requests,
 });
 
-test('a wake with its latency lands in the current minute and in the last hour with p50', () => {
+/** A file the test can reach with a second connection, to move rows back on the library's clock. */
+function fileStore() {
+  const path = join(mkdtempSync(join(tmpdir(), 'pneuma-space-metrics-')), 'pneuma-space.sqlite3');
+  const backdate = (ms: number) => {
+    const db = new DatabaseSync(path);
+    db.prepare('UPDATE events SET at = at - ?').run(ms);
+    db.close();
+  };
+  return { path, store: new SqliteStore(path), backdate };
+}
+
+const realClock = () => ({ now: Date.now() });
+
+test('a wake with its latency lands in the current minute and in the last hour', () => {
   const { events, metrics, last } = fixture();
   events.emit('waking', app);
   events.emit('awake', app, { ms: 840 });
   const snapshot = metrics.snapshot();
   assert.equal(last(snapshot.series.wakes), 1);
   assert.equal(last(snapshot.series.wakeMeanMs), 840);
-  assert.deepEqual(snapshot.wakes.last1h, { count: 1, failures: 0, p50Ms: 840, p95Ms: 840 });
+  assert.equal(snapshot.wakes.last1h.count, 1);
+});
+
+test("wake p50 and p95 per window come from every replica's awake events in the store", async () => {
+  const { store, backdate } = fileStore();
+  const awake = (ms: number) => ({ replica: 'other' as ReplicaId, ev: 'awake', app, tenant: DEFAULT_TENANT, body: { ms } });
+  await store.insertEvents(Array.from({ length: 10 }, () => awake(1000)));
+  backdate(2 * HOUR);
+  await store.insertEvents(Array.from({ length: 20 }, (_, i) => awake(i + 1)));
+  const { metrics } = fixture({ store, clock: realClock() });
+  await metrics.sample();
+  const { last1h, last24h } = metrics.snapshot().wakes;
+  assert.deepEqual([last1h.p50Ms, last1h.p95Ms, last24h.p50Ms, last24h.p95Ms], [10, 19, 15, 1000]);
 });
 
 test('the next snapshot counts a request once, before and after the sampler writes it', async () => {
@@ -128,16 +158,69 @@ test('a failed delivery lands in the deliveries series', () => {
   assert.equal(last(metrics.snapshot().series.deliveriesFailed), 1);
 });
 
-test('the events ring keeps the last 100, newest last', () => {
-  const { events, metrics } = fixture();
-  for (let i = 0; i < 120; i++) events.emit('delivery.due', app, { attempt: 0, n: i });
-  const { events: ring } = metrics.snapshot();
-  assert.equal(ring.length, 100);
-  assert.equal(ring.at(-1)!.n, 119);
+const storedNs = async (store: SqliteStore) => (await store.events({})).map((e) => e.body.n);
+
+test('100 waiting events are inserted at once, without waiting for the second to pass', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { events, store } = fixture();
+  const settle = async () => { for (let i = 0; i < 5; i++) await tick(); };
+  events.emit('delivery.due', app, { attempt: 0, n: 0 });
+  await settle();
+  for (let n = 1; n <= 99; n++) events.emit('delivery.due', app, { attempt: 0, n });
+  await settle();
+  const waiting = (await storedNs(store)).length;
+  events.emit('delivery.due', app, { attempt: 0, n: 100 });
+  await settle();
+  assert.deepEqual([waiting, (await storedNs(store)).length], [1, 101]);
 });
 
-test('each event carries a seq one above the previous', () => {
-  const { events, metrics } = fixture();
-  for (let i = 0; i < 3; i++) events.emit('delivery.due', app, { attempt: 0 });
-  assert.deepEqual(metrics.snapshot().events.map((e) => e.seq), [1, 2, 3]);
+test('an event after an insert waits until a second has passed since it', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { events, store } = fixture();
+  const settle = async () => { for (let i = 0; i < 5; i++) await tick(); };
+  events.emit('delivery.due', app, { attempt: 0, n: 1 });
+  await settle();
+  events.emit('delivery.due', app, { attempt: 0, n: 2 });
+  t.mock.timers.tick(999);
+  await settle();
+  const early = await storedNs(store);
+  t.mock.timers.tick(1);
+  await settle();
+  assert.deepEqual([early, await storedNs(store)], [[1], [1, 2]]);
+});
+
+test('the event tail hides rows younger than the settle window and shows them after', async () => {
+  const { store, backdate } = fileStore();
+  const { events, metrics, clock } = fixture({ store });
+  events.emit('awake', app, { ms: 5 });
+  await metrics.flushEvents();
+  backdate(1500);
+  const young = await metrics.events();
+  backdate(600);
+  clock.now += 1000;
+  assert.deepEqual([young.length, (await metrics.events()).map((e) => [e.ev, e.app, e.ms])], [0, [['awake', 'survey', 5]]]);
+});
+
+test('event ids keep increasing after the gateway restarts on the same store', async () => {
+  const { path, store } = fileStore();
+  const before = fixture({ store });
+  before.events.emit('delivery.due', app, { attempt: 0 });
+  await before.metrics.flushEvents();
+  await store.close();
+  const reopened = new SqliteStore(path);
+  const after = fixture({ store: reopened });
+  after.events.emit('delivery.due', app, { attempt: 0 });
+  await after.metrics.flushEvents();
+  assert.deepEqual((await reopened.events({})).map((e) => e.id), [1, 2]);
+});
+
+test("the leader's sweep deletes events past the retention, then the oldest beyond the row cap", async () => {
+  const { store, backdate } = fileStore();
+  const row = (n: number) => ({ replica: 'r1' as ReplicaId, ev: 'delivery.due', app, tenant: DEFAULT_TENANT, body: { n } });
+  await store.insertEvents([1, 2, 3].map(row));
+  backdate(15 * 24 * HOUR);
+  await store.insertEvents([4, 5, 6].map(row));
+  const { metrics } = fixture({ store, clock: realClock(), policy: { events_max_rows: 2 } });
+  await metrics.sample();
+  assert.deepEqual(await storedNs(store), [5, 6]);
 });

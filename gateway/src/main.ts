@@ -81,7 +81,7 @@ const registry = await PlatformRegistry.open({
   store, runtime, guard, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => metrics.stats(),
   addressing: setup.addressing, volumeGb: config.volumeGb,
 });
-const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica });
+const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica, policy: () => registry.policy() });
 const authority = new Authority(store, setup.admins);
 const identity: Identity = setup.upstream
   ? new UpstreamIdentity(setup.upstream, authority, registry)
@@ -105,7 +105,7 @@ const metrics = new Metrics({
     runner: profileProbe('runner', RUNNER_PORT),
   },
   host: () => hostSample(data),
-  usage: store,
+  store,
   policy: () => registry.policy(),
   view: (name) => registry.view(name),
   replica,
@@ -131,7 +131,10 @@ await instances.onLeader((leading) => {
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
 // The console audience keeps a JWT leaked from an app request from replaying on the admin API (ADR 0021 item 1).
 const upstream = setup.consoleIdentity ? { identity: new UpstreamIdentity(setup.consoleIdentity, authority, registry), authority } : undefined;
-const admin = await startAdmin({ registry, bundles, runtime, guard, metrics, requests, store, ingressPort, upstream }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const peers = process.env.PNEUMA_SPACE_PEERS
+  ? { host: process.env.PNEUMA_SPACE_PEERS, forward: ['authorization', ...(setup.upstream ? [setup.upstream.header] : [])] }
+  : undefined;
+const admin = await startAdmin({ registry, bundles, runtime, guard, metrics, requests, replica, peers, store, ingressPort, upstream }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {
   ingress.flush().catch((error: Error) => log('flush-failed', { error: error.message }));
@@ -149,7 +152,8 @@ process.once('SIGTERM', async () => {
   await Promise.all([ingress.close(), new Promise((resolve) => admin.close(resolve))]);
   await ingress.flush();
   await instances.close();
-  await store.close();
   log('gateway-stopped');
+  await metrics.flushEvents();
+  await store.close();
   process.exit(0);
 });

@@ -23,14 +23,14 @@ async function admin(runtime?: Runtimes) {
     nameOf: (app) => registry.nameOf(app),
     probes: { redis: async () => 'up' },
     host: async () => ({ cpus: 1, load: [0, 0, 0], memory: { totalBytes: 1, freeBytes: 1 }, data: null }),
-    usage: store,
+    store,
     policy: () => registry.policy(),
     view: (name) => registry.view(name),
     replica: 'r1' as ReplicaId,
   });
-  const requests = new RequestLog();
+  const requests = new RequestLog(() => {});
   const logs = { logs: (app: AppId, tail: number) => w.runtime.logs(app, tail), healthOf: () => [] };
-  const server = await startAdmin({ registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, requests, store, ingressPort: 18080 }, { port: 0 });
+  const server = await startAdmin({ registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, requests, replica: 'r1' as ReplicaId, store, ingressPort: 18080 }, { port: 0 });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
     const raw = typeof body === 'string' ? body : body === undefined ? undefined : JSON.stringify(body);
@@ -129,8 +129,9 @@ test('GET /api/requests answers the records after the cursor, named, without a D
   const id = (await store.app(appName('survey')))!.id as AppId;
   for (const path of ['/a', '/b', '/c']) requests.record({ app: id, kind: 'request', method: 'GET', path, status: 200, ms: 2, waitMs: 1, cold: false, subject: null, error: null });
   w.runtime.calls.length = 0;
-  const reply = await call('GET', '/api/requests?after=1&limit=1');
-  assert.deepEqual(reply.body.map((r: { seq: number; app: string; path: string }) => [r.seq, r.app, r.path]), [[2, 'survey', '/b']]);
+  const reply = await call('GET', '/api/requests?after=r1:1&limit=1');
+  assert.deepEqual(reply.body.records.map((r: { replica: string; seq: number; app: string; path: string }) => [r.replica, r.seq, r.app, r.path]), [['r1', 2, 'survey', '/b']]);
+  assert.equal(reply.body.cursor, 'r1:2');
   assert.deepEqual(w.runtime.calls, []);
 });
 

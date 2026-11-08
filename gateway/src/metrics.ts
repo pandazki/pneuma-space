@@ -4,16 +4,23 @@ import type { EventLog, LifecycleEvent } from './events.ts';
 import { resolvesOnNetwork } from './providers.ts';
 import { canConnect } from './runtime.ts';
 import {
-  USAGE_COUNTERS,
-  type AppId, type AppName, type AppStatus, type AppSummary, type Delivery, type DeliveryState, type InstanceState, type LeaseKind, type Policy,
-  type ReplicaId, type Stats, type StoreOps, type TenantName, type UsageBucket, type UsageStep,
+  EVENT_SETTLE_MS, USAGE_COUNTERS,
+  type AppId, type AppName, type AppStatus, type AppSummary, type Delivery, type DeliveryState, type EventRecord, type InstanceState, type LeaseKind,
+  type Policy, type ReplicaId, type Stats, type StoreOps, type TenantName, type UsageBucket, type UsageStep,
 } from './model.ts';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const WINDOW_MINUTES = 24 * 60;
-const WAKE_SAMPLES = 10_000;
+const EVENT_BATCH = 100;
+const EVENT_FLUSH_MS = 1000;
+/** Events kept for a store that does not answer; they are on stdout either way. */
+const EVENT_BACKLOG = 10_000;
+const EVENT_TAIL = 100;
+const EVENT_TAIL_MS = 1000;
+/** A tail nobody asked for in this long is read afresh instead of by cursor, so the read stays one tail long. */
+const EVENT_TAIL_STALE_MS = MINUTE;
 const PROBE_TIMEOUT_MS = 1000;
 const RECENT_FAILURES = 20;
 
@@ -30,7 +37,7 @@ export type HostSample = {
 };
 
 export type MetricsDeps = {
-  readonly events: Pick<EventLog, 'onEvent' | 'recent'>;
+  readonly events: Pick<EventLog, 'onEvent'>;
   /** Ingress counters, read from memory. */
   readonly stats: () => readonly Stats[];
   readonly apps: () => Promise<readonly AppSummary[]>;
@@ -41,16 +48,19 @@ export type MetricsDeps = {
   readonly nameOf: (app: AppId) => AppName | null;
   readonly probes: Readonly<Record<ServiceName, Probe>>;
   readonly host: () => Promise<HostSample>;
-  readonly usage: Pick<StoreOps, 'putUsage' | 'usage' | 'sweepUsage'>;
-  readonly policy: () => Pick<Policy, 'usage_retention_days'>;
+  readonly store: Pick<StoreOps, 'putUsage' | 'usage' | 'sweepUsage' | 'insertEvents' | 'events' | 'sweepEvents'>;
+  readonly policy: () => Pick<Policy, 'usage_retention_days' | 'events_retention_days' | 'events_max_rows'>;
   readonly view: (name: AppName) => { readonly app: AppId; readonly tenant: TenantName } | null;
   readonly replica: ReplicaId;
-  /** Whether this replica leads now; only the leader accrues awake time and sweeps (ADR 0024 item 2). */
+  /** Whether this replica leads now; only the leader accrues awake time and sweeps (ADR 0024 items 2 and 4). */
   readonly leader?: () => boolean;
   readonly now?: () => number;
 };
 
 type Counter = (typeof USAGE_COUNTERS)[number];
+type NewEvent = Omit<EventRecord, 'id' | 'at'>;
+/** An event as `/api/metrics` answers it: the stdout line's fields with the store's id, and the app's name where it still has one. */
+export type EventView = { readonly id: number; readonly t: number; readonly ev: string; readonly app: string | null; readonly replica: ReplicaId; readonly [field: string]: unknown };
 type Counts = Record<Counter, number>;
 /** One of this process's buckets: `live` counts in memory, `written` is what the store holds for it. */
 type Own = { readonly app: AppId | '*'; readonly tenant: TenantName | null; readonly step: UsageStep; readonly start: number; readonly live: Counts; written: Counts };
@@ -78,7 +88,8 @@ function percentile(sorted: readonly number[], p: number): number | null {
 /**
  * Observation (ADR 0014, 0024): lifecycle events and the ingress counters land in this process's usage buckets, which the
  * 10 s sampler writes as absolute values and reads back summed over replicas. `snapshot()` merges that read with what
- * memory counted since, so it never waits on the store.
+ * memory counted since, so it never waits on the store. Every lifecycle event is also batched into the `events` table,
+ * which `events()` reads back by cursor for every replica's console.
  */
 export class Metrics {
   readonly #deps: MetricsDeps;
@@ -89,9 +100,19 @@ export class Metrics {
   readonly #own = new Map<string, Own>();
   #stored = new Map<number, UsageBucket>();
   #last24h = new Map<AppId, { readonly requests: number; readonly errors: number }>();
-  #wakeSamples: { readonly t: number; readonly ms: number }[] = [];
+  #wakeMsDay: number[] = [];
+  #wakeMsHour: number[] = [];
+  #eventsReadAt = -Infinity;
   readonly #states = new Map<string, InstanceState>();
   readonly #reasons = new Map<string, { readonly reason: unknown; readonly t: number }>();
+  #storedReasons = new Map<string, { readonly reason: unknown; readonly t: number }>();
+  #batch: NewEvent[] = [];
+  #flushedAt = -Infinity;
+  #flushTimer: ReturnType<typeof setTimeout> | null = null;
+  #inserting: Promise<void> = Promise.resolve();
+  #tail: EventRecord[] = [];
+  #tailAt = -Infinity;
+  #tailing: Promise<void> | null = null;
   #counters = new Map<AppId, { readonly requests: number; readonly errors: number }>();
   #awakeSampledAt: number | null = null;
   #sweptAt = -Infinity;
@@ -140,12 +161,13 @@ export class Metrics {
       due: counts.due, delivering: counts.delivering, failed: counts.failed,
       recentFailures: failed.map((d) => ({
         app: this.#deps.nameOf(d.app) ?? d.app, trigger: d.trigger, attempts: d.attempts,
-        reason: this.#reasons.get(d.id)?.reason ?? null, at: this.#reasons.get(d.id)?.t ?? d.nextAttemptAt,
+        reason: this.#reasonOf(d.id)?.reason ?? null, at: this.#reasonOf(d.id)?.t ?? d.nextAttemptAt,
       })),
     };
     this.#host = host;
     this.#rssBytes = process.memoryUsage.rss();
     if (this.#deps.leader?.() ?? true) this.#accrueAwake(apps, now);
+    if (now - this.#eventsReadAt >= MINUTE) await this.#readEvents(now);
     await this.#flush(now);
     if ((this.#deps.leader?.() ?? true) && now - this.#sweptAt >= HOUR) await this.#sweep(now);
     this.#lastFlushAt = now;
@@ -159,9 +181,8 @@ export class Metrics {
     const first = current - WINDOW_MINUTES + 1;
     const minutes = Array.from({ length: WINDOW_MINUTES }, (_, i) => this.#merged((first + i) * MINUTE));
     const series = Object.fromEntries(SERIES.map((c) => [c, minutes.map((m) => m[c])])) as Record<(typeof SERIES)[number], number[]>;
-    const wakes = (span: number) => {
+    const wakes = (span: number, ms: readonly number[]) => {
       const recent = minutes.slice(-span);
-      const ms = this.#wakeSamples.filter((w) => w.t >= now - span * MINUTE).map((w) => w.ms).sort((a, b) => a - b);
       return {
         count: recent.reduce((sum, m) => sum + m.wakes, 0),
         failures: recent.reduce((sum, m) => sum + m.wakeFailures, 0),
@@ -174,7 +195,7 @@ export class Metrics {
       host: this.#host,
       services: this.#services,
       fleet: this.#fleet,
-      wakes: { last1h: wakes(60), last24h: wakes(WINDOW_MINUTES) },
+      wakes: { last1h: wakes(60, this.#wakeMsHour), last24h: wakes(WINDOW_MINUTES, this.#wakeMsDay) },
       deliveries: this.#deliveries,
       series: {
         start: first * MINUTE,
@@ -182,8 +203,33 @@ export class Metrics {
         ...series,
         wakeMeanMs: minutes.map((m) => (m.wakes ? Math.round(m.wakeMs / m.wakes) : null)),
       },
-      events: this.#deps.events.recent().map((e) => ({ ...e, app: (e.app && this.#deps.nameOf(e.app as AppId)) ?? e.app })),
     };
+  }
+
+  /** The newest settled events, oldest first, read from the store at most once a second (ADR 0024 item 4). */
+  async events(): Promise<EventView[]> {
+    if (this.#now() - this.#tailAt >= EVENT_TAIL_MS) await (this.#tailing ??= this.#readTail().finally(() => (this.#tailing = null)));
+    return this.#tail.map((e) => ({ ...e.body, id: e.id, t: typeof e.body.t === 'number' ? e.body.t : e.at, ev: e.ev, app: (e.app && this.#deps.nameOf(e.app as AppId)) ?? e.app, replica: e.replica }));
+  }
+
+  /** Inserts the waiting events now; resolves once every event recorded before the call is in the store or back in the batch. */
+  flushEvents(): Promise<void> {
+    if (this.#flushTimer) clearTimeout(this.#flushTimer);
+    this.#flushTimer = null;
+    // One insert at a time keeps this replica's ids in the order its events happened.
+    this.#inserting = this.#inserting.then(async () => {
+      const batch = this.#batch.splice(0);
+      if (!batch.length) return;
+      this.#flushedAt = this.#now();
+      try {
+        await this.#deps.store.insertEvents(batch);
+      } catch {
+        this.#batch.unshift(...batch);
+        this.#batch.splice(0, Math.max(0, this.#batch.length - EVENT_BACKLOG));
+        this.#scheduleEvents();
+      }
+    });
+    return this.#inserting;
   }
 
   /** Memory only. Per app: requests and errors over the last 24 hourly buckets, and this replica's last access. */
@@ -215,13 +261,13 @@ export class Metrics {
   async #flush(now: number): Promise<void> {
     const dirty = [...this.#own.values()].filter((o) => USAGE_COUNTERS.some((c) => o.live[c] !== o.written[c])).map((o) => [o, { ...o.live }] as const);
     if (dirty.length) {
-      await this.#deps.usage.putUsage(dirty.map(([o, counts]) => ({ app: o.app, tenant: o.tenant, step: o.step, start: o.start, replica: this.#writer, ...counts })));
+      await this.#deps.store.putUsage(dirty.map(([o, counts]) => ({ app: o.app, tenant: o.tenant, step: o.step, start: o.start, replica: this.#writer, ...counts })));
     }
     const minute = bucketStart(now, 60);
     const hour = bucketStart(now, 3600);
     const [minutes, hours] = await Promise.all([
-      this.#deps.usage.usage({ step: 60, app: '*', from: minute - (WINDOW_MINUTES - 1) * MINUTE, to: minute + MINUTE }),
-      this.#deps.usage.usage({ step: 3600, from: hour - 23 * HOUR, to: hour + HOUR }),
+      this.#deps.store.usage({ step: 60, app: '*', from: minute - (WINDOW_MINUTES - 1) * MINUTE, to: minute + MINUTE }),
+      this.#deps.store.usage({ step: 3600, from: hour - 23 * HOUR, to: hour + HOUR }),
     ]);
     this.#stored = new Map(minutes.map((b) => [b.start, b]));
     const last24h = new Map<AppId, { requests: number; errors: number }>();
@@ -238,9 +284,52 @@ export class Metrics {
   }
 
   async #sweep(now: number): Promise<void> {
-    await this.#deps.usage.sweepUsage(3600, now - this.#deps.policy().usage_retention_days * DAY);
-    await this.#deps.usage.sweepUsage(60, now - DAY);
+    const policy = this.#deps.policy();
+    await this.#deps.store.sweepUsage(3600, now - policy.usage_retention_days * DAY);
+    await this.#deps.store.sweepUsage(60, now - DAY);
+    await this.#deps.store.sweepEvents(now - policy.events_retention_days * DAY, policy.events_max_rows);
     this.#sweptAt = now;
+  }
+
+  /** Wake latencies over every replica's `awake` events, and the reasons of failed deliveries (ADR 0024 item 3). */
+  async #readEvents(now: number): Promise<void> {
+    const [awake, failed] = await Promise.all([
+      this.#deps.store.events({ ev: 'awake', since: now - DAY }),
+      this.#deps.store.events({ ev: 'delivery.failed', since: now - DAY }),
+    ]);
+    const timed = awake.filter((e) => typeof e.body.ms === 'number');
+    const sorted = (rows: readonly EventRecord[]) => rows.map((e) => e.body.ms as number).sort((a, b) => a - b);
+    this.#wakeMsDay = sorted(timed);
+    this.#wakeMsHour = sorted(timed.filter((e) => e.at >= now - HOUR));
+    this.#storedReasons = new Map(failed.map((e) => [String(e.body.delivery), { reason: e.body.reason ?? null, t: typeof e.body.t === 'number' ? e.body.t : e.at }]));
+    this.#eventsReadAt = now;
+  }
+
+  #reasonOf(delivery: string) {
+    return this.#reasons.get(delivery) ?? this.#storedReasons.get(delivery);
+  }
+
+  async #readTail(): Promise<void> {
+    const now = this.#now();
+    const fresh = now - this.#tailAt >= EVENT_TAIL_STALE_MS || this.#tail.length === 0;
+    const after = fresh ? Math.max(0, (await newestEventId(this.#deps.store)) - EVENT_TAIL) : this.#tail.at(-1)!.id;
+    const rows = await this.#deps.store.events({ after, settleMs: EVENT_SETTLE_MS });
+    this.#tail = (fresh ? rows : [...this.#tail, ...rows]).slice(-EVENT_TAIL);
+    this.#tailAt = now;
+  }
+
+  /** At most one insert a second, at once when the last was longer ago, and at once when 100 are waiting. */
+  #queueEvent(e: LifecycleEvent): void {
+    const { seq: _, ev, app, ...body } = e;
+    this.#batch.push({ replica: this.#deps.replica, ev, app, tenant: app === null ? null : this.#tenantOf(app as AppId), body });
+    this.#scheduleEvents(this.#batch.length >= EVENT_BATCH);
+  }
+
+  #scheduleEvents(now = false): void {
+    const wait = this.#flushedAt + EVENT_FLUSH_MS - this.#now();
+    if (now || wait <= 0) void this.flushEvents();
+    else this.#flushTimer ??= setTimeout(() => void this.flushEvents(), wait);
+    this.#flushTimer?.unref?.();
   }
 
   /** Every running instance adds the time since the previous sample, so the precision is one sampling interval. */
@@ -291,6 +380,7 @@ export class Metrics {
   }
 
   #record(e: LifecycleEvent): void {
+    this.#queueEvent(e);
     const app = e.app as AppId | null;
     if (app !== null && isInstanceState(e.ev)) {
       const before = this.#states.get(app);
@@ -298,10 +388,6 @@ export class Metrics {
       if (e.ev === 'awake' && typeof e.ms === 'number') {
         this.#count(app, 'wakes');
         this.#count(app, 'wakeMs', e.ms);
-        const t = this.#now();
-        this.#wakeSamples.push({ t, ms: e.ms });
-        const old = this.#wakeSamples.findIndex((w) => w.t >= t - DAY);
-        this.#wakeSamples.splice(0, Math.max(old, this.#wakeSamples.length - WAKE_SAMPLES));
       } else if (e.ev === 'asleep' && before === 'waking' && e.error !== undefined) this.#count(app, 'wakeFailures');
       else if (e.ev === 'asleep' && before === 'stopping' && e.error === undefined) this.#count(app, 'sleeps');
     } else if (e.ev === 'removed' && app !== null) this.#states.delete(app);
@@ -312,6 +398,24 @@ export class Metrics {
       if (this.#reasons.size > RECENT_FAILURES) this.#reasons.delete(this.#reasons.keys().next().value!);
     } else if (e.ev === 'delivery.due' && Number(e.attempt) > 0) this.#count(app, 'deliveriesRetried');
   }
+}
+
+/**
+ * The frozen EventFilter reads oldest first only, so the newest id is found by doubling then halving `after` with limit 1:
+ * about 2 log2(id) reads on the primary key, however many rows the table holds.
+ */
+async function newestEventId(store: Pick<StoreOps, 'events'>): Promise<number> {
+  const beyond = async (id: number) => (await store.events({ after: id, limit: 1 })).length > 0;
+  if (!(await beyond(0))) return 0;
+  let low = 0;
+  let high = 1;
+  while (await beyond(high)) [low, high] = [high, high * 2];
+  while (high - low > 1) {
+    const mid = Math.floor((low + high) / 2);
+    if (await beyond(mid)) low = mid;
+    else high = mid;
+  }
+  return high;
 }
 
 export const tcpProbe = (host: string, port: number): Probe => async () => ((await canConnect(host, port)) ? 'up' : 'down');
