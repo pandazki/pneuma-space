@@ -9,6 +9,7 @@ import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Conflict, ENV_BY_KIND, newAppId, type BundleId, type CapabilityKind, type Injection, type JobResult } from './model.ts';
 import { createProviders, objectUrl, providerConfig, S3BundleStore, signedFetch } from './providers.ts';
+import { Resp, RespError } from './resp.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const project = 'pneuma-space-u6';
@@ -19,8 +20,14 @@ const stackEnv = {
 };
 const dockerUp = spawnSync('docker', ['info'], { stdio: 'ignore' }).status === 0;
 
+const pgPort = 26432;
+const redisPort = 26379;
+// The gateway reaches postgres and redis on the compose network; this test reaches them through these host ports,
+// and coturn needs none, so a second stack's coturn on 3478 does not block it.
+const override = join(mkdtempSync(join(tmpdir(), 'pneuma-space-u6-')), 'ports.yaml');
+writeFileSync(override, `services:\n  postgres: { ports: ["127.0.0.1:${pgPort}:5432"] }\n  redis: { ports: ["127.0.0.1:${redisPort}:6379"] }\n  coturn: { ports: !reset [] }\n`);
 const compose = (...args: string[]) =>
-  execFileSync('docker', ['compose', '-p', project, '--profile', 'postgres', '--profile', 'rtc', ...args], { cwd: root, env: stackEnv, stdio: 'pipe' });
+  execFileSync('docker', ['compose', '-p', project, '-f', 'compose.yaml', '-f', override, '--profile', 'postgres', '--profile', 'rtc', ...args], { cwd: root, env: stackEnv, stdio: 'pipe' });
 
 function exec(service: string, argv: readonly string[], stdin = ''): Promise<JobResult> {
   return new Promise((resolve) => {
@@ -178,6 +185,12 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       assert.match(await asApp('PING'), /^WRONGPASS/);
       await kv.ensure(app, resource);
       assert.deepEqual((await asApp('PING')).split('\n').slice(0, 2), ['OK', 'PONG']);
+    });
+
+    test('an error reply rejects with RespError', async () => {
+      const resp = await Resp.open({ host: '127.0.0.1', port: redisPort, password: config.redisPassword });
+      await assert.rejects(resp.command('ACL', 'SETUSER', app, 'nosuchrule'), RespError);
+      await resp.close();
     });
 
     test('destroy twice removes the prefix keys and the user, nothing else', async () => {
