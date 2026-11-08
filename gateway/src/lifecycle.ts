@@ -67,7 +67,7 @@ type Local = {
   retired: number;
   /** The epoch whose handle the driver reported gone; the fast path stops at once, before the CAS lands. */
   ended: number;
-  /** Wakes for `waking` waiters on this replica when the replica's own lease count changes. */
+  /** Resolved on every release here, so a drain this replica runs sees its own leases end at once. */
   changed: PromiseWithResolvers<void>;
 };
 
@@ -296,10 +296,9 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
     return local;
   }
 
-  #counts(local: Local | undefined, plus?: LeaseKind): Counts {
+  #counts(local: Local | undefined): Counts {
     const counts = { request: 0, channel: 0, trigger: 0 };
     for (const { kind } of local?.leases.values() ?? []) counts[kind]++;
-    if (plus) counts[plus]++;
     return counts;
   }
 
@@ -315,8 +314,7 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
 
   /** Every tally write of an app goes through this one queue, with the count recorded when it is queued (ADR 0020 item 4). */
   #enqueue<T>(local: Local, epoch: number, counts: Counts, write: () => Promise<T>): Promise<T> {
-    const queued = { epoch, total: total(counts) };
-    local.queued = queued;
+    local.queued = { epoch, total: total(counts) };
     const run = local.queue.then(write);
     local.queue = run.catch(() => {});
     return run;
