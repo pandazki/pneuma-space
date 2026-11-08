@@ -5,7 +5,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { DEFAULT_POLICY, type AppId, type AppName, type ImageId, type ReleaseNumber, type Subject } from './model.ts';
+import { DEFAULT_POLICY, DEFAULT_TENANT, type AppId, type AppName, type ImageId, type ReleaseNumber, type Subject } from './model.ts';
 import { Ingress } from './ingress.ts';
 
 const MiB = 2 ** 20;
@@ -17,7 +17,7 @@ async function serveIngress(upstreamPort: number): Promise<void> {
   const ingress = new Ingress({
     registry: {
       view: (name) => ({
-        app, name, status: 'registered', owner: 'user:o' as Subject, release: 1 as ReleaseNumber, image: 'sha256:x' as ImageId,
+        app, name, tenant: DEFAULT_TENANT, access: 'org', status: 'registered', owner: 'user:o' as Subject, release: 1 as ReleaseNumber, image: 'sha256:x' as ImageId,
         kinds: new Set(['route']), bundle: null, identity: null, policyOverride: {},
       }),
       policy: () => DEFAULT_POLICY,

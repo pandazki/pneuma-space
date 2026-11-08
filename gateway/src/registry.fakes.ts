@@ -17,6 +17,7 @@ export type Call = readonly [verb: 'ensure' | 'suspend' | 'destroy', provider: P
 export class FakeProvider implements CapabilityProvider {
   readonly kind: ResourceKind;
   readonly name: ProviderName;
+  readonly service = null;
   readonly calls: Call[];
   readonly inUse: ReadonlySet<AppId>;
   fail: Call[0] | null = null;
@@ -117,7 +118,7 @@ export type World = {
   readonly bundles: FakeBundles;
   /** Compose services the registry's probe finds; none by default. */
   readonly services: Set<string>;
-  /** Opens a fresh store and registry over the same file, as a gateway restart would. */
+  /** Closes the last store and opens a fresh store and registry over the same file, as a gateway restart would. */
   open(): Promise<{ store: SqliteStore; registry: PlatformRegistry }>;
 };
 
@@ -135,10 +136,12 @@ export function world(): World {
   }
   const bundles = new FakeBundles();
   const services = new Set<string>();
+  let previous: SqliteStore | null = null;
   return {
     dir, calls, providers, runtime, bundles, services,
     async open() {
-      const store = new SqliteStore(join(dir, 'pneuma-space.sqlite3'));
+      await previous?.close();
+      const store = (previous = new SqliteStore(join(dir, 'pneuma-space.sqlite3')));
       const registry = await PlatformRegistry.open({
         store, runtime, guard: runtime, infra: runtime, bundles, providers: [...providers.values()], probe: async (service) => services.has(service),
       });

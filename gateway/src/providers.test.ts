@@ -52,7 +52,7 @@ async function until(probe: () => Promise<boolean>, what: string): Promise<void>
 const pgReady = async () => (await exec('postgres', ['pg_isready', '-U', 'postgres'])).exitCode === 0;
 const redisReady = async () => (await exec('redis', ['redis-cli'], `AUTH ${config.redisPassword}\nPING\n`)).stdout.includes('PONG');
 
-function assertEnvNames(kind: CapabilityKind, injection: Injection): void {
+function assertEnvNames(kind: CapabilityKind, injection: Pick<Injection, 'env'>): void {
   assert.deepEqual(Object.keys(injection.env).sort(), [...ENV_BY_KIND[kind]].sort());
 }
 
@@ -66,7 +66,7 @@ for (const [name, kind, prefix] of [['volume', 'files', 'pneuma-space-files-'], 
       assert.deepEqual(await providers[name].ensure(app, resource), resource);
       const [binding, ...rest] = providers[name].inject(app, resource).storage;
       assert.deepEqual([binding.id, binding.target, rest.length], [`${prefix}${app}`, target, 0]);
-      assertEnvNames(kind, { env: binding.env, storage: [] });
+      assertEnvNames(kind, binding);
       assert.ok(Object.values(binding.env).every((value) => value.includes('{dir}')));
     });
 

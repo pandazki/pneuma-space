@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import {
-  DEFAULT_POLICY, ManifestError, InputError, appName, effectivePolicy, parseManifest, releaseKey,
+  DEFAULT_POLICY, DEFAULT_QUOTA, ManifestError, InputError, QUOTA_RESOURCES, admits, appName, effectivePolicy, parseManifest, releaseKey,
   type BundleId, type ImageId,
 } from './model.ts';
 
@@ -60,6 +60,16 @@ test('releaseKey does not depend on key order', () => {
 test('effectivePolicy takes override fields over global ones and keeps the rest', () => {
   const policy = effectivePolicy(DEFAULT_POLICY, { idle_seconds: 5, drain_timeout_seconds: undefined });
   assert.deepEqual(policy, { ...DEFAULT_POLICY, idle_seconds: 5 });
+});
+
+test('admits refuses a resource whose used plus ask passes its limit, and never an unlimited one', () => {
+  const none = { apps: 0, awake: 0, cpu_millis: 0, memory_mb: 0, storage_gb: 0 };
+  for (const resource of QUOTA_RESOURCES) {
+    const limit = DEFAULT_QUOTA[resource]!;
+    assert.equal(admits(DEFAULT_QUOTA, { ...none, [resource]: limit - 1 }, { [resource]: 1 }), null);
+    assert.deepEqual(admits(DEFAULT_QUOTA, { ...none, [resource]: limit }, { [resource]: 1 }), { resource, used: limit, limit, ask: 1 });
+    assert.equal(admits({ ...DEFAULT_QUOTA, [resource]: null }, { ...none, [resource]: limit }, { [resource]: 1 }), null);
+  }
 });
 
 test('appName accepts 40 lowercase characters and rejects uppercase or 41', () => {
