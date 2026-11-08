@@ -6,6 +6,8 @@ import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { DEFAULT_POLICY, DEFAULT_TENANT, type AppId, type AppName, type ImageId, type ReleaseNumber, type Subject } from './model.ts';
+import { PATH_ADDRESSING } from './address.ts';
+import { LOCAL_CALLER } from './authz.ts';
 import { Ingress } from './ingress.ts';
 
 const MiB = 2 ** 20;
@@ -23,7 +25,10 @@ async function serveIngress(upstreamPort: number): Promise<void> {
       policy: () => DEFAULT_POLICY,
     },
     runtime: { acquire: async () => ({ app, address: `127.0.0.1:${upstreamPort}` }), release() {}, channel() {}, state: () => 'awake' },
-    identity: { authenticate: async () => ({ status: 401 }), serve: async () => {} },
+    identity: { identify: async () => 'absent', challenge: () => ({ status: 401 }), serve: async () => {} },
+    authority: { callerOf: async () => LOCAL_CALLER },
+    addressing: PATH_ADDRESSING,
+    upstream: null,
     bundles: { open: async () => { throw new Error('unused'); } },
     scheduler: { invoke: async () => { throw new Error('unused'); } },
     stats: [],

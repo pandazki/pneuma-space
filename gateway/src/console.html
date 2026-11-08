@@ -309,6 +309,15 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .chart text { font: 11px var(--mono); fill: var(--ink-3); }
 .tip { position: absolute; pointer-events: none; z-index: 5; background: var(--tip-bg); color: var(--tip-fg); font-size: 12px; line-height: 17px; border-radius: 6px; padding: 4px 8px; white-space: nowrap; }
 .tip .mono { font-size: 11.5px; }
+.heat { position: relative; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px 32px; }
+.heat svg { display: block; flex: 0 1 auto; width: 100%; max-width: var(--w); height: auto; overflow: visible; }
+.heat text { font: 11px var(--mono); fill: var(--ink-3); }
+.heat rect.c { cursor: default; }
+.heat rect.c:hover, .heat rect.c.on { stroke: var(--ink); stroke-width: 1.5; }
+.heat .side { display: grid; gap: 10px; min-width: 160px; font-size: 12px; color: var(--ink-2); }
+.heat .side b { display: block; font: 600 20px/1.2 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+.heat .scale { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; color: var(--ink-3); }
+.heat .scale i { width: 10px; height: 10px; border-radius: 2px; }
 .pair { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 0; padding: 0; }
 .pair > section { border-top: 0; min-width: 0; }
 .pair > section + section { border-left: 1px dashed var(--line); }
@@ -653,11 +662,15 @@ const I18N = {
     'sec.activity': '活动', 'sec.activityDesc': '每分钟计数，当前分钟画成未完成；上方标记是事件。',
     'win.60': '1 小时', 'win.360': '6 小时', 'win.1440': '24 小时',
     'ch.traffic': '流量', 'ch.wakes': '唤醒', 'ch.deliveries': '投递',
-    's.requests': '请求', 's.errors': '错误', 's.wakes': '唤醒', 's.wakeFailures': '失败', 's.wakeP50Ms': 'p50 耗时',
+    's.requests': '请求', 's.errors': '错误', 's.wakes': '唤醒', 's.wakeFailures': '失败', 's.wakeMeanMs': '平均耗时',
+    'sec.heat': '热度', 'sec.heatDesc': '近 30 天每小时的请求，按星期和钟点叠加；颜色越深越忙。',
+    'heat.platform': '整个平台的请求', 'heat.app': '近 14 天每小时的请求', 'heat.less': '少', 'heat.more': '多',
+    'heat.total': '合计请求', 'heat.peak': '最忙的钟点', 'heat.none': '这段时间没有请求。',
+    'heat.span': '{from} 起的 30 天，当地时间',
     's.deliveriesDone': '完成', 's.deliveriesFailed': '失败', 's.deliveriesRetried': '重试',
     'sec.attention': '需要关注', 'sec.attentionDesc': '投递失败、唤醒失败、服务不可达、唤醒 p95 超门槛。已读只记在这个浏览器里。',
     'sec.events': '事件流', 'sec.eventsDesc': '生命周期事件，最新在上。悬停或向下滚动即暂停跟随。', 'ev.filter': '筛选事件',
-    'col.name': '名称', 'col.state': '状态', 'col.since': '进入时间', 'col.requests': '请求', 'col.errors': '错误',
+    'col.name': '名称', 'col.state': '状态', 'col.since': '进入时间', 'col.requests': '请求（24 小时）', 'col.errors': '错误（24 小时）',
     'col.status': '状态',
     'col.instance': '实例', 'col.release': '版本', 'col.capabilities': '能力', 'col.lastAccess': '最近访问', 'col.image': '镜像',
     'col.bundle': '静态包', 'col.published': '发布时间', 'col.kind': '能力', 'col.provider': 'Provider', 'col.trigger': '触发器',
@@ -675,7 +688,8 @@ const I18N = {
     'd.publish': '发布新版本', 'd.remove': '移除', 'd.purge': '清除', 'cancel': '取消',
     'd.removeTitle': '移除 {name}？', 'd.removeBody': '地址将返回 404。卷、数据库、键前缀和 bucket 全部保留，再次发布即可恢复。',
     'd.purgeTitle': '清除 {name}？', 'd.purgeBody': '这会删除它的文件、数据库、键值数据和 bucket，无法撤销。',
-    'd.purgeHint': '移除后才能清除。', 'd.requests': '请求', 'd.errors': '错误', 'd.lastAccess': '最近访问', 'd.release': '当前版本',
+    'd.purgeHint': '移除后才能清除。', 'd.requests': '请求（24 小时）', 'd.errors': '错误（24 小时）', 'd.lastAccess': '最近访问', 'd.release': '当前版本',
+    'sec.usage': '热度', 'sec.usageDesc': '每格是一个小时，行是日期，最新在上；当地时间。',
     'sec.policy': '策略', 'sec.policyDesc': '只对这个应用生效的覆盖值。留空则沿用平台值。',
     'p.effective': '生效值 {v}', 'p.default': '平台默认（{v}）', 'p.save': '保存策略', 'p.saved': '策略已保存。', 'p.nothing': '没有改动。',
     'p.dbNote': '切换数据库会开通另一种引擎，不迁移数据。',
@@ -833,11 +847,15 @@ const I18N = {
     'sec.activity': 'Activity', 'sec.activityDesc': 'Per-minute counts, the current minute drawn as unfinished; marks above are events.',
     'win.60': '1 h', 'win.360': '6 h', 'win.1440': '24 h',
     'ch.traffic': 'Traffic', 'ch.wakes': 'Wakes', 'ch.deliveries': 'Deliveries',
-    's.requests': 'requests', 's.errors': 'errors', 's.wakes': 'wakes', 's.wakeFailures': 'failures', 's.wakeP50Ms': 'p50 latency',
+    's.requests': 'requests', 's.errors': 'errors', 's.wakes': 'wakes', 's.wakeFailures': 'failures', 's.wakeMeanMs': 'mean latency',
+    'sec.heat': 'Heat', 'sec.heatDesc': 'Requests per hour over the last 30 days, stacked by weekday and hour; darker is busier.',
+    'heat.platform': 'Requests across the platform', 'heat.app': 'Requests per hour, last 14 days', 'heat.less': 'less', 'heat.more': 'more',
+    'heat.total': 'Total requests', 'heat.peak': 'Busiest hour', 'heat.none': 'No requests in this period.',
+    'heat.span': '30 days from {from}, local time',
     's.deliveriesDone': 'done', 's.deliveriesFailed': 'failed', 's.deliveriesRetried': 'retried',
     'sec.attention': 'Attention', 'sec.attentionDesc': 'Failed deliveries and wakes, a service down, wake p95 over the gate. Seen marks stay in this browser.',
     'sec.events': 'Event tail', 'sec.eventsDesc': 'Lifecycle events, newest on top. Hover or scroll down to pause following.', 'ev.filter': 'Filter events',
-    'col.name': 'Name', 'col.state': 'State', 'col.since': 'Since', 'col.requests': 'Requests', 'col.errors': 'Errors',
+    'col.name': 'Name', 'col.state': 'State', 'col.since': 'Since', 'col.requests': 'Requests, 24 h', 'col.errors': 'Errors, 24 h',
     'col.status': 'Status',
     'col.instance': 'Instance', 'col.release': 'Release', 'col.capabilities': 'Capabilities', 'col.lastAccess': 'Last access', 'col.image': 'Image',
     'col.bundle': 'Bundle', 'col.published': 'Published', 'col.kind': 'Kind', 'col.provider': 'Provider', 'col.trigger': 'Trigger',
@@ -855,7 +873,8 @@ const I18N = {
     'd.publish': 'Publish release', 'd.remove': 'Remove', 'd.purge': 'Purge', 'cancel': 'Cancel',
     'd.removeTitle': 'Remove {name}?', 'd.removeBody': 'Its address will answer 404. Every volume, database, key prefix and bucket is kept; publishing again restores it.',
     'd.purgeTitle': 'Purge {name}?', 'd.purgeBody': 'This deletes its files, database, key-value data and bucket. It cannot be undone.',
-    'd.purgeHint': 'Purge is possible after remove.', 'd.requests': 'Requests', 'd.errors': 'Errors', 'd.lastAccess': 'Last access', 'd.release': 'Current release',
+    'd.purgeHint': 'Purge is possible after remove.', 'd.requests': 'Requests, 24 h', 'd.errors': 'Errors, 24 h', 'd.lastAccess': 'Last access', 'd.release': 'Current release',
+    'sec.usage': 'Heat', 'sec.usageDesc': 'One cell per hour, one row per day, newest on top; local time.',
     'sec.policy': 'Policy', 'sec.policyDesc': 'Overrides for this app. An empty field follows the platform value.',
     'p.effective': 'effective {v}', 'p.default': 'platform default ({v})', 'p.save': 'Save policy', 'p.saved': 'Policy saved.', 'p.nothing': 'Nothing changed.',
     'p.dbNote': 'Changing the database provisions the other engine without migrating data.',
@@ -1564,17 +1583,18 @@ function timeline({ cap = Infinity, shows = () => true, pick = null } = {}) {
 
 // Charts
 
-/** Sums minute buckets into bins: 1 h by minute, 6 h by 5 min, 24 h by 15 min. Latency bins take the median of minute medians. */
+/** Sums minute buckets into bins: 1 h by minute, 6 h by 5 min, 24 h by 15 min. A latency bin is the mean over its wakes, since means merge and medians do not. */
 function binned(series, key, minutes) {
   const step = minutes === 60 ? 1 : minutes === 360 ? 5 : 15;
   const values = series[key].slice(-minutes);
+  const wakes = series.wakes.slice(-minutes);
   const out = [];
   for (let i = 0; i < values.length; i += step) {
-    const chunk = values.slice(i, i + step);
-    if (key === 'wakeP50Ms') {
-      const present = chunk.filter((v) => v != null).sort((a, b) => a - b);
-      out.push(present.length ? present[Math.floor(present.length / 2)] : null);
-    } else out.push(chunk.reduce((a, b) => a + b, 0));
+    if (key === 'wakeMeanMs') {
+      let n = 0, total = 0;
+      for (let j = i; j < Math.min(i + step, values.length); j++) if (values[j] != null) { n += wakes[j]; total += values[j] * wakes[j]; }
+      out.push(n ? total / n : null);
+    } else out.push(values.slice(i, i + step).reduce((a, b) => a + b, 0));
   }
   return { values: out, step };
 }
@@ -1696,7 +1716,7 @@ function chartCard(attrs, titleKey, layers, marks, extra = () => null) {
       const here = marks.map((kind) => [kind, lane.get(`${i}:${kind}`)?.n ?? 0]).filter(([, n]) => n > 0);
       fill(tip,
         h('div', { class: 'mono' }, step === 1 ? clock(from) : `${clock(from)}–${clock(from + binMs)}`, i === count - 1 ? ` · ${t('ch.partial')}` : ''),
-        ...bins.map((l) => h('div', {}, h('span', { style: `color:${l.color}` }, '● '), `${t(`s.${l.key}`)} `, h('span', { class: 'mono' }, l.key === 'wakeP50Ms' ? ms(l.values[i]) : nf(l.values[i] ?? 0)))),
+        ...bins.map((l) => h('div', {}, h('span', { style: `color:${l.color}` }, '● '), `${t(`s.${l.key}`)} `, h('span', { class: 'mono' }, l.key === 'wakeMeanMs' ? ms(l.values[i]) : nf(l.values[i] ?? 0)))),
         ...here.map(([kind, n]) => h('div', {}, h('span', { style: `color:${MARKS[kind].color}` }, '◆ '), `${t(`mk.${kind}`)} `, h('span', { class: 'mono' }, nf(n)))));
       tip.hidden = false;
       const left = x(i) + 12;
@@ -1717,12 +1737,114 @@ function chartCard(attrs, titleKey, layers, marks, extra = () => null) {
     set(next) {
       model = next;
       fill(legend, ...layers.map((l) => {
-        const total = l.key === 'wakeP50Ms' ? null : binned(next.metrics.series, l.key, win).values.reduce((a, b) => a + b, 0);
+        const total = l.key === 'wakeMeanMs' ? null : binned(next.metrics.series, l.key, win).values.reduce((a, b) => a + b, 0);
         return h('span', { class: 'legend' }, h('i', { style: `background:${l.color}` }), t(`s.${l.key}`), total == null ? null : h('span', { class: 'mono' }, nf(total)));
       }));
       fill(note, extra(next));
       note.hidden = !note.childNodes.length;
       draw();
+    },
+  };
+}
+
+// Heat (ADR 0024 item 3): hourly usage rows as a grid in local time.
+
+const HEAT_MS = 60_000;
+const HOUR_MS = 3_600_000;
+const APP_HEAT_DAYS = 14;
+const HEAT_PITCH = 19;
+const HEAT_CELL = 16;
+
+const localHour = (v) => { const d = new Date(v); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()} ${d.getHours()}`; };
+const hourSpan = (hour) => `${String(hour).padStart(2, '0')}:00–${String((hour + 1) % 24).padStart(2, '0')}:00`;
+
+function addUsage(map, key, b) {
+  const sum = map.get(key) ?? { requests: 0, errors: 0, wakes: 0 };
+  sum.requests += b.requests;
+  sum.errors += b.errors;
+  sum.wakes += b.wakes;
+  map.set(key, sum);
+}
+
+/** Seven rows from Monday, each hour summed over every such weekday in the buckets. */
+function weekRows(buckets) {
+  const sums = new Map();
+  for (const b of buckets) { const d = new Date(b.start); addUsage(sums, `${d.getDay()}:${d.getHours()}`, b); }
+  const monday = new Date(2024, 0, 1);
+  return Array.from({ length: 7 }, (_, r) => {
+    const day = new Date(monday.getFullYear(), 0, 1 + r);
+    const label = new Intl.DateTimeFormat(locale(), { weekday: 'short' }).format(day);
+    const long = new Intl.DateTimeFormat(locale(), { weekday: 'long' }).format(day);
+    return { label, cells: Array.from({ length: 24 }, (_, hour) => ({ ...(sums.get(`${day.getDay()}:${hour}`) ?? { requests: 0, errors: 0, wakes: 0 }), when: `${long} ${hourSpan(hour)}` })) };
+  });
+}
+
+/** The last `days` local days, today on top; an hour still to come is null. */
+function dayRows(buckets, days) {
+  const sums = new Map();
+  for (const b of buckets) addUsage(sums, localHour(b.start), b);
+  const now = Date.now();
+  const today = new Date();
+  return Array.from({ length: days }, (_, r) => {
+    const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - r);
+    const label = new Intl.DateTimeFormat(locale(), { month: '2-digit', day: '2-digit' }).format(day);
+    const date = new Intl.DateTimeFormat(locale(), { dateStyle: 'medium' }).format(day);
+    return { label, cells: Array.from({ length: 24 }, (_, hour) => {
+      const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour).getTime();
+      return start > now ? null : { ...(sums.get(localHour(start)) ?? { requests: 0, errors: 0, wakes: 0 }), when: `${date} ${hourSpan(hour)}` };
+    }) };
+  });
+}
+
+/** rows: [{ label, cells: 24 × ({ requests, errors, wakes, when } | null) }]; shade grows with the square root of requests against the busiest cell. */
+function heatGrid(titleKey) {
+  const tip = h('div', { class: 'tip', hidden: true });
+  const plot = h('div', { style: 'position:relative;flex:0 1 auto;width:100%;max-width:var(--w)' });
+  const side = h('div', { class: 'side' });
+  const el = h('div', { class: 'heat' }, plot, side);
+  const scale = h('span', { class: 'scale' }, t('heat.less'), [0, 0.25, 0.5, 0.75, 1].map((f) => h('i', { style: f ? `background:var(--accent);opacity:${(0.18 + 0.82 * Math.sqrt(f)).toFixed(2)}` : 'background:var(--line)' })), t('heat.more'));
+  return {
+    el,
+    set(rows, note = null) {
+      const left = 44;
+      const top = 16;
+      const width = left + 24 * HEAT_PITCH;
+      const height = top + rows.length * HEAT_PITCH;
+      const cells = rows.flatMap((r) => r.cells.filter(Boolean));
+      const max = Math.max(0, ...cells.map((c) => c.requests));
+      const g = svg('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': t(titleKey) });
+      for (const hour of [0, 6, 12, 18]) g.append(svg('text', { x: left + hour * HEAT_PITCH, y: 10 }, String(hour).padStart(2, '0')));
+      let on = null;
+      rows.forEach((row, r) => {
+        g.append(svg('text', { x: left - 8, y: top + r * HEAT_PITCH + HEAT_CELL - 4, 'text-anchor': 'end' }, row.label));
+        row.cells.forEach((c, hour) => {
+          const style = !c ? 'fill:none;stroke:var(--line);stroke-dasharray:2 2'
+            : c.requests > 0 ? `fill:var(--accent);fill-opacity:${(0.18 + 0.82 * Math.sqrt(c.requests / max)).toFixed(2)}` : 'fill:var(--line)';
+          const rect = svg('rect', { class: c ? 'c' : null, x: left + hour * HEAT_PITCH, y: top + r * HEAT_PITCH, width: HEAT_CELL, height: HEAT_CELL, rx: 3, style });
+          if (c) rect.addEventListener('pointerenter', () => {
+            on?.classList.remove('on');
+            (on = rect).classList.add('on');
+            fill(tip, h('div', { class: 'mono' }, c.when), h('div', {}, ['requests', 'errors', 'wakes'].map((k, i) => [i ? ' · ' : '', `${t(`s.${k}`)} `, h('span', { class: 'mono' }, nf(c[k]))])));
+            tip.hidden = false;
+            const box = rect.getBoundingClientRect();
+            const base = plot.getBoundingClientRect();
+            const x = box.right - base.left + 8;
+            const flipped = box.left - base.left - tip.offsetWidth - 8;
+            tip.style.left = `${x + tip.offsetWidth <= base.width ? x : flipped >= 0 ? flipped : Math.max(0, base.width - tip.offsetWidth)}px`;
+            tip.style.top = `${x + tip.offsetWidth <= base.width || flipped >= 0 ? box.top - base.top - 4 : box.bottom - base.top + 6}px`;
+          });
+          g.append(rect);
+        });
+      });
+      g.addEventListener('pointerleave', () => { tip.hidden = true; on?.classList.remove('on'); on = null; });
+      plot.style.setProperty('--w', `${width}px`);
+      fill(plot, g, tip);
+      const total = cells.reduce((sum, c) => sum + c.requests, 0);
+      const peak = cells.reduce((best, c) => (c.requests > (best?.requests ?? 0) ? c : best), null);
+      fill(side,
+        h('div', {}, t('heat.total'), h('b', {}, nf(total))),
+        peak ? h('div', {}, t('heat.peak'), h('b', { style: 'font-size:13px' }, peak.when)) : h('div', { class: 'muted' }, t('heat.none')),
+        scale, note);
     },
   };
 }
@@ -1939,6 +2061,7 @@ async function overview() {
   const lane = timeline({ cap: TIMELINE_ROWS });
   const inbox = attentionInbox();
   const tail = eventTail();
+  const heat = heatGrid('heat.platform');
   const charts = [
     chartCard({ 'data-section': 'traffic' }, 'ch.traffic', [
       { key: 'requests', color: 'var(--accent)', kind: 'area' },
@@ -1946,7 +2069,7 @@ async function overview() {
     chartCard({ 'data-section': 'wakes' }, 'ch.wakes', [
       { key: 'wakes', color: 'var(--accent)', kind: 'bar' },
       { key: 'wakeFailures', color: 'var(--red)', kind: 'bar' },
-      { key: 'wakeP50Ms', color: 'var(--orange)', kind: 'line', axis: 'right' }], ['wake', 'wakeFailed']),
+      { key: 'wakeMeanMs', color: 'var(--orange)', kind: 'line', axis: 'right' }], ['wake', 'wakeFailed']),
     chartCard({ 'data-section': 'deliveries' }, 'ch.deliveries', [
       { key: 'deliveriesDone', color: 'var(--accent)', kind: 'area' },
       { key: 'deliveriesFailed', color: 'var(--red)', kind: 'bar' },
@@ -1968,9 +2091,10 @@ async function overview() {
     h('section', {}, sectionHead(1, 'sec.fleet', 'sec.fleetDesc'), h('div', { class: 'fleet', 'data-section': 'fleet' }, seats.el, gate.el, host.el)),
     h('section', {}, sectionHead(2, 'sec.timeline', 'sec.timelineDesc', lane.note), lane.el),
     h('section', {}, sectionHead(3, 'sec.activity', 'sec.activityDesc', windows), h('div', { class: 'charts' }, charts.map((c) => c.el))),
+    h('section', {}, sectionHead(4, 'sec.heat', 'sec.heatDesc'), h('div', { class: 'inset chart', 'data-section': 'heat' }, h('header', {}, h('b', {}, t('heat.platform'))), heat.el)),
     h('div', { class: 'pair' },
-      h('section', {}, sectionHead(4, 'sec.attention', 'sec.attentionDesc', inbox.action), inbox.el),
-      h('section', {}, sectionHead(5, 'sec.events', 'sec.eventsDesc', h('a', { href: '#/realtime', style: 'font-size:12px' }, `${t('ov.toRealtime')} →`)), tail.el)),
+      h('section', {}, sectionHead(5, 'sec.attention', 'sec.attentionDesc', inbox.action), inbox.el),
+      h('section', {}, sectionHead(6, 'sec.events', 'sec.eventsDesc', h('a', { href: '#/realtime', style: 'font-size:12px' }, `${t('ov.toRealtime')} →`)), tail.el)),
   );
 
   const pollMetrics = async () => {
@@ -2008,8 +2132,12 @@ async function overview() {
     charts.forEach((c) => c.set(model));
     inbox.render(model, animate);
   };
+  const pollHeat = header.guarded(async () => {
+    const usage = await api('GET', '/api/usage?app=*');
+    heat.set(weekRows(usage.buckets), h('span', { class: 'muted' }, t('heat.span', { from: new Intl.DateTimeFormat(locale(), { dateStyle: 'medium' }).format(usage.from) })));
+  });
   const refresh = header.guarded(pollMetrics);
-  return { loops: [[METRICS_MS, refresh], [APPS_MS, header.guarded(pollApps)]], first: refresh };
+  return { loops: [[METRICS_MS, refresh], [APPS_MS, header.guarded(pollApps)], [HEAT_MS, pollHeat]], first: () => Promise.all([refresh(), pollHeat()]) };
 }
 
 // Realtime (ADR 0016): the request ring and the event ring, read by cursor, under one filter.
@@ -2475,9 +2603,13 @@ function stateStrip(events, name) {
 }
 
 async function detail(name) {
-  const [d, apps, m, health] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), api('GET', '/api/metrics'), api('GET', '/api/health')]);
+  const usagePath = () => `/api/usage?app=${encodeURIComponent(name)}&from=${Math.floor(Date.now() / HOUR_MS) * HOUR_MS - APP_HEAT_DAYS * 24 * HOUR_MS}`;
+  const [d, apps, m, health, usage] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), api('GET', '/api/metrics'), api('GET', '/api/health'), api('GET', usagePath())]);
+  const heat = heatGrid('heat.app');
+  heat.set(dayRows(usage.buckets, APP_HEAT_DAYS));
+  let heatAt = Date.now();
   const { app, releases, bindings, policy, stats, deliveries } = d;
-  d.address = `/apps/${app.name}/`;
+  d.address = apps.find((a) => a.name === app.name)?.address ?? '';
   const reload = () => route();
   const lift = async () => {
     try {
@@ -2509,7 +2641,7 @@ async function detail(name) {
       h('h1', { class: 'mono', style: 'margin-top:12px' }, app.name),
       h('div', { class: 'meta' },
         status(app.status),
-        app.status === 'registered' ? h('a', { href: ingressOrigin(health.ingressPort) + d.address, target: '_blank', rel: 'noopener', class: 'mono', title: t('d.open', { address: d.address }) }, d.address) : h('span', { class: 'mono muted' }, d.address),
+        app.status === 'registered' ? h('a', { href: appUrl(d.address, health.ingressPort), target: '_blank', rel: 'noopener', class: 'mono', title: t('d.open', { address: d.address }) }, d.address) : h('span', { class: 'mono muted' }, d.address),
         row ? runtimeChip(row) : null,
         h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(s.instance), s.since != null ? h('span', { class: 'muted' }, t('d.since', { ago: ago(s.since).textContent })) : null, leaseChips(s.leases)),
         h('span', { class: 'muted' }, t('d.owner', { owner: app.owner }))));
@@ -2543,8 +2675,9 @@ async function detail(name) {
           h('button', { class: 'btn danger', type: 'button', disabled: app.status !== 'removed', title: app.status === 'removed' ? null : t('d.purgeHint'), onclick: act('purge') }, t('d.purge'))),
         actionMessage)),
     h('section', { style: 'padding-top:0;border-top:0' }, tiles),
-    h('section', {}, sectionHead(1, 'sec.policy', 'sec.policyDesc'), policyForm(app, policy, reload)),
-    h('section', {}, sectionHead(2, 'sec.releases', 'sec.releasesDesc'), table(
+    h('section', {}, sectionHead(1, 'sec.usage', 'sec.usageDesc'), h('div', { class: 'inset chart', 'data-section': 'usage' }, h('header', {}, h('b', {}, t('heat.app'))), heat.el)),
+    h('section', {}, sectionHead(2, 'sec.policy', 'sec.policyDesc'), policyForm(app, policy, reload)),
+    h('section', {}, sectionHead(3, 'sec.releases', 'sec.releasesDesc'), table(
       [['col.release', 'r'], ['col.image'], ['col.capabilities'], ['col.bundle'], ['col.published']],
       [...releases].sort((a, b) => b.number - a.number).map((r) => ({ cells: [
         h('span', { class: 'num' }, `#${r.number}`, current(r) ? h('span', { class: 'chip', style: 'margin-left:6px' }, t('r.current')) : null),
@@ -2553,25 +2686,30 @@ async function detail(name) {
         h('span', { class: 'mono', title: r.bundle ?? '' }, r.bundle ? r.bundle.slice(0, 12) : '-'),
         h('span', { title: stamp(r.publishedAt) }, ago(r.publishedAt)),
       ] })), 'empty.filtered')),
-    h('section', {}, sectionHead(3, 'sec.bindings', 'sec.bindingsDesc'), table(
+    h('section', {}, sectionHead(4, 'sec.bindings', 'sec.bindingsDesc'), table(
       [['col.kind'], ['col.provider'], ['col.state']],
       bindings.map((b) => ({ cells: [chip(b.kind), h('span', { class: 'mono' }, b.provider), status(b.state)] })), 'empty.bindings')),
-    h('section', {}, sectionHead(4, 'sec.deliveries', 'sec.deliveriesDesc'), table(
+    h('section', {}, sectionHead(5, 'sec.deliveries', 'sec.deliveriesDesc'), table(
       [['col.state'], ['col.trigger'], ['col.attempts', 'r'], ['col.scheduledFor'], ['col.created'], ['col.nextAttempt']],
       deliveries.map((x) => ({ cells: [
         status(x.state), h('span', { class: 'mono' }, x.trigger), h('span', { class: 'num' }, nf(x.attempts)),
         x.scheduledFor == null ? h('span', { class: 'muted' }, t('d.onDemand')) : h('span', { class: 'mono' }, stamp(x.scheduledFor)),
         ago(x.createdAt), x.state === 'due' ? ago(x.nextAttemptAt) : h('span', { class: 'muted' }, '-'),
       ] })), 'empty.deliveries')),
-    h('section', {}, sectionHead(5, 'sec.logs', 'sec.logsDesc', ...logs.controls), logs.box),
+    h('section', {}, sectionHead(6, 'sec.logs', 'sec.logsDesc', ...logs.controls), logs.box),
   );
   return async function update() {
     const [fresh, list, now] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), api('GET', '/api/metrics')]);
     renderHead(list.find((a) => a.name === app.name), fresh.stats, now.events);
+    if (Date.now() - heatAt >= HEAT_MS) {
+      heatAt = Date.now();
+      heat.set(dayRows((await api('GET', usagePath())).buckets, APP_HEAT_DAYS));
+    }
   };
 }
 
-const ingressOrigin = (port) => `${location.protocol}//${location.hostname}:${port}`;
+// A path-mode address is relative to the ingress, which listens on its own port; a subdomain address is absolute.
+const appUrl = (address, port) => new URL(address, `${location.protocol}//${location.hostname}:${port}`).href;
 
 const FIELD_OF = [[/^app name/, 'name'], [/^subject/, 'owner'], [/^image|image "/, 'image'], [/^bundle|static is declared/, 'bundle']];
 

@@ -380,7 +380,7 @@ export const DEFAULT_POLICY: Policy = {
   failure_window_seconds: 60,
   restart_backoff_seconds: 5,
   cpu_millis: 1000,
-  memory_mb: 256,
+  memory_mb: 512,
   timezone: 'UTC',
   usage_retention_days: 90,
   events_retention_days: 14,
@@ -595,6 +595,7 @@ export type AppSummary = {
   /** The engine a declared `db` uses under the app's effective policy; null without `db`. */
   readonly dbBackend: Policy['db_backend'] | null;
   readonly lastAccessAt: number | null;
+  /** Over the last 24 hourly `usage` buckets (ADR 0024). */
   readonly requests: number;
   readonly errors: number;
   /** The node the instance runs on; null when asleep or not known. */
@@ -744,7 +745,7 @@ export type AuditRecord = {
   readonly action: AuditAction;
   readonly targetKind: 'app' | 'tenant' | 'token' | 'member' | 'policy';
   readonly target: string;
-  readonly result: 'ok' | 'refused' | 'error';
+  readonly result: 'started' | 'ok' | 'refused' | 'error';
   /** Never a secret. */
   readonly details: Readonly<Record<string, unknown>>;
 };
@@ -1014,8 +1015,9 @@ export interface Registry {
   setGlobalPolicy(patch: Partial<Policy>): Promise<Policy>;
   setAppPolicy(name: AppName, patch: PolicyPatch): Promise<PolicyOverride>;
   setOwner(name: AppName, owner: Subject): Promise<void>;
-  issueToken(name: string): Promise<{ readonly token: string; readonly subject: Subject }>;
+  issueToken(name: string): Promise<{ readonly id: string; readonly token: string; readonly subject: Subject }>;
   view(name: AppName): RouteView | null;
+  nameOf(id: AppId): AppName | null;
   /** The global snapshot; merge with a RouteView's override via effectivePolicy. */
   policy(): Policy;
   runSpec(app: AppId): RunSpec | null;
@@ -1061,6 +1063,9 @@ export const ADMIN_PATHS = {
   apps: '/api/apps',
   metrics: '/api/metrics',
   requests: '/api/requests',
+  usage: '/api/usage',
+  usageApps: '/api/usage/apps',
+  audit: '/api/audit',
   bundles: '/api/bundles',
   policy: '/api/policy',
   tokens: '/api/tokens',

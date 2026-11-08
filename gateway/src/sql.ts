@@ -417,19 +417,23 @@ export class SqlOps implements StoreOps {
     return (await this.#s.run("DELETE FROM delivery WHERE state IN ('done', 'cancelled') AND created_at < $1", [before])).changes;
   }
 
+  /** `requests` and `errors` live in `usage` now (ADR 0024 item 3); the zeros stand in until Stats loses them. */
   async stats() {
-    return (await this.#s.all('SELECT * FROM stats')).map((r): Stats => ({
-      app: r.app as AppId, requests: num(r.requests), errors: num(r.errors), lastAccessAt: numOrNull(r.last_access_at),
+    return (await this.#s.all('SELECT app, last_access_at FROM stats')).map((r): Stats => ({
+      app: r.app as AppId, requests: 0, errors: 0, lastAccessAt: numOrNull(r.last_access_at),
     }));
   }
 
+  /** Each replica writes its own last access; the later one wins. */
   putStats(stats: readonly Stats[]) {
     return this.#s.atomic(async () => {
       for (const s of stats) {
         await this.#s.run(
-          `INSERT INTO stats (app, requests, errors, last_access_at) VALUES ($1, $2, $3, $4)
-           ON CONFLICT (app) DO UPDATE SET requests = excluded.requests, errors = excluded.errors, last_access_at = excluded.last_access_at`,
-          [s.app, s.requests, s.errors, s.lastAccessAt],
+          `INSERT INTO stats (app, last_access_at) VALUES ($1, $2)
+           ON CONFLICT (app) DO UPDATE SET last_access_at = CASE
+             WHEN stats.last_access_at IS NULL OR excluded.last_access_at > stats.last_access_at THEN excluded.last_access_at
+             ELSE stats.last_access_at END`,
+          [s.app, s.lastAccessAt],
         );
       }
     });

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
-  APPS_PATH, CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_TENANT, InputError, NotFound, RUNTIMES,
+  CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_TENANT, GLOBAL_ONLY_POLICY, InputError, NotFound, RUNTIMES,
   declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider,
   type App, type AppDetail, type AppId, type AppName, type AppSummary, type Binding, type BindingState,
   type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type Change, type CapabilityProvider, type Guard, type Infra,
@@ -9,6 +9,7 @@ import {
   type PublishRequest, type Registry, type Release, type ReleaseNumber, type ResourceKind, type RouteView,
   type RunSpec, type Runtime, type RuntimeKind, type SchedulerView, type Stats, type Store, type StoreOps, type Subject, type Trigger, type TriggerName,
 } from './model.ts';
+import { address, PATH_ADDRESSING, type Addressing } from './address.ts';
 import { emit } from './events.ts';
 import { issueToken } from './identity.ts';
 import { resolvesOnNetwork, type ServiceProbe } from './providers.ts';
@@ -22,12 +23,16 @@ export type RegistryDeps = {
   readonly providers: readonly CapabilityProvider[];
   /** Whether a runtime's compose service is up; publish refuses a runtime whose service is not. */
   readonly probe?: ServiceProbe;
-  /** Ingress counters once U8 wires them; the last snapshot otherwise. */
+  /** The 24 h counts and last access per app; the stored last access otherwise. */
   readonly statsSource?: () => Promise<Stats[]>;
+  readonly addressing?: Addressing;
 };
 
 const SECONDS_FIELDS = ['idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds', 'failure_window_seconds', 'restart_backoff_seconds'] as const;
+const WHOLE_FIELDS = ['max_failures', 'cpu_millis', 'memory_mb', 'usage_retention_days', 'events_retention_days', 'events_max_rows'] as const;
+const POLICY_FIELDS: readonly string[] = [...SECONDS_FIELDS, ...WHOLE_FIELDS, 'db_backend', 'timezone'];
 const DETAIL_DELIVERIES = 50;
+const SIGHTING_MS = 5 * 60_000;
 
 const log = emit;
 
@@ -41,19 +46,19 @@ function desiredState(app: App, manifest: Manifest | null, policy: Policy, bindi
 
 function parsePolicyPatch(raw: unknown, scope: 'global' | 'app'): Record<string, unknown> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new InputError('policy must be a JSON object');
-  const allowed: readonly string[] = [...SECONDS_FIELDS, 'max_failures', 'db_backend', ...(scope === 'global' ? ['timezone'] : [])];
+  const globalOnly: readonly string[] = GLOBAL_ONLY_POLICY;
   for (const [key, value] of Object.entries(raw)) {
-    if (!allowed.includes(key)) {
-      const hint = key === 'timezone' ? 'timezone is global only; set it with PUT /api/policy' : `allowed: ${allowed.join(', ')}`;
-      throw new InputError(`policy field "${key}" is not accepted here; ${hint}`);
+    if (scope === 'app' && globalOnly.includes(key)) throw new InputError(`policy field "${key}" is global only; set it with PUT /api/policy`);
+    if (!POLICY_FIELDS.includes(key)) {
+      const allowed = scope === 'global' ? POLICY_FIELDS : POLICY_FIELDS.filter((field) => !globalOnly.includes(field));
+      throw new InputError(`policy field "${key}" is not accepted here; allowed: ${allowed.join(', ')}`);
     }
     if (value === null && scope === 'app') continue;
-    if ((SECONDS_FIELDS as readonly string[]).includes(key) && !(Number.isInteger(value) && (value as number) > 0)) {
+    const positive = Number.isInteger(value) && (value as number) > 0;
+    if ((SECONDS_FIELDS as readonly string[]).includes(key) && !positive) {
       throw new InputError(`${key} must be a positive integer number of seconds, got ${JSON.stringify(value)}`);
     }
-    if (key === 'max_failures' && !(Number.isInteger(value) && (value as number) > 0)) {
-      throw new InputError(`max_failures must be a positive integer, got ${JSON.stringify(value)}`);
-    }
+    if ((WHOLE_FIELDS as readonly string[]).includes(key) && !positive) throw new InputError(`${key} must be a positive integer, got ${JSON.stringify(value)}`);
     if (key === 'db_backend' && !(CAPABILITIES.db.providers as readonly unknown[]).includes(value)) {
       throw new InputError(`db_backend must be one of ${CAPABILITIES.db.providers.join(', ')}, got ${JSON.stringify(value)}`);
     }
@@ -91,6 +96,7 @@ export class PlatformRegistry implements Registry {
   readonly #bundles: BundleStore;
   readonly #providers: ReadonlyMap<ProviderName, CapabilityProvider>;
   readonly #stats: () => Promise<Stats[]>;
+  readonly #addressing: Addressing;
   readonly #changed = new EventEmitter();
   readonly #views = new Map<AppName, RouteView>();
   readonly #specs = new Map<AppId, RunSpec>();
@@ -98,6 +104,7 @@ export class PlatformRegistry implements Registry {
   readonly #names = new Map<AppId, AppName>();
   readonly #schedules = new Map<AppId, SchedulerView>();
   readonly #indexes = new Map<BundleId, BundleIndex>();
+  readonly #sightings = new Map<string, { readonly key: string; readonly at: number }>();
   #policy: Policy;
 
   private constructor(deps: RegistryDeps, policy: Policy) {
@@ -109,6 +116,7 @@ export class PlatformRegistry implements Registry {
     this.#bundles = deps.bundles;
     this.#providers = new Map(deps.providers.map((p) => [p.name, p]));
     this.#stats = deps.statsSource ?? (() => deps.store.stats());
+    this.#addressing = deps.addressing ?? PATH_ADDRESSING;
     this.#policy = policy;
   }
 
@@ -320,13 +328,23 @@ export class PlatformRegistry implements Registry {
     log('owner', name, { owner });
   }
 
-  async issueToken(name: string): Promise<{ readonly token: string; readonly subject: Subject }> {
+  /** `id` is beyond the frozen interface; the admin boundary audits it. */
+  async issueToken(name: string): Promise<{ readonly id: string; readonly token: string; readonly subject: Subject }> {
     const { token, hash, subject } = issueToken(name);
-    await this.#store.putToken({
-      id: randomBytes(8).toString('hex'), tenant: DEFAULT_TENANT, subject, label: name, hash, createdBy: 'local', createdAt: Date.now(), revokedAt: null,
-    });
+    const id = randomBytes(8).toString('hex');
+    await this.#store.putToken({ id, tenant: DEFAULT_TENANT, subject, label: name, hash, createdBy: 'local', createdAt: Date.now(), revokedAt: null });
     log('token', null, { subject });
-    return { token, subject };
+    return { id, token, subject };
+  }
+
+  /** The authentication path's User write: once per user per 5 min on this replica, at once when the name or groups change (ADR 0022 item 1). */
+  async sighted(id: string, name: string, groups: readonly string[]): Promise<void> {
+    const key = JSON.stringify([name, groups]);
+    const at = Date.now();
+    const last = this.#sightings.get(id);
+    if (last && last.key === key && at - last.at < SIGHTING_MS) return;
+    await this.#store.putUser({ id, name, groups, firstSeen: at, lastSeen: at });
+    this.#sightings.set(id, { key, at });
   }
 
   view(name: AppName): RouteView | null {
@@ -355,7 +373,7 @@ export class PlatformRegistry implements Registry {
       const s = stats.get(view.app);
       return {
         name: view.name,
-        address: `${APPS_PATH}/${view.name}/`,
+        address: address(this.#addressing, view.name),
         release: view.release,
         capabilities: [...view.kinds],
         status: view.status,

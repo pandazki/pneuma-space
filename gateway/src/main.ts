@@ -1,10 +1,14 @@
+import type { IncomingMessage } from 'node:http';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
+import { parseAppsOrigin } from './address.ts';
 import { startAdmin } from './admin.ts';
 import { Docker } from './docker.ts';
 import { emit, events } from './events.ts';
 import { Instances } from './instances.ts';
-import { loadOrCreateSecret, LocalIdentity } from './identity.ts';
+import { Authority, parsePlatformAdmins } from './authz.ts';
+import { loadOrCreateSecret, LocalIdentity, parseIdentityEnv, UpstreamIdentity, type Identity } from './identity.ts';
+import { JwtVerifier } from './jwt.ts';
 import { Ingress } from './ingress.ts';
 import { hostSample, httpProbe, Metrics, profileProbe, tcpProbe } from './metrics.ts';
 import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId } from './model.ts';
@@ -22,13 +26,24 @@ const SAMPLE_MS = 10_000;
 
 const log = (ev: string, extra: Record<string, unknown> = {}) => emit(ev, null, extra);
 
+const setup = (() => {
+  try {
+    const identity = parseIdentityEnv(process.env);
+    const admins = parsePlatformAdmins(process.env.PNEUMA_SPACE_PLATFORM_ADMINS);
+    const upstream = identity.kind === 'upstream' ? { ...identity.options, verifier: new JwtVerifier(identity.jwt), audiences: identity.jwt.audiences } : null;
+    return { admins, upstream, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
+  } catch (error) {
+    console.error(`pneuma-space: ${(error as Error).message}`);
+    process.exit(1);
+  }
+})();
+
 const data = process.env.PNEUMA_SPACE_DATA ?? '/data';
 const network = process.env.PNEUMA_SPACE_NETWORK ?? 'pneuma-space';
 // The host port compose publishes the ingress on; the console links to apps through it.
 const ingressPort = Number(process.env.PNEUMA_SPACE_HTTP_PORT ?? INGRESS_PORT);
 const config = providerConfig(process.env);
-
-const replica = (process.env.PNEUMA_SPACE_REPLICA || hostname()) as ReplicaId;
+const replica = (process.env.PNEUMA_SPACE_REPLICA ?? hostname()) as ReplicaId;
 
 const store = new SqliteStore(join(data, 'pneuma-space.sqlite3'));
 // SQLite: one replica, which leads at once (ADR 0020 item 7).
@@ -47,12 +62,17 @@ const isolate = new IsolateRuntime({
 });
 const runtime = new Runtimes({ runtimes: [container, isolate], specFor, instances });
 const registry = await PlatformRegistry.open({
-  store, runtime, guard, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => ingress.snapshot(),
+  store, runtime, guard, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => metrics.stats(),
+  addressing: setup.addressing,
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica });
-const identity = new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), (hash) => store.token(hash));
+const authority = new Authority(store, setup.admins);
+const identity: Identity = setup.upstream
+  ? new UpstreamIdentity(setup.upstream, authority, registry)
+  : new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), authority);
 const ingress = new Ingress({
-  registry, runtime, identity, bundles, scheduler, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
+  registry, runtime, identity, authority, addressing: setup.addressing, bundles, scheduler,
+  upstream: setup.upstream && { header: setup.upstream.header, stripCookies: setup.upstream.stripCookies }, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
 });
 
 const metrics = new Metrics({
@@ -69,6 +89,10 @@ const metrics = new Metrics({
     runner: profileProbe('runner', RUNNER_PORT),
   },
   host: () => hostSample(data),
+  usage: store,
+  policy: () => registry.policy(),
+  view: (name) => registry.view(name),
+  replica,
 });
 
 process.on('unhandledRejection', (error) => log('unhandled-rejection', { error: String(error) }));
@@ -84,7 +108,11 @@ await runtime.reconcile();
 void registry.resume();
 await instances.onLeader((leading) => (leading ? scheduler.resume() : scheduler.stop()));
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
-const admin = await startAdmin({ registry, bundles, runtime, guard, metrics, requests, ingressPort }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const caller = setup.upstream ? async (request: IncomingMessage) => {
+  const auth = await identity.identify(request);
+  return typeof auth === 'string' ? auth : authority.callerOf(auth);
+} : undefined;
+const admin = await startAdmin({ registry, bundles, runtime, guard, metrics, requests, store, ingressPort, caller }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {
   ingress.flush().catch((error: Error) => log('flush-failed', { error: error.message }));

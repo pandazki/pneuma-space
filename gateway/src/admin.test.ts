@@ -4,7 +4,10 @@ import { test } from 'node:test';
 import { startAdmin } from './admin.ts';
 import { EventLog } from './events.ts';
 import { Metrics } from './metrics.ts';
-import { appName, DEFAULT_POLICY, parseManifest, subject, type AppId, type HealthCheck, type Runtime, type RuntimeKind } from './model.ts';
+import {
+  appName, DEFAULT_POLICY, DEFAULT_TENANT, parseManifest, subject, USAGE_COUNTERS,
+  type AppId, type AuditRecord, type HealthCheck, type ReplicaId, type Runtime, type RuntimeKind, type TenantName, type Usage,
+} from './model.ts';
 import { RequestLog } from './requests.ts';
 import { Runtimes } from './runtimes.ts';
 import { world } from './registry.fakes.ts';
@@ -20,10 +23,14 @@ async function admin(runtime?: Runtimes) {
     nameOf: (app) => registry.nameOf(app),
     probes: { redis: async () => 'up' },
     host: async () => ({ cpus: 1, load: [0, 0, 0], memory: { totalBytes: 1, freeBytes: 1 }, data: null }),
+    usage: store,
+    policy: () => registry.policy(),
+    view: (name) => registry.view(name),
+    replica: 'r1' as ReplicaId,
   });
   const requests = new RequestLog();
   const logs = { logs: (app: AppId, tail: number) => w.runtime.logs(app, tail), healthOf: () => [] };
-  const server = await startAdmin({ registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, requests, ingressPort: 18080 }, { port: 0 });
+  const server = await startAdmin({ registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, requests, store, ingressPort: 18080 }, { port: 0 });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
     const raw = typeof body === 'string' ? body : body === undefined ? undefined : JSON.stringify(body);
@@ -155,4 +162,76 @@ test('GET /api/health lists every runtime kind with its checks and the global po
   });
   assert.deepEqual(body.policy, DEFAULT_POLICY);
   assert.deepEqual(calls, []);
+});
+
+test('GET /api/usage filters by app and by tenant', async (t) => {
+  const { call, server, registry, store } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  const survey = registry.view(appName('survey'))!.app;
+  const row = (app: AppId, tenant: TenantName, requests: number): Usage => ({
+    ...(Object.fromEntries(USAGE_COUNTERS.map((c) => [c, 0])) as Record<(typeof USAGE_COUNTERS)[number], number>),
+    app, tenant, step: 3600, start: 7_200_000, replica: 'r1' as ReplicaId, requests,
+  });
+  await store.putUsage([row(survey, DEFAULT_TENANT, 4), row('other0000001' as AppId, 'lab' as TenantName, 9)]);
+  const requests = async (query: string) => (await call('GET', `/api/usage?${query}&from=0&to=10800000`)).body.buckets.map((b: Usage) => b.requests);
+  assert.deepEqual([await requests('app=survey'), await requests('tenant=lab')], [[4], [9]]);
+});
+
+const audit = async (store: { audit: (filter: { target?: string }) => Promise<AuditRecord[]> }, target: string) =>
+  (await store.audit({ target })).reverse().map(({ actor, actorTenant, tenant, action, targetKind, target: id, result, details }) => ({ actor, actorTenant, tenant, action, targetKind, target: id, result, details }));
+
+test('a publish writes a started row, then an ok row with the release number and key', async (t) => {
+  const { call, server, store } = await admin();
+  t.after(() => server.close());
+  const release = (await call('PUT', '/api/apps/survey/release', kvApp)).body;
+  const row = { actor: 'local', actorTenant: null, tenant: DEFAULT_TENANT, action: 'app.publish', targetKind: 'app', target: 'survey' };
+  assert.deepEqual(await audit(store, 'survey'), [
+    { ...row, result: 'started', details: {} },
+    { ...row, result: 'ok', details: { release: 1, releaseKey: release.releaseKey } },
+  ]);
+});
+
+test('a request the handler refuses writes refused with the reason', async (t) => {
+  const { call, server, store } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  assert.equal((await call('POST', '/api/apps/survey/purge')).status, 409);
+  const [started, refused] = (await audit(store, 'survey')).filter((r) => r.action === 'app.purge');
+  assert.deepEqual([started.result, refused.result], ['started', 'refused']);
+  assert.match(String(refused.details.error), /remove it before purging/);
+});
+
+test('a handler that throws writes error with the message', async (t) => {
+  const { call, server, store, w } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  w.runtime.unquarantine = () => { throw new Error('guard unreachable'); };
+  assert.equal((await call('POST', '/api/apps/survey/unquarantine')).status, 500);
+  assert.deepEqual((await audit(store, 'survey')).at(-1), {
+    actor: 'local', actorTenant: null, tenant: DEFAULT_TENANT, action: 'app.unquarantine', targetKind: 'app', target: 'survey',
+    result: 'error', details: { error: 'guard unreachable' },
+  });
+});
+
+test('a token issue row carries the token id and never the secret', async (t) => {
+  const { call, server, store } = await admin();
+  t.after(() => server.close());
+  const issued = (await call('POST', '/api/tokens', { name: 'ci' })).body;
+  const rows = await audit(store, 'service:ci');
+  assert.deepEqual(rows.map((r) => [r.action, r.targetKind, r.result, r.details]), [['token.issue', 'token', 'started', {}], ['token.issue', 'token', 'ok', { token: issued.id }]]);
+  assert.equal(JSON.stringify(await store.audit({})).includes(issued.token), false);
+});
+
+test('GET /api/audit filters by tenant, time range, action and actor, newest first within the limit', async (t) => {
+  const { call, server, store } = await admin();
+  t.after(() => server.close());
+  const row = { actor: subject('user:ann'), actorTenant: null, tenant: 'lab' as TenantName, action: 'app.remove', targetKind: 'app', target: 'a', result: 'ok', details: {} } as const;
+  for (const at of [10, 20, 30, 40]) await store.insertAudit({ ...row, at });
+  await store.insertAudit({ ...row, at: 25, tenant: DEFAULT_TENANT });
+  await store.insertAudit({ ...row, at: 25, action: 'app.purge' });
+  await store.insertAudit({ ...row, at: 25, actor: subject('user:bob') });
+  const ats = async (query: string) => (await call('GET', `/api/audit?${query}`)).body.map((r: AuditRecord) => r.at);
+  assert.deepEqual(await ats('tenant=lab&from=20&to=40&action=app.remove&actor=user:ann'), [30, 20]);
+  assert.deepEqual(await ats('tenant=lab&action=app.remove&actor=user:ann&limit=3'), [40, 30, 20]);
 });

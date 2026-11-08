@@ -72,7 +72,10 @@ export const MIGRATIONS = [
      trigger INTEGER NOT NULL, released_at INTEGER, PRIMARY KEY (app, replica));
    CREATE TABLE guard (
      app TEXT PRIMARY KEY, release INTEGER NOT NULL, failures TEXT NOT NULL, quarantine_reason TEXT, quarantined_at INTEGER);`,
-  // ADR 0020 as revised: the app's version for stale-view wakes, the delivery's claimer for conditional claims.
+  // ADR 0024 item 3: counts moved to usage. PgStore builds the final schema, so only SQLite drops columns.
+  `ALTER TABLE stats DROP COLUMN requests;
+   ALTER TABLE stats DROP COLUMN errors;`,
+  // ADR 0020 as revised (step 6): the app's version for stale-view wakes, the delivery's claimer for conditional claims.
   `ALTER TABLE app ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE delivery ADD COLUMN replica TEXT;`,
 ];

@@ -51,6 +51,17 @@ test('migration step 4 puts every M1 app and token in the default tenant', async
   await store.close();
 });
 
+test('migration step 5 keeps each app\'s last access when stats loses its counts (INV-7)', async () => {
+  const file = path();
+  const m2 = new DatabaseSync(file);
+  for (const step of MIGRATIONS.slice(0, 4)) m2.exec(step);
+  m2.exec(`PRAGMA user_version = 4; INSERT INTO stats (app, requests, errors, last_access_at) VALUES ('id-survey', 3, 1, 42);`);
+  m2.close();
+  const store = new SqliteStore(file);
+  assert.deepEqual((await store.stats()).map((s) => [s.app, s.lastAccessAt]), [['id-survey', 42]]);
+  await store.close();
+});
+
 test('the audit table refuses update and delete', async () => {
   const file = path();
   const store = new SqliteStore(file);
