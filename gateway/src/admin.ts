@@ -4,14 +4,14 @@ import type { AddressInfo } from 'node:net';
 import { emit } from './events.ts';
 import type { Metrics } from './metrics.ts';
 import type { Runtimes } from './runtimes.ts';
-import { RING, type RequestLog } from './requests.ts';
+import { gather, peerSources, RING, seqIn, type RequestLog, type Source } from './requests.ts';
 import { can, LOCAL_CALLER, type Action, type Authority } from './authz.ts';
 import type { Answer, Identity } from './identity.ts';
 import type { AdminRegistry } from './registry.ts';
 import {
   ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, NotFound, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
   appName, bundleId, parseManifest, subject, tenantName,
-  type Access, type Actor, type AppId, type AuditAction, type AuditRecord, type BundleStore, type Caller, type Guard, type Release, type Role, type StoreOps,
+  type Access, type Actor, type AppId, type AuditAction, type AuditRecord, type BundleStore, type Caller, type Guard, type Release, type ReplicaId, type Role, type StoreOps,
   type Subject, type TenantName, type UsageBucket, type UsageCounters,
 } from './model.ts';
 
@@ -20,8 +20,12 @@ export type AdminDeps = {
   readonly bundles: BundleStore;
   readonly runtime: Pick<Runtimes, 'logs' | 'healthOf'>;
   readonly guard: Guard;
-  readonly metrics: Pick<Metrics, 'snapshot'>;
+  readonly metrics: Pick<Metrics, 'snapshot' | 'events'>;
   readonly requests: Pick<RequestLog, 'after'>;
+  /** This replica, named in its request records and cursor entries. */
+  readonly replica: ReplicaId;
+  /** `PNEUMA_SPACE_PEERS` and the credential headers a fan-out forwards; absent on a single replica (ADR 0024 item 5). */
+  readonly peers?: { readonly host: string; readonly forward: readonly string[] };
   readonly store: Pick<StoreOps, 'usage' | 'insertAudit' | 'audit' | 'tenant' | 'tenants' | 'quotaUsed' | 'memberships' | 'user' | 'tokens'>;
   readonly ingressPort: number;
   readonly consoleFile?: string | URL;
@@ -165,7 +169,7 @@ function firstTenant({ body, caller }: Ctx): TenantName {
   throw new InputError(`tenant is required on a first publish${mine.length ? `; you are in ${mine.join(', ')}` : ''}`);
 }
 
-function routes({ registry, bundles, runtime, guard, metrics, requests, store, ingressPort, upstream }: AdminDeps): Route[] {
+function routes({ registry, bundles, runtime, guard, metrics, requests, replica, peers, store, ingressPort, upstream }: AdminDeps): Route[] {
   const app = (name: string | undefined) => appName(name!);
   const found = <T>(value: T | null, name: string | undefined): T => {
     if (value === null) throw new NotFound(`no app named "${name}"`);
@@ -187,6 +191,15 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, store, i
   const tenantAdmin = (caller: Caller, tenant: TenantName | null) => caller.platformAdmin || (tenant !== null && caller.roles.get(tenant) === 'admin');
   const tokenSubject = ({ body, caller, params: [tenant] }: Ctx): string =>
     body.kind === 'service' ? `service:${tenant}.${String(body.name)}` : String(subjectOf(caller.actor) ?? '');
+  const local: Source = {
+    name: replica,
+    page: async (cursor, limit) => ({ replica, records: requests.after(seqIn(cursor, replica), limit).map((r) => ({ ...r, app: registry.nameOf(r.app) ?? r.app })) }),
+  };
+  const peerNames = new Map<string, ReplicaId>();
+  const forwarded = (request: IncomingMessage) => Object.fromEntries((peers?.forward ?? []).flatMap((name) => {
+    const value = request.headers[name];
+    return typeof value === 'string' ? [[name, value]] : [];
+  }));
   const appRoute = (method: string, path: string, action: Action, handle: Handler, extra: Partial<Route> = {}): Route =>
     ({ method, path: at(path), action, scope: ({ params: [name] }) => onApp(name), handle, ...extra });
 
@@ -214,7 +227,7 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, store, i
         return tenant ? all.filter((a) => a.tenant === tenantName(tenant)) : all;
       },
     },
-    { method: 'GET', path: at(ADMIN_PATHS.metrics), action: 'platform.read', handle: () => metrics.snapshot() },
+    { method: 'GET', path: at(ADMIN_PATHS.metrics), action: 'platform.read', handle: async () => ({ ...metrics.snapshot(), events: await metrics.events() }) },
     {
       method: 'GET', path: at(ADMIN_PATHS.usage),
       action: ({ query }) => (query.get('app') ?? '*') === '*' ? 'records' : 'app.read',
@@ -249,9 +262,12 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, store, i
     },
     { method: 'GET', path: at(ADMIN_PATHS.audit), action: 'records', scope: onQuery, handle: ({ query }) => store.audit(auditFilter(query)) },
     {
-      method: 'GET', path: at(ADMIN_PATHS.requests), action: 'platform.read', handle: ({ query }) => requests
-        .after(wholeParam(query, 'after', 0, 0, Number.MAX_SAFE_INTEGER), wholeParam(query, 'limit', 500, 1, RING))
-        .map((r) => ({ ...r, app: registry.nameOf(r.app) ?? r.app })),
+      method: 'GET', path: at(ADMIN_PATHS.requests), action: 'platform.read', handle: async ({ query, request }) => {
+        const cursor = query.get('after') ?? '';
+        const limit = wholeParam(query, 'limit', 500, 1, RING);
+        if (query.get('local') !== null) return local.page(cursor, limit);
+        return gather(cursor, limit, peers ? await peerSources(peers.host, ADMIN_PORT, forwarded(request), peerNames) : [local]);
+      },
     },
     appRoute('GET', ADMIN_PATHS.app('<name>'), 'app.read', async ({ params: [name] }) => found(await registry.detail(app(name)), name)),
     appRoute('GET', ADMIN_PATHS.logs('<name>'), 'app.read', ({ query, params: [name] }) => runtime.logs(found(registry.view(app(name)), name).app, wholeParam(query, 'tail', 200, 1, MAX_TAIL))),
