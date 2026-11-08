@@ -27,7 +27,6 @@ const BODY_LIMIT = 1024 * 1024;
 const MAX_TAIL = 10_000;
 const HOUR = 3_600_000;
 const USAGE_SPAN_MS = 30 * 24 * HOUR;
-const USAGE_PATHS = { usage: '/api/usage', apps: '/api/usage/apps' } as const;
 
 /** A string result is sent as text/plain, anything else as JSON. */
 type Handler = (request: IncomingMessage, name: string | undefined) => Promise<unknown> | unknown;
@@ -105,7 +104,7 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, usage, i
     { method: 'GET', path: at(ADMIN_PATHS.apps), handle: () => registry.listing() },
     { method: 'GET', path: at(ADMIN_PATHS.metrics), handle: () => metrics.snapshot() },
     {
-      method: 'GET', path: at(USAGE_PATHS.usage), handle: async (request) => {
+      method: 'GET', path: at(ADMIN_PATHS.usage), handle: async (request) => {
         const query = new URL(request.url ?? '/', 'http://admin').searchParams;
         const window = usageWindow(request);
         const name = query.get('app');
@@ -119,7 +118,7 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, usage, i
       },
     },
     {
-      method: 'GET', path: at(USAGE_PATHS.apps), handle: async (request) => {
+      method: 'GET', path: at(ADMIN_PATHS.usageApps), handle: async (request) => {
         const query = new URL(request.url ?? '/', 'http://admin').searchParams;
         const tenant = query.get('tenant');
         const rows = await usage.usage({ step: 3600, ...usageWindow(request), ...(tenant !== null && { tenant: tenantName(tenant) }) });

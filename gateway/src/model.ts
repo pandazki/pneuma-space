@@ -588,6 +588,7 @@ export type AppSummary = {
   /** The engine a declared `db` uses under the app's effective policy; null without `db`. */
   readonly dbBackend: Policy['db_backend'] | null;
   readonly lastAccessAt: number | null;
+  /** Over the last 24 hourly `usage` buckets (ADR 0024). */
   readonly requests: number;
   readonly errors: number;
   /** The node the instance runs on; null when asleep or not known. */
@@ -1004,6 +1005,7 @@ export interface Registry {
   setOwner(name: AppName, owner: Subject): Promise<void>;
   issueToken(name: string): Promise<{ readonly token: string; readonly subject: Subject }>;
   view(name: AppName): RouteView | null;
+  nameOf(id: AppId): AppName | null;
   /** The global snapshot; merge with a RouteView's override via effectivePolicy. */
   policy(): Policy;
   runSpec(app: AppId): RunSpec | null;
@@ -1049,6 +1051,8 @@ export const ADMIN_PATHS = {
   apps: '/api/apps',
   metrics: '/api/metrics',
   requests: '/api/requests',
+  usage: '/api/usage',
+  usageApps: '/api/usage/apps',
   bundles: '/api/bundles',
   policy: '/api/policy',
   tokens: '/api/tokens',
