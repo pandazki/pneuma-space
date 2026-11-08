@@ -1,17 +1,19 @@
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { startAdmin } from './admin.ts';
 import { Docker } from './docker.ts';
 import { emit, events } from './events.ts';
+import { Instances } from './instances.ts';
 import { loadOrCreateSecret, LocalIdentity } from './identity.ts';
 import { Ingress } from './ingress.ts';
 import { hostSample, httpProbe, Metrics, profileProbe, tcpProbe } from './metrics.ts';
-import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId } from './model.ts';
+import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId } from './model.ts';
 import { composeProject, DockerInfra } from './infra.ts';
 import { createProviders, providerConfig, S3BundleStore } from './providers.ts';
 import { PlatformRegistry } from './registry.ts';
 import { IsolateRuntime, RUNNER_PORT } from './isolate.ts';
 import { DockerRuntime } from './runtime.ts';
-import { Runtimes } from './runtimes.ts';
+import { AppGuard, Runtimes } from './runtimes.ts';
 import { requests } from './requests.ts';
 import { DeliveryScheduler } from './scheduler.ts';
 import { SqliteStore } from './store.ts';
@@ -26,21 +28,28 @@ const network = process.env.PNEUMA_SPACE_NETWORK ?? 'pneuma-space';
 const ingressPort = Number(process.env.PNEUMA_SPACE_HTTP_PORT ?? INGRESS_PORT);
 const config = providerConfig(process.env);
 
+const replica = (process.env.PNEUMA_SPACE_REPLICA || hostname()) as ReplicaId;
+
 const store = new SqliteStore(join(data, 'pneuma-space.sqlite3'));
+// SQLite: one replica, which leads at once (ADR 0020 item 7).
+const instances = new Instances(store, { replica, leader: true });
+await instances.ready();
+await instances.start();
 const docker = new Docker();
 const infra = new DockerInfra(docker, await composeProject(docker));
 const specFor = (app: AppId) => registry.runSpec(app);
-const container = new DockerRuntime({ docker, network, specFor });
+const guard = new AppGuard({ instances, specFor });
+const container = new DockerRuntime({ docker, network, specFor, instances, guard });
 const bundles = new S3BundleStore(config.object);
 const isolate = new IsolateRuntime({
   runner: `http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`, bundleUrl: (id) => bundles.presignTar(id), specFor,
-  hasRun: async (app) => (await store.releases(app)).some((release) => release.runtime === 'isolate'),
+  hasRun: async (app) => (await store.releases(app)).some((release) => release.runtime === 'isolate'), instances, guard,
 });
-const runtime = new Runtimes({ runtimes: [container, isolate], specFor, events });
+const runtime = new Runtimes({ runtimes: [container, isolate], specFor, instances });
 const registry = await PlatformRegistry.open({
-  store, runtime, guard: runtime, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => ingress.snapshot(),
+  store, runtime, guard, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => ingress.snapshot(),
 });
-const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app) });
+const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica });
 const identity = new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), (hash) => store.token(hash));
 const ingress = new Ingress({
   registry, runtime, identity, bundles, scheduler, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
@@ -73,16 +82,16 @@ registry.onAppChanged((app) => {
 // Reconcile first so a resumed purge retires the containers it finds; Providers converge in the background (DESIGN 2.3).
 await runtime.reconcile();
 void registry.resume();
-await scheduler.resume();
+await instances.onLeader((leading) => (leading ? scheduler.resume() : scheduler.stop()));
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
-const admin = await startAdmin({ registry, bundles, runtime, guard: runtime, metrics, requests, ingressPort }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const admin = await startAdmin({ registry, bundles, runtime, guard, metrics, requests, ingressPort }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {
   ingress.flush().catch((error: Error) => log('flush-failed', { error: error.message }));
   void sample();
 }, SAMPLE_MS);
 void sample();
-log('gateway-ready', { network, data });
+log('gateway-ready', { network, data, replica });
 
 process.once('SIGTERM', async () => {
   clearInterval(flusher);
@@ -92,6 +101,7 @@ process.once('SIGTERM', async () => {
   admin.closeAllConnections();
   await Promise.all([ingress.close(), new Promise((resolve) => admin.close(resolve))]);
   await ingress.flush();
+  await instances.close();
   await store.close();
   log('gateway-stopped');
   process.exit(0);

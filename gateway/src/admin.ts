@@ -111,8 +111,8 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, ingressP
     },
     { method: 'POST', path: at(ADMIN_PATHS.remove('<name>')), handle: async (_, name) => (await registry.remove(app(name)), { status: 'removed' }) },
     {
-      method: 'POST', path: at(ADMIN_PATHS.unquarantine('<name>')), handle: (_, name) => {
-        guard.unquarantine(found(registry.view(app(name)), name).app);
+      method: 'POST', path: at(ADMIN_PATHS.unquarantine('<name>')), handle: async (_, name) => {
+        await guard.unquarantine(found(registry.view(app(name)), name).app);
         return { quarantine: null };
       },
     },

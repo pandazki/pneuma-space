@@ -1,8 +1,9 @@
-import { emit, type Emit, type EventLog, type LifecycleEvent } from './events.ts';
+import { emit, type Emit } from './events.ts';
+import type { Instances } from './instances.ts';
 import {
-  Conflict, NotFound, RUNTIMES,
-  type AppId, type Guard, type HealthCheck, type InstanceState, type Lease, type LeaseKind, type Quarantine, type ReleaseNumber,
-  type Runtime, type RunSpec, type RuntimeKind,
+  admits, Conflict, NotFound, QuotaExceeded, RUNTIMES,
+  type AppId, type Guard, type HealthCheck, type InstanceState, type Lease, type LeaseKind, type Quarantine,
+  type Runtime, type RunSpec, type RuntimeKind, type StoreOps,
 } from './model.ts';
 
 /** A wake inside `restart_backoff_seconds` of the app's last failure. */
@@ -28,36 +29,26 @@ export class Quarantined extends Error {
   }
 }
 
-/** Failure times (epoch ms) inside the window, counted against one release; a new release starts clean. */
-type Health = { readonly release: ReleaseNumber; failures: number[]; quarantine: Quarantine | null };
-
-const INSTANCE_STATES: ReadonlySet<string> = new Set<InstanceState>(['asleep', 'waking', 'awake', 'draining', 'stopping']);
-
 export type RuntimesOptions = {
   readonly runtimes: readonly Runtime[];
   readonly specFor: (app: AppId) => RunSpec | null;
-  readonly events: Pick<EventLog, 'onEvent'>;
-  readonly log?: Emit;
-  readonly now?: () => number;
+  readonly instances: Instances;
 };
 
-/** The one Runtime the rest of the gateway sees: dispatches by the RunSpec's runtime and guards every wake (ADR 0017). */
-export class Runtimes implements Omit<Runtime, 'kind'>, Guard {
+/** What a wake takes from its tenant's quota (ADR 0023): an isolate worker shares the runner's CPU, so it records none. */
+export const instanceShape = (spec: RunSpec) => ({ cpuMillis: spec.runtime.kind === 'isolate' ? 0 : spec.policy.cpu_millis, memoryMb: spec.policy.memory_mb });
+
+/** The one Runtime the rest of the gateway sees: dispatches by the RunSpec's runtime (ADR 0017). */
+export class Runtimes implements Omit<Runtime, 'kind'> {
   readonly #byKind: ReadonlyMap<RuntimeKind, Runtime>;
   readonly #specFor: (app: AppId) => RunSpec | null;
-  readonly #log: Emit;
-  readonly #now: () => number;
+  readonly #instances: Instances;
   readonly #owners = new WeakMap<Lease, Runtime>();
-  readonly #health = new Map<AppId, Health>();
-  /** Last instance state per app, so a failed wake (waking, then asleep with an error) is told from other errors. */
-  readonly #states = new Map<string, string>();
 
   constructor(options: RuntimesOptions) {
     this.#byKind = new Map(options.runtimes.map((runtime) => [runtime.kind, runtime]));
     this.#specFor = options.specFor;
-    this.#log = options.log ?? emit;
-    this.#now = options.now ?? Date.now;
-    options.events.onEvent((event) => this.#observe(event));
+    this.#instances = options.instances;
   }
 
   async acquire(app: AppId, kind: 'request' | 'trigger'): Promise<Lease> {
@@ -65,8 +56,9 @@ export class Runtimes implements Omit<Runtime, 'kind'>, Guard {
     if (!spec) throw new NotFound(`app ${app} has no registered release with a runtime`);
     const runtime = this.#byKind.get(spec.runtime.kind);
     if (!runtime) throw new Unavailable(spec.runtime.kind);
-    this.#admit(spec);
-    for (const other of this.#all()) if (other !== runtime && other.state(app) !== 'none') await other.retire(app);
+    const row = this.#instances.row(app);
+    // One row per app: the old runtime's instance goes before the new runtime wakes; an asleep row with no handle holds nothing.
+    if (row && row.runtime !== runtime.kind && (row.state !== 'asleep' || row.handle !== null)) await this.#byKind.get(row.runtime)?.retire(app);
     const lease = await runtime.acquire(app, kind);
     this.#owners.set(lease, runtime);
     return lease;
@@ -122,64 +114,92 @@ export class Runtimes implements Omit<Runtime, 'kind'>, Guard {
     return this.#byKind.get(kind)?.health() ?? [];
   }
 
-  quarantine(app: AppId): Quarantine | null {
-    return this.#current(app)?.quarantine ?? null;
-  }
-
-  unquarantine(app: AppId): void {
-    const lifted = this.#health.get(app)?.quarantine;
-    this.#health.delete(app);
-    if (lifted) this.#log('unquarantined', app);
-  }
-
   #all(): Runtime[] {
     return [...this.#byKind.values()];
   }
 
-  /** At most one runtime holds an instance: acquire retires the old runtime's before the new one wakes. */
   #holder(app: AppId): Runtime | null {
-    return this.#all().find((runtime) => runtime.state(app) !== 'none') ?? null;
+    const row = this.#instances.row(app);
+    return row ? (this.#byKind.get(row.runtime) ?? null) : null;
+  }
+}
+
+export type GuardOptions = {
+  readonly instances: Instances;
+  readonly specFor: (app: AppId) => RunSpec | null;
+  readonly log?: Emit;
+  readonly now?: () => number;
+};
+
+/**
+ * The only place that counts failures and quarantines (ADR 0017), on the app's guard row inside the transaction that observed the failure
+ * (ADR 0020 item 5). It also owns wake admission: quarantine, backoff, then the tenant's quota under its row lock (ADR 0023 item 3).
+ */
+export class AppGuard implements Guard {
+  readonly #instances: Instances;
+  readonly #specFor: (app: AppId) => RunSpec | null;
+  readonly #log: Emit;
+  readonly #now: () => number;
+
+  constructor(options: GuardOptions) {
+    this.#instances = options.instances;
+    this.#specFor = options.specFor;
+    this.#log = options.log ?? emit;
+    this.#now = options.now ?? Date.now;
   }
 
-  #current(app: AppId): Health | null {
-    const health = this.#health.get(app);
-    const release = this.#specFor(app)?.release;
-    if (health && release !== undefined && release !== health.release) {
-      this.#health.delete(app);
-      return null;
+  /** A guard row of an older release reads as none: a new release starts clean. */
+  quarantine(app: AppId): Quarantine | null {
+    const record = this.#instances.guard(app);
+    if (!record || record.quarantinedAt === null || record.release !== this.#specFor(app)?.release) return null;
+    return { reason: record.quarantineReason ?? '', since: record.quarantinedAt, failures: record.failures.length };
+  }
+
+  /** Deletes the guard row; resolves once it is gone, so the caller's next request finds the app admitted. */
+  async unquarantine(app: AppId): Promise<void> {
+    const lifted = this.quarantine(app);
+    await this.#instances.store.deleteGuard(app);
+    await this.#instances.refresh(app);
+    if (lifted) this.#log('unquarantined', app);
+  }
+
+  /** Inside the wake transaction; throws Quarantined, Backoff or QuotaExceeded and writes only through `tx`. */
+  readonly admit = async (tx: StoreOps, spec: RunSpec): Promise<void> => {
+    const record = await tx.guard(spec.app, 'update');
+    if (record && record.release !== spec.release) await tx.deleteGuard(spec.app);
+    else if (record) {
+      if (record.quarantinedAt !== null) throw new Quarantined({ reason: record.quarantineReason ?? '', since: record.quarantinedAt, failures: record.failures.length });
+      const wait = record.failures.at(-1)! + spec.policy.restart_backoff_seconds * 1000 - this.#now();
+      if (wait > 0) throw new Backoff(Math.ceil(wait / 1000));
     }
-    return health ?? null;
-  }
+    const tenant = await tx.tenant(spec.tenant, 'update');
+    if (!tenant) return;
+    const shape = instanceShape(spec);
+    const refusal = admits(tenant.quota, await tx.quotaUsed(spec.tenant), { awake: 1, cpu_millis: shape.cpuMillis, memory_mb: shape.memoryMb });
+    if (refusal) throw new QuotaExceeded(spec.tenant, refusal);
+  };
 
-  #admit(spec: RunSpec): void {
-    const health = this.#current(spec.app);
-    if (!health) return;
-    if (health.quarantine) throw new Quarantined(health.quarantine);
-    const wait = health.failures.at(-1)! + spec.policy.restart_backoff_seconds * 1000 - this.#now();
-    if (wait > 0) throw new Backoff(Math.ceil(wait / 1000));
-  }
-
-  #observe(event: LifecycleEvent): void {
-    if (event.app === null) return;
-    const before = this.#states.get(event.app);
-    if (INSTANCE_STATES.has(event.ev)) this.#states.set(event.app, event.ev);
-    else if (event.ev === 'removed') {
-      this.#states.delete(event.app);
-      this.#health.delete(event.app as AppId);
-    }
-    if (event.ev === 'crashed' || event.ev === 'hung') this.#fail(event.app as AppId, String(event.reason ?? event.ev));
-    else if (event.ev === 'asleep' && before === 'waking' && event.error !== undefined) this.#fail(event.app as AppId, String(event.error));
-  }
-
-  #fail(app: AppId, reason: string): void {
-    const spec = this.#specFor(app);
-    if (!spec) return;
+  /** Records one failure inside the transaction that won the CAS observing it; returns the quarantine it caused, for the caller to announce after commit. */
+  async fail(tx: StoreOps, spec: RunSpec, reason: string): Promise<Quarantine | null> {
     const now = this.#now();
-    const health = this.#current(app) ?? { release: spec.release, failures: [], quarantine: null };
-    this.#health.set(app, health);
-    health.failures = [...health.failures.filter((t) => t > now - spec.policy.failure_window_seconds * 1000), now];
-    if (health.quarantine || health.failures.length < spec.policy.max_failures) return;
-    health.quarantine = { reason, since: now, failures: health.failures.length };
-    this.#log('quarantined', app, { reason, failures: health.failures.length });
+    const found = await tx.guard(spec.app, 'update');
+    const record = found?.release === spec.release ? found : null;
+    const failures = [...(record?.failures ?? []).filter((t) => t > now - spec.policy.failure_window_seconds * 1000), now];
+    const quarantined = record?.quarantinedAt == null && failures.length >= spec.policy.max_failures;
+    await tx.putGuard({
+      app: spec.app, release: spec.release, failures,
+      quarantineReason: quarantined ? reason : (record?.quarantineReason ?? null),
+      quarantinedAt: quarantined ? now : (record?.quarantinedAt ?? null),
+    });
+    return quarantined ? { reason, since: now, failures: failures.length } : null;
+  }
+
+  announce(app: AppId, quarantine: Quarantine): void {
+    this.#log('quarantined', app, { reason: quarantine.reason, failures: quarantine.failures });
+  }
+
+  /** A removed instance starts clean, so republishing the same release after remove is not still quarantined. */
+  async clear(tx: StoreOps, app: AppId): Promise<void> {
+    await tx.deleteGuard(app);
   }
 }

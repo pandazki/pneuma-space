@@ -1,10 +1,11 @@
 import { lookup } from 'node:dns/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { emit, type Emit } from './events.ts';
+import type { Instances } from './instances.ts';
 import { Lifecycle, specHash, type Adopted, type Driver, type Ending, type Gone, type Slot } from './lifecycle.ts';
 import { RUNTIME_ENV, type AppId, type BundleId, type HealthCheck, type RunSpec } from './model.ts';
 import type { EventPage, Listed, RunnerEvent, Started, StartRequest } from './runner.ts';
-import { Unavailable } from './runtimes.ts';
+import { Unavailable, type AppGuard } from './runtimes.ts';
 
 /** The runner's control port on the platform network; never published to the host. */
 export const RUNNER_PORT = 8082;
@@ -30,6 +31,8 @@ export type IsolateOptions = {
   readonly specFor: (app: AppId) => RunSpec | null;
   /** Whether any release of the app ran on this runtime, so purge must reach the runner to delete its storage. */
   readonly hasRun: (app: AppId) => Promise<boolean>;
+  readonly instances: Instances;
+  readonly guard?: AppGuard;
   readonly log?: Emit;
 };
 
@@ -75,8 +78,9 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     return spec.runtime.kind === 'isolate';
   }
 
-  async start(slot: Slot<IsolateRun, string>, spec: IsolateRun): Promise<string> {
-    slot.spec = spec;
+  async start(slot: Slot<string>, spec: IsolateRun): Promise<string> {
+    slot.release = spec.release;
+    slot.specHash = specHash(spec);
     const readyMs = spec.policy.ready_timeout_seconds * 1000;
     const request: StartRequest = {
       release: spec.release,
@@ -104,7 +108,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     return `${address}:${started.port}`;
   }
 
-  async sleep(app: AppId, slot: Slot<IsolateRun, string>): Promise<void> {
+  async sleep(app: AppId, slot: Slot<string>): Promise<void> {
     await this.#call('DELETE', `/instances/${app}?drain=${STOP_MS}`, undefined, STOP_MS + CALL_MS);
     this.#live.delete(slot.handle!);
     slot.handle = null;
@@ -128,10 +132,10 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     }
   }
 
-  /** A runner that is off or does not answer holds nothing to adopt; the gateway starts without it. */
-  async adopt(): Promise<readonly Adopted<string>[]> {
+  /** A runner that is off or does not answer reports null; the gateway starts without it. */
+  async adopt(): Promise<readonly Adopted<string>[] | null> {
     const address = await lookup(this.#runner.hostname).then(({ address }) => address, () => null);
-    if (address === null) return [];
+    if (address === null) return null;
     let listed: Listed[];
     try {
       await this.#cursor();
@@ -139,7 +143,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     } catch (error) {
       this.#suspect = true;
       this.#log('runner-unreachable', null, { error: String(error) });
-      return [];
+      return null;
     }
     const listening = listed.filter(({ state }) => state === 'listening');
     // A worker still starting or ending belongs to no gateway now; the recovery poll stops it.

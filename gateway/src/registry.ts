@@ -484,6 +484,7 @@ export class PlatformRegistry implements Registry {
         staticRoot: release?.runtime === 'isolate' && release.manifest.capabilities.static ? `${release.manifest.capabilities.static.dir}/` : '',
         identity: release?.manifest.capabilities.identity ?? null,
         policyOverride: Object.freeze({ ...app.policyOverride }),
+        version: app.version,
       });
       this.#views.set(name, view);
       this.#names.set(app.id, name);
@@ -523,6 +524,7 @@ export class PlatformRegistry implements Registry {
         services: [...new Set(providers.flatMap(([provider]) => (provider.service ? [provider.service] : [])))],
       },
       policy,
+      version: app.version,
     };
   }
 
