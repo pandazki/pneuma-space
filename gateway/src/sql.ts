@@ -192,15 +192,17 @@ export class SqlOps implements StoreOps {
     return (await this.#s.all('SELECT * FROM app ORDER BY name')).map(toApp);
   }
 
+  /** A write that changes nothing raises no version and announces nothing, so restart convergence leaves the rows as they were. */
   async putApp(app: App) {
-    await this.#s.run(
+    const { changes } = await this.#s.run(
       `INSERT INTO app (name, id, tenant, access, owner, status, current, policy_override, registered_at, version) VALUES (${placeholders(9)}, 1)
        ON CONFLICT (name) DO UPDATE SET id = excluded.id, tenant = excluded.tenant, access = excluded.access, owner = excluded.owner,
          status = excluded.status, current = excluded.current, policy_override = excluded.policy_override, registered_at = excluded.registered_at,
-         version = app.version + 1`,
+         version = app.version + 1
+       WHERE ${['id', 'tenant', 'access', 'owner', 'status', 'current', 'policy_override', 'registered_at'].map((c) => `app.${c} IS DISTINCT FROM excluded.${c}`).join(' OR ')}`,
       [app.name, app.id, app.tenant, app.access, app.owner, app.status, app.current, JSON.stringify(app.policyOverride), app.registeredAt],
     );
-    this.#touch({ kind: 'app', name: app.name });
+    if (changes > 0) this.#touch({ kind: 'app', name: app.name });
   }
 
   deleteApp(app: AppId) {
@@ -250,12 +252,13 @@ export class SqlOps implements StoreOps {
   }
 
   async putBinding(b: Binding) {
-    await this.#s.run(
+    const { changes } = await this.#s.run(
       `INSERT INTO binding (app, kind, provider, state, resource) VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (app, kind, provider) DO UPDATE SET state = excluded.state, resource = excluded.resource`,
+       ON CONFLICT (app, kind, provider) DO UPDATE SET state = excluded.state, resource = excluded.resource
+       WHERE binding.state IS DISTINCT FROM excluded.state OR binding.resource IS DISTINCT FROM excluded.resource`,
       [b.app, b.kind, b.provider, b.state, JSON.stringify(b.resource)],
     );
-    await this.#touchApp(b.app);
+    if (changes > 0) await this.#touchApp(b.app);
   }
 
   async policy(): Promise<Policy> {

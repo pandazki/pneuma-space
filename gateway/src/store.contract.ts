@@ -190,6 +190,15 @@ export function storeContract(name: string, open: OpenStore): void {
       assert.equal((await store.app('versioned' as AppName))?.version, 2);
     });
 
+    test('rewriting a binding unchanged leaves the app version as it was', async () => {
+      await store.putApp(app('steady'));
+      const binding = { app: appId('steady'), kind: 'kv', provider: 'redis', state: 'active', resource: { user: 'u' } } as const;
+      await store.putBinding(binding);
+      const before = (await store.app('steady' as AppName))?.version;
+      await store.putBinding(binding);
+      assert.equal((await store.app('steady' as AppName))?.version, before);
+    });
+
     test('a due delivery is claimed once', async () => {
       await store.insertDelivery(delivery('claimed', {}));
       assert.deepEqual([await store.claimDelivery('claimed' as DeliveryId, replica, 1), await store.claimDelivery('claimed' as DeliveryId, replica, 1)], [true, false]);
