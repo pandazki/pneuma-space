@@ -1,3 +1,5 @@
+import type { QuotaExceeded } from './model.ts';
+
 export type LifecycleEvent = { readonly seq: number; readonly t: number; readonly ev: string; readonly app: string | null; readonly [field: string]: unknown };
 export type Emit = (ev: string, app?: string | null, extra?: Record<string, unknown>) => void;
 
@@ -34,3 +36,22 @@ export class EventLog {
 
 export const events = new EventLog();
 export const emit = events.emit;
+
+const QUOTA_EVENT_MS = 60_000;
+
+export type QuotaRefused = (refused: QuotaExceeded, app: string, action: 'publish' | 'wake') => void;
+
+/** `quota-refused` at most once a minute per (tenant, resource) on this replica (ADR 0023 item 5). */
+export function quotaRefusals(log: Emit = emit, now: () => number = Date.now): QuotaRefused {
+  const last = new Map<string, number>();
+  return ({ tenant, refusal: { resource, used, limit } }, app, action) => {
+    const key = `${tenant}/${resource}`;
+    const at = now();
+    if (at - (last.get(key) ?? -Infinity) < QUOTA_EVENT_MS) return;
+    last.set(key, at);
+    log('quota-refused', app, { tenant, resource, used, limit, action });
+  };
+}
+
+/** Shared by both admission points, publish and wake. */
+export const quotaRefused = quotaRefusals();

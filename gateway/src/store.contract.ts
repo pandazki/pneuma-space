@@ -1,15 +1,15 @@
-// The Store contract, run against every Store (ADR 0025 item 2). A later PgStore passes its own factory.
+// The Store contract, run against every Store (ADR 0025 item 2).
 
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { after, before, describe, test } from 'node:test';
 import {
   DEFAULT_POLICY, DEFAULT_QUOTA, DEFAULT_TENANT, IDEMPOTENCY_WINDOW_MS, USAGE_COUNTERS, changeKey,
-  type App, type AppId, type AppName, type Delivery, type DeliveryId, type Instance, type ReleaseNumber, type ReplicaId, type Store,
+  type App, type AppId, type AppName, type Binding, type Delivery, type DeliveryId, type ImageId, type Instance, type ReleaseNumber, type ReplicaId, type Store,
   type Subject, type TenantName, type TriggerName, type Usage,
 } from './model.ts';
 
-export type OpenStore = () => Promise<Store & { close(): Promise<void> }>;
+export type OpenStore = (options: { readonly volumeGb: number }) => Promise<Store & { close(): Promise<void> }>;
 
 const appId = (name: string) => `id-${name}` as AppId;
 const replica = 'replica-a' as ReplicaId;
@@ -45,7 +45,7 @@ export function storeContract(name: string, open: OpenStore): void {
   describe(`${name} store contract`, () => {
     let store: Awaited<ReturnType<OpenStore>>;
     before(async () => {
-      store = await open();
+      store = await open({ volumeGb: 2 });
     });
     after(() => store.close());
 
@@ -61,15 +61,15 @@ export function storeContract(name: string, open: OpenStore): void {
       assert.equal((await store.insertDelivery(delivery('k3', { idempotencyKey: 'job-7', createdAt: t0 + IDEMPOTENCY_WINDOW_MS + 1 }))).id, 'k3');
     });
 
-    test('two concurrent transactions serialize: the second sees the first one commit', async () => {
-      const first = store.transaction(async (tx) => {
-        const seen = await tx.app(app('one').name);
+    test('two concurrent read-modify-write transactions on one row both take effect', async () => {
+      await store.putApp(app('one'));
+      const bump = () => store.transaction(async (tx) => {
+        const row = (await tx.app(app('one').name))!;
         await sleep(20);
-        await tx.putApp(app('one'));
-        return seen;
+        await tx.putApp({ ...row, registeredAt: row.registeredAt + 1 });
       });
-      const second = store.transaction(async (tx) => tx.app(app('one').name));
-      assert.deepEqual(await Promise.all([first, second]), [null, app('one')]);
+      await Promise.all([bump(), bump()]);
+      assert.equal((await store.app(app('one').name))?.registeredAt, 2);
     });
 
     test('exclusive runs commands on one name one at a time and on another name meanwhile', async () => {
@@ -190,6 +190,19 @@ export function storeContract(name: string, open: OpenStore): void {
       assert.equal((await store.app('versioned' as AppName))?.version, 2);
     });
 
+    test('appsWithCurrent pairs every app with its current release or null', async () => {
+      const release = {
+        app: appId('paired'), number: 2 as ReleaseNumber, image: 'sha256:2' as ImageId, manifest: { contract: 1, capabilities: {} }, bundle: null, runtime: 'container', releaseKey: 'k2', publishedAt: 7,
+      } as const;
+      await store.putApp(app('paired'));
+      await store.putRelease({ ...release, number: 1 as ReleaseNumber, image: 'sha256:1' as ImageId });
+      await store.putRelease(release);
+      await store.putApp(app('paired', { current: 2 as ReleaseNumber, version: 4 }));
+      await store.putApp(app('unpaired'));
+      const pairs = (await store.appsWithCurrent()).filter((p) => ['paired', 'unpaired'].includes(p.app.name));
+      assert.deepEqual(pairs.map((p) => [p.app.name, p.release]), [['paired', release], ['unpaired', null]]);
+    });
+
     test('rewriting a binding unchanged leaves the app version as it was', async () => {
       await store.putApp(app('steady'));
       const binding = { app: appId('steady'), kind: 'kv', provider: 'redis', state: 'active', resource: { user: 'u' } } as const;
@@ -247,11 +260,18 @@ export function storeContract(name: string, open: OpenStore): void {
       assert.deepEqual(await store.audit({ target: 'audited' }), [{ ...row, id: second, at: 2, action: 'app.remove' }, { ...row, id: first }]);
     });
 
-    test('storage usage round-trips, one row per binding', async () => {
-      const measured = { app: appId('stored'), kind: 'files', provider: 'volume', bytes: 2 ** 33, measuredAt: 4 } as const;
-      await store.putStorageUsage([{ ...measured, bytes: 1 }]);
-      await store.putStorageUsage([measured]);
-      assert.deepEqual(await store.storageUsage(measured.app), [measured]);
+    test('quotaUsed counts each files and SQLite binding of the tenant at the provisioned volume size', async () => {
+      const tenant = 'violet' as TenantName;
+      await store.putApp(app('v1', { tenant }));
+      await store.putApp(app('v2'));
+      const bind = (name: string, kind: Binding['kind'], provider: Binding['provider']) =>
+        store.putBinding({ app: appId(name), kind, provider, state: 'suspended', resource: {} });
+      await bind('v1', 'files', 'volume');
+      await bind('v1', 'db', 'sqlite');
+      await bind('v1', 'db', 'postgres');
+      await bind('v1', 'object', 's3');
+      await bind('v2', 'files', 'volume');
+      assert.equal((await store.quotaUsed(tenant)).storage_gb, 4);
     });
 
     test('instance log keeps one row per app', async () => {

@@ -9,7 +9,7 @@ import { can, LOCAL_CALLER, type Action, type Authority } from './authz.ts';
 import type { Answer, Identity } from './identity.ts';
 import type { AdminRegistry } from './registry.ts';
 import {
-  ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, NotFound, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
+  ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, NotFound, QuotaExceeded, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
   appName, bundleId, parseManifest, subject, tenantName,
   type Access, type Actor, type AppId, type AuditAction, type AuditRecord, type BundleStore, type Caller, type Guard, type Release, type ReplicaId, type Role, type StoreOps,
   type Subject, type TenantName, type UsageBucket, type UsageCounters,
@@ -541,7 +541,7 @@ export function createAdmin(deps: AdminDeps): Server {
     } catch (error) {
       const status = statusOf(error);
       if (status === 500) emit('admin-error', null, { path, error: String(error) });
-      send(response, status, { error: (error as Error).message });
+      send(response, status, { error: (error as Error).message, ...(error instanceof QuotaExceeded && { quota: { tenant: error.tenant, ...error.refusal } }) });
     }
   });
 }

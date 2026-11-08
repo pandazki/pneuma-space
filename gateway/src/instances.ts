@@ -1,6 +1,6 @@
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { AppId, AppName, GuardRecord, Instance, LeaseTally, ReplicaId, Store } from './model.ts';
+import type { AppId, AppName, GuardRecord, Instance, Leadership, LeaseTally, ReplicaId, Store } from './model.ts';
 
 const HEARTBEAT_MS = 2000;
 /** A replica not seen for this long is dead: the leader sweeps its rows and takes over its transitions. */
@@ -12,10 +12,7 @@ const POLL_MS = 500;
 
 export type InstancesOptions = {
   readonly replica?: ReplicaId;
-  /**
-   * Whether this replica leads. The frozen Store has no leadership operation yet (reported to the coordinator);
-   * on SQLite leadership is held at once, in-process (ADR 0020 item 7).
-   */
+  /** False keeps this replica from ever asking for the lead; tests run followers on one SQLite file this way. */
   readonly leader?: boolean;
 };
 
@@ -37,7 +34,8 @@ export class Instances {
   readonly #waiters = new Map<AppId, PromiseWithResolvers<void>>();
   readonly #listeners: ((app: AppId) => void)[] = [];
   readonly #leaderListeners: ((leading: boolean) => unknown)[] = [];
-  #leading: boolean;
+  readonly #mayLead: boolean;
+  #tenure: Leadership | null = null;
   #ready: Promise<void> | null = null;
   #resync: NodeJS.Timeout | null = null;
   #tallyTimer: NodeJS.Timeout | null = null;
@@ -46,7 +44,7 @@ export class Instances {
   constructor(store: Store, options: InstancesOptions = {}) {
     this.store = store;
     this.replica = options.replica ?? (hostname() as ReplicaId);
-    this.#leading = options.leader ?? true;
+    this.#mayLead = options.leader ?? true;
     store.onChange((change) => {
       if (change.kind === 'instance') void this.refresh(change.app).catch(() => {});
       if (change.kind === 'app') void this.#purged(change.name).catch(() => {});
@@ -54,9 +52,9 @@ export class Instances {
     store.onResync(() => void this.#load().catch(() => {}));
   }
 
-  /** Resolves once the first full read is in; the mirror is empty until then. */
+  /** Resolves once the first full read is in and the lead was asked for once; the mirror is empty until then. */
   ready(): Promise<void> {
-    this.#ready ??= this.#load().then(() => {
+    this.#ready ??= this.#load().then(() => this.#lead()).then(() => {
       this.#resync = setInterval(() => void this.#load().catch(() => {}), RESYNC_MS).unref();
       this.#tallyTimer = setInterval(() => void this.#readTallies().catch(() => {}), TALLY_MS).unref();
     });
@@ -135,22 +133,45 @@ export class Instances {
   }
 
   get leading(): boolean {
-    return this.#leading;
+    return this.#tenure?.held() ?? false;
   }
 
   /** Calls `listener` whenever leadership changes, and at once when this replica leads already; resolves with that first call. */
   async onLeader(listener: (leading: boolean) => unknown): Promise<void> {
     this.#leaderListeners.push(listener);
-    if (this.#leading) await listener(true);
+    if (this.leading) await listener(true);
   }
 
-  /** Writes this replica's row now and every 2 s; the leader also sweeps the rows of replicas not seen for 10 s. */
+  /** Takes the lead if it is free; the leader loops stop as soon as the tenure is lost (ADR 0020 item 4). */
+  async #lead(): Promise<void> {
+    if (!this.#mayLead || this.#tenure) return;
+    const tenure = await this.store.leader();
+    if (!tenure || this.#tenure) return;
+    this.#tenure = tenure;
+    tenure.onLost(() => {
+      if (this.#tenure !== tenure) return;
+      this.#tenure = null;
+      this.#tell(false);
+    });
+    this.#tell(true);
+  }
+
+  #tell(leading: boolean): void {
+    for (const listener of this.#leaderListeners) {
+      void Promise.resolve().then(() => listener(leading)).catch((error: Error) => {
+        console.error(JSON.stringify({ ev: 'leader-listener-failed', leading, error: error.message }));
+      });
+    }
+  }
+
+  /** Writes this replica's row now and every 2 s, asking for the lead each time; the leader also sweeps the rows of replicas not seen for 10 s. */
   async start(): Promise<void> {
     const startedAt = Date.now();
     const beat = async () => {
       const now = Date.now();
       await this.store.putReplica({ id: this.replica, startedAt, seenAt: now });
-      if (this.#leading) await this.store.sweepReplicas(now - DEAD_MS);
+      await this.#lead();
+      if (this.leading) await this.store.sweepReplicas(now - DEAD_MS);
     };
     await beat();
     this.#heartbeat = setInterval(() => void beat().catch(() => {}), HEARTBEAT_MS).unref();
@@ -161,9 +182,11 @@ export class Instances {
     if (this.#resync) clearInterval(this.#resync);
     if (this.#tallyTimer) clearInterval(this.#tallyTimer);
     if (this.#heartbeat) clearInterval(this.#heartbeat);
-    if (this.#leading) {
-      this.#leading = false;
+    const tenure = this.#tenure;
+    this.#tenure = null;
+    if (tenure) {
       for (const listener of this.#leaderListeners) await listener(false);
+      await tenure.release();
     }
     await this.store.deleteReplica(this.replica);
   }

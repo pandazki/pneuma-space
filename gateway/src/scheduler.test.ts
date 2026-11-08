@@ -4,8 +4,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import {
-  DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS, NotFound,
-  type App, type AppId, type CronExpr, type Delivery, type DeliveryFilter, type Lease, type Replica, type ReplicaId, type SchedulerView, type Subject, type TriggerName,
+  DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS, NotFound, QuotaExceeded,
+  type App, type AppId, type CronExpr, type Delivery, type DeliveryFilter, type Lease, type Replica, type ReplicaId, type SchedulerView, type Subject, type TenantName, type TriggerName,
 } from './model.ts';
 import { RING, requests } from './requests.ts';
 import { DeliveryScheduler, latestSlot, nextSlot, type SchedulerDeps } from './scheduler.ts';
@@ -47,7 +47,7 @@ function harness(triggers: Record<string, string | null> = { run: null }) {
     triggers: Object.entries(triggers).map(([name, schedule]) => ({ app: APP, name: name as TriggerName, schedule: schedule as CronExpr | null })),
     policy: DEFAULT_POLICY,
   };
-  const state = { view: view as SchedulerView | null, acquired: 0, released: 0, refuse: false, failWrite: false, replicas: [] as Replica[] };
+  const state = { view: view as SchedulerView | null, acquired: 0, released: 0, refuse: false, quota: false, failWrite: false, replicas: [] as Replica[] };
   const store: SchedulerDeps['store'] = {
     apps: async () => [{ id: APP, status: 'registered' } as App],
     insertDelivery: async (d) => {
@@ -81,6 +81,7 @@ function harness(triggers: Record<string, string | null> = { run: null }) {
   const runtime: SchedulerDeps['runtime'] = {
     acquire: async (app) => {
       if (state.refuse) throw new NotFound('app has no run spec');
+      if (state.quota) throw new QuotaExceeded('blue' as TenantName, { resource: 'awake', used: 1, limit: 1, ask: 1 });
       state.acquired++;
       return { app, address };
     },
@@ -209,6 +210,14 @@ test('an acquire refused with NotFound cancels the delivery', async () => {
   await invoke();
   await scheduler.tick();
   assert.equal(rows[0].state, 'cancelled');
+});
+
+test('a wake refused by the tenant\'s quota leaves attempts unchanged and retries the delivery 30 s later', async () => {
+  const { scheduler, rows, clock, state, invoke } = harness();
+  state.quota = true;
+  await invoke();
+  await scheduler.tick();
+  assert.deepEqual([rows[0].state, rows[0].attempts, rows[0].nextAttemptAt], ['due', 0, T0 + 30_000]);
 });
 
 test('resume leaves a delivery claimed by another live replica delivering', async () => {

@@ -52,8 +52,8 @@ export type MetricsDeps = {
   readonly policy: () => Pick<Policy, 'usage_retention_days' | 'events_retention_days' | 'events_max_rows'>;
   readonly view: (name: AppName) => { readonly app: AppId; readonly tenant: TenantName } | null;
   readonly replica: ReplicaId;
-  /** Only the leader accrues awake time and sweeps (ADR 0024 items 2 and 4). */
-  readonly leader?: boolean;
+  /** Whether this replica leads now; only the leader accrues awake time and sweeps (ADR 0024 items 2 and 4). */
+  readonly leader?: () => boolean;
   readonly now?: () => number;
 };
 
@@ -166,10 +166,10 @@ export class Metrics {
     };
     this.#host = host;
     this.#rssBytes = process.memoryUsage.rss();
-    if (this.#deps.leader ?? true) this.#accrueAwake(apps, now);
+    if (this.#deps.leader?.() ?? true) this.#accrueAwake(apps, now);
     if (now - this.#eventsReadAt >= MINUTE) await this.#readEvents(now);
     await this.#flush(now);
-    if ((this.#deps.leader ?? true) && now - this.#sweptAt >= HOUR) await this.#sweep(now);
+    if ((this.#deps.leader?.() ?? true) && now - this.#sweptAt >= HOUR) await this.#sweep(now);
     this.#lastFlushAt = now;
   }
 

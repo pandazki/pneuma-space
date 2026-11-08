@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
-import { DEFAULT_TENANT, QUOTA_RESOURCES, changeKey, type AppName, type Change, type Store, type StoreOps } from './model.ts';
-import { SQLITE, STORE_OPS, SqlOps, type Row, type Session } from './sql.ts';
+import { DEFAULT_TENANT, QUOTA_RESOURCES, changeKey, type AppName, type Change, type Leadership, type Store, type StoreOps } from './model.ts';
+import { SQLITE, SqlOps, wrap, type Row, type Session } from './sql.ts';
 
 /** The migrated `default` tenant is unlimited (ADR 0022 item 4, ADR 0023 item 2). */
 const UNLIMITED = JSON.stringify(Object.fromEntries(QUOTA_RESOURCES.map((resource) => [resource, null])));
@@ -82,6 +82,8 @@ export const MIGRATIONS = [
   `ALTER TABLE app ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
    ALTER TABLE delivery ADD COLUMN replica TEXT;
    UPDATE tenant SET quota = '${UNLIMITED}' WHERE name = '${DEFAULT_TENANT}';`,
+  // ADR 0023 item 4: storage counts provisioned capacity, never a measurement.
+  'DROP TABLE storage_usage',
 ];
 
 /** `$n` placeholders become `?n`, which node:sqlite binds by position. */
@@ -142,11 +144,6 @@ export class SqliteSession implements Session {
   }
 }
 
-function wrap(ops: StoreOps, call: <T>(work: () => Promise<T>) => Promise<T>): StoreOps {
-  const wrapped = Object.fromEntries(STORE_OPS.map((name) => [name, (...args: unknown[]) => call(() => (ops[name] as (...a: unknown[]) => Promise<unknown>)(...args))]));
-  return wrapped as unknown as StoreOps;
-}
-
 export interface SqliteStore extends StoreOps {}
 
 /** Calls and transactions run one at a time in call order; node:sqlite is synchronous and in-process, so there is nothing to overlap. */
@@ -159,7 +156,7 @@ export class SqliteStore implements Store {
   readonly #changeListeners: ((change: Change) => void)[] = [];
   #tail: Promise<unknown> = Promise.resolve();
 
-  constructor(path: string) {
+  constructor(path: string, { volumeGb = 1 }: { readonly volumeGb?: number } = {}) {
     this.#db = new DatabaseSync(path);
     this.#db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;');
     const { user_version: applied } = this.#db.prepare('PRAGMA user_version').get() as { user_version: number };
@@ -173,7 +170,7 @@ export class SqliteStore implements Store {
       throw error;
     }
     this.#session = new SqliteSession(this.#db, (changes) => this.#announce(changes));
-    this.#ops = new SqlOps(this.#session);
+    this.#ops = new SqlOps(this.#session, volumeGb);
     Object.assign(this, wrap(this.#ops, (work) => this.#queue(work)));
   }
 
@@ -208,6 +205,12 @@ export class SqliteStore implements Store {
 
   /** In-process announcements are never missed, so there is never a resync. */
   onResync(_listener: () => void): void {}
+
+  /** One process owns the file, so it leads at once and never loses it (ADR 0020 item 7). */
+  async leader(): Promise<Leadership> {
+    let held = true;
+    return { held: () => held, onLost: () => {}, release: async () => void (held = false) };
+  }
 
   #announce(changes: readonly Change[]): void {
     for (const change of changes) {

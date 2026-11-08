@@ -445,7 +445,7 @@ export const DEFAULT_QUOTA: Quota = { apps: 100, awake: 20, cpu_millis: 20000, m
 
 export type Refusal = { readonly resource: QuotaResource; readonly used: number; readonly limit: number; readonly ask: number };
 
-/** The one quota rule, at publish and at wake: refused when `used + ask` passes a limit. A new binding asks 0 GB, so only a tenant already over its storage is refused. */
+/** The one quota rule, at publish and at wake: refused when `used + ask` passes a limit. */
 export function admits(quota: Quota, used: QuotaUsage, ask: Partial<QuotaUsage>): Refusal | null {
   for (const resource of QUOTA_RESOURCES) {
     const limit = quota[resource];
@@ -759,14 +759,6 @@ export type AuditFilter = {
   readonly limit?: number;
 };
 
-export type StorageUsage = {
-  readonly app: AppId;
-  readonly kind: ResourceKind;
-  readonly provider: ProviderName;
-  readonly bytes: number;
-  readonly measuredAt: number;
-};
-
 /** The tail of an instance's log kept when it ended, one row per app. */
 export type InstanceLog = { readonly app: AppId; readonly release: ReleaseNumber; readonly endedAt: number; readonly reason: string; readonly tail: string };
 
@@ -802,6 +794,8 @@ export function parseChange(key: string): Change | null {
 export interface StoreOps {
   app(name: AppName): Promise<App | null>;
   apps(): Promise<App[]>;
+  /** Every app with its current release, in one read; the Registry's resync (ADR 0025 item 5). */
+  appsWithCurrent(): Promise<{ readonly app: App; readonly release: Release | null }[]>;
   putApp(app: App): Promise<void>;
   /** Deletes the app and its Registry rows (release, trigger, binding); the end of purge. */
   deleteApp(app: AppId): Promise<void>;
@@ -829,7 +823,7 @@ export interface StoreOps {
   tenant(name: TenantName, lock?: RowLock): Promise<Tenant | null>;
   tenants(): Promise<Tenant[]>;
   putTenant(tenant: Tenant): Promise<void>;
-  /** Apps not purging, instances waking to stopping with their recorded cpu and memory, and measured storage in GiB. */
+  /** Apps not purging, instances waking to stopping with their recorded cpu and memory, and the provisioned GiB of files and SQLite bindings. */
   quotaUsed(tenant: TenantName): Promise<QuotaUsage>;
 
   user(id: string): Promise<User | null>;
@@ -897,9 +891,6 @@ export interface StoreOps {
   /** Newest first. */
   audit(filter: AuditFilter): Promise<AuditRecord[]>;
 
-  storageUsage(app?: AppId): Promise<StorageUsage[]>;
-  putStorageUsage(rows: readonly StorageUsage[]): Promise<void>;
-
   instanceLog(app: AppId): Promise<InstanceLog | null>;
   putInstanceLog(log: InstanceLog): Promise<void>;
 }
@@ -917,6 +908,16 @@ export interface Store extends StoreOps {
   onChange(listener: (change: Change) => void): void;
   /** Called when changes may have been missed; listeners re-read everything. */
   onResync(listener: () => void): void;
+  /** Takes the leader lock if it is free: this replica's tenure, or null while another replica leads. SQLite always leads (ADR 0020 item 7). */
+  leader(): Promise<Leadership | null>;
+}
+
+/** One tenure as the leader (ADR 0020 item 4); once ended it stays ended, and the replica asks `Store.leader` again. */
+export interface Leadership {
+  held(): boolean;
+  /** Called once when the tenure ends other than by `release`: the lock's session died or missed its probe. */
+  onLost(listener: () => void): void;
+  release(): Promise<void>;
 }
 
 /** Hides how instances run: instances, leases, the reaper and their lifecycle. The M2 multi-node seam. */
