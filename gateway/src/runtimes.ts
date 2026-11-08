@@ -1,5 +1,6 @@
 import { emit, type Emit } from './events.ts';
 import type { Instances } from './instances.ts';
+import type { Series } from './metrics.ts';
 import {
   admits, Conflict, NotFound, QuotaExceeded, RUNTIMES,
   type AppId, type Guard, type HealthCheck, type InstanceState, type Lease, type LeaseKind, type Quarantine,
@@ -129,6 +130,7 @@ export type GuardOptions = {
   readonly specFor: (app: AppId) => RunSpec | null;
   readonly log?: Emit;
   readonly now?: () => number;
+  readonly series?: Pick<Series, 'wake'>;
 };
 
 /**
@@ -140,12 +142,14 @@ export class AppGuard implements Guard {
   readonly #specFor: (app: AppId) => RunSpec | null;
   readonly #log: Emit;
   readonly #now: () => number;
+  readonly #series: Pick<Series, 'wake'> | undefined;
 
   constructor(options: GuardOptions) {
     this.#instances = options.instances;
     this.#specFor = options.specFor;
     this.#log = options.log ?? emit;
     this.#now = options.now ?? Date.now;
+    this.#series = options.series;
   }
 
   /** A guard row of an older release reads as none: a new release starts clean. */
@@ -165,19 +169,26 @@ export class AppGuard implements Guard {
 
   /** Inside the wake transaction; throws Quarantined, Backoff or QuotaExceeded and writes only through `tx`. */
   readonly admit = async (tx: StoreOps, spec: RunSpec): Promise<void> => {
+    const refusal = await this.#refusal(tx, spec);
+    if (!refusal) return;
+    this.#series?.wake(spec.tenant, spec.runtime.kind, 'refused');
+    throw refusal;
+  };
+
+  async #refusal(tx: StoreOps, spec: RunSpec): Promise<Quarantined | Backoff | QuotaExceeded | null> {
     const record = await tx.guard(spec.app, 'update');
     if (record && record.release !== spec.release) await tx.deleteGuard(spec.app);
     else if (record) {
-      if (record.quarantinedAt !== null) throw new Quarantined({ reason: record.quarantineReason ?? '', since: record.quarantinedAt, failures: record.failures.length });
+      if (record.quarantinedAt !== null) return new Quarantined({ reason: record.quarantineReason ?? '', since: record.quarantinedAt, failures: record.failures.length });
       const wait = record.failures.at(-1)! + spec.policy.restart_backoff_seconds * 1000 - this.#now();
-      if (wait > 0) throw new Backoff(Math.ceil(wait / 1000));
+      if (wait > 0) return new Backoff(Math.ceil(wait / 1000));
     }
     const tenant = await tx.tenant(spec.tenant, 'update');
-    if (!tenant) return;
+    if (!tenant) return null;
     const shape = instanceShape(spec);
     const refusal = admits(tenant.quota, await tx.quotaUsed(spec.tenant), { awake: 1, cpu_millis: shape.cpuMillis, memory_mb: shape.memoryMb });
-    if (refusal) throw new QuotaExceeded(spec.tenant, refusal);
-  };
+    return refusal && new QuotaExceeded(spec.tenant, refusal);
+  }
 
   /** Records one failure inside the transaction that won the CAS observing it; returns the quarantine it caused, for the caller to announce after commit. */
   async fail(tx: StoreOps, spec: RunSpec, reason: string): Promise<Quarantine | null> {

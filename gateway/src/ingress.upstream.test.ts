@@ -10,6 +10,7 @@ import { parseAppsOrigin } from './address.ts';
 import { Authority } from './authz.ts';
 import { UpstreamIdentity, type Identity, type UpstreamConfig } from './identity.ts';
 import { Ingress } from './ingress.ts';
+import { Series } from './metrics.ts';
 import { JwtVerifier } from './jwt.ts';
 import {
   DEFAULT_POLICY, QuotaExceeded,
@@ -95,6 +96,7 @@ before(async () => {
     stats: [],
     async flushStats() {},
     async deleteStats() {},
+    series: new Series(),
   });
   port = await ingress.listen(0, '127.0.0.1');
 });

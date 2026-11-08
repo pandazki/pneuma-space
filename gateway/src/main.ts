@@ -9,7 +9,7 @@ import { Authority, parsePlatformAdmins } from './authz.ts';
 import { loadOrCreateSecret, LocalIdentity, parseIdentityEnv, UpstreamIdentity, type Identity } from './identity.ts';
 import { JwtVerifier } from './jwt.ts';
 import { Ingress } from './ingress.ts';
-import { hostSample, httpProbe, Metrics, profileProbe, tcpProbe } from './metrics.ts';
+import { hostSample, httpProbe, Metrics, profileProbe, serveMetrics, Series, tcpProbe } from './metrics.ts';
 import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId } from './model.ts';
 import { composeProject, DockerInfra } from './infra.ts';
 import { createProviders, providerConfig, S3BundleStore } from './providers.ts';
@@ -52,13 +52,14 @@ const store = storeUrl
     commands: Number(process.env.PNEUMA_SPACE_STORE_COMMANDS ?? 4), testRetry: process.env.PNEUMA_SPACE_STORE_TEST_RETRY === '1',
   })
   : new SqliteStore(join(data, 'pneuma-space.sqlite3'));
+const series = new Series();
 const instances = new Instances(store, { replica });
 await instances.ready();
 await instances.start();
 const docker = new Docker();
 const infra = new DockerInfra(docker, await composeProject(docker));
 const specFor = (app: AppId) => registry.runSpec(app);
-const guard = new AppGuard({ instances, specFor });
+const guard = new AppGuard({ instances, specFor, series });
 const container = new DockerRuntime({ docker, network, specFor, instances, guard });
 const bundles = new S3BundleStore(config.object);
 const isolate = new IsolateRuntime({
@@ -78,6 +79,7 @@ const identity: Identity = setup.upstream
 const ingress = new Ingress({
   registry, runtime, identity, authority, addressing: setup.addressing, bundles, scheduler,
   upstream: setup.upstream && { header: setup.upstream.header, stripCookies: setup.upstream.stripCookies }, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
+  series,
 });
 
 const metrics = new Metrics({
@@ -97,6 +99,9 @@ const metrics = new Metrics({
   usage: store,
   policy: () => registry.policy(),
   view: (name) => registry.view(name),
+  series,
+  quota: store,
+  retries: () => (store instanceof PgStore ? store.retries : 0),
   replica,
   leader: () => instances.leading,
 });
@@ -121,6 +126,7 @@ await ingress.listen(INGRESS_PORT, '0.0.0.0');
 // The console audience keeps a JWT leaked from an app request from replaying on the admin API (ADR 0021 item 1).
 const upstream = setup.consoleIdentity ? { identity: new UpstreamIdentity(setup.consoleIdentity, authority, registry), authority } : undefined;
 const admin = await startAdmin({ registry, bundles, runtime, guard, metrics, requests, store, ingressPort, upstream }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const exporter = await serveMetrics(process.env.PNEUMA_SPACE_METRICS_PORT, () => metrics.prometheus());
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {
   ingress.flush().catch((error: Error) => log('flush-failed', { error: error.message }));
@@ -135,6 +141,8 @@ process.once('SIGTERM', async () => {
   container.close();
   isolate.close();
   admin.closeAllConnections();
+  exporter?.close();
+  exporter?.closeAllConnections();
   await Promise.all([ingress.close(), new Promise((resolve) => admin.close(resolve))]);
   await ingress.flush();
   await instances.close();

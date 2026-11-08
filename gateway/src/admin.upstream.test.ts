@@ -9,6 +9,7 @@ import { startAdmin } from './admin.ts';
 import { Authority } from './authz.ts';
 import { UpstreamIdentity, type UpstreamConfig } from './identity.ts';
 import { Ingress } from './ingress.ts';
+import { Series } from './metrics.ts';
 import { JwtVerifier } from './jwt.ts';
 import { appName, parseManifest, subject, type AppId, type AuditRecord, type DeliveryId, type TenantName } from './model.ts';
 import { world } from './registry.fakes.ts';
@@ -214,7 +215,7 @@ test('a personal token publishes into its tenant with the issuer as owner, and t
   const ingress = new Ingress({
     registry, authority, identity, addressing: parseAppsOrigin('https://*.apps.test'), upstream: { header: 'x-upstream-jwt', stripCookies: [] },
     runtime: { acquire: async (app: AppId) => ({ app, address: `127.0.0.1:${(echo.address() as AddressInfo).port}` }), release() {}, channel() {}, state: () => 'awake' },
-    bundles: { open: async () => Readable.from([]) }, scheduler: { invoke: async () => 'd-1' as DeliveryId }, stats: [], async flushStats() {}, async deleteStats() {},
+    bundles: { open: async () => Readable.from([]) }, scheduler: { invoke: async () => 'd-1' as DeliveryId }, stats: [], async flushStats() {}, async deleteStats() {}, series: new Series(),
   });
   const port = await ingress.listen(0, '127.0.0.1');
   t.after(async () => { await ingress.close(); echo.close(); });

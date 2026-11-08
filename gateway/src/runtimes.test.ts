@@ -3,10 +3,11 @@ import { test } from 'node:test';
 import { Instances } from './instances.ts';
 import { registered, replica, tempStore, until } from './lifecycle.fakes.ts';
 import {
-  appName, Conflict, DEFAULT_POLICY, DEFAULT_TENANT, newAppId,
+  appName, Conflict, DEFAULT_POLICY, DEFAULT_QUOTA, DEFAULT_TENANT, newAppId, QuotaExceeded,
   type AppId, type BundleId, type ImageId, type Lease, type ReleaseNumber, type Runtime, type RunSpec, type RuntimeKind,
 } from './model.ts';
-import { Backoff, Quarantined, Runtimes } from './runtimes.ts';
+import { Series } from './metrics.ts';
+import { AppGuard, Backoff, Quarantined, Runtimes } from './runtimes.ts';
 
 class FakeRuntime implements Runtime {
   readonly kind: RuntimeKind;
@@ -164,4 +165,14 @@ test('removing the instance clears the app\'s Guard state, so republishing the s
   assert.notEqual(guard.quarantine(app), null);
   await lifecycle.retire(app);
   assert.equal(guard.quarantine(app), null);
+});
+
+test('a wake the Guard refuses counts as result="refused" with its tenant and runtime', async () => {
+  const store = tempStore();
+  const { app, specFor } = await registered(store);
+  await store.putTenant({ name: DEFAULT_TENANT, display: DEFAULT_TENANT, quota: { ...DEFAULT_QUOTA, awake: 0 }, createdAt: 0 });
+  const series = new Series();
+  const guard = new AppGuard({ instances: new Instances(store), specFor, series });
+  await assert.rejects(store.transaction((tx) => guard.admit(tx, specFor(app)!)), QuotaExceeded);
+  assert.match(series.render(), /^pneuma_space_wakes_total\{tenant="default",runtime="container",result="refused"\} 1$/m);
 });

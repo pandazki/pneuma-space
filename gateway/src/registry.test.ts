@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { Ingress } from './ingress.ts';
+import { Series } from './metrics.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Conflict, InputError, appName, parseManifest, subject, triggerName, type App, type AppId, type BundleId, type Capabilities, type Change, type Store, type StoreOps } from './model.ts';
 import { PlatformRegistry } from './registry.ts';
@@ -146,6 +147,7 @@ test('after purge, a stats flush and a scheduler reload leave no row of the app 
     stats: [{ app, requests: 3, errors: 0, lastAccessAt: 1 }],
     flushStats: (stats) => store.putStats(stats),
     deleteStats: (id) => store.deleteStats(id),
+    series: new Series(),
   });
   registry.onAppChanged((id) => {
     void scheduler.reload(id);

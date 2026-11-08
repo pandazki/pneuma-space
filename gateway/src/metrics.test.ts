@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { EventLog } from './events.ts';
-import { Metrics } from './metrics.ts';
-import { DEFAULT_TENANT, USAGE_COUNTERS, appName, type AppId, type AppSummary, type InstanceState, type ReplicaId, type Stats, type Usage } from './model.ts';
+import { EXPOSITION_TYPE, Metrics, serveMetrics, Series } from './metrics.ts';
+import { DEFAULT_TENANT, USAGE_COUNTERS, appName, type AppId, type AppSummary, type InstanceState, type ReplicaId, type Stats, type TenantName, type Usage } from './model.ts';
 import { SqliteStore } from './store.ts';
 
 const HOUR = 3_600_000;
@@ -24,6 +24,9 @@ function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader =
     usage: store,
     policy: () => ({ usage_retention_days: 90 }),
     view: (name) => (name === survey ? { app, tenant: DEFAULT_TENANT } : null),
+    series: new Series(),
+    quota: store,
+    retries: () => 0,
     replica: replica as ReplicaId,
     leader: () => leader,
     now: () => clock.now,
@@ -140,4 +143,71 @@ test('each event carries a seq one above the previous', () => {
   const { events, metrics } = fixture();
   for (let i = 0; i < 3; i++) events.emit('delivery.due', app, { attempt: 0 });
   assert.deepEqual(metrics.snapshot().events.map((e) => e.seq), [1, 2, 3]);
+});
+
+/** A replica that has answered a request, run a wake and sampled an awake instance. */
+async function exported(leader = true) {
+  const f = fixture({ leader });
+  f.apps.push(summary('awake'));
+  f.events.emit('waking', app);
+  f.events.emit('awake', app, { ms: 300, tenant: DEFAULT_TENANT, runtime: 'container' });
+  await f.metrics.sample();
+  return f.metrics.prometheus();
+}
+
+const FAMILIES = /^pneuma_space_(instances|tenant_quota_used|tenant_quota_limit|deliveries|service_up)[{ ]/m;
+
+test('a wake adds to its bucket and every bucket above, and to _sum and _count', () => {
+  const series = new Series();
+  series.awake(DEFAULT_TENANT, 'container', 300);
+  const lines = series.render().split('\n').filter((l) => l.startsWith('pneuma_space_wake_duration_seconds_') && /le="0\.(25|5)"|le="\+Inf"|_sum|_count/.test(l));
+  assert.deepEqual(lines, [
+    'pneuma_space_wake_duration_seconds_bucket{runtime="container",le="0.25"} 0',
+    'pneuma_space_wake_duration_seconds_bucket{runtime="container",le="0.5"} 1',
+    'pneuma_space_wake_duration_seconds_bucket{runtime="container",le="+Inf"} 1',
+    'pneuma_space_wake_duration_seconds_sum{runtime="container"} 0.3',
+    'pneuma_space_wake_duration_seconds_count{runtime="container"} 1',
+  ]);
+});
+
+test('only the leader exports the instance, quota, delivery and service gauges', async () => {
+  assert.deepEqual([FAMILIES.test(await exported(true)), FAMILIES.test(await exported(false))], [true, false]);
+});
+
+test('no sample carries an app label', async () => {
+  assert.doesNotMatch(await exported(), /^[^#].*[{,]app="/m);
+});
+
+test('a label value with a quote, a backslash and a newline is escaped', () => {
+  const series = new Series();
+  series.request('a"b\\c\nd' as TenantName, null, 'request', false);
+  assert.match(series.render(), /^pneuma_space_requests_total\{tenant="a\\"b\\\\c\\nd",runtime="none",kind="request"\} 1$/m);
+});
+
+test('the exposition parses: every sample is name{labels} value under one HELP and one TYPE of its family', async () => {
+  const lines = (await exported()).trimEnd().split('\n');
+  const declared = (kind: string) => lines.filter((l) => l.startsWith(`# ${kind} `)).map((l) => l.split(' ')[2]);
+  const types = new Map(lines.filter((l) => l.startsWith('# TYPE ')).map((l) => [l.split(' ')[2], l.split(' ')[3]]));
+  assert.deepEqual(declared('HELP'), [...new Set(declared('HELP'))]);
+  assert.deepEqual(declared('TYPE'), declared('HELP'));
+  const sample = /^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{([a-zA-Z_][a-zA-Z0-9_]*="([^"\\]|\\.)*",?)*\})? (\S+)$/;
+  for (const line of lines.filter((l) => !l.startsWith('#'))) {
+    const match = sample.exec(line);
+    assert.ok(match && !Number.isNaN(Number(match[5])), line);
+    const name = match[1];
+    const family = types.has(name) ? name : name.replace(/_(bucket|sum|count)$/, '');
+    assert.ok(types.has(family) && (family === name || types.get(family) === 'histogram'), line);
+  }
+});
+
+test('without PNEUMA_SPACE_METRICS_PORT no exporter starts', async () => {
+  assert.equal(await serveMetrics(undefined, () => ''), null);
+});
+
+test('the exporter answers GET /metrics in the exposition format and 404 elsewhere', async (t) => {
+  const server = (await serveMetrics('0', () => 'x 1\n'))!;
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const [metrics, other] = await Promise.all([fetch(`${base}/metrics`), fetch(`${base}/api/metrics`)]);
+  assert.deepEqual([metrics.status, metrics.headers.get('content-type'), await metrics.text(), other.status], [200, EXPOSITION_TYPE, 'x 1\n', 404]);
 });

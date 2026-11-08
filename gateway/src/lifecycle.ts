@@ -397,7 +397,7 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
       if (settled) {
         this.#instances.putRow(asleep);
         if (reason !== null) await this.#instances.refresh(app);
-        this.#emit('asleep', app, cause(error));
+        this.#emit('asleep', app, { ...cause(error), runtime: this.kind, tenant: spec.tenant });
         if (settled.quarantine) this.#guard.announce(app, settled.quarantine);
       }
       throw error;
@@ -423,7 +423,7 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
     }
     this.#instances.putTally(tally);
     this.#instances.putRow(awake);
-    this.#emit('awake', app, { ms: Math.round(performance.now() - started) });
+    this.#emit('awake', app, { ms: Math.round(performance.now() - started), runtime: this.kind, tenant: spec.tenant });
     return lease;
   }
 
