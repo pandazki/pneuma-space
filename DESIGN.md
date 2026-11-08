@@ -32,7 +32,6 @@ PneumaSpace 把有状态的 web 应用部署到一台可信机器上，M2 起也
 | Usage | `(app, step, start, replica)`，`app` 为 `'*'` 表示整个平台 | `tenant`（写入时的）, 请求、错误、唤醒、休眠、投递结果的计数, `wake_ms`, `awake_ms`；每 App 只有 3600 s 步长，`'*'` 另有 60 s 步长 | 平台库，保留 `usage_retention_days` | Metrics，每副本只写自己的行，写绝对值（ADR 0024） |
 | Event | `id`，全局递增 | `at`（库时钟）, `replica`, `ev`, `app`, `tenant`, `body` | 平台库，按 `events_retention_days` 和 `events_max_rows` 清扫；同时写 stdout | Metrics |
 | Audit | `id` | `at`, `actor`, `actor_tenant`, `tenant`, `action`, `target_kind`, `target`, `result`, `details`（不含密钥） | 平台库，只追加，触发器拒绝改删 | 管理边界：路由表的每个变更路由声明 `audit` |
-| StorageUsage | `(app, kind, provider)` | `bytes`, `measured_at` | 平台库，每 15 min 覆盖 | Metrics，在领导者上（ADR 0023） |
 | InstanceLog | `app` | `release`, `ended_at`, `reason`, `tail`（最后 200 行，至多 64 KiB） | 平台库，每 App 一行覆盖 | Runtime，K8s 平面删 Pod 前写 |
 | Metrics | 每副本一份 | 当前桶的累计、最近 1000 条请求记录（ADR 0016，每条同时写 stdout）、平台服务探测结果、宿主机样本 | 内存，不持久 | Metrics |
 | 平台密钥 | 单文件 | cookie 签名密钥，只用于 `local` 身份 | `/data/pneuma-space.secret`，首次启动生成 | Registry |
@@ -85,7 +84,7 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 | INV-9 | 每条 Binding 恰好属于一个 Provider 实现，每个 ingress 和 schedule kind 恰好有一个负责组件（1.3 节）；Registry 写 Binding 行，Provider 写资源，Runtime 应用 Injection（环境变量和挂载），Ingress 注入请求头，没有别的路径。 |
 | INV-10 | 对象字节在浏览器和对象服务之间移动，静态字节在对象存储和网关之间移动，两条路径都不经过 `acquire`。 |
 | INV-11 | 每个 App 在整个集群同一时刻至多一个 Instance，只靠实例行上带 `state` 和 `epoch` 的条件更新保证，领导者错位或两个副本同时自认领导都不产生第二个（ADR 0020）。新 Release 的实例在旧实例 `draining` 结束、旧容器或 Pod 消失后才创建，所以两个进程不会同时打开一个 `/data` 或 SQLite 文件。 |
-| INV-12 | 配额按租户，只在两处判定：发布时（首次插 App 行、将新建 Binding 行），唤醒的 CAS 事务里在租户行锁下。用量取自平台库的计数和实测，不存计数器（ADR 0023）。超额是带原因的拒绝，不是失败，Guard 不计数。 |
+| INV-12 | 配额按租户，只在两处判定：发布时（首次插 App 行、将新建 Binding 行），唤醒的 CAS 事务里在租户行锁下。用量取自平台库的计数和已供应的卷容量，不存计数器（ADR 0023）。超额是带原因的拒绝，不是失败，Guard 不计数。 |
 
 ## 2 架构
 
@@ -104,7 +103,7 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 | Providers | 每种资源 kind 一个；`ensure`、`inject`、`suspend`、`destroy`；BundleStore；IdentityProvider（`local` 或 `upstream`） | 互相调用；写平台库 |
 | 认证与授权 | `jwt.ts` 验上游 JWT（只用 `node:crypto` 和 `fetch`，ADR 0021）；每请求至多认证一次，得到 `Caller`；`authz.ts` 的 `ACTIONS` 表和纯函数 `can(caller, action, tenant)` 是管理 API 唯一的授权判定；成员和令牌缓存，按 `tenant/<name>` 通知失效（ADR 0022） | 写库（User 行经 `registry.sighted()` 由 Registry 写） |
 | Store | `SqliteStore` 或 `PgStore`（`pg.ts`），DML 只写一次，在 `sql.ts`；`transaction`（PostgreSQL 上 `SERIALIZABLE`，冲突重跑）、`exclusive`（按应用名互斥）、行触发器在提交时向通道 `pneuma_space` 发变更通知（ADR 0025） | 业务判断；每张表的写者仍是 1.2 节那一列 |
-| Metrics | 1.2 节的 Usage、Event、StorageUsage 和 Metrics 行。订阅生命周期事件流（每行 JSON 日志同时发给订阅者），批量写 `events`；每 10 s 写本副本的 `usage` 行并读回总览的序列，采样 Runtime 的实例和 Lease 计数、Delivery 的状态计数、宿主机和平台服务可达性；`GET /api/metrics` 返回一份内存快照，每 App 的 Lease 计数、进入状态的时间和休眠时刻随列表返回（ADR 0015）；`GET /api/requests` 由接到请求的副本扇出到 `PNEUMA_SPACE_PEERS` 并归并，记录由 Ingress 和 Scheduler 写入内存环（ADR 0016）；`GET /api/nodes` 有人请求才采样；`/metrics` 在单独端口（ADR 0024） | 写这三张表之外的表；在请求路径上调 Docker、K8s 或网络（探测只在采样器里） |
+| Metrics | 1.2 节的 Usage、Event 和 Metrics 行。订阅生命周期事件流（每行 JSON 日志同时发给订阅者），批量写 `events`；每 10 s 写本副本的 `usage` 行并读回总览的序列，采样 Runtime 的实例和 Lease 计数、Delivery 的状态计数、宿主机和平台服务可达性；`GET /api/metrics` 返回一份内存快照，每 App 的 Lease 计数、进入状态的时间和休眠时刻随列表返回（ADR 0015）；`GET /api/requests` 由接到请求的副本扇出到 `PNEUMA_SPACE_PEERS` 并归并，记录由 Ingress 和 Scheduler 写入内存环（ADR 0016）；`GET /api/nodes` 有人请求才采样；`/metrics` 在单独端口（ADR 0024） | 写这三张表之外的表；在请求路径上调 Docker、K8s 或网络（探测只在采样器里） |
 | Console 和 CLI | 8081 管理边界；页面是总览（US-P-13 列的指标）、实时（ADR 0016）、拓扑（ADR 0018）和项目（US-P-6 列的字段，项目详情含 Release 列表、Delivery 列表和容器日志），`upstream` 模式另有团队页和租户切换器（ADR 0022 第 8 条），中英双语，明暗主题，单文件 HTML 内联 CSS、JS 和 SVG 图表，不加载外部资源；发布表单收镜像引用、manifest、可选 bundle 和首次发布时的 owner，引用由网关解析为镜像 id 或 digest；`appctl publish` 用 `--owner`（默认取环境变量 `PNEUMA_SPACE_OWNER`）；全局 Policy 和 owner 变更只有 `appctl`，`upstream` 模式的令牌只在团队页签发；`appctl` 先读 `pneuma-space.json`，需要容器时才 `docker build`（K8s 平面再 `docker push` 到 `PNEUMA_SPACE_REGISTRY`），有 `static` 时打包目录，再以 `PNEUMA_SPACE_TOKEN` 作 Bearer 调管理接口；管理接口的分发器按 `ACTIONS` 授权，按路由声明的 `audit` 在处理结束后写审计行（ADR 0024 第 6 条） | 任何业务逻辑；它们是薄壳 |
 
 部署平面是 `PNEUMA_SPACE_PLANE`（默认 `docker`，或 `kubernetes`）。组合根 `main.ts` 按它选下表四个实现；Lifecycle、`Runtimes` 门面、Guard、Scheduler、Ingress、Registry、Providers 两个平面共用一份。K8s 是平面不是运行时，`RUNTIMES` 仍是两行（ADR 0019 第 1 条）。
@@ -158,7 +157,7 @@ K8s 平面：命名空间 `pneuma-space` 放网关、runner 和集群内的平�
 
 退役（Registry 在发布、改变 Injection 的 policy 变更、remove 之后调用）：`awake` 时置 `draining`，调用每个 `channel` 的 `on_retire`（WebSocket 发 close 1001，SSE 直接关闭连接），等待 Lease 清空至多 `drain_timeout_seconds`，`docker stop` 并 `docker rm`；`asleep` 时直接 `docker rm`。下一次 `acquire` 为当前 Release 建新容器。`purge` 先退役，再销毁每条 Binding 的资源和该 App 的 bundle，所以卷不会被容器占用。
 
-重启：开平台库，`delivering` 回 `due`。先核对容器，再续跑 `purging`（续跑要退役该 App 可能还活着的容器，所以核对在前）。一次 `docker ps` 按标签 `pneuma-space.app` 列出容器：App 不存在、`pneuma-space.release` 不等于 `current`、或 `pneuma-space.spec` 不等于当前推导的 Injection 哈希的移除，其余运行中的采纳为 `awake`（`awake_at = now`），停止的为 `asleep`。订阅 Docker 事件流，`die` 事件把实例置 `asleep`。Provider 在后台对每条 Binding 按其 `state` 重跑 `ensure` 或 `suspend`，收敛后端可能丢失或与行不一致的状态（例如重建的 Redis 容器，或 ensure 和提交之间的崩溃）。
+重启：开平台库，加载实例行的镜像；领导者把 `replica` 已死的 `delivering` 回 `due`。先核对实例，再续跑 `purging`（续跑要退役该 App 可能还活着的实例，所以核对在前）。领导者按标签 `pneuma-space.role=instance` 列出容器或 Pod，与实例行比对：没有对应行、或行的 `release`、`spec_hash`、`epoch` 与标签不符的删掉；行是 `awake` 而容器或 Pod 不在的，CAS 回 `asleep` 并发 `crashed`；其余保持行的状态（ADR 0019 第 5 条，ADR 0020）。每个副本订阅自己平面的结束事件（Docker `die`、Pod watch、runner 查询），观察到结束就做 CAS，赢家发事件。Provider 在后台对每条 Binding 按其 `state` 重跑 `ensure` 或 `suspend`，收敛后端可能丢失或与行不一致的状态（例如重建的 Redis 容器，或 ensure 和提交之间的崩溃）。
 
 ### 2.4 发布
 
