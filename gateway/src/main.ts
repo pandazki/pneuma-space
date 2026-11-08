@@ -95,8 +95,9 @@ const runtime = new Runtimes({ runtimes: [container, isolate], specFor, instance
 // A Kubernetes Service name resolves whether or not a Pod serves it, so the cluster probes by connecting.
 const SERVICE_PORTS = { postgres: config.postgres.port, coturn: 3478 } as const;
 const providerProbe = setup.pods ? (service: keyof typeof SERVICE_PORTS) => canConnect(service, SERVICE_PORTS[service]) : resolvesOnNetwork;
+const providers = Object.values(createProviders(runtime, config, providerProbe));
 const registry = await PlatformRegistry.open({
-  store, runtime, guard, infra, bundles, providers: Object.values(createProviders(runtime, config, providerProbe)), statsSource: async () => metrics.stats(),
+  store, runtime, guard, infra, bundles, providers, statsSource: async () => metrics.stats(),
   addressing: setup.addressing, volumeGb: config.volumeGb, nodeOf: (app) => nodes.nodeOf(app),
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica, policy: () => registry.policy() });
@@ -168,7 +169,7 @@ const upstream = setup.consoleIdentity ? { identity: new UpstreamIdentity(setup.
 const peers = process.env.PNEUMA_SPACE_PEERS
   ? { host: process.env.PNEUMA_SPACE_PEERS, forward: ['authorization', ...(setup.upstream ? [setup.upstream.header] : [])] }
   : undefined;
-const admin = await startAdmin({ registry, bundles, runtime, guard, metrics, nodes, requests, replica, peers, store, ingressPort, upstream }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const admin = await startAdmin({ registry, bundles, runtime, guard, metrics, nodes, requests, replica, peers, store, ingressPort, upstream, providers }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const exporter = await serveMetrics(process.env.PNEUMA_SPACE_METRICS_PORT, () => metrics.prometheus());
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {

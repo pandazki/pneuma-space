@@ -60,7 +60,7 @@ before(async () => {
   const identity = new UpstreamIdentity(config('console'), authority, registry);
   const server = await startAdmin({
     registry, bundles: w.bundles, runtime: { logs: async () => '', healthOf: () => [] }, guard: w.runtime,
-    metrics: { snapshot: () => ({}) as never, events: async () => [] }, nodes: { snapshot: () => ({ source: null, sampledAt: null, nodes: [] }) }, requests: { after: () => [] }, replica: 'r1' as ReplicaId, store, ingressPort: 18080, upstream: { identity, authority },
+    metrics: { snapshot: () => ({}) as never, events: async () => [] }, nodes: { snapshot: () => ({ source: null, sampledAt: null, nodes: [] }) }, requests: { after: () => [] }, replica: 'r1' as ReplicaId, store, ingressPort: 18080, upstream: { identity, authority }, providers: [...w.providers.values()],
   }, { port: 0 });
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   close = async () => void server.close();
@@ -114,6 +114,8 @@ const TABLE: [row: string, method: string, path: string, body: unknown, allowed:
   ['issue service token', 'POST', `/api/tenants/${A}/tokens`, { kind: 'service', name: 'deploy' }, 'ana', 'bob', 403, true],
   ['issue personal token', 'POST', `/api/tenants/${A}/tokens`, { kind: 'personal' }, 'bob', 'cid', 403, true],
   ['revoke token', 'DELETE', `/api/tenants/${A}/tokens/<old>`, undefined, 'ana', 'bob', 403, true],
+  ['state', 'GET', '/api/apps/gamma/state', undefined, 'cid', 'token:bob', 404],
+  ['tenant state', 'GET', `/api/state?tenant=${B}`, undefined, 'cid', 'token:bob', 403],
   ['remove', 'POST', '/api/apps/alpha/remove', undefined, 'bob', 'cid', 404],
   ['unquarantine', 'POST', '/api/apps/alpha/unquarantine', undefined, 'bob', 'cid', 404],
   ['purge', 'POST', '/api/apps/alpha/purge', undefined, 'ana', 'bob', 403, true],

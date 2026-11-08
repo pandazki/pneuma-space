@@ -11,8 +11,8 @@ import type { Answer, Identity } from './identity.ts';
 import {
   ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, LOGOUT_PATH, NotFound, QuotaExceeded, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
   appName, bundleId, parseManifest, subject, tenantName,
-  type Access, type Actor, type AppId, type AuditAction, type AuditRecord, type BundleStore, type Caller, type Guard, type Registry, type Release, type ReplicaId, type Role, type StoreOps,
-  type Subject, type TenantName, type UsageBucket, type UsageCounters,
+  type Access, type Actor, type App, type AppId, type AuditAction, type AuditRecord, type Binding, type BundleStore, type Caller, type CapabilityProvider, type Guard, type ProviderName,
+  type Registry, type Release, type ReplicaId, type Role, type StateInventory, type StoreOps, type Subject, type TenantName, type UsageBucket, type UsageCounters,
 } from './model.ts';
 
 export type AdminDeps = {
@@ -27,7 +27,8 @@ export type AdminDeps = {
   readonly replica: ReplicaId;
   /** `PNEUMA_SPACE_PEERS` and the credential headers a fan-out forwards; absent on a single replica (ADR 0024 item 5). */
   readonly peers?: { readonly host: string; readonly forward: readonly string[] };
-  readonly store: Pick<StoreOps, 'usage' | 'insertAudit' | 'audit' | 'tenant' | 'tenants' | 'quotaUsed' | 'memberships' | 'user' | 'tokens'>;
+  readonly store: Pick<StoreOps, 'usage' | 'insertAudit' | 'audit' | 'tenant' | 'tenants' | 'quotaUsed' | 'memberships' | 'user' | 'tokens' | 'app' | 'appsWithCurrent' | 'release' | 'bindings'>;
+  readonly providers: readonly Pick<CapabilityProvider, 'name' | 'location'>[];
   readonly ingressPort: number;
   readonly consoleFile?: string | URL;
   /** The console-audience provider and the Authority; absent under `local`, where every request is LOCAL_CALLER (ADR 0022 item 4). */
@@ -157,7 +158,7 @@ function firstTenant({ body, caller }: Ctx): TenantName {
   throw new InputError(`tenant is required on a first publish${mine.length ? `; you are in ${mine.join(', ')}` : ''}`);
 }
 
-function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, replica, peers, store, ingressPort, upstream }: AdminDeps): Route[] {
+function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, replica, peers, store, ingressPort, upstream, providers }: AdminDeps): Route[] {
   const app = (name: string | undefined) => appName(name!);
   const found = <T>(value: T | null, name: string | undefined): T => {
     if (value === null) throw new NotFound(`no app named "${name}"`);
@@ -188,6 +189,13 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, r
     const value = request.headers[name];
     return typeof value === 'string' ? [[name, value]] : [];
   }));
+  const locate = new Map(providers.map((p) => [p.name, p] as const)) as ReadonlyMap<ProviderName, Pick<CapabilityProvider, 'location'>>;
+  const inventory = (app: App, release: Release | null, bindings: readonly Binding[]): StateInventory => ({
+    app: app.name,
+    release: app.current,
+    bundle: release?.bundle ?? null,
+    bindings: bindings.map(({ kind, provider, state, resource }) => ({ kind, provider, state, location: locate.get(provider)!.location(resource) })),
+  });
   const appRoute = (method: string, path: string, action: Action, handle: Handler, extra: Partial<Route> = {}): Route =>
     ({ method, path: at(path), action, scope: ({ params: [name] }) => onApp(name), handle, ...extra });
 
@@ -259,6 +267,20 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, r
       },
     },
     appRoute('GET', ADMIN_PATHS.app('<name>'), 'app.read', async ({ params: [name] }) => found(await registry.detail(app(name)), name)),
+    appRoute('GET', ADMIN_PATHS.state('<name>'), 'app.read', async ({ params: [name] }) => {
+      const row = found(await store.app(app(name)), name);
+      return inventory(row, row.current === null ? null : await store.release(row.id, row.current), await store.bindings(row.id));
+    }),
+    {
+      method: 'GET', path: at(ADMIN_PATHS.states), action: 'records', scope: onQuery, handle: async (_, scope) => {
+        const [rows, bindings] = await Promise.all([store.appsWithCurrent(), store.bindings()]);
+        const byApp = Map.groupBy(bindings, (b) => b.app);
+        return {
+          apps: rows.filter(({ app: row }) => scope.tenant === null || row.tenant === scope.tenant)
+            .map(({ app: row, release }) => inventory(row, release, byApp.get(row.id) ?? [])),
+        };
+      },
+    },
     appRoute('GET', ADMIN_PATHS.logs('<name>'), 'app.read', ({ query, params: [name] }) => runtime.logs(found(registry.view(app(name)), name).app, wholeParam(query, 'tail', 200, 1, MAX_TAIL))),
     {
       method: 'PUT', path: at(ADMIN_PATHS.release('<name>')), json: true, action: 'app.release',
