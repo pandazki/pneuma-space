@@ -3,7 +3,7 @@
 import {
   DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS, USAGE_COUNTERS,
   type App, type AppId, type AppName, type AuditFilter, type AuditRecord, type Binding, type Change, type Delivery, type DeliveryFilter,
-  type DeliveryState, type EventFilter, type EventRecord, type GuardRecord, type Instance, type InstanceLog, type LeaseTally, type Membership,
+  type DeliveryId, type DeliveryState, type EventFilter, type EventRecord, type GuardRecord, type Instance, type InstanceLog, type LeaseTally, type Membership,
   type Policy, type QuotaUsage, type Release, type ReleaseNumber, type Replica, type ReplicaId, type RowLock, type Stats, type StorageUsage,
   type StoreOps, type Tenant, type TenantName, type Token, type Trigger, type TriggerName, type Usage, type UsageBucket, type UsageFilter,
   type UsageStep, type User,
@@ -45,6 +45,7 @@ const toApp = (r: Row): App => ({
   current: numOrNull(r.current) as ReleaseNumber | null,
   policyOverride: json(r.policy_override),
   registeredAt: num(r.registered_at),
+  version: num(r.version),
 });
 
 const toRelease = (r: Row): Release => ({
@@ -78,6 +79,7 @@ const toDelivery = (r: Row): Delivery => ({
   attempts: num(r.attempts),
   nextAttemptAt: num(r.next_attempt_at),
   createdAt: num(r.created_at),
+  replica: r.replica as ReplicaId | null,
 });
 
 const toToken = (r: Row): Token => ({
@@ -173,8 +175,7 @@ export class SqlOps implements StoreOps {
   }
 
   async #touchApp(id: AppId): Promise<void> {
-    if (!this.#s.touched) return;
-    const [row] = await this.#s.all('SELECT name FROM app WHERE id = $1', [id]);
+    const [row] = await this.#s.all('UPDATE app SET version = version + 1 WHERE id = $1 RETURNING name', [id]);
     if (row) this.#touch({ kind: 'app', name: row.name as AppName });
   }
 
@@ -193,9 +194,10 @@ export class SqlOps implements StoreOps {
 
   async putApp(app: App) {
     await this.#s.run(
-      `INSERT INTO app (name, id, tenant, access, owner, status, current, policy_override, registered_at) VALUES (${placeholders(9)})
+      `INSERT INTO app (name, id, tenant, access, owner, status, current, policy_override, registered_at, version) VALUES (${placeholders(9)}, 1)
        ON CONFLICT (name) DO UPDATE SET id = excluded.id, tenant = excluded.tenant, access = excluded.access, owner = excluded.owner,
-         status = excluded.status, current = excluded.current, policy_override = excluded.policy_override, registered_at = excluded.registered_at`,
+         status = excluded.status, current = excluded.current, policy_override = excluded.policy_override, registered_at = excluded.registered_at,
+         version = app.version + 1`,
       [app.name, app.id, app.tenant, app.access, app.owner, app.status, app.current, JSON.stringify(app.policyOverride), app.registeredAt],
     );
     this.#touch({ kind: 'app', name: app.name });
@@ -381,6 +383,11 @@ export class SqlOps implements StoreOps {
     await this.#s.run('UPDATE delivery SET state = $1, attempts = $2, next_attempt_at = $3 WHERE id = $4', [d.state, d.attempts, d.nextAttemptAt, d.id]);
   }
 
+  async claimDelivery(id: DeliveryId, replica: ReplicaId, attempts: number) {
+    const { changes } = await this.#s.run("UPDATE delivery SET state = 'delivering', replica = $2, attempts = $3 WHERE id = $1 AND state = 'due'", [id, replica, attempts]);
+    return changes > 0;
+  }
+
   async deliveries(filter: DeliveryFilter) {
     const w = where([['app = ?', filter.app], ['state = ?', filter.state], ['next_attempt_at <= ?', filter.dueBefore]]);
     // The worker wants the oldest due row first; every other reader wants the newest.
@@ -452,9 +459,7 @@ export class SqlOps implements StoreOps {
 
   deleteReplica(id: ReplicaId) {
     return this.#s.atomic(async () => {
-      for (const row of await this.#s.all('DELETE FROM lease_tally WHERE replica = $1 RETURNING app', [id])) {
-        this.#touch({ kind: 'instance', app: row.app as AppId });
-      }
+      await this.#s.run('DELETE FROM lease_tally WHERE replica = $1', [id]);
       await this.#s.run('DELETE FROM replica WHERE id = $1', [id]);
     });
   }
@@ -477,15 +482,23 @@ export class SqlOps implements StoreOps {
     return changes > 0;
   }
 
-  async casInstance(expected: Pick<Instance, 'state' | 'epoch'>, next: Instance) {
+  async casInstance(expected: Pick<Instance, 'runtime' | 'state' | 'epoch'>, next: Instance) {
     const n = INSTANCE_COLUMNS.length;
     const set = INSTANCE_COLUMNS.slice(1).map((column, i) => `${column} = $${i + 2}`).join(', ');
     const { changes } = await this.#s.run(
-      `UPDATE instance SET ${set} WHERE app = $1 AND state = $${n + 1} AND epoch = $${n + 2}`,
-      [...instanceParams(next), expected.state, expected.epoch],
+      `UPDATE instance SET ${set} WHERE app = $1 AND runtime = $${n + 1} AND state = $${n + 2} AND epoch = $${n + 3}`,
+      [...instanceParams(next), expected.runtime, expected.state, expected.epoch],
     );
     if (changes > 0) this.#touch({ kind: 'instance', app: next.app });
     return changes > 0;
+  }
+
+  deleteInstance(app: AppId) {
+    return this.#s.atomic(async () => {
+      const { changes } = await this.#s.run('DELETE FROM instance WHERE app = $1', [app]);
+      await this.#s.run('DELETE FROM lease_tally WHERE app = $1', [app]);
+      if (changes > 0) this.#touch({ kind: 'instance', app });
+    });
   }
 
   async leaseTallies(app?: AppId) {
@@ -500,7 +513,6 @@ export class SqlOps implements StoreOps {
          trigger = excluded.trigger, released_at = excluded.released_at`,
       [t.app, t.replica, t.epoch, t.request, t.channel, t.trigger, t.releasedAt],
     );
-    this.#touch({ kind: 'instance', app: t.app });
   }
 
   async guard(app: AppId, lock?: RowLock) {

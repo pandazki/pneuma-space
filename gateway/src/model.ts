@@ -313,6 +313,8 @@ export type App = {
   readonly policyOverride: PolicyOverride;
   /** When the status last became registered; a republish after remove starts schedules here. */
   readonly registeredAt: number;
+  /** Raised by the store on every write of the app's rows (app, release, trigger, binding); a reader applies only a newer one (ADR 0025 item 5). */
+  readonly version: number;
 };
 
 export type Release = {
@@ -414,6 +416,8 @@ export type Delivery = {
   readonly attempts: number;
   readonly nextAttemptAt: number;
   readonly createdAt: number;
+  /** The replica that claimed it for its current attempt; null until the first claim. */
+  readonly replica: ReplicaId | null;
 };
 
 /** A service token's subject is `service:<tenant>.<label>`, a personal token's is its issuer's `user:<id>` (ADR 0022 item 2). */
@@ -535,6 +539,8 @@ export type RunSpec = {
   readonly runtime: { readonly kind: 'container'; readonly image: ImageId } | { readonly kind: 'isolate'; readonly bundle: BundleId; readonly entry: string };
   readonly injection: Injection;
   readonly policy: Policy;
+  /** The app row's version this spec was built from; a wake against a newer row waits for the refresh (ADR 0020 item 4). */
+  readonly version: number;
 };
 
 /** Per-app snapshot the Ingress reads; rebuilt after every command that changes the app's rows. */
@@ -557,6 +563,7 @@ export type RouteView = {
   /** Null when the release does not declare identity. */
   readonly identity: IdentityDeclaration | null;
   readonly policyOverride: PolicyOverride;
+  readonly version: number;
 };
 
 export type PublishRequest = {
@@ -833,6 +840,8 @@ export interface StoreOps {
   /** Returns the stored row: an existing one for the same scheduled slot, or the same (app, trigger, idempotencyKey) within IDEMPOTENCY_WINDOW_MS. */
   insertDelivery(delivery: Delivery): Promise<Delivery>;
   updateDelivery(delivery: Delivery): Promise<void>;
+  /** Moves a due delivery to delivering for `replica` with `attempts`; false when it was not due any more (ADR 0020 item 4). */
+  claimDelivery(id: DeliveryId, replica: ReplicaId, attempts: number): Promise<boolean>;
   deliveries(filter: DeliveryFilter): Promise<Delivery[]>;
   deliveryCounts(): Promise<Record<DeliveryState, number>>;
   lastScheduledFor(app: AppId, trigger: TriggerName): Promise<number | null>;
@@ -853,10 +862,13 @@ export interface StoreOps {
   instances(): Promise<Instance[]>;
   /** False when the app already has a row. */
   insertInstance(instance: Instance): Promise<boolean>;
-  /** Writes `next` only if the row is still in `expected` state and epoch; false otherwise. */
-  casInstance(expected: Pick<Instance, 'state' | 'epoch'>, next: Instance): Promise<boolean>;
+  /** Writes `next` only if the row still has `expected` runtime, state and epoch; false otherwise. */
+  casInstance(expected: Pick<Instance, 'runtime' | 'state' | 'epoch'>, next: Instance): Promise<boolean>;
+  /** Deletes the app's instance and lease_tally rows; purge cleanup, idempotent (ADR 0020 item 8). */
+  deleteInstance(app: AppId): Promise<void>;
 
   leaseTallies(app?: AppId): Promise<LeaseTally[]>;
+  /** Announces no change (ADR 0020 item 2). */
   putLeaseTally(tally: LeaseTally): Promise<void>;
 
   guard(app: AppId, lock?: RowLock): Promise<GuardRecord | null>;

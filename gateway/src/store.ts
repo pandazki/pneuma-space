@@ -72,6 +72,9 @@ export const MIGRATIONS = [
      trigger INTEGER NOT NULL, released_at INTEGER, PRIMARY KEY (app, replica));
    CREATE TABLE guard (
      app TEXT PRIMARY KEY, release INTEGER NOT NULL, failures TEXT NOT NULL, quarantine_reason TEXT, quarantined_at INTEGER);`,
+  // ADR 0020 as revised: the app's version for stale-view wakes, the delivery's claimer for conditional claims.
+  `ALTER TABLE app ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE delivery ADD COLUMN replica TEXT;`,
 ];
 
 /** `$n` placeholders become `?n`, which node:sqlite binds by position. */

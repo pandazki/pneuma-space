@@ -17,14 +17,14 @@ const replica = 'replica-a' as ReplicaId;
 export function app(name: string, fields: Partial<App> = {}): App {
   return {
     name: name as AppName, id: appId(name), tenant: DEFAULT_TENANT, access: 'org', owner: 'user:ann' as Subject, status: 'registered',
-    current: null, policyOverride: {}, registeredAt: 0, ...fields,
+    current: null, policyOverride: {}, registeredAt: 0, version: 1, ...fields,
   };
 }
 
 function delivery(id: string, fields: Partial<Delivery>): Delivery {
   return {
     id: id as DeliveryId, app: appId('a1'), trigger: 'reindex' as TriggerName, scheduledFor: null, caller: null,
-    idempotencyKey: null, body: new Uint8Array(), state: 'due', attempts: 0, nextAttemptAt: 0, createdAt: 0, ...fields,
+    idempotencyKey: null, body: new Uint8Array(), state: 'due', attempts: 0, nextAttemptAt: 0, createdAt: 0, replica: null, ...fields,
   };
 }
 
@@ -154,9 +154,46 @@ export function storeContract(name: string, open: OpenStore): void {
       const asleep = instance('cas');
       const waking = { ...asleep, state: 'waking', epoch: 1, actor: replica } as const;
       assert.deepEqual([await store.insertInstance(asleep), await store.insertInstance(asleep)], [true, false]);
-      assert.equal(await store.casInstance({ state: 'asleep', epoch: 0 }, waking), true);
-      assert.equal(await store.casInstance({ state: 'asleep', epoch: 0 }, { ...waking, epoch: 2 }), false);
+      assert.equal(await store.casInstance({ runtime: 'container', state: 'asleep', epoch: 0 }, waking), true);
+      assert.equal(await store.casInstance({ runtime: 'container', state: 'asleep', epoch: 0 }, { ...waking, epoch: 2 }), false);
       assert.deepEqual(await store.instance(asleep.app), waking);
+    });
+
+    test('an instance CAS that names another runtime writes nothing', async () => {
+      const asleep = instance('other-runtime');
+      await store.insertInstance(asleep);
+      assert.equal(await store.casInstance({ runtime: 'isolate', state: 'asleep', epoch: 0 }, { ...asleep, runtime: 'isolate', state: 'waking', epoch: 1 }), false);
+      assert.deepEqual(await store.instance(asleep.app), asleep);
+    });
+
+    test('deleteInstance removes the instance and its lease tallies', async () => {
+      const row = instance('purged');
+      await store.insertInstance(row);
+      await store.putLeaseTally({ app: row.app, replica, epoch: 0, request: 1, channel: 0, trigger: 0, releasedAt: null });
+      await store.deleteInstance(row.app);
+      assert.deepEqual([await store.instance(row.app), await store.leaseTallies(row.app)], [null, []]);
+    });
+
+    test('a lease tally write announces no change', async () => {
+      const seen: string[] = [];
+      store.onChange((change) => seen.push(changeKey(change)));
+      await store.putLeaseTally({ app: appId('quiet'), replica, epoch: 1, request: 1, channel: 0, trigger: 0, releasedAt: null });
+      await announced(seen, []);
+      assert.deepEqual(seen.filter((key) => key === `instance/${appId('quiet')}`), []);
+    });
+
+    test('a write to a release raises the app version', async () => {
+      await store.putApp(app('versioned'));
+      await store.putRelease({
+        app: appId('versioned'), number: 1 as ReleaseNumber, image: null, manifest: { contract: 1, capabilities: {} }, bundle: null, runtime: null, releaseKey: 'k', publishedAt: 0,
+      });
+      assert.equal((await store.app('versioned' as AppName))?.version, 2);
+    });
+
+    test('a due delivery is claimed once', async () => {
+      await store.insertDelivery(delivery('claimed', {}));
+      assert.deepEqual([await store.claimDelivery('claimed' as DeliveryId, replica, 1), await store.claimDelivery('claimed' as DeliveryId, replica, 1)], [true, false]);
+      assert.deepEqual((await store.deliveries({ state: 'delivering' })).find((d) => d.id === 'claimed')?.replica, replica);
     });
 
     test('lease tally round-trips per replica', async () => {
