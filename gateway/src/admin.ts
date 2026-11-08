@@ -10,7 +10,7 @@ import { can, LOCAL_CALLER, type Action, type Authority } from './authz.ts';
 import type { Answer, Identity } from './identity.ts';
 import type { AdminRegistry } from './registry.ts';
 import {
-  ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, NotFound, QuotaExceeded, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
+  ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, LOGOUT_PATH, NotFound, QuotaExceeded, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
   appName, bundleId, parseManifest, subject, tenantName,
   type Access, type Actor, type AppId, type AuditAction, type AuditRecord, type BundleStore, type Caller, type Guard, type Release, type ReplicaId, type Role, type StoreOps,
   type Subject, type TenantName, type UsageBucket, type UsageCounters,
@@ -32,7 +32,7 @@ export type AdminDeps = {
   readonly ingressPort: number;
   readonly consoleFile?: string | URL;
   /** The console-audience provider and the Authority; absent under `local`, where every request is LOCAL_CALLER (ADR 0022 item 4). */
-  readonly upstream?: { readonly identity: Pick<Identity, 'identify' | 'challenge'>; readonly authority: Pick<Authority, 'callerOf'> };
+  readonly upstream?: { readonly identity: Pick<Identity, 'identify' | 'challenge' | 'serve'>; readonly authority: Pick<Authority, 'callerOf'> };
 };
 
 /** ADMIN_PATHS lacks these while model.ts is frozen. */
@@ -519,6 +519,7 @@ export function createAdmin(deps: AdminDeps): Server {
     const path = url.pathname;
     try {
       if (path === ADMIN_PATHS.healthz && READS.has(request.method ?? '')) return void response.writeHead(200).end();
+      if (path === LOGOUT_PATH && deps.upstream) return await deps.upstream.identity.serve(request, response);
       if (request.method === 'GET' && path === '/') {
         const page = await readFile(consoleFile).catch(() => null);
         if (page) return void ((await callerOf(request, response)) && response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page));
