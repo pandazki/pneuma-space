@@ -174,7 +174,7 @@ export type IdentitySetup =
     readonly options: Omit<UpstreamConfig, 'verifier' | 'audiences'>;
   };
 
-export function parseIdentityEnv(env: NodeJS.ProcessEnv, readFile: (path: string) => string = (path) => readFileSync(path, 'utf8')): IdentitySetup {
+export function parseIdentityEnv(env: NodeJS.ProcessEnv): IdentitySetup {
   const kind = env.PNEUMA_SPACE_IDENTITY ?? 'local';
   if (kind === 'local') return { kind };
   if (kind !== 'upstream') throw new Error(`PNEUMA_SPACE_IDENTITY must be local or upstream, got "${kind}"`);
@@ -193,7 +193,7 @@ export function parseIdentityEnv(env: NodeJS.ProcessEnv, readFile: (path: string
   const consoleAudiences = list('PNEUMA_SPACE_CONSOLE_AUDIENCE');
   return {
     kind,
-    jwt: { issuer: required('PNEUMA_SPACE_IDENTITY_ISSUER'), audiences, keys: url ? { kind: 'jwks', url } : { kind: 'static', text: readFile(file!) } },
+    jwt: { issuer: required('PNEUMA_SPACE_IDENTITY_ISSUER'), audiences, keys: url ? { kind: 'jwks', url } : { kind: 'static', text: readFileSync(file!, 'utf8') } },
     consoleAudiences: consoleAudiences.length > 0 ? consoleAudiences : audiences,
     options: {
       header,
