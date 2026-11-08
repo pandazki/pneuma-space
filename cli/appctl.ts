@@ -12,17 +12,6 @@ import {
 } from '../gateway/src/model.ts';
 import { assemble } from './scaffold.ts';
 
-// ADMIN_PATHS lacks these while model.ts is frozen; the copy in admin.ts is the gateway's.
-const TENANT_PATHS = {
-  me: '/api/me',
-  tenants: '/api/tenants',
-  access: (name: string) => `/api/apps/${name}/access`,
-  quota: (tenant: string) => `/api/tenants/${tenant}/quota`,
-  member: (tenant: string, user: string) => `/api/tenants/${tenant}/members/${user}`,
-  tokens: (tenant: string) => `/api/tenants/${tenant}/tokens`,
-  token: (tenant: string, id: string) => `/api/tenants/${tenant}/tokens/${id}`,
-} as const;
-
 const EXIT = { usage: 1, manifest: 2, api: 3, build: 4 } as const;
 
 class Failure extends Error {
@@ -341,7 +330,7 @@ async function owner(args: string[]): Promise<void> {
 async function token([verb, ...rest]: string[], options: Options): Promise<void> {
   if (verb === 'revoke') {
     if (rest.length !== 1 || !options.tenant) throw usage('token revoke takes <id> --tenant <t>');
-    await api('DELETE', TENANT_PATHS.token(options.tenant, rest[0]));
+    await api('DELETE', ADMIN_PATHS.tenantToken(options.tenant, rest[0]));
     return void console.log(`revoked ${rest[0]}`);
   }
   if (verb !== 'create') throw usage('token takes create or revoke');
@@ -351,7 +340,7 @@ async function token([verb, ...rest]: string[], options: Options): Promise<void>
   } else {
     if (rest.length > 1 || (options.kind === 'service') !== (rest.length === 1)) throw usage('token create takes <name> for --kind service and none for --kind personal');
     const body = { kind: options.kind, ...(rest[0] && { name: rest[0] }), ...(options.label && { label: options.label }) };
-    issued = await api('POST', TENANT_PATHS.tokens(options.tenant), body).catch((error: Error) => {
+    issued = await api('POST', ADMIN_PATHS.tenantTokens(options.tenant), body).catch((error: Error) => {
       if (error instanceof Failure && error.status === 403 && process.env.PNEUMA_SPACE_TOKEN) throw new Failure(EXIT.api, 'a token cannot issue a token; sign a personal token in the console', 403);
       throw error;
     });
@@ -362,7 +351,7 @@ async function token([verb, ...rest]: string[], options: Options): Promise<void>
 
 async function whoami(args: string[]): Promise<void> {
   if (args.length) throw usage('whoami takes no arguments');
-  const me = await api('GET', TENANT_PATHS.me);
+  const me = await api('GET', ADMIN_PATHS.me);
   if (me.local) return void console.log('local\tplatform admin, unauthenticated');
   const roles = Object.entries(me.roles as Record<string, string>).map(([tenant, role]) => `${tenant}:${role}`);
   console.log([me.subject, me.name, ...roles, ...(me.platformAdmin ? ['platform admin'] : [])].join('\t'));
@@ -370,31 +359,31 @@ async function whoami(args: string[]): Promise<void> {
 
 async function tenant([verb, ...rest]: string[], options: Options): Promise<void> {
   if (verb === 'list' && !rest.length) {
-    for (const t of await api('GET', TENANT_PATHS.tenants)) console.log([t.name, t.display].join('\t'));
+    for (const t of await api('GET', ADMIN_PATHS.tenants)) console.log([t.name, t.display].join('\t'));
     return;
   }
   if (verb !== 'create' || rest.length < 2) throw usage('tenant takes list, or create <tenant> <admin-id>...');
   const [name, ...admins] = rest;
-  await api('POST', TENANT_PATHS.tenants, { name, admins, ...(options.display && { display: options.display }) });
+  await api('POST', ADMIN_PATHS.tenants, { name, admins, ...(options.display && { display: options.display }) });
   console.log(`created ${name} with admins ${admins.join(', ')}`);
 }
 
 async function member([verb, tenant, user, role, ...extra]: string[]): Promise<void> {
   if (!tenant || !user || extra.length) throw usage('member takes add|role|remove <tenant> <user-id>');
   if (verb === 'remove' && role === undefined) {
-    await api('DELETE', TENANT_PATHS.member(tenant, user));
+    await api('DELETE', ADMIN_PATHS.member(tenant, user));
     return void console.log(`removed ${user} from ${tenant}`);
   }
   if (!(verb === 'add' || (verb === 'role' && role !== undefined))) throw usage('member takes add <tenant> <user-id> [role], role <tenant> <user-id> <role>, or remove <tenant> <user-id>');
-  await api('PUT', TENANT_PATHS.member(tenant, user), { role: role ?? 'member' });
+  await api('PUT', ADMIN_PATHS.member(tenant, user), { role: role ?? 'member' });
   console.log(`${user} is ${role ?? 'member'} of ${tenant}`);
 }
 
 async function quota([tenant, ...pairs]: string[]): Promise<void> {
   if (!tenant) throw usage('quota takes <tenant> [key=value ...]');
   const result = pairs.length
-    ? await api('PUT', TENANT_PATHS.quota(tenant), fields(pairs, 'quota'))
-    : await api('GET', TENANT_PATHS.quota(tenant));
+    ? await api('PUT', ADMIN_PATHS.quota(tenant), fields(pairs, 'quota'))
+    : await api('GET', ADMIN_PATHS.quota(tenant));
   console.log(JSON.stringify(result, null, 2));
 }
 
@@ -446,7 +435,7 @@ const COMMANDS: Record<string, (args: string[], options: Options) => unknown> = 
   access: async (args) => {
     if (args.length !== 2) throw usage('access takes <name> tenant|org|public');
     const name = appName(args[0]);
-    await api('PUT', TENANT_PATHS.access(name), { access: args[1] });
+    await api('PUT', ADMIN_PATHS.access(name), { access: args[1] });
     console.log(`${name} access ${args[1]}`);
   },
   whoami,

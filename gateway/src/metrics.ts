@@ -8,7 +8,7 @@ import { canConnect } from './runtime.ts';
 import {
   EVENT_SETTLE_MS, QUOTA_RESOURCES, USAGE_COUNTERS,
   type AppId, type AppName, type AppStatus, type AppSummary, type Delivery, type DeliveryState, type EventRecord, type InstanceState, type LeaseKind,
-  type Policy, type Quota, type QuotaResource, type QuotaUsage, type ReplicaId, type RuntimeKind, type Stats, type StoreOps, type TenantName, type UsageBucket, type UsageStep,
+  type Policy, type Quota, type QuotaResource, type QuotaUsage, type ReplicaId, type RuntimeKind, type StoreOps, type TenantName, type Traffic, type UsageBucket, type UsageStep,
 } from './model.ts';
 
 const MINUTE = 60_000;
@@ -43,7 +43,7 @@ export type HostSample = {
 export type MetricsDeps = {
   readonly events: Pick<EventLog, 'onEvent'>;
   /** Ingress counters, read from memory. */
-  readonly stats: () => readonly Stats[];
+  readonly stats: () => readonly Traffic[];
   readonly apps: () => Promise<readonly AppSummary[]>;
   readonly deliveries: {
     counts(): Promise<Readonly<Record<DeliveryState, number>>>;
@@ -356,7 +356,7 @@ export class Metrics {
   }
 
   /** Memory only. Per app: requests and errors over the last 24 hourly buckets, and this replica's last access. */
-  stats(): Stats[] {
+  stats(): Traffic[] {
     this.#absorbStats();
     const from = bucketStart(this.#now(), 3600) - 23 * HOUR;
     const out = new Map<AppId, { requests: number; errors: number; lastAccessAt: number | null }>();

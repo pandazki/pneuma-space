@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { NodeView } from './nodes.ts';
-import { appName, type AppId, type AppSummary, type Instance, type InstanceState, type NodeSample, type ReleaseNumber, type ReplicaId } from './model.ts';
+import { appName, DEFAULT_TENANT, type AppId, type AppSummary, type Instance, type InstanceState, type NodeSample, type ReleaseNumber, type ReplicaId } from './model.ts';
 
 const A = 'a1b2c3d4e5f6' as AppId;
 const B = 'b1b2c3d4e5f6' as AppId;
@@ -12,7 +12,7 @@ const row = (app: AppId, state: InstanceState, node: string | null): Instance =>
 });
 
 const summary = (name: string, instance: InstanceState, node: string | null): AppSummary => ({
-  name: appName(name), address: `/apps/${name}/`, release: 1 as ReleaseNumber, capabilities: [], status: 'registered', instance, since: null,
+  name: appName(name), address: `/apps/${name}/`, tenant: DEFAULT_TENANT, access: 'org', release: 1 as ReleaseNumber, capabilities: [], status: 'registered', instance, since: null,
   leases: { request: 0, channel: 0, trigger: 0 }, sleepsAt: null, runtime: 'container', quarantine: null, dbBackend: null,
   lastAccessAt: null, requests: 0, errors: 0, node,
 });

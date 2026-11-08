@@ -2867,8 +2867,8 @@ async function detail(name) {
         h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(s.instance), s.since != null ? h('span', { class: 'muted' }, t('d.since', { ago: ago(s.since).textContent })) : null, leaseChips(s.leases)),
         h('span', { class: 'muted' }, t('d.owner', { owner: app.owner }))));
     tiles.replaceChildren(
-      tile(t('d.requests'), nf(detailStats.requests), ''),
-      tile(t('d.errors'), nf(detailStats.errors), detailStats.requests ? pct(detailStats.errors / detailStats.requests) : ''),
+      tile(t('d.requests'), nf(row?.requests ?? 0), ''),
+      tile(t('d.errors'), nf(row?.errors ?? 0), row?.requests ? pct(row.errors / row.requests) : ''),
       tile(t('d.lastAccess'), detailStats.lastAccessAt == null ? t('never') : ago(detailStats.lastAccessAt).textContent, detailStats.lastAccessAt == null ? '' : stamp(detailStats.lastAccessAt)),
       tile(t('d.release'), app.current == null ? '-' : `#${app.current}`, releases.length ? stamp(Math.max(...releases.map((r) => r.publishedAt))) : ''));
   };

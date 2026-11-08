@@ -432,11 +432,8 @@ export class SqlOps implements StoreOps {
     return (await this.#s.run("DELETE FROM delivery WHERE state IN ('done', 'cancelled') AND created_at < $1", [before])).changes;
   }
 
-  /** `requests` and `errors` live in `usage` now (ADR 0024 item 3); the zeros stand in until Stats loses them. */
   async stats() {
-    return (await this.#s.all('SELECT app, last_access_at FROM stats')).map((r): Stats => ({
-      app: r.app as AppId, requests: 0, errors: 0, lastAccessAt: numOrNull(r.last_access_at),
-    }));
+    return (await this.#s.all('SELECT app, last_access_at FROM stats')).map((r): Stats => ({ app: r.app as AppId, lastAccessAt: numOrNull(r.last_access_at) }));
   }
 
   /** Each replica writes its own last access; the later one wins. */
