@@ -545,6 +545,15 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .topo-svg [data-state="unpublished"] { opacity: .6; }
 .topo-svg [data-state="unpublished"] .chipr { fill: none; stroke-dasharray: 3 3; }
 .topo-svg .unpub { fill: none; stroke: var(--line-strong); stroke-dasharray: 4 4; }
+.topo-svg [data-state="down"] .chipr { fill: var(--red-tint); stroke: var(--red); }
+.topo-svg [data-state="down"] .sdot { fill: var(--red); }
+.topo-svg [data-state="down"] .chipt { fill: var(--red); }
+.topo-svg [data-state="cordoned"] .chipr { fill: var(--orange-tint); stroke: var(--orange); }
+.topo-svg [data-state="cordoned"] .sdot { fill: var(--orange); }
+.topo-svg [data-state="cordoned"] .chipt { fill: var(--ink); }
+.topo-svg .trk { fill: var(--hover-2); }
+.topo-svg .fil { fill: var(--accent); transition: width .6s cubic-bezier(.16,1,.3,1); }
+.topo-svg .fil.hot { fill: var(--orange); }
 .topo-svg .lanet.fault .grp { fill: var(--red); }
 .topo-svg .chipg.hit .chipr { stroke: var(--accent); stroke-width: 2; }
 .topo-svg .chipg.hit { animation: chiphit 1.6s ease-out; opacity: 1; }
@@ -689,6 +698,13 @@ const I18N = {
     'k.awakeSub': '唤醒中 {waking} · 排空中 {draining} · 停止中 {stopping}',
     'k.wakes': '唤醒（1 小时）',
     'k.host': '主机负载', 'k.cores': '/ {n} 核',
+    'k.cluster': '集群', 'k.nodesReady': '/ {n} 个节点就绪', 'k.requestedNote': '平台 Pod 的请求之和，不含节点上的其他 Pod',
+    'node.cpu': 'CPU 已请求', 'node.mem': '内存已请求', 'node.cores': '{used} / {total} 核',
+    'node.ready': '就绪', 'node.notReady': '未就绪', 'node.schedulable': '可调度', 'node.unschedulable': '不可调度', 'node.host': '单机',
+    'node.cordoned': '已 cordon：新实例不会调度到这里，这里的实例下次唤醒时换到别的节点',
+    'node.gateways': '网关', 'node.runner': 'runner', 'node.apps': '应用', 'node.none': '无', 'node.load': '负载 {load} · {n} 核',
+    'node.workers.one': '{n} 个 worker', 'node.workers.other': '{n} 个 worker', 'node.stuck': '{n} 个卡死', 'node.restarts': '重启 {n} 次',
+    'node.waiting': '等待第一次节点采样',
     'sec.activity': '活动', 'sec.activityDesc': '每分钟计数，当前分钟画成未完成；上方标记是事件。',
     'win.60': '1 小时', 'win.360': '6 小时', 'win.1440': '24 小时',
     'ch.traffic': '流量', 'ch.wakes': '唤醒', 'ch.deliveries': '投递',
@@ -788,6 +804,11 @@ const I18N = {
     'tp.view': '视图',
     'tp.view.lane': '泳道',
     'tp.view.graph': '连线',
+    'tp.view.nodes': '节点',
+    'tp.sec.nodes': '按节点',
+    'tp.sec.nodesDesc': '每个节点一个框：网关副本、runner 和跑在它上面的应用；条是平台 Pod 的请求对 allocatable。',
+    'tp.nodesHint': '每个节点最多画 {n} 个应用，每 15 秒采样一次。点应用打开详情。',
+    'tp.nodes.label': '节点视图：每个节点一个框，框里是它的网关、runner 和应用。',
     'tp.sec.lane': '按运行时的泳道',
     'tp.sec.laneDesc': '每个已注册应用在它的运行时泳道里；泳道到服务的边标出声明该能力的应用数。',
     'tp.sec.graph': '每个应用的连线',
@@ -909,6 +930,13 @@ const I18N = {
     'k.awakeSub': 'waking {waking} · draining {draining} · stopping {stopping}',
     'k.wakes': 'Wakes, 1 h',
     'k.host': 'Host load', 'k.cores': '/ {n} cores',
+    'k.cluster': 'Cluster', 'k.nodesReady': '/ {n} nodes ready', 'k.requestedNote': 'Summed over the platform’s Pods, not every Pod on the nodes',
+    'node.cpu': 'CPU requested', 'node.mem': 'Memory requested', 'node.cores': '{used} / {total} cores',
+    'node.ready': 'Ready', 'node.notReady': 'NotReady', 'node.schedulable': 'schedulable', 'node.unschedulable': 'unschedulable', 'node.host': 'single host',
+    'node.cordoned': 'Cordoned: no new instance is scheduled here; instances here move when they next wake',
+    'node.gateways': 'gateways', 'node.runner': 'runner', 'node.apps': 'apps', 'node.none': 'none', 'node.load': 'load {load} · {n} cores',
+    'node.workers.one': '{n} worker', 'node.workers.other': '{n} workers', 'node.stuck': '{n} stuck', 'node.restarts': '{n} restarts',
+    'node.waiting': 'Waiting for the first node sample',
     'sec.activity': 'Activity', 'sec.activityDesc': 'Per-minute counts, the current minute drawn as unfinished; marks above are events.',
     'win.60': '1 h', 'win.360': '6 h', 'win.1440': '24 h',
     'ch.traffic': 'Traffic', 'ch.wakes': 'Wakes', 'ch.deliveries': 'Deliveries',
@@ -1008,6 +1036,11 @@ const I18N = {
     'tp.view': 'View',
     'tp.view.lane': 'Lanes',
     'tp.view.graph': 'Graph',
+    'tp.view.nodes': 'Nodes',
+    'tp.sec.nodes': 'By node',
+    'tp.sec.nodesDesc': 'One frame per node: the gateway replicas, the runner and the apps running on it; bars are the platform Pods’ requests over allocatable.',
+    'tp.nodesHint': 'Each node draws at most {n} apps; sampled every 15 s. Click an app to open it.',
+    'tp.nodes.label': 'Node view: one frame per node holding its gateways, runner and apps.',
     'tp.sec.lane': 'Lanes by runtime',
     'tp.sec.laneDesc': 'Every registered app sits in the lane of its runtime; an edge to a service counts the apps declaring that capability.',
     'tp.sec.graph': 'Every app’s edges',
@@ -1373,7 +1406,7 @@ const MARKS = {
 
 /** Everything the overview knows, folded from snapshots: the event history by seq and each app's state transitions. */
 function liveModel() {
-  return { startedAt: null, lastSeq: 0, horizon: 0, events: [], transitions: new Map(), wakeFailures: new WeakSet(), metrics: null, apps: [], appsAt: 0, rates: new Map() };
+  return { startedAt: null, lastSeq: 0, horizon: 0, events: [], transitions: new Map(), wakeFailures: new WeakSet(), metrics: null, nodes: null, apps: [], appsAt: 0, rates: new Map() };
 }
 
 function absorbMetrics(model, m) {
@@ -1640,21 +1673,41 @@ function gateCard() {
   };
 }
 
+const NODES_MS = 15_000;
+const cores = (millis) => new Intl.NumberFormat(locale(), { maximumFractionDigits: 2 }).format(millis / 1000);
+
+/** The host card; under Kubernetes the cluster card: ready nodes, and the platform's requests over allocatable (ADR 0024 item 8). */
 function hostCard() {
+  const label = h('span', { class: 'l' });
   const value = h('span', { class: 'kv' });
   const meter = h('div', { class: 'meter' });
-  const el = h('div', { class: 'card', 'data-section': 'host' }, h('div', { class: 'kh' }, h('span', { class: 'l' }, t('k.host'))), value, meter);
+  const note = h('div', { class: 'ks' });
+  const el = h('div', { class: 'card', 'data-section': 'host' }, h('div', { class: 'kh' }, label), value, meter, note);
+  const row = (name, text, ratio) => [
+    h('div', {}, h('span', {}, name), h('span', { class: 'num' }, text)),
+    h('div', { class: 'bar', style: 'margin-top:0' }, h('i', { class: ratio > 0.85 ? 'hot' : null, style: `width:${Math.min(100, (ratio || 0) * 100).toFixed(1)}%` })),
+  ];
   return {
     el,
-    render(m) {
+    render(m, nodes) {
+      if (nodes?.source === 'k8s') {
+        const sum = (side, key) => nodes.nodes.reduce((n, x) => n + x[side][key], 0);
+        el.dataset.section = 'cluster';
+        fill(label, t('k.cluster'));
+        fill(value, nf(nodes.nodes.filter((n) => n.ready).length), h('small', {}, t('k.nodesReady', { n: nf(nodes.nodes.length) })));
+        fill(meter,
+          ...row(t('node.cpu'), t('node.cores', { used: cores(sum('requested', 'cpuMillis')), total: cores(sum('allocatable', 'cpuMillis')) }), sum('requested', 'cpuMillis') / sum('allocatable', 'cpuMillis')),
+          ...row(t('node.mem'), `${bytes(sum('requested', 'memoryBytes'))} / ${bytes(sum('allocatable', 'memoryBytes'))}`, sum('requested', 'memoryBytes') / sum('allocatable', 'memoryBytes')));
+        fill(note, t('k.requestedNote'));
+        return;
+      }
+      el.dataset.section = 'host';
+      fill(label, t('k.host'));
+      fill(note);
       const host = m.host;
       if (!host) return void fill(value, '-');
       const used = host.memory.totalBytes - host.memory.freeBytes;
       fill(value, new Intl.NumberFormat(locale(), { maximumFractionDigits: 2 }).format(host.load[0]), h('small', {}, t('k.cores', { n: host.cpus })));
-      const row = (label, text, ratio) => [
-        h('div', {}, h('span', {}, label), h('span', { class: 'num' }, text)),
-        h('div', { class: 'bar', style: 'margin-top:0' }, h('i', { class: ratio > 0.85 ? 'hot' : null, style: `width:${Math.min(100, ratio * 100).toFixed(1)}%` })),
-      ];
       fill(meter,
         ...row(t('host.mem'), `${bytes(used)} / ${bytes(host.memory.totalBytes)}`, used / host.memory.totalBytes),
         ...(host.data ? row(t('host.disk'), t('host.diskFree', { free: bytes(host.data.freeBytes) }), 1 - host.data.freeBytes / host.data.totalBytes) : []));
@@ -2284,7 +2337,7 @@ async function overview() {
     services.render(model.metrics);
     seats.render(model, animate);
     gate.render(model, animate);
-    host.render(model.metrics);
+    host.render(model.metrics, model.nodes);
     const awake = [...model.transitions.keys()].some((n) => ACTIVE.includes(stateOf(model, n)));
     if (moved || awake || Date.now() - paintedAt > 60_000) {
       lane.render(model, animate);
@@ -2297,8 +2350,12 @@ async function overview() {
     const usage = await api('GET', '/api/usage?app=*');
     heat.set(weekRows(usage.buckets), h('span', { class: 'muted' }, t('heat.span', { from: new Intl.DateTimeFormat(locale(), { dateStyle: 'medium' }).format(usage.from) })));
   });
+  const pollNodes = header.guarded(async () => {
+    model.nodes = await api('GET', '/api/nodes');
+    if (model.metrics) host.render(model.metrics, model.nodes);
+  });
   const refresh = header.guarded(pollMetrics);
-  return { loops: [[METRICS_MS, refresh], [APPS_MS, header.guarded(pollApps)], [HEAT_MS, pollHeat]], first: () => Promise.all([refresh(), pollHeat()]) };
+  return { loops: [[METRICS_MS, refresh], [APPS_MS, header.guarded(pollApps)], [HEAT_MS, pollHeat], [NODES_MS, pollNodes]], first: () => Promise.all([pollNodes(), refresh(), pollHeat()]) };
 }
 
 // Realtime (ADR 0016): the request ring and the event ring, read by cursor, under one filter.
@@ -3236,7 +3293,7 @@ function servicesOf(a) {
 }
 
 function topoModel() {
-  return { apps: [], health: null, services: {}, cursor: null, startedAt: null, last: null };
+  return { apps: [], health: null, services: {}, nodes: null, cursor: null, startedAt: null, last: null };
 }
 
 /** up, down or off from the last probe sample; unknown before the gateway's first sample, which is no fault. */
@@ -3292,19 +3349,26 @@ function stripeDefs() {
     svg('rect', { width: 8, height: 8, class: 'sbg' }), svg('rect', { width: 1, height: 8, class: 'sln' })));
 }
 
+/** The small text at a chip's right: no release yet, or, with `withNode` under Kubernetes, the node the app runs on. */
+function chipNote(model, a, withNode) {
+  if (laneOf(a) === null) return { text: t('tp.noRelease'), mono: false };
+  return withNode && model.nodes?.source === 'k8s' && a.node ? { text: a.node, mono: true } : null;
+}
+const noteWidth = (note) => (note ? textWidth(note.text, 11.5, note.mono) + 8 : 0);
+
 /** An app as a chip: state dot and name; quarantine and an unreachable service colour it. */
-function appChip(model, a, x, y, w) {
+function appChip(model, a, x, y, w, withNode = false) {
   const blocked = blockedBy(model, a);
   const unpublished = laneOf(a) === null;
   const state = a.quarantine ? 'quarantined' : unpublished ? 'unpublished' : a.instance;
-  const note = unpublished ? t('tp.noRelease') : '';
-  const noteW = note ? textWidth(note, 11.5) + 8 : 0;
+  const note = chipNote(model, a, withNode);
+  const noteW = noteWidth(note);
   const g = svg('g', { class: `chipg${blocked.length ? ' fault' : ''}`, 'data-state': state, 'data-app': a.name },
     svg('rect', { x, y, width: w, height: 22, rx: 6, class: 'chipr' }),
     svg('circle', { cx: x + 10, cy: y + 11, r: 3, class: 'sdot' }),
     tx(x + 19, y + 15, fit(a.name, 11.5, true, w - 26 - noteW), 'm chipt'),
-    note ? tx(x + w - 8, y + 15, note, 't3 small', { 'text-anchor': 'end' }) : null);
-  const why = [unpublished ? note : t(`st.${a.instance}`), a.quarantine && `${t('att.quarantine')}: ${a.quarantine.reason}`, ...blocked.map((s) => t('tp.needs', { name: t(`svc.${s}`), status: t(`st.${svcStatus(model, s)}`) }))];
+    note ? tx(x + w - 8, y + 15, fit(note.text, 11.5, note.mono, Math.max(24, w - 60)), `${note.mono ? 'm ' : ''}t3 small`, { 'text-anchor': 'end' }) : null);
+  const why = [unpublished ? note.text : t(`st.${a.instance}`), a.node, a.quarantine && `${t('att.quarantine')}: ${a.quarantine.reason}`, ...blocked.map((s) => t('tp.needs', { name: t(`svc.${s}`), status: t(`st.${svcStatus(model, s)}`) }))];
   return titled(g, `${a.name} · ${why.filter(Boolean).join(' · ')}`);
 }
 
@@ -3325,16 +3389,20 @@ function pillButton(x, y, label, onPick, key, cls = '') {
   return { el: act(g, label, onPick, key), w };
 }
 
-function flowChips(apps, x0, rowW, y0) {
+/** Lays chips out left to right, wrapping at `rowW`; each item brings its own width. */
+function wrapChips(items, x0, rowW, y0) {
   let x = x0, y = y0;
-  return apps.map((a) => {
-    const note = laneOf(a) === null ? textWidth(t('tp.noRelease'), 11.5) + 8 : 0;
-    const w = Math.min(rowW, Math.max(84, textWidth(a.name, 11.5, true) + 30 + note));
+  return items.map((item) => {
+    const w = Math.min(rowW, item.w);
     if (x + w > x0 + rowW) { x = x0; y += 30; }
-    const at = { a, x, y, w };
+    const at = { ...item, x, y, w };
     x += w + 6;
     return at;
   });
+}
+
+function flowChips(model, apps, x0, rowW, y0, withNode = false) {
+  return wrapChips(apps.map((a) => ({ a, w: Math.max(84, textWidth(a.name, 11.5, true) + 30 + noteWidth(chipNote(model, a, withNode))) })), x0, rowW, y0);
 }
 
 function serviceNode(model, name, x, y, w, hgt, label = t(`svc.${name}`)) {
@@ -3374,7 +3442,7 @@ function laneScene(model, width, shown, on) {
   const flows = svg('g', { class: 'flows' });
   const chips = new Map();
   const chip = (p) => {
-    const el = act(appChip(model, p.a, p.x, p.y, p.w), p.a.name, () => on.open(p.a.name), `app:${p.a.name}`);
+    const el = act(appChip(model, p.a, p.x, p.y, p.w, true), p.a.name, () => on.open(p.a.name), `app:${p.a.name}`);
     chips.set(p.a.name, el);
     return el;
   };
@@ -3392,7 +3460,7 @@ function laneScene(model, width, shown, on) {
     const down = laneDown(model, lane);
     const g = svg('g', { class: `lane${down ? ' fault' : ''}`, 'data-id': `lane:${lane}` });
     const inner = lx + 14, innerW = lw - 28;
-    const placed = flowChips(apps, inner, innerW, y + 44);
+    const placed = flowChips(model, apps, inner, innerW, y + 44, true);
     const more = hidden ? (() => {
       const label = t('tp.more', { n: nf(hidden) });
       const w = textWidth(label, 11.5, true) + 20;
@@ -3454,7 +3522,7 @@ function laneScene(model, width, shown, on) {
   }
   const unpublished = model.apps.filter((a) => laneOf(a) === null);
   if (unpublished.length) {
-    const placed = flowChips(unpublished, lx + 14, lw - 28, y + 34);
+    const placed = flowChips(model, unpublished, lx + 14, lw - 28, y + 34, true);
     const uh = placed.at(-1).y + 22 + 12 - y;
     nodes.append(svg('g', { 'data-id': 'unpublished' }, svg('rect', { x: lx, y, width: lw, height: uh, rx: 14, class: 'unpub' }),
       tx(lx + 14, y + 22, t('tp.unpublished'), 'strong small t2'),
@@ -3715,6 +3783,134 @@ function graphScene(model, width, shown, hidden, on) {
   };
 }
 
+// Node view (ADR 0024 item 8): one frame per node holding its gateways, its runner and the apps running on it.
+
+/** The apps a node frame holds: every running app on the single host, else the apps whose instance runs on that node. */
+const appsOn = (answer, node, apps) => (answer.source === 'host' ? apps.filter((a) => ACTIVE_STATES.has(a.instance)) : apps.filter((a) => a.node === node.name));
+
+/** A non-app chip in the app chip's shape: state dot, mono label, optional note. */
+function plainChip(x, y, w, label, state, note = '', title = label) {
+  const noteW = note ? textWidth(note, 11.5) + 8 : 0;
+  return titled(svg('g', { class: 'chipg', 'data-state': state },
+    svg('rect', { x, y, width: w, height: 22, rx: 6, class: 'chipr' }),
+    svg('circle', { cx: x + 10, cy: y + 11, r: 3, class: 'sdot' }),
+    tx(x + 19, y + 15, fit(label, 11.5, true, w - 26 - noteW), 'm chipt'),
+    note ? tx(x + w - 8, y + 15, note, 't3 small', { 'text-anchor': 'end' }) : null), title);
+}
+const plainWidth = (label, note = '') => Math.max(64, textWidth(label, 11.5, true) + 30 + (note ? textWidth(note, 11.5) + 8 : 0));
+
+function nodeFrame(model, answer, node, w, shown, on, chips) {
+  const g = svg('g', { 'data-id': `node:${node.name}` });
+  const inner = 14, innerW = w - 28;
+  const host = answer.source === 'host';
+  const pills = [
+    node.ready ? ['awake', t('node.ready')] : ['down', t('node.notReady')],
+    host ? ['plain', t('node.host')] : node.schedulable ? ['plain', t('node.schedulable')] : ['cordoned', t('node.unschedulable')],
+  ];
+  let px = w - inner;
+  const pillEls = pills.reverse().map(([state, label]) => {
+    const pw = textWidth(label, 11.5) + 26;
+    px -= pw;
+    const el = svg('g', { class: 'chipg', 'data-state': state },
+      svg('rect', { x: px, y: 10, width: pw, height: 22, rx: 6, class: 'chipr' }),
+      svg('circle', { cx: px + 10, cy: 21, r: 3, class: 'sdot' }),
+      tx(px + 18, 25, label, 'chipt'));
+    px -= 6;
+    return state === 'cordoned' ? titled(el, t('node.cordoned')) : el;
+  });
+  const sub = host && node.used ? t('node.load', { load: new Intl.NumberFormat(locale(), { maximumFractionDigits: 2 }).format(node.used.load[0]), n: node.used.cpus })
+    : ['topology.kubernetes.io/zone', 'node.kubernetes.io/instance-type'].map((k) => node.labels[k]).filter(Boolean).join(' · ');
+  const taints = node.taints.filter((x) => x.key !== 'node.kubernetes.io/unschedulable').map((x) => `${x.key}${x.value ? `=${x.value}` : ''}:${x.effect}`);
+  g.append(titled(tx(inner, 26, fit(node.name, 13, true, px - inner - 4, 600), 'm lanen'), node.name), ...pillEls);
+  let y = 42;
+  if (sub || taints.length) {
+    const line = [sub, ...taints].filter(Boolean).join(' · ');
+    g.append(titled(tx(inner, y + 8, fit(line, 11.5, true, innerW), 'm t3 small'), line));
+    y += 20;
+  }
+  const bar = (label, text, used, total) => {
+    const ratio = total > 0 ? Math.min(1, used / total) : 0;
+    g.append(tx(inner, y + 12, label, 't2 small'), tx(inner + innerW, y + 12, text, 'm t3 small', { 'text-anchor': 'end' }),
+      svg('rect', { x: inner, y: y + 19, width: innerW, height: 4, rx: 2, class: 'trk' }),
+      svg('rect', { x: inner, y: y + 19, width: Math.max(ratio > 0 ? 2 : 0, ratio * innerW), height: 4, rx: 2, class: `fil${ratio > 0.85 ? ' hot' : ''}` }));
+    y += 32;
+  };
+  bar(t('node.cpu'), t('node.cores', { used: cores(node.requested.cpuMillis), total: cores(node.allocatable.cpuMillis) }), node.requested.cpuMillis, node.allocatable.cpuMillis);
+  bar(t('node.mem'), `${bytes(node.requested.memoryBytes)} / ${bytes(node.allocatable.memoryBytes)}`, node.requested.memoryBytes, node.allocatable.memoryBytes);
+  const group = (label, items, empty) => {
+    y += 6;
+    g.append(tx(inner, y + 10, label, 't3 small'));
+    y += 18;
+    if (!items.length) {
+      g.append(tx(inner, y + 15, empty, 't3 small'));
+      y += 22;
+      return;
+    }
+    const placed = wrapChips(items, inner, innerW, y);
+    for (const p of placed) g.append(p.draw(p));
+    y = placed.at(-1).y + 22;
+  };
+  group(t('node.gateways'), node.gateways.map((gw) => ({ w: plainWidth(gw.pod), draw: (p) => plainChip(p.x, p.y, p.w, gw.pod, gw.ready ? 'awake' : 'down', '', `${gw.pod} · ${t(gw.ready ? 'node.ready' : 'node.notReady')}`) })), t('node.none'));
+  const r = node.runner;
+  const runnerNote = r && r.workers != null ? plural('node.workers', r.workers) : '';
+  const runnerTitle = r && [r.pod, t(r.ready ? 'node.ready' : 'node.notReady'), runnerNote, r.stuck ? t('node.stuck', { n: r.stuck }) : '', r.restarts ? t('node.restarts', { n: r.restarts }) : ''].filter(Boolean).join(' · ');
+  group(t('node.runner'), r ? [{ w: plainWidth(r.pod, runnerNote), draw: (p) => plainChip(p.x, p.y, p.w, r.pod, !r.ready ? 'down' : r.stuck ? 'cordoned' : 'awake', runnerNote, runnerTitle) }] : [], t('node.none'));
+  const all = appsOn(answer, node, model.apps);
+  const drawn = laneShown(appsOn(answer, node, shown));
+  const hidden = all.length - drawn.length;
+  const items = drawn.map((a) => ({ a, w: Math.max(84, textWidth(a.name, 11.5, true) + 30), draw: (p) => {
+    const el = act(appChip(model, a, p.x, p.y, p.w), a.name, () => on.open(a.name), `app:${a.name}`);
+    chips.set(a.name, el);
+    return el;
+  } }));
+  if (hidden) {
+    const label = t('tp.more', { n: nf(hidden) });
+    const title = t('tp.moreTitle', { n: nf(hidden), cap: nf(LANE_CAP) });
+    items.push({ w: textWidth(label, 11.5, true) + 20, draw: (p) => act(titled(svg('g', { class: 'chipg', 'data-state': 'more' },
+      svg('rect', { x: p.x, y: p.y, width: p.w, height: 22, rx: 6, class: 'chipr' }),
+      tx(p.x + p.w / 2, p.y + 15, label, 'm chipt', { 'text-anchor': 'middle' })), title), title, () => { location.hash = '#/apps'; }, `more:${node.name}`) });
+  }
+  group(`${t('node.apps')} · ${nf(all.length)}`, items, t('tp.noApps'));
+  const fh = y + 14;
+  g.prepend(svg('rect', { x: 0, y: 0, width: w, height: fh, rx: 14, class: 'box' }), ...(node.ready ? [] : [svg('rect', { x: 0, y: 0, width: w, height: fh, rx: 14, class: 'downwash' })]));
+  return { g, h: fh };
+}
+
+function nodeScene(model, width, shown, on) {
+  const W = Math.max(300, width);
+  const el = svg('svg', { class: 'topo-svg', width: W, role: 'group', 'aria-label': t('tp.nodes.label') });
+  const chips = new Map();
+  const answer = model.nodes;
+  if (!answer?.nodes.length) {
+    el.append(tx(W / 2, 40, t('node.waiting'), 't3 small', { 'text-anchor': 'middle' }));
+    el.setAttribute('height', 72);
+    el.setAttribute('viewBox', `0 0 ${W} 72`);
+    return { el, flow() {} };
+  }
+  const gap = 16;
+  const cols = Math.max(1, Math.min(answer.nodes.length, Math.floor((W + gap) / (340 + gap))));
+  const fw = (W - gap * (cols - 1)) / cols;
+  let y = 0;
+  for (let i = 0; i < answer.nodes.length; i += cols) {
+    const row = answer.nodes.slice(i, i + cols).map((node) => nodeFrame(model, answer, node, fw, shown, on, chips));
+    row.forEach(({ g }, j) => {
+      g.setAttribute('transform', `translate(${j * (fw + gap)},${y})`);
+      el.append(g);
+    });
+    y += Math.max(...row.map((f) => f.h)) + gap;
+  }
+  const H = y - gap;
+  el.setAttribute('height', H);
+  el.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  return {
+    el,
+    flow(name) {
+      const chip = chips.get(name);
+      if (chip) glow(chip, 'hit');
+    },
+  };
+}
+
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** flash() for SVG, which has no offsetWidth to restart an animation with. */
@@ -3780,7 +3976,8 @@ function faultItems(model, faults) {
     h('span', { class: 'mono fix' }, fixFor(model, s))));
 }
 
-let topoView = store.get('pneuma-space-topology') === 'graph' ? 'graph' : 'lane';
+const TOPO_VIEWS = ['lane', 'graph', 'nodes'];
+let topoView = TOPO_VIEWS.includes(store.get('pneuma-space-topology')) ? store.get('pneuma-space-topology') : 'lane';
 
 function topology() {
   const model = topoModel();
@@ -3805,10 +4002,9 @@ function topology() {
   const viewRow = h('div', { class: 'toolbar topo-view' });
   const secHead = h('div');
   const renderChrome = () => {
-    const graph = topoView === 'graph';
-    fill(secHead, sectionHead(1, graph ? 'tp.sec.graph' : 'tp.sec.lane', graph ? 'tp.sec.graphDesc' : 'tp.sec.laneDesc'));
-    fill(tools, [filterInput, h('span', { class: 'muted' }, graph ? t('tp.graphHint', { n: GRAPH_CAP }) : t('tp.laneHint', { n: LANE_CAP }))]);
-    fill(viewRow, segmented([['lane', t('tp.view.lane')], ['graph', t('tp.view.graph')]], topoView, (v) => {
+    fill(secHead, sectionHead(1, `tp.sec.${topoView}`, `tp.sec.${topoView}Desc`));
+    fill(tools, [filterInput, h('span', { class: 'muted' }, t(`tp.${topoView}Hint`, { n: topoView === 'graph' ? GRAPH_CAP : LANE_CAP }))]);
+    fill(viewRow, segmented(TOPO_VIEWS.map((v) => [v, t(`tp.view.${v}`)]), topoView, (v) => {
       topoView = v;
       store.set('pneuma-space-topology', v);
       selection = null;
@@ -3894,13 +4090,14 @@ function topology() {
       shown = [...matching].sort((a, b) => (b.lastAccessAt ?? 0) - (a.lastAccessAt ?? 0) || a.name.localeCompare(b.name)).slice(0, GRAPH_CAP).sort((a, b) => a.name.localeCompare(b.name));
       for (const a of registered) if (!shown.includes(a)) hidden[groupOf(a)] = (hidden[groupOf(a)] ?? 0) + 1;
     }
-    const signature = JSON.stringify([topoView, width, filter, hidden, model.health, SERVICES.map((s) => svcStatus(model, s)),
-      shown.map((a) => [a.name, a.release, a.runtime, a.instance, a.quarantine, a.capabilities, a.dbBackend])]);
+    const nodesSig = model.nodes && { ...model.nodes, sampledAt: null };
+    const signature = JSON.stringify([topoView, width, filter, hidden, model.health, SERVICES.map((s) => svcStatus(model, s)), topoView === 'nodes' ? nodesSig : model.nodes?.source,
+      shown.map((a) => [a.name, a.release, a.runtime, a.instance, a.quarantine, a.capabilities, a.dbBackend, a.node])]);
     if (signature !== painted) {
       painted = signature;
       const focused = sceneBox.contains(document.activeElement) ? document.activeElement.dataset.key : null;
       const old = scene?.el;
-      scene = topoView === 'graph' ? graphScene(local, width, shown, hidden, on) : laneScene(local, width, shown, on);
+      scene = topoView === 'graph' ? graphScene(local, width, shown, hidden, on) : topoView === 'nodes' ? nodeScene(local, width, shown, on) : laneScene(local, width, shown, on);
       sceneBox.prepend(scene.el);
       if (old) retire(old);
       if (focused) {
@@ -3932,6 +4129,9 @@ function topology() {
     model.startedAt = m.gateway.startedAt;
     model.services = m.services;
   };
+  const loadNodes = async () => {
+    model.nodes = await api('GET', '/api/nodes');
+  };
   const pollRequests = header.guarded(async () => {
     if (!scene) return;
     const seeding = model.cursor === null;
@@ -3950,12 +4150,12 @@ function topology() {
     }
   });
   const refresh = header.guarded(async () => {
-    await Promise.all([loadApps(), loadMetrics()]);
+    await Promise.all([loadApps(), loadMetrics(), loadNodes()]);
     paint();
     await pollRequests();
   });
   return {
-    loops: [[APPS_MS, header.guarded(async () => { await loadApps(); paint(); })], [METRICS_MS, header.guarded(async () => { await loadMetrics(); paint(); })], [REQUESTS_MS, pollRequests]],
+    loops: [[APPS_MS, header.guarded(async () => { await loadApps(); paint(); })], [METRICS_MS, header.guarded(async () => { await loadMetrics(); paint(); })], [NODES_MS, header.guarded(async () => { await loadNodes(); paint(); })], [REQUESTS_MS, pollRequests]],
     first: refresh,
   };
 }
