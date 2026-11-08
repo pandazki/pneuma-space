@@ -10,7 +10,6 @@ const root = join(here, '..', '..');
 
 const NOT_ON_THIS_PLANE = {
   PNEUMA_SPACE_NETWORK: 'Docker network for app containers',
-  PNEUMA_SPACE_COMPOSE_PROJECT: 'compose project label',
   PNEUMA_SPACE_HTTP_PORT: 'host port compose publishes; subdomain addresses come from PNEUMA_SPACE_APPS_ORIGIN',
   PNEUMA_SPACE_VOLUME_SIZE: 'single-host nominal volume size (ADR 0023)',
   PNEUMA_SPACE_TOKEN: "appctl's platform token, not the gateway's",
