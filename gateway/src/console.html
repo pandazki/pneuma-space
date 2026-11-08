@@ -2646,7 +2646,8 @@ function realtime() {
     renderLane(true);
   };
   const polls = [pollMetrics, pollRequests, pollApps].map((fn) => header.guarded(fn));
-  const first = () => Promise.all(polls.map((fn) => fn()));
+  // The metrics poll loads the listing, whose addresses the first request rows need.
+  const first = async () => { await polls[0](); await Promise.all([polls[1](), polls[2]()]); };
   return { loops: [[METRICS_MS, polls[0]], [REQUESTS_MS, polls[1]], [APPS_MS, polls[2]]], first };
 }
 
@@ -3149,7 +3150,7 @@ async function tenantsPage() {
       ] })), 'empty.tenants'));
   };
   const field = (key, control, hintKey) => h('label', { class: 'field' }, h('span', {}, t(key)), control, hintKey ? h('small', {}, t(hintKey)) : null);
-  const name = h('input', { required: true, pattern: '[a-z][a-z0-9\\-]{0,39}', placeholder: 'research', autocomplete: 'off', spellcheck: 'false' });
+  const name = h('input', { required: true, pattern: '[a-z][a-z0-9\\-]{0,39}', placeholder: 'design', autocomplete: 'off', spellcheck: 'false' });
   const display = h('input', { autocomplete: 'off' });
   const admins = h('input', { placeholder: 'ana, bo', autocomplete: 'off', spellcheck: 'false' });
   const form = h('form', { class: 'card form', novalidate: true, onsubmit: async (event) => {
