@@ -996,7 +996,6 @@ export interface CapabilityProvider {
 
 /** Hides how a request's caller is identified (local stub in M1, OIDC in M2). */
 export interface IdentityProvider {
-  authenticate(request: IncomingMessage): Promise<Principal | Challenge>;
   /** Serves the gateway-root pages under /_pneuma-space/ (login, logout). */
   serve(request: IncomingMessage, response: ServerResponse): Promise<void>;
 }

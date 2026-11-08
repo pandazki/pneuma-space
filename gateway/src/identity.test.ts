@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Authority } from './authz.ts';
 import { events, type LifecycleEvent } from './events.ts';
-import { LocalIdentity, UpstreamIdentity, issueToken, loadOrCreateSecret, parseIdentityEnv, type UpstreamConfig } from './identity.ts';
+import { LocalIdentity, UpstreamIdentity, issueToken, loadOrCreateSecret, parseIdentityEnv, type Answer, type Identity, type UpstreamConfig } from './identity.ts';
 import { JwtVerifier } from './jwt.ts';
 import { DEFAULT_QUOTA, DEFAULT_TENANT, type Subject, type TenantName, type Token } from './model.ts';
 import { SqliteStore } from './store.ts';
@@ -26,6 +26,12 @@ const base = () => `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
 function request(headers: IncomingHttpHeaders, method = 'GET', url = '/apps/survey/'): IncomingMessage {
   return { method, url, headers } as IncomingMessage;
+}
+
+/** The Ingress and admin path: one read, then the caller or the answer a client would get. */
+async function authenticate(identity: Identity, request: IncomingMessage): Promise<{ subject: string; name: string } | Answer> {
+  const auth = await identity.identify(request);
+  return typeof auth === 'string' ? identity.challenge(request, auth) : { subject: auth.subject, name: auth.name };
 }
 
 function cookie(payload: object, key: Buffer = secret): string {
@@ -49,25 +55,25 @@ test('a cookie the platform did not sign, a tampered one and an expired one are 
     tampered,
     cookie({ sub: 'user:ana', name: 'ana', iat: Date.now() - 31 * 24 * 3600 * 1000 }),
   ]) {
-    assert.deepEqual(await identity.authenticate(request({ cookie: value })), { status: 401 });
+    assert.deepEqual(await authenticate(identity, request({ cookie: value })), { status: 401 });
   }
 });
 
 test('a bearer token the platform never issued is challenged', async () => {
-  assert.deepEqual(await identity.authenticate(request({ authorization: `Bearer ${issueToken('service:ci' as Subject).token}` })), { status: 401 });
+  assert.deepEqual(await authenticate(identity, request({ authorization: `Bearer ${issueToken('service:ci' as Subject).token}` })), { status: 401 });
 });
 
 test('an issued token authenticates as service:<name>', async () => {
-  assert.deepEqual(await identity.authenticate(request({ authorization: `Bearer ${issued.token}` })), { subject: 'service:ci', name: 'ci' });
+  assert.deepEqual(await authenticate(identity, request({ authorization: `Bearer ${issued.token}` })), { subject: 'service:ci', name: 'ci' });
 });
 
 test('a browser is sent to the login page with its path as next; other clients get 401', async () => {
   assert.deepEqual(
-    await identity.authenticate(request({ accept: 'text/html,application/xhtml+xml' }, 'GET', '/apps/survey/a?b=1')),
+    await authenticate(identity, request({ accept: 'text/html,application/xhtml+xml' }, 'GET', '/apps/survey/a?b=1')),
     { status: 303, location: '/_pneuma-space/login?next=%2Fapps%2Fsurvey%2Fa%3Fb%3D1' },
   );
-  assert.deepEqual(await identity.authenticate(request({ accept: 'text/html' }, 'POST')), { status: 401 });
-  assert.deepEqual(await identity.authenticate(request({ accept: 'application/json' })), { status: 401 });
+  assert.deepEqual(await authenticate(identity, request({ accept: 'text/html' }, 'POST')), { status: 401 });
+  assert.deepEqual(await authenticate(identity, request({ accept: 'application/json' })), { status: 401 });
 });
 
 test('login with an invalid name is 400 and sets no cookie', async () => {
@@ -81,7 +87,7 @@ test('login sets a cookie that authenticates as user:<name> and returns to next'
   assert.equal(response.status, 303);
   assert.equal(response.headers.get('location'), '/apps/survey/?q=1');
   const session = response.headers.get('set-cookie')!.split(';')[0];
-  assert.deepEqual(await identity.authenticate(request({ cookie: `theme=dark; ${session}` })), { subject: 'user:ana', name: 'ana' });
+  assert.deepEqual(await authenticate(identity, request({ cookie: `theme=dark; ${session}` })), { subject: 'user:ana', name: 'ana' });
 });
 
 test('login never redirects outside /apps/', async () => {
@@ -163,19 +169,19 @@ test('upstream: a non-JWT Authorization value is a platform token', async () => 
 
 test('upstream: the user id comes from sub by default and from the configured claim', async () => {
   const value = jwt({ sub: 'x-123', email: 'ana@example.com' });
-  assert.equal((await upstream().authenticate(request({ authorization: value })) as { subject: string }).subject, 'user:x-123');
-  assert.equal((await upstream({ userClaim: 'email' }).authenticate(request({ authorization: value })) as { subject: string }).subject, 'user:ana@example.com');
+  assert.equal((await authenticate(upstream(), request({ authorization: value })) as { subject: string }).subject, 'user:x-123');
+  assert.equal((await authenticate(upstream({ userClaim: 'email' }), request({ authorization: value })) as { subject: string }).subject, 'user:ana@example.com');
 });
 
 test('upstream: a non-ASCII display name reaches the Principal unchanged', async () => {
-  assert.equal((await upstream().authenticate(request({ authorization: jwt({ name: '李雷' }) })) as { name: string }).name, '李雷');
+  assert.equal((await authenticate(upstream(), request({ authorization: jwt({ name: '李雷' }) })) as { name: string }).name, '李雷');
 });
 
 test('upstream: a user claim outside the subject grammar is 401 and logs identity-rejected with the claim name only', async () => {
   const seen: LifecycleEvent[] = [];
   events.onEvent((event) => event.ev === 'identity-rejected' && seen.push(event));
   const browser = request({ authorization: jwt({ sub: 'ana smith' }), accept: 'text/html' });
-  assert.deepEqual(await upstream().authenticate(browser), { status: 401 });
+  assert.deepEqual(await authenticate(upstream(), browser), { status: 401 });
   assert.equal(seen.length, 1);
   assert.equal(seen[0]!.claim, 'sub');
   assert.ok(!JSON.stringify(seen[0]).includes('ana smith'));
@@ -183,11 +189,11 @@ test('upstream: a user claim outside the subject grammar is 401 and logs identit
 
 test('upstream: a browser without a JWT is sent to the login URL with its encoded absolute address', async () => {
   const browser = request({ accept: 'text/html', host: 'survey.apps.example', 'x-forwarded-proto': 'https' }, 'GET', '/a?b=1');
-  assert.deepEqual(await upstream().authenticate(browser), { status: 303, location: 'https://sso.example/start?rd=https%3A%2F%2Fsurvey.apps.example%2Fa%3Fb%3D1' });
+  assert.deepEqual(await authenticate(upstream(), browser), { status: 303, location: 'https://sso.example/start?rd=https%3A%2F%2Fsurvey.apps.example%2Fa%3Fb%3D1' });
 });
 
 test('upstream: an API client without a JWT gets 401', async () => {
-  assert.deepEqual(await upstream().authenticate(request({ accept: 'application/json' })), { status: 401 });
+  assert.deepEqual(await authenticate(upstream(), request({ accept: 'application/json' })), { status: 401 });
 });
 
 test('upstream: with no usable key the answer is 503 and never a redirect', async () => {
@@ -214,7 +220,7 @@ test('upstream: a personal token stops working once its issuer leaves the tenant
   await store.putMembership({ tenant: DESIGN, user: 'cleo', role: 'member' });
   assert.equal(typeof await upstream().identify(request({ authorization: `Bearer ${secret}` })), 'object');
   await store.deleteMembership(DESIGN, 'cleo');
-  assert.deepEqual(await upstream().authenticate(request({ authorization: `Bearer ${secret}` })), { status: 401 });
+  assert.deepEqual(await authenticate(upstream(), request({ authorization: `Bearer ${secret}` })), { status: 401 });
 });
 
 test('upstream: a revoked token is 401', async () => {
@@ -222,7 +228,7 @@ test('upstream: a revoked token is 401', async () => {
   await store.putMembership({ tenant: DESIGN, user: 'dan', role: 'member' });
   assert.equal(typeof await upstream().identify(request({ authorization: `Bearer ${secret}` })), 'object');
   await store.revokeToken(row.id, 1);
-  assert.deepEqual(await upstream().authenticate(request({ authorization: `Bearer ${secret}` })), { status: 401 });
+  assert.deepEqual(await authenticate(upstream(), request({ authorization: `Bearer ${secret}` })), { status: 401 });
 });
 
 test('upstream mode with a required key missing exits with a one-line reason before listening', () => {

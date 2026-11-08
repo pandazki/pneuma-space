@@ -74,15 +74,6 @@ function bareName(who: Subject): string {
   return who.slice(who.indexOf(':') + 1);
 }
 
-/** The frozen interface has no 503, so a keys outage reaches an `authenticate` caller as a throw rather than a Challenge. */
-async function principalOrChallenge(identity: Identity, request: IncomingMessage): Promise<Principal | Challenge> {
-  const auth = await identity.identify(request);
-  if (typeof auth !== 'string') return { subject: auth.subject, name: auth.name };
-  const answer = identity.challenge(request, auth);
-  if (answer.status === 503) throw new JwtError('keys-unavailable');
-  return answer;
-}
-
 function isBrowser(request: IncomingMessage): boolean {
   return request.method === 'GET' && (request.headers.accept ?? '').includes('text/html');
 }
@@ -97,10 +88,6 @@ export class LocalIdentity implements Identity {
     this.#secret = secret;
     this.#tokens = tokens;
     this.#addressing = addressing;
-  }
-
-  authenticate(request: IncomingMessage): Promise<Principal | Challenge> {
-    return principalOrChallenge(this, request);
   }
 
   async identify(request: IncomingMessage): Promise<Auth | Failure> {
@@ -246,10 +233,6 @@ export class UpstreamIdentity implements Identity {
     this.#config = config;
     this.#tokens = tokens;
     this.#users = users;
-  }
-
-  authenticate(request: IncomingMessage): Promise<Principal | Challenge> {
-    return principalOrChallenge(this, request);
   }
 
   /** A valid JWT in the configured header wins; otherwise `Authorization: Bearer` with a non-JWT value is a platform token (ADR 0021 items 2, 5). */
