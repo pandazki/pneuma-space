@@ -8,8 +8,10 @@ import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { demux, Docker, type ContainerInfo } from './docker.ts';
 import { DockerInfra } from './infra.ts';
+import { Instances } from './instances.ts';
+import { CURRENT, register, tempStore } from './lifecycle.fakes.ts';
 import {
-  appName, DEFAULT_POLICY, DEFAULT_TENANT, newAppId, NotFound, type AppId, type ImageId, type Lease, type Policy, type ReleaseNumber, type RunSpec, type StorageBinding,
+  appName, DEFAULT_POLICY, DEFAULT_TENANT, newAppId, NotFound, type AppId, type ImageId, type Lease, type Policy, type ReleaseNumber, type ReplicaId, type RunSpec, type StorageBinding,
 } from './model.ts';
 import { DockerRuntime } from './runtime.ts';
 
@@ -82,15 +84,23 @@ function inner(image: ImageId, network: string): void {
   function fixture(t: TestContext, policy: Partial<Policy> = {}) {
     const app = newAppId();
     const specs = new Map<AppId, RunSpec>();
-    const publish = (release: number, env: Record<string, string> = {}, id: AppId = app, storage: StorageBinding[] = []) => specs.set(id, {
-      app: id, name: appName('fixture'), tenant: DEFAULT_TENANT, release: release as ReleaseNumber, runtime: { kind: 'container', image }, injection: { env, storage, services: [] }, policy: { ...DEFAULT_POLICY, ...policy },
-    });
+    const store = tempStore();
+    const publish = (release: number, env: Record<string, string> = {}, id: AppId = app, storage: StorageBinding[] = []) => {
+      const spec: RunSpec = {
+        app: id, name: appName(id === app ? 'fixture' : `fixture-${id}`), tenant: DEFAULT_TENANT, release: release as ReleaseNumber, runtime: { kind: 'container', image },
+        injection: { env, storage, services: [] }, policy: { ...DEFAULT_POLICY, ...policy }, version: CURRENT,
+      };
+      register(store, spec);
+      specs.set(id, spec);
+    };
+    /** A gateway process: its own mirror of the shared store, under the same replica name, as a restart keeps the host name. */
+    const instances = () => new Instances(store, { replica: 'gateway' as ReplicaId });
     publish(1);
     const runtimes: DockerRuntime[] = [];
     const events: Record<string, unknown>[] = [];
     const start = () => {
       const docker = new CountingDocker();
-      const runtime = new DockerRuntime({ docker, network, specFor: (id) => specs.get(id) ?? null, log: (ev, id, extra) => { if (id === app) events.push({ ev, ...extra }); } });
+      const runtime = new DockerRuntime({ docker, network, specFor: (id) => specs.get(id) ?? null, instances: instances(), log: (ev, id, extra) => { if (id === app) events.push({ ev, ...extra }); } });
       runtimes.push(runtime);
       return { docker, runtime };
     };
@@ -100,7 +110,7 @@ function inner(image: ImageId, network: string): void {
         for (const container of await raw.list({ label: [`pneuma-space.app=${id}`] })) await raw.remove(container.Id);
       }
     });
-    return { app, events, publish, start, specFor: (id: AppId) => specs.get(id) ?? null, ...start() };
+    return { app, events, instances, publish, start, specFor: (id: AppId) => specs.get(id) ?? null, ...start() };
   }
 
   const answer = async (address: string) => (await fetch(`http://${address}/`)).text();
@@ -120,7 +130,7 @@ function inner(image: ImageId, network: string): void {
   });
 
   test('a container that exits at once fails the wake even when another container answers on its old IP', async (t) => {
-    const { app, publish, start, specFor } = fixture(t, { ready_timeout_seconds: 3 });
+    const { app, instances, publish, start, specFor } = fixture(t, { ready_timeout_seconds: 3 });
     const other = newAppId();
     publish(1, {}, other);
     const { runtime: healthy } = start();
@@ -135,7 +145,7 @@ function inner(image: ImageId, network: string): void {
       reused = false;
     }
     publish(1, { FIXTURE_EXIT: '1' });
-    const runtime = new DockerRuntime({ docker: new ReusedAddress(), network, specFor, log: () => {} });
+    const runtime = new DockerRuntime({ docker: new ReusedAddress(), network, specFor, instances: instances(), log: () => {} });
     t.after(() => runtime.close());
     await assert.rejects(runtime.acquire(app, 'request'));
     assert.equal(runtime.state(app), 'asleep');
@@ -218,7 +228,7 @@ function inner(image: ImageId, network: string): void {
     await runtime.retire(app);
     const ms = performance.now() - started;
     assert.ok(ms >= 1000 && ms < 3000, `drain took ${Math.round(ms)} ms`);
-    assert.equal(runtime.state(app), 'none');
+    assert.equal(runtime.state(app), 'asleep');
   });
 
   test('retire calls onRetire for channel leases', async (t) => {
@@ -228,7 +238,7 @@ function inner(image: ImageId, network: string): void {
     runtime.channel(lease, () => { closed++; runtime.release(lease); });
     await runtime.retire(app);
     assert.equal(closed, 1);
-    assert.equal(runtime.state(app), 'none');
+    assert.equal(runtime.state(app), 'asleep');
   });
 
   test('an external docker stop flips the instance to asleep; the next acquire wakes it under 3 s', async (t) => {
@@ -309,7 +319,7 @@ function inner(image: ImageId, network: string): void {
     const { docker, runtime } = start();
     await runtime.reconcile();
     assert.equal(runtime.state(app), 'awake');
-    assert.equal(runtime.state(stale), 'none');
+    assert.equal(runtime.state(stale), 'asleep');
     assert.deepEqual(await containers(stale), []);
     const lease = await runtime.acquire(app, 'request');
     assert.equal(docker.starts, 0);

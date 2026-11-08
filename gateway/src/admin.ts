@@ -303,8 +303,8 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, store, i
     appRoute('POST', ADMIN_PATHS.remove('<name>'), 'app.remove', async ({ params: [name] }) => (await registry.remove(app(name)), { status: 'removed' }), {
       audit: onAppAudit('app.remove'),
     }),
-    appRoute('POST', ADMIN_PATHS.unquarantine('<name>'), 'app.remove', ({ params: [name] }) => {
-      guard.unquarantine(found(registry.view(app(name)), name).app);
+    appRoute('POST', ADMIN_PATHS.unquarantine('<name>'), 'app.remove', async ({ params: [name] }) => {
+      await guard.unquarantine(found(registry.view(app(name)), name).app);
       return { quarantine: null };
     }, { audit: onAppAudit('app.unquarantine') }),
     appRoute('POST', ADMIN_PATHS.purge('<name>'), 'app.purge', async ({ params: [name] }) => (await registry.purge(app(name)), { status: 'purged' }), {

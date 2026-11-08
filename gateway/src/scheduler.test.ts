@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import {
   DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS, NotFound,
-  type App, type AppId, type CronExpr, type Delivery, type DeliveryFilter, type Lease, type SchedulerView, type Subject, type TriggerName,
+  type App, type AppId, type CronExpr, type Delivery, type DeliveryFilter, type Lease, type Replica, type ReplicaId, type SchedulerView, type Subject, type TriggerName,
 } from './model.ts';
 import { RING, requests } from './requests.ts';
 import { DeliveryScheduler, latestSlot, nextSlot, type SchedulerDeps } from './scheduler.ts';
@@ -46,7 +46,7 @@ function harness(triggers: Record<string, string | null> = { run: null }) {
     triggers: Object.entries(triggers).map(([name, schedule]) => ({ app: APP, name: name as TriggerName, schedule: schedule as CronExpr | null })),
     policy: DEFAULT_POLICY,
   };
-  const state = { view: view as SchedulerView | null, acquired: 0, released: 0, refuse: false, failWrite: false };
+  const state = { view: view as SchedulerView | null, acquired: 0, released: 0, refuse: false, failWrite: false, replicas: [] as Replica[] };
   const store: SchedulerDeps['store'] = {
     apps: async () => [{ id: APP, status: 'registered' } as App],
     insertDelivery: async (d) => {
@@ -61,6 +61,13 @@ function harness(triggers: Record<string, string | null> = { run: null }) {
       if (state.failWrite) throw new Error('database is locked');
       rows.splice(rows.findIndex((r) => r.id === d.id), 1, d);
     },
+    claimDelivery: async (id, replica, attempts) => {
+      if (state.failWrite) throw new Error('database is locked');
+      const i = rows.findIndex((r) => r.id === id && r.state === 'due');
+      if (i >= 0) rows[i] = { ...rows[i], state: 'delivering', replica, attempts };
+      return i >= 0;
+    },
+    replicas: async () => state.replicas,
     deliveries: async (f: DeliveryFilter) => rows.filter((r) => (f.app === undefined || r.app === f.app) &&
       (f.state === undefined || r.state === f.state) && (f.dueBefore === undefined || r.nextAttemptAt <= f.dueBefore)),
     deleteDeliveries: async (app) => void rows.splice(0, rows.length, ...rows.filter((r) => r.app !== app)),
@@ -78,7 +85,7 @@ function harness(triggers: Record<string, string | null> = { run: null }) {
     release: (_lease: Lease) => void state.released++,
     state: () => 'asleep',
   };
-  const scheduler = new DeliveryScheduler({ store, runtime, view: () => state.view, now: () => clock.now, log: () => {} });
+  const scheduler = new DeliveryScheduler({ store, runtime, view: () => state.view, now: () => clock.now, log: () => {}, replica: 'me' as ReplicaId });
   const invoke = (key: string | null = null, body = '') =>
     scheduler.invoke({ app: APP, trigger: 'run' as TriggerName, caller, idempotencyKey: key, body: new TextEncoder().encode(body) });
   return { scheduler, rows, clock, state, invoke };
@@ -200,6 +207,16 @@ test('an acquire refused with NotFound cancels the delivery', async () => {
   await invoke();
   await scheduler.tick();
   assert.equal(rows[0].state, 'cancelled');
+});
+
+test('resume leaves a delivery claimed by another live replica delivering', async () => {
+  const { scheduler, rows, state, invoke } = harness();
+  await invoke();
+  rows[0] = { ...rows[0], state: 'delivering', attempts: 1, replica: 'other' as ReplicaId };
+  state.replicas = [{ id: 'other' as ReplicaId, startedAt: 0, seenAt: Date.now() }];
+  await scheduler.resume();
+  scheduler.stop();
+  assert.equal(rows[0].state, 'delivering');
 });
 
 test('resume returns a delivering row to due and redelivers it with the same id', async () => {

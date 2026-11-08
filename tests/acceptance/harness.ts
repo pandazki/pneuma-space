@@ -26,8 +26,8 @@ mkdirSync(scratch, { recursive: true });
 
 /** Its own project, ports and network, so the suite never touches a developer's stack. */
 export const stack = {
-  project: 'pneuma-space-acc',
-  network: 'pneuma-space-acc',
+  project: process.env.PNEUMA_SPACE_ACC_PROJECT ?? 'pneuma-space-acc',
+  network: process.env.PNEUMA_SPACE_ACC_PROJECT ?? 'pneuma-space-acc',
   httpPort: Number(process.env.PNEUMA_SPACE_ACC_HTTP_PORT ?? 18080),
   adminPort: Number(process.env.PNEUMA_SPACE_ACC_ADMIN_PORT ?? 18081),
   objectPort: Number(process.env.PNEUMA_SPACE_ACC_OBJECT_PORT ?? 19000),

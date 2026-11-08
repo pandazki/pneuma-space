@@ -1,7 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
-import { DEFAULT_QUOTA, DEFAULT_TENANT, changeKey, type AppName, type Change, type Store, type StoreOps } from './model.ts';
+import { DEFAULT_TENANT, QUOTA_RESOURCES, changeKey, type AppName, type Change, type Store, type StoreOps } from './model.ts';
 import { SQLITE, STORE_OPS, SqlOps, type Row, type Session } from './sql.ts';
+
+/** The migrated `default` tenant is unlimited (ADR 0022 item 4, ADR 0023 item 2). */
+const UNLIMITED = JSON.stringify(Object.fromEntries(QUOTA_RESOURCES.map((resource) => [resource, null])));
 
 /** Append only; `PRAGMA user_version` counts the steps applied. */
 export const MIGRATIONS = [
@@ -30,7 +33,7 @@ export const MIGRATIONS = [
   // M2 (ADR 0025 item 8): the tables PgStore creates in its step 1, and every M1 app and token in the default tenant.
   `CREATE TABLE tenant (name TEXT PRIMARY KEY, display TEXT NOT NULL, quota TEXT NOT NULL, created_at INTEGER NOT NULL);
    INSERT INTO tenant (name, display, quota, created_at)
-     VALUES ('${DEFAULT_TENANT}', '${DEFAULT_TENANT}', '${JSON.stringify(DEFAULT_QUOTA)}', CAST(unixepoch('subsec') * 1000 AS INTEGER));
+     VALUES ('${DEFAULT_TENANT}', '${DEFAULT_TENANT}', '${UNLIMITED}', CAST(unixepoch('subsec') * 1000 AS INTEGER));
    CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, groups TEXT NOT NULL, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL);
    CREATE TABLE membership (
      tenant TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('admin', 'member')), PRIMARY KEY (tenant, user_id));
@@ -75,6 +78,10 @@ export const MIGRATIONS = [
   // ADR 0024 item 3: counts moved to usage. PgStore builds the final schema, so only SQLite drops columns.
   `ALTER TABLE stats DROP COLUMN requests;
    ALTER TABLE stats DROP COLUMN errors;`,
+  // ADR 0020 as revised (step 6): the app's version for stale-view wakes, the delivery's claimer for conditional claims.
+  `ALTER TABLE app ADD COLUMN version INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE delivery ADD COLUMN replica TEXT;
+   UPDATE tenant SET quota = '${UNLIMITED}' WHERE name = '${DEFAULT_TENANT}';`,
 ];
 
 /** `$n` placeholders become `?n`, which node:sqlite binds by position. */

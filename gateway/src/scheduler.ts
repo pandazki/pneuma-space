@@ -1,19 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import { request } from 'node:http';
+import { hostname } from 'node:os';
 import { emit, type Emit } from './events.ts';
+import { DEAD_MS } from './instances.ts';
 import { requests } from './requests.ts';
 import {
   HEADERS, MAX_ATTEMPTS, NotFound, TRIGGER_PATH,
-  type AppId, type CronExpr, type Delivery, type DeliveryId, type InvokeRequest, type Lease,
+  type AppId, type CronExpr, type Delivery, type DeliveryId, type InvokeRequest, type Lease, type ReplicaId,
   type Runtime, type Scheduler, type SchedulerView, type Store, type TriggerName,
 } from './model.ts';
 
 export type SchedulerDeps = {
-  readonly store: Pick<Store, 'apps' | 'insertDelivery' | 'updateDelivery' | 'deliveries' | 'lastScheduledFor' | 'deleteDeliveries'>;
+  readonly store: Pick<Store, 'apps' | 'insertDelivery' | 'updateDelivery' | 'claimDelivery' | 'deliveries' | 'lastScheduledFor' | 'deleteDeliveries' | 'replicas'>;
   readonly runtime: Pick<Runtime, 'acquire' | 'release' | 'state'>;
   readonly view: (app: AppId) => SchedulerView | null;
   readonly now?: () => number;
   readonly log?: Emit;
+  /** This replica, named in the deliveries it claims. */
+  readonly replica?: ReplicaId;
 };
 
 const TICK_MS = 1000;
@@ -27,6 +31,7 @@ export class DeliveryScheduler implements Scheduler {
   readonly #view: SchedulerDeps['view'];
   readonly #now: () => number;
   readonly #log: Emit;
+  readonly #replica: ReplicaId;
   readonly #inFlight = new Set<AppId>();
   #timer: ReturnType<typeof setInterval> | null = null;
 
@@ -36,6 +41,7 @@ export class DeliveryScheduler implements Scheduler {
     this.#view = deps.view;
     this.#now = deps.now ?? Date.now;
     this.#log = deps.log ?? emit;
+    this.#replica = deps.replica ?? (hostname() as ReplicaId);
   }
 
   async invoke(req: InvokeRequest): Promise<DeliveryId> {
@@ -56,8 +62,12 @@ export class DeliveryScheduler implements Scheduler {
     }
   }
 
+  /** On taking leadership: deliveries claimed by a dead replica, or by this one before it restarted, go back to due (ADR 0020 item 4). */
   async resume(): Promise<void> {
+    const seen = Date.now() - DEAD_MS;
+    const live = new Set((await this.#store.replicas()).filter((r) => r.seenAt >= seen && r.id !== this.#replica).map((r) => r.id));
     for (const d of await this.#store.deliveries({ state: 'delivering' })) {
+      if (d.replica && live.has(d.replica)) continue;
       await this.#write({ ...d, state: 'due', nextAttemptAt: this.#now() }, 'gateway restarted mid-delivery');
     }
     this.#timer ??= setInterval(() => void this.tick(), TICK_MS).unref();
@@ -118,8 +128,9 @@ export class DeliveryScheduler implements Scheduler {
     if (!declares(view, due.trigger)) {
       return this.#write({ ...due, state: 'cancelled' }, 'trigger not declared or app not registered');
     }
-    const d: Delivery = { ...due, state: 'delivering', attempts: due.attempts + 1 };
-    await this.#write(d);
+    const d: Delivery = { ...due, state: 'delivering', attempts: due.attempts + 1, replica: this.#replica };
+    if (!(await this.#store.claimDelivery(d.id, this.#replica, d.attempts))) return;
+    this.#emit(d);
     const outcome = await this.#attempt(d, view.policy.trigger_timeout_seconds * 1000);
     if (outcome.ok) await this.#write({ ...d, state: 'done' });
     else if (outcome.cancel || !declares(this.#view(d.app), d.trigger)) await this.#write({ ...d, state: 'cancelled' }, outcome.reason);

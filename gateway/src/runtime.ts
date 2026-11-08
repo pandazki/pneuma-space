@@ -2,10 +2,12 @@ import { connect } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Docker, DockerError, type ContainerSpec, type DockerEvent } from './docker.ts';
 import type { Emit } from './events.ts';
+import type { Instances } from './instances.ts';
 import { Lifecycle, specHash, type Adopted, type Driver, type Gone, type Slot } from './lifecycle.ts';
 import { APP_PORT, Conflict, RUNTIME_ENV, type AppId, type HealthCheck, type RunSpec } from './model.ts';
+import type { AppGuard } from './runtimes.ts';
 
-const LABEL = { app: 'pneuma-space.app', release: 'pneuma-space.release', spec: 'pneuma-space.spec', network: 'pneuma-space.network' } as const;
+const LABEL = { app: 'pneuma-space.app', release: 'pneuma-space.release', spec: 'pneuma-space.spec', network: 'pneuma-space.network', role: 'pneuma-space.role' } as const;
 const READY_POLL_MS = 50;
 const STOP_SIGNALS: ReadonlySet<string> = new Set(['15', '9']);
 
@@ -16,11 +18,13 @@ export type RuntimeOptions = {
   /** PNEUMA_SPACE_NETWORK: app containers join it, and only containers labelled with it are this gateway's. */
   readonly network: string;
   readonly specFor: (app: AppId) => RunSpec | null;
+  readonly instances: Instances;
+  readonly guard?: AppGuard;
   readonly log?: Emit;
 };
 
-const sameRun = (a: ContainerRun, b: ContainerRun): boolean =>
-  a.release === b.release && a.runtime.image === b.runtime.image && specHash(a) === specHash(b);
+/** A release names one image, so release and spec hash say whether a kept container still fits. */
+const fits = (slot: Slot<string>, spec: ContainerRun): boolean => slot.release === spec.release && slot.specHash === specHash(spec);
 export const fill = (env: Readonly<Record<string, string>>, dir: string) =>
   Object.fromEntries(Object.entries(env).map(([key, value]) => [key, value.replaceAll('{dir}', dir)]));
 
@@ -54,15 +58,16 @@ class DockerDriver implements Driver<ContainerRun, string> {
     return spec.runtime.kind === 'container';
   }
 
-  async start(slot: Slot<ContainerRun, string>, spec: ContainerRun): Promise<string> {
+  async start(slot: Slot<string>, spec: ContainerRun): Promise<string> {
     const docker = this.#docker;
     try {
-      if (slot.handle && !sameRun(slot.spec, spec)) {
+      if (slot.handle && !fits(slot, spec)) {
         await this.remove(spec.app, slot.handle);
         slot.handle = null;
       }
-      slot.spec = spec;
       slot.handle ??= await this.#create(spec);
+      slot.release = spec.release;
+      slot.specHash = specHash(spec);
       this.#startedAt.set(slot.handle, Date.now());
       if (!(await docker.start(slot.handle))) {
         // 404 also means the container outlived its network (compose down recreates it); a same-name create would return it again.
@@ -102,7 +107,7 @@ class DockerDriver implements Driver<ContainerRun, string> {
     }
   }
 
-  async sleep(_app: AppId, slot: Slot<ContainerRun, string>): Promise<void> {
+  async sleep(_app: AppId, slot: Slot<string>): Promise<void> {
     await this.#docker.stop(slot.handle!);
   }
 
@@ -120,7 +125,7 @@ class DockerDriver implements Driver<ContainerRun, string> {
 
   async adopt(): Promise<readonly Adopted<string>[]> {
     this.#since ||= Math.floor(Date.now() / 1000);
-    const found = await this.#docker.list({ label: [LABEL.app, `${LABEL.network}=${this.#network}`] });
+    const found = await this.#docker.list({ label: [`${LABEL.role}=instance`, `${LABEL.network}=${this.#network}`] });
     return found.map((container) => {
       const ip = container.NetworkSettings.Networks[this.#network]?.IPAddress;
       return {
@@ -177,7 +182,7 @@ class DockerDriver implements Driver<ContainerRun, string> {
         [RUNTIME_ENV.app]: spec.name, [RUNTIME_ENV.release]: String(spec.release), [RUNTIME_ENV.port]: String(APP_PORT),
       },
       labels: {
-        [LABEL.app]: spec.app, [LABEL.release]: String(spec.release), [LABEL.spec]: specHash(spec), [LABEL.network]: this.#network,
+        [LABEL.app]: spec.app, [LABEL.release]: String(spec.release), [LABEL.spec]: specHash(spec), [LABEL.network]: this.#network, [LABEL.role]: 'instance',
       },
       mounts: storage.map(({ id, target }) => ({ volume: id, target })),
       network: this.#network,

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
-import { DEFAULT_QUOTA, DEFAULT_TENANT, type AppName, type Subject } from './model.ts';
+import { DEFAULT_TENANT, type AppName, type Subject } from './model.ts';
 import { app, storeContract } from './store.contract.ts';
 import { MIGRATIONS, SqliteSession, SqliteStore } from './store.ts';
 
@@ -43,7 +43,7 @@ test('migration step 4 puts every M1 app and token in the default tenant', async
     INSERT INTO token (id, subject, hash, created_at) VALUES ('t1', 'service:ci', 'h1', 2);`);
   m1.close();
   const store = new SqliteStore(file);
-  assert.deepEqual((await store.tenant(DEFAULT_TENANT))?.quota, DEFAULT_QUOTA);
+  assert.deepEqual((await store.tenant(DEFAULT_TENANT))?.quota, { apps: null, awake: null, cpu_millis: null, memory_mb: null, storage_gb: null });
   assert.deepEqual([(await store.app('survey' as AppName))?.tenant, (await store.app('survey' as AppName))?.access], [DEFAULT_TENANT, 'org']);
   assert.deepEqual(await store.token('h1'), {
     id: 't1', tenant: DEFAULT_TENANT, subject: 'service:ci' as Subject, label: 'ci', hash: 'h1', createdBy: 'local', createdAt: 2, revokedAt: null,
@@ -73,4 +73,15 @@ test('the audit table refuses update and delete', async () => {
   assert.throws(() => db.exec("UPDATE audit SET result = 'error'"), /append-only/);
   assert.throws(() => db.exec('DELETE FROM audit'), /append-only/);
   db.close();
+});
+
+test('step 6 makes an already migrated default tenant unlimited', async () => {
+  const file = path();
+  const migrated = new DatabaseSync(file);
+  for (const step of MIGRATIONS.slice(0, 5)) migrated.exec(step);
+  migrated.exec(`PRAGMA user_version = 5; UPDATE tenant SET quota = '{"apps":100,"awake":20,"cpu_millis":20000,"memory_mb":8192,"storage_gb":20}'`);
+  migrated.close();
+  const store = new SqliteStore(file);
+  assert.deepEqual((await store.tenant(DEFAULT_TENANT))?.quota, { apps: null, awake: null, cpu_millis: null, memory_mb: null, storage_gb: null });
+  await store.close();
 });
