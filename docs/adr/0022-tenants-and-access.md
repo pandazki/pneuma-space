@@ -17,7 +17,7 @@
    加成员按 id，id 可以还没出现过，页面标"未登录过"，不预建 User 行。每个租户至少保留一个 `admin`，移除最后一个返回 409，平台管理员除外。平台管理员不落库：`PNEUMA_SPACE_PLATFORM_ADMINS` 是逗号列表，项为 `user:<id>` 或 `group:<name>`，每个请求按它判定。
 2. **令牌两种，一张表，都属于一个租户，权限封顶 `member`。** 服务令牌主体 `service:<tenant>.<name>`（`name` 匹配 `^[a-z][a-z0-9-]{0,22}$`），该租户 `admin` 签发，给自动化和程序开发者。个人令牌主体是签发人的 `user:<id>`，任一成员给自己签，`appctl` 用它，发布的应用 owner 就是本人，浏览器里 `X-Pneuma-Space-Owner: 1` 照旧成立；每次使用都要求签发人仍是 `token.tenant` 的成员，否则 401，所以移除成员即作废他的令牌。令牌从不带平台管理员权限，封顶 `member` 对平台管理员也成立；平台管理员的动作（全局策略、租户、配额、移动应用）只接受 JWT 主体。签发、吊销令牌、改成员、建租户同样只接受 JWT 主体，令牌不能再生令牌。只存 `sha256`，明文只在签发响应里出现一次。触发端点语义不变：先过访问范围，再要求 `service:` 主体或 owner。M1 的令牌迁到 `default` 租户，主体保留 `service:<name>`。
 3. **首次发布的租户**：令牌取 `token.tenant`；浏览器取请求体 `tenant`，调用者只在一个租户时可省略。之后只有平台管理员能 `PUT .../tenant` 移动；移动先退役实例（配额占用、Pod 标签、旧租户令牌的访问都随之一次切换），再改行。owner 默认取调用主体，`--owner` 仍可覆盖。
-4. **单机**：迁移建租户 `default`，现存应用和令牌归它。`local` 模式下一切写入都落 `default`，管理 API 和 M1 一样不认证，调用者视为平台管理员，Ingress 不做访问范围检查。`access` 字段照存，切到 `upstream` 后生效。
+4. **单机**：迁移建租户 `default`（配额全部不限，ADR 0023），现存应用和令牌归它。`local` 模式下一切写入都落 `default`，管理 API 和 M1 一样不认证，调用者视为平台管理员，Ingress 不做访问范围检查。`access` 字段照存，切到 `upstream` 后生效。
 5. **调用者是一个值，认证一次构造，下游不再查身份**：`Caller = { actor, platformAdmin, roles: Map<TenantName, 'admin' | 'member'>, viaToken }`，令牌的 `roles` 已收窄到 `token.tenant` 且封顶 `member`。管理 API 是一张表 `ACTIONS`（端点到所需级别），检查是纯函数 `can(caller, action, tenant)`。平台管理员通过每一行。拒绝答 403 并写明缺哪个角色；目标应用不在调用者租户里答 404，不暴露别的租户有什么。`T` 指目标应用或租户。
 
    | 端点 | 所需 | 令牌可用 |

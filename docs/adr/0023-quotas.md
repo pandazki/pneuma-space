@@ -12,14 +12,14 @@
    | `memory_mb` | MiB | 512 | Pod `requests.memory = limits.memory`；Docker `Memory` | 启动消息带 `heapMb`，`maxOldGenerationSizeMb` 用它，堆外预算同值；runner 的 `PNEUMA_SPACE_RUNNER_WORKER_HEAP_MB` 和 `_OFFHEAP_MB` 变成上限，超出时按上限起并记 `memory-clamped` 事件 |
 
    两个字段改变实例的形状：spec 哈希算 Injection 加这两个值；按应用的覆盖变化触发退役，全局默认的变化在下次唤醒生效。按应用覆盖不得超过本租户的 `cpu_millis` 和 `memory_mb` 总额，否则设置时 400。M1 的容器没有内存上限，`memory_mb` 的默认值是 G6"应用不改"的唯一例外：超过 512 MiB 的应用要在策略里声明，否则被 OOM 计为失败。
-2. **每租户 `Tenant.quota`**，建租户时从常量 `DEFAULT_QUOTA` 拷贝并存储（改常量不影响已有租户，与 `db_backend` 写进 override 同一模式），`null` 表示不限，只有平台管理员能改。
+2. **每租户 `Tenant.quota`**，建租户时从常量 `DEFAULT_QUOTA` 拷贝并存储（改常量不影响已有租户，与 `db_backend` 写进 override 同一模式），`null` 表示不限，只有平台管理员能改。迁移建出的 `default` 租户每项都是 `null`：单机版和 M1 的验收行（AC-P-8 发 500 个应用、唤醒 20 个）不受配额约束，平台管理员要限它就显式设。
 
    | 字段 | 默认 | 计什么 | 在哪拒绝 |
    | --- | --- | --- | --- |
    | `apps` | 100 | 本租户状态不是 `purging` 的 App 行（`removed` 仍占名字和数据） | 首次发布，插 App 行的事务里 |
    | `awake` | 20 | 本租户 `waking`、`awake`、`draining`、`stopping` 的实例行，任何运行时 | 唤醒的 CAS 事务里（ADR 0020） |
    | `cpu_millis` | 20000 | 上述实例行上记下的 `cpu_millis` 之和 | 同上 |
-   | `memory_mb` | 8192 | 上述实例行上记下的 `memory_mb` 之和 | 同上 |
+   | `memory_mb` | 10240（20 个默认实例） | 上述实例行上记下的 `memory_mb` 之和 | 同上 |
    | `storage_gb` | 20 | 本租户 files 和 SQLite 的 StorageBinding 数乘以已供应容量（K8s 是 `PNEUMA_SPACE_K8S_VOLUME_SIZE`，单机是同名的标称值 `PNEUMA_SPACE_VOLUME_SIZE`，默认 1Gi，不强制）；PostgreSQL 库和 bucket 不计 | 发布将要新建 StorageBinding 行时；同样能力的重新发布照常通过，超额的团队仍能发修复 |
 
 3. **平台库计数，在租户行锁下。** 唤醒事务先 `SELECT ... FROM tenant WHERE name=$1 FOR UPDATE`，再对本租户的实例行 `count` 和两个 `sum`，与 `quota` 比较，通过则把实例行置 `waking` 并写入这次的 `cpu_millis`、`memory_mb`（取自有效 Policy，之后改 Policy 不改在跑实例的占用）。锁只串行化同一租户的唤醒，持有时间是一次索引扫描，事务里没有网络和 K8s 调用。判定是 `model.ts` 里的纯函数 `admits(quota, used, ask) -> Refusal | null`，发布和唤醒两处调用。
