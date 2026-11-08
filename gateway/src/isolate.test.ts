@@ -6,22 +6,29 @@ import type { AddressInfo } from 'node:net';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { EventLog } from './events.ts';
+import { Instances } from './instances.ts';
 import { IsolateRuntime } from './isolate.ts';
+import { CURRENT, register, tempStore } from './lifecycle.fakes.ts';
 import {
-  appName, DEFAULT_POLICY, DEFAULT_TENANT, newAppId, NotFound, type AppId, type BundleId, type Policy, type ReleaseNumber, type RunSpec, type StorageBinding,
+  appName, DEFAULT_POLICY, DEFAULT_TENANT, newAppId, NotFound, type AppId, type BundleId, type Policy, type ReleaseNumber, type ReplicaId, type RunSpec, type StorageBinding,
 } from './model.ts';
 import type { EventPage } from './runner.ts';
 import { serveBundle, startRunner, type RunnerProcess } from './runner.harness.ts';
-import { Runtimes, Unavailable } from './runtimes.ts';
+import { AppGuard, Runtimes, Unavailable } from './runtimes.ts';
 
 async function fixture(t: TestContext, policy: Partial<Policy> = {}, storage: readonly StorageBinding[] = [], env: Record<string, string> = {}) {
   const app = newAppId();
   const specs = new Map<AppId, RunSpec>();
   const specFor = (id: AppId) => specs.get(id) ?? null;
-  const publish = (release: number, id = app) => specs.set(id, {
-    app: id, name: appName('fixture'), tenant: DEFAULT_TENANT, release: release as ReleaseNumber, runtime: { kind: 'isolate', bundle: 'b' as BundleId, entry: 'app.mjs' },
-    injection: { env, storage, services: [] }, policy: { ...DEFAULT_POLICY, ...policy },
-  });
+  const store = tempStore();
+  const publish = (release: number, id = app) => {
+    const spec: RunSpec = {
+      app: id, name: appName(id === app ? 'fixture' : `fixture-${id}`), tenant: DEFAULT_TENANT, release: release as ReleaseNumber, runtime: { kind: 'isolate', bundle: 'b' as BundleId, entry: 'app.mjs' },
+      injection: { env, storage, services: [] }, policy: { ...DEFAULT_POLICY, ...policy }, version: CURRENT,
+    };
+    register(store, spec);
+    specs.set(id, spec);
+  };
   publish(1);
   /** A second app on the same runner. */
   const other = newAppId();
@@ -32,9 +39,14 @@ async function fixture(t: TestContext, policy: Partial<Policy> = {}, storage: re
   const events: Record<string, unknown>[] = [];
   const bus = new EventLog(() => {});
   const runtimes: IsolateRuntime[] = [];
+  let guard!: AppGuard;
+  let instances!: Instances;
+  /** A gateway process: its own mirror of the shared store, under the same replica name, as a restart keeps the host name. */
   const start = (url = runner.url) => {
+    instances = new Instances(store, { replica: 'gateway' as ReplicaId });
+    guard = new AppGuard({ instances, specFor, log: bus.emit });
     const runtime = new IsolateRuntime({
-      runner: url, bundleUrl: () => bundleUrl, specFor, hasRun: async () => true,
+      runner: url, bundleUrl: () => bundleUrl, specFor, hasRun: async () => true, instances, guard,
       log: (ev, id, extra) => {
         if (id === app) events.push({ ev, ...extra });
         bus.emit(ev, id, extra);
@@ -56,7 +68,8 @@ async function fixture(t: TestContext, policy: Partial<Policy> = {}, storage: re
   const workers = async () => (await (await fetch(`${runner.url}/instances`)).json()) as { app: string; release: number }[];
   const runnerEvents = async () => ((await (await fetch(`${runner.url}/events?after=0`)).json()) as EventPage).events;
   const runtime = start();
-  const guarded = () => new Runtimes({ runtimes: [runtime], specFor, events: bus, log: bus.emit });
+  const shared = { guard, instances };
+  const guarded = () => Object.assign(new Runtimes({ runtimes: [runtime], specFor, instances: shared.instances }), { quarantine: (id: AppId) => shared.guard.quarantine(id) });
   /** A start from outside this gateway, as one that died mid-start would have left it. */
   const startElsewhere = (id: AppId, env: Record<string, string>) => void fetch(`${runner.url}/instances/${id}`, {
     method: 'POST', body: JSON.stringify({ release: 1, spec: 'elsewhere', bundleUrl, entry: 'app.mjs', env, storage: [], readyMs: 8000 }),
@@ -252,7 +265,7 @@ const staleRunner = async (t: TestContext) => {
     json({ ok: true, startedAt: 1, stuck: 0, workers: runner.listed.length });
   }).listen(0, '127.0.0.1');
   await once(fake, 'listening');
-  const runtime = new IsolateRuntime({ runner: `http://127.0.0.1:${(fake.address() as AddressInfo).port}`, bundleUrl: () => '', specFor: () => null, hasRun: async () => true, log: (ev, _app, extra) => logged.push({ ev, ...extra }) });
+  const runtime = new IsolateRuntime({ runner: `http://127.0.0.1:${(fake.address() as AddressInfo).port}`, bundleUrl: () => '', specFor: () => null, hasRun: async () => true, instances: new Instances(tempStore()), log: (ev, _app, extra) => logged.push({ ev, ...extra }) });
   t.after(() => { runtime.close(); fake.close(); });
   return { runner, runtime, logged };
 };

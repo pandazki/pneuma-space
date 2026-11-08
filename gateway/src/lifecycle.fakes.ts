@@ -10,6 +10,14 @@ import {
 import { AppGuard } from './runtimes.ts';
 import { SqliteStore } from './store.ts';
 
+/** Registers the app a test RunSpec names, so a wake transaction finds its row; SQLite runs it before any later call. */
+export function register(store: SqliteStore, spec: RunSpec): void {
+  void store.putApp({ name: spec.name, id: spec.app, tenant: spec.tenant, access: 'org', owner: 'user:ann' as never, status: 'registered', current: spec.release, policyOverride: {}, registeredAt: 0, version: 0 });
+}
+
+/** Never older than the app row, so a test spec never waits for a Registry refresh. */
+export const CURRENT = Number.MAX_SAFE_INTEGER;
+
 export const tempStore = () => new SqliteStore(join(mkdtempSync(join(tmpdir(), 'pneuma-space-lifecycle-')), 'pneuma-space.sqlite3'));
 
 /** A driver whose instances are names: start answers at once unless `failure` is set, and `end` reports an instance gone. */
@@ -77,7 +85,7 @@ export async function registered(store: SqliteStore, policy: Partial<Policy> = {
   await store.putApp({ name, id, tenant: DEFAULT_TENANT, access: 'org', owner: 'user:ann' as never, status: 'registered', current: 1 as ReleaseNumber, policyOverride: {}, registeredAt: 0, version: 0 });
   let spec: RunSpec = {
     app: id, name, tenant: DEFAULT_TENANT, release: 1 as ReleaseNumber, runtime: { kind: 'container', image: 'sha256:fake' as ImageId },
-    injection: { env: {}, storage: [], services: [] }, policy: { ...DEFAULT_POLICY, ...policy }, version: Number.MAX_SAFE_INTEGER,
+    injection: { env: {}, storage: [], services: [] }, policy: { ...DEFAULT_POLICY, ...policy }, version: CURRENT,
   };
   return {
     app: id,

@@ -352,7 +352,7 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
     const outcome = await this.#store.transaction(async (tx): Promise<Instance | 'lost' | 'stale' | 'gone'> => {
       const appRow = await tx.app(spec.name);
       if (!appRow || appRow.id !== app || appRow.status !== 'registered') return 'gone';
-      if (spec.version !== undefined && spec.version < appRow.version) return 'stale';
+      if (spec.version < appRow.version) return 'stale';
       let current = await tx.instance(app, 'update');
       if (!current) {
         current = {
