@@ -9,7 +9,7 @@
    | 键 | 默认 | 含义 |
    | --- | --- | --- |
    | `PNEUMA_SPACE_IDENTITY_HEADER` | 无，`upstream` 必填 | 上游放 JWT 的请求头，大小写不敏感，值可带 `Bearer ` |
-   | `PNEUMA_SPACE_IDENTITY_JWKS_URL` / `_KEYS_FILE` | 无，二选一 | JWKS 地址，或静态公钥文件（JWKS JSON 或 PEM） |
+   | `PNEUMA_SPACE_IDENTITY_JWKS_URL` / `_KEYS_FILE` | 无，二选一 | JWKS 地址，或静态公钥文件（JWKS JSON 或 PEM）；文件路径以网关容器内为准，运营者自己挂载（Compose 用 override 文件，K8s 用 Secret 卷） |
    | `PNEUMA_SPACE_IDENTITY_ISSUER` | 无，必填 | `iss` 精确相等 |
    | `PNEUMA_SPACE_IDENTITY_AUDIENCE` | 无，必填 | 逗号列表，`aud` 与之有交集；应用主机用它 |
    | `PNEUMA_SPACE_CONSOLE_AUDIENCE` | 同上 | 控制台和管理 API 的受众；配成不同值后，从应用请求泄出的 JWT 不能在控制台重放 |
