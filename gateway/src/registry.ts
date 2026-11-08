@@ -28,6 +28,7 @@ export type RegistryDeps = {
 
 const SECONDS_FIELDS = ['idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds', 'failure_window_seconds', 'restart_backoff_seconds'] as const;
 const DETAIL_DELIVERIES = 50;
+const SIGHTING_MS = 5 * 60_000;
 
 const log = emit;
 
@@ -98,6 +99,7 @@ export class PlatformRegistry implements Registry {
   readonly #names = new Map<AppId, AppName>();
   readonly #schedules = new Map<AppId, SchedulerView>();
   readonly #indexes = new Map<BundleId, BundleIndex>();
+  readonly #sightings = new Map<string, { readonly key: string; readonly at: number }>();
   #policy: Policy;
 
   private constructor(deps: RegistryDeps, policy: Policy) {
@@ -327,6 +329,16 @@ export class PlatformRegistry implements Registry {
     });
     log('token', null, { subject });
     return { token, subject };
+  }
+
+  /** The authentication path's User write: once per user per 5 min on this replica, at once when the name or groups change (ADR 0022 item 1). */
+  async sighted(id: string, name: string, groups: readonly string[]): Promise<void> {
+    const key = JSON.stringify([name, groups]);
+    const at = Date.now();
+    const last = this.#sightings.get(id);
+    if (last && last.key === key && at - last.at < SIGHTING_MS) return;
+    await this.#store.putUser({ id, name, groups, firstSeen: at, lastSeen: at });
+    this.#sightings.set(id, { key, at });
   }
 
   view(name: AppName): RouteView | null {
