@@ -74,7 +74,7 @@ export class Authority {
         const { token } = auth;
         return {
           actor: { via: 'token', subject: token.subject, token: token.id, createdBy: token.createdBy },
-          platformAdmin: token.subject.startsWith('user:') && this.#admins.users.has(token.subject.slice('user:'.length)),
+          platformAdmin: false,
           roles: new Map([[token.tenant, 'member']]),
           viaToken: true,
         };
@@ -91,16 +91,13 @@ type Rule =
   | { readonly need: 'signed-in' | 'any-member' | 'platform'; readonly token: boolean }
   | { readonly need: 'member' | 'admin' | 'admin-or-holder'; readonly of: 'app' | 'tenant'; readonly token: boolean };
 
-/**
- * ADR 0022 item 5, one entry per endpoint row. A platform admin passes every level; `token: false` holds for them too,
- * and the platform rows a token may use are reachable only by an id-listed issuer, the one token caller with `platformAdmin`.
- */
+/** ADR 0022 item 5, one entry per endpoint row. A platform admin passes every level; no token is one, so every platform row is `token: false`. */
 export const ACTIONS = {
   'me': { need: 'signed-in', token: true },
   'health': { need: 'signed-in', token: true },
   'apps.list': { need: 'signed-in', token: true },
   'app.read': { need: 'member', of: 'app', token: true },
-  'platform.read': { need: 'platform', token: true },
+  'platform.read': { need: 'platform', token: false },
   'bundles.upload': { need: 'any-member', token: true },
   'app.release': { need: 'member', of: 'app', token: true },
   'app.policy': { need: 'member', of: 'app', token: true },
@@ -109,9 +106,9 @@ export const ACTIONS = {
   'app.remove': { need: 'member', of: 'app', token: true },
   'app.purge': { need: 'admin', of: 'app', token: false },
   'app.move': { need: 'platform', token: false },
-  'policy.set': { need: 'platform', token: true },
+  'policy.set': { need: 'platform', token: false },
   'tenants': { need: 'platform', token: false },
-  'tenant.quota.set': { need: 'platform', token: true },
+  'tenant.quota.set': { need: 'platform', token: false },
   'tenant.read': { need: 'member', of: 'tenant', token: true },
   'records': { need: 'member', of: 'tenant', token: true },
   'members.write': { need: 'admin', of: 'tenant', token: false },

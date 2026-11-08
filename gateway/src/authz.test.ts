@@ -32,15 +32,14 @@ test('a service token is a member of its own tenant only', async () => {
   assert.deepEqual(caller, { actor: { via: 'token', subject: t.subject, token: 't1', createdBy: 'user:ana' }, platformAdmin: false, roles: new Map([[A, 'member']]), viaToken: true });
 });
 
-test('a personal token of an id-listed platform admin is a platform admin', async () => {
-  const t = token('user:root', A);
-  assert.equal((await authority.callerOf({ via: 'token', subject: t.subject, name: 'root', token: t })).platformAdmin, true);
+test('platform admins listed by id and by group are platform admins in the browser', async () => {
+  assert.equal((await authority.callerOf({ via: 'upstream', subject: 'user:root' as Subject, name: 'Root', groups: [] })).platformAdmin, true);
+  assert.equal((await authority.callerOf({ via: 'upstream', subject: 'user:olga' as Subject, name: 'Olga', groups: ['ops'] })).platformAdmin, true);
 });
 
-test('a group-listed platform admin is one in the browser and not through a token', async () => {
-  assert.equal((await authority.callerOf({ via: 'upstream', subject: 'user:olga' as Subject, name: 'Olga', groups: ['ops'] })).platformAdmin, true);
-  const t = token('user:olga', A);
-  assert.equal((await authority.callerOf({ via: 'token', subject: t.subject, name: 'olga', token: t })).platformAdmin, false);
+test('no token carries platform-admin rights, not even a personal token of an id-listed admin', async () => {
+  const t = token('user:root', A);
+  assert.equal((await authority.callerOf({ via: 'token', subject: t.subject, name: 'root', token: t })).platformAdmin, false);
 });
 
 test('a membership change in a tenant reaches the next callerOf despite the cache', async () => {
@@ -63,7 +62,6 @@ const memberB = caller('user:bo', { [B]: 'member' });
 const adminA = caller('user:ana', { [A]: 'admin' });
 const tokenA = caller(`service:${A}.ci`, { [A]: 'member' }, { viaToken: true });
 const platform = caller('user:olga', {}, { platformAdmin: true });
-const platformToken = caller('user:root', { [A]: 'member' }, { viaToken: true, platformAdmin: true });
 
 type Attempt = readonly [Caller, TenantName | null, Subject | null];
 /** `refused` is null on rows any signed-in caller passes; their refusal is the challenge before `can`. */
@@ -72,7 +70,7 @@ const CASES: Record<Action, { allowed: Attempt; refused: readonly [...Attempt, D
   'health': { allowed: [nobody, null, null], refused: null },
   'apps.list': { allowed: [nobody, null, null], refused: null },
   'app.read': { allowed: [tokenA, A, null], refused: [memberB, A, null, 404] },
-  'platform.read': { allowed: [platformToken, null, null], refused: [adminA, null, null, 403] },
+  'platform.read': { allowed: [platform, null, null], refused: [adminA, null, null, 403] },
   'bundles.upload': { allowed: [tokenA, null, null], refused: [nobody, null, null, 403] },
   'app.release': { allowed: [tokenA, A, null], refused: [memberB, A, null, 404] },
   'app.policy': { allowed: [memberA, A, null], refused: [memberB, A, null, 404] },
@@ -80,10 +78,10 @@ const CASES: Record<Action, { allowed: Attempt; refused: readonly [...Attempt, D
   'app.owner': { allowed: [memberA, A, 'user:mia' as Subject], refused: [memberA, A, 'user:ana' as Subject, 403] },
   'app.remove': { allowed: [tokenA, A, null], refused: [memberB, A, null, 404] },
   'app.purge': { allowed: [adminA, A, null], refused: [memberA, A, null, 403] },
-  'app.move': { allowed: [platform, null, null], refused: [platformToken, null, null, 403] },
-  'policy.set': { allowed: [platformToken, null, null], refused: [adminA, null, null, 403] },
-  'tenants': { allowed: [platform, null, null], refused: [platformToken, null, null, 403] },
-  'tenant.quota.set': { allowed: [platformToken, null, null], refused: [adminA, null, null, 403] },
+  'app.move': { allowed: [platform, null, null], refused: [adminA, null, null, 403] },
+  'policy.set': { allowed: [platform, null, null], refused: [tokenA, null, null, 403] },
+  'tenants': { allowed: [platform, null, null], refused: [adminA, null, null, 403] },
+  'tenant.quota.set': { allowed: [platform, null, null], refused: [tokenA, null, null, 403] },
   'tenant.read': { allowed: [tokenA, A, null], refused: [memberB, A, null, 403] },
   'records': { allowed: [memberA, A, null], refused: [memberA, null, null, 403] },
   'members.write': { allowed: [adminA, A, null], refused: [memberA, A, null, 403] },
