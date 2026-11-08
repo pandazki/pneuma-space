@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
-  APPS_PATH, CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_TENANT, InputError, NotFound, RUNTIMES,
+  APPS_PATH, CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_TENANT, GLOBAL_ONLY_POLICY, InputError, NotFound, RUNTIMES,
   declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider,
   type App, type AppDetail, type AppId, type AppName, type AppSummary, type Binding, type BindingState,
   type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type Change, type CapabilityProvider, type Guard, type Infra,
@@ -22,11 +22,13 @@ export type RegistryDeps = {
   readonly providers: readonly CapabilityProvider[];
   /** Whether a runtime's compose service is up; publish refuses a runtime whose service is not. */
   readonly probe?: ServiceProbe;
-  /** Ingress counters once U8 wires them; the last snapshot otherwise. */
+  /** The 24 h counts and last access per app; the stored last access otherwise. */
   readonly statsSource?: () => Promise<Stats[]>;
 };
 
 const SECONDS_FIELDS = ['idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds', 'failure_window_seconds', 'restart_backoff_seconds'] as const;
+const WHOLE_FIELDS = ['max_failures', 'cpu_millis', 'memory_mb', 'usage_retention_days', 'events_retention_days', 'events_max_rows'] as const;
+const POLICY_FIELDS: readonly string[] = [...SECONDS_FIELDS, ...WHOLE_FIELDS, 'db_backend', 'timezone'];
 const DETAIL_DELIVERIES = 50;
 const SIGHTING_MS = 5 * 60_000;
 
@@ -42,19 +44,19 @@ function desiredState(app: App, manifest: Manifest | null, policy: Policy, bindi
 
 function parsePolicyPatch(raw: unknown, scope: 'global' | 'app'): Record<string, unknown> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new InputError('policy must be a JSON object');
-  const allowed: readonly string[] = [...SECONDS_FIELDS, 'max_failures', 'db_backend', ...(scope === 'global' ? ['timezone'] : [])];
+  const globalOnly: readonly string[] = GLOBAL_ONLY_POLICY;
   for (const [key, value] of Object.entries(raw)) {
-    if (!allowed.includes(key)) {
-      const hint = key === 'timezone' ? 'timezone is global only; set it with PUT /api/policy' : `allowed: ${allowed.join(', ')}`;
-      throw new InputError(`policy field "${key}" is not accepted here; ${hint}`);
+    if (scope === 'app' && globalOnly.includes(key)) throw new InputError(`policy field "${key}" is global only; set it with PUT /api/policy`);
+    if (!POLICY_FIELDS.includes(key)) {
+      const allowed = scope === 'global' ? POLICY_FIELDS : POLICY_FIELDS.filter((field) => !globalOnly.includes(field));
+      throw new InputError(`policy field "${key}" is not accepted here; allowed: ${allowed.join(', ')}`);
     }
     if (value === null && scope === 'app') continue;
-    if ((SECONDS_FIELDS as readonly string[]).includes(key) && !(Number.isInteger(value) && (value as number) > 0)) {
+    const positive = Number.isInteger(value) && (value as number) > 0;
+    if ((SECONDS_FIELDS as readonly string[]).includes(key) && !positive) {
       throw new InputError(`${key} must be a positive integer number of seconds, got ${JSON.stringify(value)}`);
     }
-    if (key === 'max_failures' && !(Number.isInteger(value) && (value as number) > 0)) {
-      throw new InputError(`max_failures must be a positive integer, got ${JSON.stringify(value)}`);
-    }
+    if ((WHOLE_FIELDS as readonly string[]).includes(key) && !positive) throw new InputError(`${key} must be a positive integer, got ${JSON.stringify(value)}`);
     if (key === 'db_backend' && !(CAPABILITIES.db.providers as readonly unknown[]).includes(value)) {
       throw new InputError(`db_backend must be one of ${CAPABILITIES.db.providers.join(', ')}, got ${JSON.stringify(value)}`);
     }

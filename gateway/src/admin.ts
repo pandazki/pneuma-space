@@ -6,9 +6,9 @@ import type { Metrics } from './metrics.ts';
 import type { Runtimes } from './runtimes.ts';
 import { RING, type RequestLog } from './requests.ts';
 import {
-  ADMIN_PATHS, ADMIN_PORT, Conflict, InputError, NotFound, RUNTIME_KINDS, RUNTIMES,
-  appName, bundleId, parseManifest, subject,
-  type BundleStore, type Guard, type Registry,
+  ADMIN_PATHS, ADMIN_PORT, Conflict, InputError, NotFound, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
+  appName, bundleId, parseManifest, subject, tenantName,
+  type AppId, type BundleStore, type Guard, type Registry, type StoreOps, type UsageBucket, type UsageCounters,
 } from './model.ts';
 
 export type AdminDeps = {
@@ -18,12 +18,16 @@ export type AdminDeps = {
   readonly guard: Guard;
   readonly metrics: Pick<Metrics, 'snapshot'>;
   readonly requests: Pick<RequestLog, 'after'>;
+  readonly usage: Pick<StoreOps, 'usage'>;
   readonly ingressPort: number;
   readonly consoleFile?: string | URL;
 };
 
 const BODY_LIMIT = 1024 * 1024;
 const MAX_TAIL = 10_000;
+const HOUR = 3_600_000;
+const USAGE_SPAN_MS = 30 * 24 * HOUR;
+const USAGE_PATHS = { usage: '/api/usage', apps: '/api/usage/apps' } as const;
 
 /** A string result is sent as text/plain, anything else as JSON. */
 type Handler = (request: IncomingMessage, name: string | undefined) => Promise<unknown> | unknown;
@@ -60,7 +64,29 @@ function wholeParam(request: IncomingMessage, name: string, fallback: number, mi
   return value;
 }
 
-function routes({ registry, bundles, runtime, guard, metrics, requests, ingressPort }: AdminDeps): Route[] {
+/** `from` and `to` in epoch ms over hourly buckets; the last 30 days by default. */
+function usageWindow(request: IncomingMessage): { readonly from: number; readonly to: number } {
+  const next = Math.floor(Date.now() / HOUR) * HOUR + HOUR;
+  const to = wholeParam(request, 'to', next, 0, Number.MAX_SAFE_INTEGER);
+  const from = wholeParam(request, 'from', to - USAGE_SPAN_MS, 0, Number.MAX_SAFE_INTEGER);
+  if (from >= to) throw new InputError('from must be before to');
+  return { from, to };
+}
+
+const zero = (): Record<string, number> => Object.fromEntries(USAGE_COUNTERS.map((c) => [c, 0]));
+
+/** Buckets of several apps summed into one row per start, oldest first. */
+function byStart(rows: readonly UsageBucket[]): (UsageCounters & { readonly start: number })[] {
+  const out = new Map<number, Record<string, number>>();
+  for (const b of rows) {
+    const sum = out.get(b.start) ?? { start: b.start, ...zero() };
+    for (const c of USAGE_COUNTERS) sum[c] += b[c];
+    out.set(b.start, sum);
+  }
+  return [...out.values()].sort((a, b) => a.start - b.start) as (UsageCounters & { readonly start: number })[];
+}
+
+function routes({ registry, bundles, runtime, guard, metrics, requests, usage, ingressPort }: AdminDeps): Route[] {
   const app = (name: string | undefined) => appName(name!);
   const found = <T>(value: T | null, name: string | undefined): T => {
     if (value === null) throw new NotFound(`no app named "${name}"`);
@@ -78,6 +104,37 @@ function routes({ registry, bundles, runtime, guard, metrics, requests, ingressP
     },
     { method: 'GET', path: at(ADMIN_PATHS.apps), handle: () => registry.listing() },
     { method: 'GET', path: at(ADMIN_PATHS.metrics), handle: () => metrics.snapshot() },
+    {
+      method: 'GET', path: at(USAGE_PATHS.usage), handle: async (request) => {
+        const query = new URL(request.url ?? '/', 'http://admin').searchParams;
+        const window = usageWindow(request);
+        const name = query.get('app');
+        const tenant = query.get('tenant');
+        if (name !== null) {
+          const app = name === '*' ? '*' : found(registry.view(appName(name)), name).app;
+          return { app: name, step: 3600, ...window, buckets: byStart(await usage.usage({ step: 3600, app, ...window })) };
+        }
+        if (tenant !== null) return { tenant, step: 3600, ...window, buckets: byStart(await usage.usage({ step: 3600, tenant: tenantName(tenant), ...window })) };
+        throw new InputError('app or tenant is required');
+      },
+    },
+    {
+      method: 'GET', path: at(USAGE_PATHS.apps), handle: async (request) => {
+        const query = new URL(request.url ?? '/', 'http://admin').searchParams;
+        const tenant = query.get('tenant');
+        const rows = await usage.usage({ step: 3600, ...usageWindow(request), ...(tenant !== null && { tenant: tenantName(tenant) }) });
+        const apps = new Map<AppId, { tenant: string | null; counts: Record<string, number> }>();
+        for (const b of rows) {
+          if (b.app === '*') continue;
+          const entry = apps.get(b.app) ?? { tenant: b.tenant, counts: zero() };
+          for (const c of USAGE_COUNTERS) entry.counts[c] += b[c];
+          apps.set(b.app, entry);
+        }
+        return [...apps].map(([id, { tenant: t, counts }]) => ({ app: registry.nameOf(id) ?? id, tenant: t, ...(counts as UsageCounters) }))
+          .sort((a, b) => b.requests - a.requests || (a.app < b.app ? -1 : 1))
+          .slice(0, wholeParam(request, 'limit', 50, 1, 1000));
+      },
+    },
     {
       method: 'GET', path: at(ADMIN_PATHS.requests), handle: (request) => requests
         .after(wholeParam(request, 'after', 0, 0, Number.MAX_SAFE_INTEGER), wholeParam(request, 'limit', 500, 1, RING))

@@ -4,7 +4,10 @@ import { test } from 'node:test';
 import { startAdmin } from './admin.ts';
 import { EventLog } from './events.ts';
 import { Metrics } from './metrics.ts';
-import { appName, DEFAULT_POLICY, parseManifest, subject, type AppId, type HealthCheck, type Runtime, type RuntimeKind } from './model.ts';
+import {
+  appName, DEFAULT_POLICY, DEFAULT_TENANT, parseManifest, subject, USAGE_COUNTERS,
+  type AppId, type HealthCheck, type ReplicaId, type Runtime, type RuntimeKind, type TenantName, type Usage,
+} from './model.ts';
 import { RequestLog } from './requests.ts';
 import { Runtimes } from './runtimes.ts';
 import { world } from './registry.fakes.ts';
@@ -20,10 +23,14 @@ async function admin(runtime?: Runtimes) {
     nameOf: (app) => registry.nameOf(app),
     probes: { redis: async () => 'up' },
     host: async () => ({ cpus: 1, load: [0, 0, 0], memory: { totalBytes: 1, freeBytes: 1 }, data: null }),
+    usage: store,
+    policy: () => registry.policy(),
+    view: (name) => registry.view(name),
+    replica: 'r1' as ReplicaId,
   });
   const requests = new RequestLog();
   const logs = { logs: (app: AppId, tail: number) => w.runtime.logs(app, tail), healthOf: () => [] };
-  const server = await startAdmin({ registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, requests, ingressPort: 18080 }, { port: 0 });
+  const server = await startAdmin({ registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, requests, usage: store, ingressPort: 18080 }, { port: 0 });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
     const raw = typeof body === 'string' ? body : body === undefined ? undefined : JSON.stringify(body);
@@ -155,4 +162,18 @@ test('GET /api/health lists every runtime kind with its checks and the global po
   });
   assert.deepEqual(body.policy, DEFAULT_POLICY);
   assert.deepEqual(calls, []);
+});
+
+test('GET /api/usage filters by app and by tenant', async (t) => {
+  const { call, server, registry, store } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  const survey = registry.view(appName('survey'))!.app;
+  const row = (app: AppId, tenant: TenantName, requests: number): Usage => ({
+    ...(Object.fromEntries(USAGE_COUNTERS.map((c) => [c, 0])) as Record<(typeof USAGE_COUNTERS)[number], number>),
+    app, tenant, step: 3600, start: 7_200_000, replica: 'r1' as ReplicaId, requests,
+  });
+  await store.putUsage([row(survey, DEFAULT_TENANT, 4), row('other0000001' as AppId, 'lab' as TenantName, 9)]);
+  const requests = async (query: string) => (await call('GET', `/api/usage?${query}&from=0&to=10800000`)).body.buckets.map((b: Usage) => b.requests);
+  assert.deepEqual([await requests('app=survey'), await requests('tenant=lab')], [[4], [9]]);
 });
