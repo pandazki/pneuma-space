@@ -4,7 +4,7 @@ import {
   DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS, USAGE_COUNTERS,
   type App, type AppId, type AppName, type AuditFilter, type AuditRecord, type Binding, type Change, type Delivery, type DeliveryFilter,
   type DeliveryId, type DeliveryState, type EventFilter, type EventRecord, type GuardRecord, type Instance, type InstanceLog, type LeaseTally, type Membership,
-  type Policy, type QuotaUsage, type Release, type ReleaseNumber, type Replica, type ReplicaId, type RowLock, type Stats, type StorageUsage,
+  type Policy, type QuotaUsage, type Release, type ReleaseNumber, type Replica, type ReplicaId, type RowLock, type Stats,
   type StoreOps, type Tenant, type TenantName, type Token, type Trigger, type TriggerName, type Usage, type UsageBucket, type UsageFilter,
   type UsageStep, type User,
 } from './model.ts';
@@ -33,7 +33,6 @@ export interface Session {
 const num = (v: unknown): number => Number(v);
 const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
 const json = (v: unknown) => JSON.parse(v as string);
-const GIB = 1024 ** 3;
 
 const toApp = (r: Row): App => ({
   name: r.name as AppName,
@@ -165,9 +164,12 @@ const limit = (n: number | undefined) => (n === undefined ? '' : ` LIMIT ${Math.
 
 export class SqlOps implements StoreOps {
   readonly #s: Session;
+  readonly #volumeGb: number;
 
-  constructor(session: Session) {
+  /** `volumeGb` is the provisioned size of one files or SQLite binding, what `storage_gb` counts (ADR 0023 item 4). */
+  constructor(session: Session, volumeGb: number) {
     this.#s = session;
+    this.#volumeGb = volumeGb;
   }
 
   #touch(change: Change): void {
@@ -319,11 +321,11 @@ export class SqlOps implements StoreOps {
          (SELECT count(*) FROM instance i JOIN app a ON a.id = i.app WHERE a.tenant = $1 AND i.state <> 'asleep') AS awake,
          (SELECT coalesce(sum(i.cpu_millis), 0) FROM instance i JOIN app a ON a.id = i.app WHERE a.tenant = $1 AND i.state <> 'asleep') AS cpu_millis,
          (SELECT coalesce(sum(i.memory_mb), 0) FROM instance i JOIN app a ON a.id = i.app WHERE a.tenant = $1 AND i.state <> 'asleep') AS memory_mb,
-         (SELECT coalesce(sum(s.bytes), 0) FROM storage_usage s JOIN app a ON a.id = s.app WHERE a.tenant = $1) AS storage_bytes`,
+         (SELECT count(*) FROM binding b JOIN app a ON a.id = b.app WHERE a.tenant = $1 AND (b.kind = 'files' OR b.provider = 'sqlite')) AS volumes`,
       [tenant],
     ))!;
     return {
-      apps: num(row.apps), awake: num(row.awake), cpu_millis: num(row.cpu_millis), memory_mb: num(row.memory_mb), storage_gb: num(row.storage_bytes) / GIB,
+      apps: num(row.apps), awake: num(row.awake), cpu_millis: num(row.cpu_millis), memory_mb: num(row.memory_mb), storage_gb: num(row.volumes) * this.#volumeGb,
     };
   }
 
@@ -605,26 +607,6 @@ export class SqlOps implements StoreOps {
       ['action = ?', filter.action], ['target = ?', filter.target],
     ]);
     return (await this.#s.all(`SELECT * FROM audit ${w.sql} ORDER BY id DESC${limit(filter.limit)}`, w.params)).map(toAudit);
-  }
-
-  async storageUsage(app?: AppId) {
-    const w = where([['app = ?', app]]);
-    return (await this.#s.all(`SELECT * FROM storage_usage ${w.sql} ORDER BY app, kind, provider`, w.params)).map((r): StorageUsage => ({
-      app: r.app as AppId, kind: r.kind as StorageUsage['kind'], provider: r.provider as StorageUsage['provider'],
-      bytes: num(r.bytes), measuredAt: num(r.measured_at),
-    }));
-  }
-
-  putStorageUsage(rows: readonly StorageUsage[]) {
-    return this.#s.atomic(async () => {
-      for (const u of rows) {
-        await this.#s.run(
-          `INSERT INTO storage_usage (app, kind, provider, bytes, measured_at) VALUES ($1, $2, $3, $4, $5)
-           ON CONFLICT (app, kind, provider) DO UPDATE SET bytes = excluded.bytes, measured_at = excluded.measured_at`,
-          [u.app, u.kind, u.provider, u.bytes, u.measuredAt],
-        );
-      }
-    });
   }
 
   async instanceLog(app: AppId) {

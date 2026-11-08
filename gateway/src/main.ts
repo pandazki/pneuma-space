@@ -45,7 +45,7 @@ const ingressPort = Number(process.env.PNEUMA_SPACE_HTTP_PORT ?? INGRESS_PORT);
 const config = providerConfig(process.env);
 const replica = (process.env.PNEUMA_SPACE_REPLICA ?? hostname()) as ReplicaId;
 
-const store = new SqliteStore(join(data, 'pneuma-space.sqlite3'));
+const store = new SqliteStore(join(data, 'pneuma-space.sqlite3'), { volumeGb: config.volumeGb });
 // SQLite: one replica, which leads at once (ADR 0020 item 7).
 const instances = new Instances(store, { replica, leader: true });
 await instances.ready();

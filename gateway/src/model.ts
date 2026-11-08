@@ -445,7 +445,7 @@ export const DEFAULT_QUOTA: Quota = { apps: 100, awake: 20, cpu_millis: 20000, m
 
 export type Refusal = { readonly resource: QuotaResource; readonly used: number; readonly limit: number; readonly ask: number };
 
-/** The one quota rule, at publish and at wake: refused when `used + ask` passes a limit. A new binding asks 0 GB, so only a tenant already over its storage is refused. */
+/** The one quota rule, at publish and at wake: refused when `used + ask` passes a limit. */
 export function admits(quota: Quota, used: QuotaUsage, ask: Partial<QuotaUsage>): Refusal | null {
   for (const resource of QUOTA_RESOURCES) {
     const limit = quota[resource];
@@ -759,14 +759,6 @@ export type AuditFilter = {
   readonly limit?: number;
 };
 
-export type StorageUsage = {
-  readonly app: AppId;
-  readonly kind: ResourceKind;
-  readonly provider: ProviderName;
-  readonly bytes: number;
-  readonly measuredAt: number;
-};
-
 /** The tail of an instance's log kept when it ended, one row per app. */
 export type InstanceLog = { readonly app: AppId; readonly release: ReleaseNumber; readonly endedAt: number; readonly reason: string; readonly tail: string };
 
@@ -829,7 +821,7 @@ export interface StoreOps {
   tenant(name: TenantName, lock?: RowLock): Promise<Tenant | null>;
   tenants(): Promise<Tenant[]>;
   putTenant(tenant: Tenant): Promise<void>;
-  /** Apps not purging, instances waking to stopping with their recorded cpu and memory, and measured storage in GiB. */
+  /** Apps not purging, instances waking to stopping with their recorded cpu and memory, and the provisioned GiB of files and SQLite bindings. */
   quotaUsed(tenant: TenantName): Promise<QuotaUsage>;
 
   user(id: string): Promise<User | null>;
@@ -896,9 +888,6 @@ export interface StoreOps {
   insertAudit(record: Omit<AuditRecord, 'id'>): Promise<number>;
   /** Newest first. */
   audit(filter: AuditFilter): Promise<AuditRecord[]>;
-
-  storageUsage(app?: AppId): Promise<StorageUsage[]>;
-  putStorageUsage(rows: readonly StorageUsage[]): Promise<void>;
 
   instanceLog(app: AppId): Promise<InstanceLog | null>;
   putInstanceLog(log: InstanceLog): Promise<void>;

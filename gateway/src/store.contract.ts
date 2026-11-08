@@ -5,11 +5,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { after, before, describe, test } from 'node:test';
 import {
   DEFAULT_POLICY, DEFAULT_QUOTA, DEFAULT_TENANT, IDEMPOTENCY_WINDOW_MS, USAGE_COUNTERS, changeKey,
-  type App, type AppId, type AppName, type Delivery, type DeliveryId, type Instance, type ReleaseNumber, type ReplicaId, type Store,
+  type App, type AppId, type AppName, type Binding, type Delivery, type DeliveryId, type Instance, type ReleaseNumber, type ReplicaId, type Store,
   type Subject, type TenantName, type TriggerName, type Usage,
 } from './model.ts';
 
-export type OpenStore = () => Promise<Store & { close(): Promise<void> }>;
+export type OpenStore = (options: { readonly volumeGb: number }) => Promise<Store & { close(): Promise<void> }>;
 
 const appId = (name: string) => `id-${name}` as AppId;
 const replica = 'replica-a' as ReplicaId;
@@ -45,7 +45,7 @@ export function storeContract(name: string, open: OpenStore): void {
   describe(`${name} store contract`, () => {
     let store: Awaited<ReturnType<OpenStore>>;
     before(async () => {
-      store = await open();
+      store = await open({ volumeGb: 2 });
     });
     after(() => store.close());
 
@@ -247,11 +247,18 @@ export function storeContract(name: string, open: OpenStore): void {
       assert.deepEqual(await store.audit({ target: 'audited' }), [{ ...row, id: second, at: 2, action: 'app.remove' }, { ...row, id: first }]);
     });
 
-    test('storage usage round-trips, one row per binding', async () => {
-      const measured = { app: appId('stored'), kind: 'files', provider: 'volume', bytes: 2 ** 33, measuredAt: 4 } as const;
-      await store.putStorageUsage([{ ...measured, bytes: 1 }]);
-      await store.putStorageUsage([measured]);
-      assert.deepEqual(await store.storageUsage(measured.app), [measured]);
+    test('quotaUsed counts each files and SQLite binding of the tenant at the provisioned volume size', async () => {
+      const tenant = 'violet' as TenantName;
+      await store.putApp(app('v1', { tenant }));
+      await store.putApp(app('v2'));
+      const bind = (name: string, kind: Binding['kind'], provider: Binding['provider']) =>
+        store.putBinding({ app: appId(name), kind, provider, state: 'suspended', resource: {} });
+      await bind('v1', 'files', 'volume');
+      await bind('v1', 'db', 'sqlite');
+      await bind('v1', 'db', 'postgres');
+      await bind('v1', 'object', 's3');
+      await bind('v2', 'files', 'volume');
+      assert.equal((await store.quotaUsed(tenant)).storage_gb, 4);
     });
 
     test('instance log keeps one row per app', async () => {
