@@ -1,3 +1,4 @@
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { startAdmin } from './admin.ts';
 import { Docker } from './docker.ts';
@@ -5,7 +6,7 @@ import { emit, events } from './events.ts';
 import { loadOrCreateSecret, LocalIdentity } from './identity.ts';
 import { Ingress } from './ingress.ts';
 import { hostSample, httpProbe, Metrics, profileProbe, tcpProbe } from './metrics.ts';
-import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId } from './model.ts';
+import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId } from './model.ts';
 import { composeProject, DockerInfra } from './infra.ts';
 import { createProviders, providerConfig, S3BundleStore } from './providers.ts';
 import { PlatformRegistry } from './registry.ts';
@@ -25,6 +26,7 @@ const network = process.env.PNEUMA_SPACE_NETWORK ?? 'pneuma-space';
 // The host port compose publishes the ingress on; the console links to apps through it.
 const ingressPort = Number(process.env.PNEUMA_SPACE_HTTP_PORT ?? INGRESS_PORT);
 const config = providerConfig(process.env);
+const replica = (process.env.PNEUMA_SPACE_REPLICA ?? hostname()) as ReplicaId;
 
 const store = new SqliteStore(join(data, 'pneuma-space.sqlite3'));
 const docker = new Docker();
@@ -38,7 +40,7 @@ const isolate = new IsolateRuntime({
 });
 const runtime = new Runtimes({ runtimes: [container, isolate], specFor, events });
 const registry = await PlatformRegistry.open({
-  store, runtime, guard: runtime, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => ingress.snapshot(),
+  store, runtime, guard: runtime, infra, bundles, providers: Object.values(createProviders(infra, runtime, config)), statsSource: async () => metrics.stats(),
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app) });
 const identity = new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), (hash) => store.token(hash));
@@ -60,6 +62,10 @@ const metrics = new Metrics({
     runner: profileProbe('runner', RUNNER_PORT),
   },
   host: () => hostSample(data),
+  usage: store,
+  policy: () => registry.policy(),
+  view: (name) => registry.view(name),
+  replica,
 });
 
 process.on('unhandledRejection', (error) => log('unhandled-rejection', { error: String(error) }));
@@ -75,7 +81,7 @@ await runtime.reconcile();
 void registry.resume();
 await scheduler.resume();
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
-const admin = await startAdmin({ registry, bundles, runtime, guard: runtime, metrics, requests, ingressPort }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const admin = await startAdmin({ registry, bundles, runtime, guard: runtime, metrics, requests, usage: store, ingressPort }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {
   ingress.flush().catch((error: Error) => log('flush-failed', { error: error.message }));

@@ -378,7 +378,7 @@ export const DEFAULT_POLICY: Policy = {
   failure_window_seconds: 60,
   restart_backoff_seconds: 5,
   cpu_millis: 1000,
-  memory_mb: 256,
+  memory_mb: 512,
   timezone: 'UTC',
   usage_retention_days: 90,
   events_retention_days: 14,

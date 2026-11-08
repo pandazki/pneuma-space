@@ -20,7 +20,7 @@ export type IngressDeps = {
   readonly identity: IdentityProvider;
   readonly bundles: Pick<BundleStore, 'open'>;
   readonly scheduler: Pick<Scheduler, 'invoke'>;
-  /** The last snapshot, loaded at startup (INV-7). */
+  /** The stored last access per app, loaded at startup (INV-7); counts start at zero in every process. */
   readonly stats: readonly Stats[];
   readonly flushStats: (stats: Stats[]) => Promise<void>;
   readonly deleteStats: (app: AppId) => Promise<void>;
@@ -114,7 +114,7 @@ export class Ingress {
 
   constructor(deps: IngressDeps) {
     this.#deps = deps;
-    for (const { app, requests, errors, lastAccessAt } of deps.stats) this.#stats.set(app, { requests, errors, lastAccessAt });
+    for (const { app, lastAccessAt } of deps.stats) this.#stats.set(app, { requests: 0, errors: 0, lastAccessAt });
     this.server = http.createServer({ requestTimeout: 0 }, (req, res) => void this.#request(req, res))
       .on('upgrade', (req: IncomingMessage, socket: net.Socket, head: Buffer) => void this.#upgrade(req, socket, head));
   }

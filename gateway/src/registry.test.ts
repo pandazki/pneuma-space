@@ -90,6 +90,12 @@ test('switching db_backend ensures a second db binding, suspends the first and e
   assert.equal(registry.runSpec(app)?.injection.env.FAKE_POSTGRES, (await store.bindings(app))[0].resource.name);
 });
 
+test('a global-only policy field is refused in a per-app override', async () => {
+  const { registry } = await world().open();
+  await publish(registry, {});
+  await assert.rejects(async () => registry.setAppPolicy(survey, { usage_retention_days: 30 } as never), InputError);
+});
+
 test('clearing db_backend is refused once the app has a db binding', async () => {
   const { registry } = await world().open();
   await publish(registry, { db: {} });
