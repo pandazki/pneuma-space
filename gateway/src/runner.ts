@@ -2,7 +2,7 @@
 // It judges nothing: hangs, exits and memory overruns are reported as events and the gateway's Guard decides.
 import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { Server, type AddressInfo } from 'node:net';
+import { Server } from 'node:net';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
@@ -38,7 +38,7 @@ export type RunnerEvent = {
 export type WorkerMessage =
   | { readonly type: 'pong'; readonly seq: number; readonly external: number }
   | { readonly type: 'listening'; readonly port: number }
-  | { readonly type: 'log'; readonly lines: readonly string[] }
+  | { readonly type: 'log'; readonly stream: 'stdout' | 'stderr'; readonly lines: readonly string[] }
   | { readonly type: 'dropped'; readonly count: number };
 /** `seq` is the newest event's; `after=latest` answers it with no events, for a cursor that starts now. */
 export type EventPage = { readonly startedAt: number; readonly seq: number; readonly events: readonly RunnerEvent[] };
@@ -49,6 +49,10 @@ const PORT = Number(env.PNEUMA_SPACE_RUNNER_PORT ?? RUNNER_PORT);
 const HEAP_CAP_MB = Number(env.PNEUMA_SPACE_RUNNER_WORKER_HEAP_MB ?? 256);
 const OFFHEAP_CAP_MB = Number(env.PNEUMA_SPACE_RUNNER_WORKER_OFFHEAP_MB ?? 256);
 const STUCK_LIMIT = Number(env.PNEUMA_SPACE_RUNNER_STUCK_LIMIT ?? 3);
+/** Worker ports; the runner's NetworkPolicy opens this range (ADR 0019 item 10). */
+const [PORT_LOW, PORT_HIGH] = (env.PNEUMA_SPACE_RUNNER_PORT_RANGE ?? '32768-60999').split('-').map(Number);
+/** A freed port waits this long, so a client of an ended worker does not reach the next worker on it (ADR 0019 item 8). */
+const PORT_COOLDOWN_MS = 30_000;
 const PING_MS = 1000;
 const SILENCE_MS = 3000;
 const TERMINATE_MS = 5000;
@@ -94,6 +98,10 @@ const ring: RunnerEvent[] = [];
 const logs = new Map<string, { readonly lines: string[]; bytes: number }>();
 /** One start or stop at a time per app, so a retried start joins the one in flight instead of racing its rename. */
 const queues = new Map<string, Promise<unknown>>();
+/** Ports a worker holds from allocation until its thread exits, and when each freed port was released. */
+const held = new Set<number>();
+const freed = new Map<number, number>();
+let nextPort = PORT_LOW;
 let seq = 0;
 let workers = 0;
 let pings = 0;
@@ -177,7 +185,7 @@ function parse(raw: unknown): WorkerMessage | null {
   const valid =
     m.type === 'pong' ? typeof m.seq === 'number' && typeof m.external === 'number'
     : m.type === 'listening' ? Number.isInteger(m.port)
-    : m.type === 'log' ? strings(m.lines)
+    : m.type === 'log' ? (m.stream === 'stdout' || m.stream === 'stderr') && strings(m.lines)
     : m.type === 'dropped' ? Number.isInteger(m.count)
     : false;
   return valid ? (m as WorkerMessage) : null;
@@ -192,12 +200,29 @@ function reject(inst: Instance): void {
   void terminate(inst);
 }
 
-async function freePort(): Promise<number> {
+async function bindable(port: number): Promise<boolean> {
   const probe = new Server();
-  await new Promise<void>((ok, fail) => probe.once('error', fail).listen(0, ok));
-  const { port } = probe.address() as AddressInfo;
+  if (!(await new Promise<boolean>((ok) => probe.once('error', () => ok(false)).listen(port, () => ok(true))))) return false;
   await new Promise((ok) => probe.close(ok));
-  return port;
+  return true;
+}
+
+/** Round-robin over the range, skipping held, cooling and otherwise bound ports; the worker binds the port itself. */
+async function allocate(): Promise<number> {
+  for (let tried = 0; tried <= PORT_HIGH - PORT_LOW; tried++) {
+    const port = nextPort;
+    nextPort = port >= PORT_HIGH ? PORT_LOW : port + 1;
+    if (held.has(port) || Date.now() - (freed.get(port) ?? -Infinity) < PORT_COOLDOWN_MS) continue;
+    held.add(port);
+    if (await bindable(port)) return port;
+    held.delete(port);
+  }
+  throw new HttpError(503, `no worker port in ${PORT_LOW}-${PORT_HIGH} is free and out of its ${PORT_COOLDOWN_MS} ms cooldown`);
+}
+
+function release(port: number): void {
+  held.delete(port);
+  freed.set(port, Date.now());
 }
 
 /** An uncaught value from the app, or a forged one; it may be anything, `undefined` included. */
@@ -251,17 +276,23 @@ async function start(app: string, request: StartRequest): Promise<Started> {
     await mkdir(target, { recursive: true });
     for (const [key, value] of Object.entries(binding.env)) storage[key] = value.replaceAll('{dir}', target);
   }
-  const port = await freePort();
+  const port = await allocate();
   const heapMb = Math.min(request.heapMb, HEAP_CAP_MB);
   const offheapMb = Math.min(request.heapMb, OFFHEAP_CAP_MB);
-  // No execArgv: any value replaces the inherited --permission, and with it the bans on child_process and addons.
-  const thread = new Worker(SHIM, {
-    workerData: { entry: pathToFileURL(join(dir, request.entry)).href, port },
-    env: { ...request.env, ...storage },
-    resourceLimits: { maxOldGenerationSizeMb: heapMb, maxYoungGenerationSizeMb: Math.max(8, Math.round(heapMb / 8)) },
-    stdout: true,
-    stderr: true,
-  });
+  let thread: Worker;
+  try {
+    // No execArgv: any value replaces the inherited --permission, and with it the bans on child_process and addons.
+    thread = new Worker(SHIM, {
+      workerData: { entry: pathToFileURL(join(dir, request.entry)).href, port },
+      env: { ...request.env, ...storage },
+      resourceLimits: { maxOldGenerationSizeMb: heapMb, maxYoungGenerationSizeMb: Math.max(8, Math.round(heapMb / 8)) },
+      stdout: true,
+      stderr: true,
+    });
+  } catch (error) {
+    release(port);
+    throw error;
+  }
   const exited = Promise.withResolvers<void>();
   const inst: Instance = {
     app, release: request.release, spec: request.spec, worker: `${startedAt}:${++workers}`, thread, since: Date.now(),
@@ -275,7 +306,12 @@ async function start(app: string, request: StartRequest): Promise<Started> {
     if (inst.ended) return;
     const message = parse(raw);
     if (message === null || (message.type === 'listening' && (inst.listening || message.port !== port))) return reject(inst);
-    if (message.type === 'log') for (const line of message.lines) append(app, line);
+    if (message.type === 'log') {
+      for (const line of message.lines) {
+        append(app, line);
+        process.stdout.write(`${JSON.stringify({ t: Date.now(), app, release: inst.release, stream: message.stream, line })}\n`);
+      }
+    }
     else if (message.type === 'dropped') append(app, `dropped ${message.count} lines`);
     else if (message.type === 'listening') {
       inst.listening = true;
@@ -298,6 +334,7 @@ async function start(app: string, request: StartRequest): Promise<Started> {
   });
   thread.on('exit', (exitCode) => {
     exited.resolve();
+    release(port);
     if (instances.get(app) === inst) instances.delete(app);
     ready.reject(new Error(`worker exited with code ${exitCode} before it listened${inst.error ? `: ${inst.error}` : ''}`));
     if (inst.oom) end(inst, 'oom', { reason: 'heap' });
@@ -375,7 +412,7 @@ async function route(request: IncomingMessage, url: URL): Promise<unknown> {
   if (method === 'POST' && resource === 'instances') {
     const app = segment(a);
     const parsed = await body(request);
-    return serial(app, () => start(app, parsed)).catch((error: Error) => { throw new HttpError(502, error.message); });
+    return serial(app, () => start(app, parsed)).catch((error: Error) => { throw error instanceof HttpError ? error : new HttpError(502, error.message); });
   }
   if (method === 'DELETE' && resource === 'instances') {
     const app = segment(a);

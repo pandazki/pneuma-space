@@ -95,8 +95,8 @@ const routes = {
   '/stdio': () => JSON.stringify([process.stdin, process.stdout, process.stderr, console._stdout, console._stderr].flatMap((s) => Object.getOwnPropertySymbols(s).map(String)).filter((k) => k === 'Symbol(kPort)')),
   '/partial': () => { process.stdout.write('par'); process.stdout.write('tial\\n'); return 'written'; },
   '/chatter': () => { for (const end = Date.now() + 1500; Date.now() < end;) console.log('chatter'); return 'printed'; },
-  '/forge': async () => { (await reached).shim.postMessage({ type: 'log', lines: 1 }); return 'posted'; },
-  '/sparse': async () => { (await reached).shim.postMessage({ type: 'log', lines: [, 'hole'] }); return 'posted'; },
+  '/forge': async () => { (await reached).shim.postMessage({ type: 'log', stream: 'stdout', lines: 1 }); return 'posted'; },
+  '/sparse': async () => { (await reached).shim.postMessage({ type: 'log', stream: 'stdout', lines: [, 'hole'] }); return 'posted'; },
   '/bogus': async () => { (await reached).internal.postMessage({ type: 'bogus' }); return 'posted'; },
   '/oom': async () => {
     const error = Buffer.concat([Buffer.from([1]), v8.serialize({ code: 'ERR_WORKER_OUT_OF_MEMORY' })]);
@@ -136,8 +136,10 @@ export async function serveBundle(t: TestContext, files: Record<string, string> 
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}/bundle.tar`;
 }
 
-/** `exited` resolves with the signal that ended the runner, or its exit code. */
-export type RunnerProcess = { readonly url: string; readonly data: string; readonly pid: number; readonly exited: Promise<string | number | null>; stop(): Promise<void> };
+/** `exited` resolves with the signal that ended the runner, or its exit code; `stdout` holds every line it printed. */
+export type RunnerProcess = {
+  readonly url: string; readonly data: string; readonly pid: number; readonly exited: Promise<string | number | null>; readonly stdout: readonly string[]; stop(): Promise<void>;
+};
 
 /** The runner as compose runs it, with the permission flags, on an ephemeral port and a scratch /data. */
 export async function startRunner(t: TestContext, env: Record<string, string> = {}, data = tempDir(t, 'pneuma-space-runner-')): Promise<RunnerProcess> {
@@ -151,14 +153,16 @@ export async function startRunner(t: TestContext, env: Record<string, string> = 
     await exited;
   };
   t.after(stop);
-  for await (const line of createInterface({ input: child.stdout! })) {
-    const event = JSON.parse(line);
-    if (event.ev === 'runner-ready') {
-      child.stdout!.resume();
-      return { url: `http://127.0.0.1:${event.port}`, data, pid: child.pid!, exited, stop };
-    }
-  }
-  throw new Error('runner exited before it was ready');
+  const stdout: string[] = [];
+  const ready = Promise.withResolvers<number>();
+  createInterface({ input: child.stdout! })
+    .on('line', (line) => {
+      stdout.push(line);
+      const event = JSON.parse(line);
+      if (event.ev === 'runner-ready') ready.resolve(event.port);
+    })
+    .once('close', () => ready.reject(new Error('runner exited before it was ready')));
+  return { url: `http://127.0.0.1:${await ready.promise}`, data, pid: child.pid!, exited, stdout, stop };
 }
 
 /** Probes `url` every 50 ms until stopped; resolves with the number of failed probes. */

@@ -52,7 +52,7 @@ const budget = { at: performance.now(), spent: 0, dropped: 0, notice: false };
 const EMPTY = Buffer.alloc(0);
 const NEWLINE = Buffer.from('\n');
 /** Per stream, the start of a line whose newline is not written yet, already cut to LINE_BYTES. */
-type Capture = { held: Buffer };
+type Capture = { readonly stream: 'stdout' | 'stderr'; held: Buffer };
 const captures: Capture[] = [];
 
 function refill(): void {
@@ -82,7 +82,7 @@ function logged(capture: Capture, bytes: Buffer): void {
     capture.held = EMPTY;
     start = i + 1;
   }
-  if (lines.length) post({ type: 'log', lines });
+  if (lines.length) post({ type: 'log', stream: capture.stream, lines });
   if (budget.dropped) noticeLater();
 }
 
@@ -106,12 +106,12 @@ function noticeLater(): void {
 // Node's own stdio streams each hold an internal port whose unknown messages fail an assertion on the runner's main thread.
 // Node's worker bootstrap calls this on process.stdout and process.stderr, by name, whenever the runner reads their native stream.
 const wantsMore = Object.getOwnPropertySymbols(Object.getPrototypeOf(process.stdout)).find((key) => key.description === 'kStdioWantsMoreDataCallback')!;
-const sink = () => {
-  const capture: Capture = { held: EMPTY };
+const sink = (stream: Capture['stream']) => {
+  const capture: Capture = { stream, held: EMPTY };
   captures.push(capture);
   return Object.assign(new Writable({ write(chunk: Buffer, _encoding, done) { logged(capture, chunk); done(); } }), { [wantsMore]: () => {} });
 };
-const [stdout, stderr] = [sink(), sink()];
+const [stdout, stderr] = [sink('stdout'), sink('stderr')];
 const stdin = new Readable({ read() { this.push(null); } });
 for (const [name, value] of Object.entries({ stdout, stderr, stdin })) Object.defineProperty(process, name, { value, enumerable: true });
 // The global console keeps the streams it first wrote to.

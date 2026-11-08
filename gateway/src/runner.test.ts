@@ -469,3 +469,38 @@ test('a final line with no newline is logged when the worker exits', async (t) =
   await nextEvent(runner, app.worker, 3000);
   assert.deepEqual((await call<string>(runner, 'GET', '/logs/tail')).split('\n'), ['fixture ready', 'tail']);
 });
+
+/** Two consecutive ports nothing is bound to. */
+async function freePair(): Promise<number> {
+  const bindable = (port: number) => new Promise<boolean>((ok) => {
+    const probe = createServer().once('error', () => ok(false)).listen(port, () => probe.close(() => ok(true)));
+  });
+  for (;;) {
+    const low = 20_000 + Math.floor(Math.random() * 10_000);
+    if ((await bindable(low)) && (await bindable(low + 1))) return low;
+  }
+}
+
+test('worker ports advance round-robin and a freed port is not handed out again within its cooldown', async (t) => {
+  const low = await freePair();
+  const runner = await startRunner(t, { ...HEALTHY, PNEUMA_SPACE_RUNNER_PORT_RANGE: `${low}-${low + 1}` });
+  const bundleUrl = await serveBundle(t);
+  const ports: number[] = [];
+  for (const _ of [1, 2]) {
+    ports.push((await start(runner, bundleUrl, 'a')).port);
+    await call(runner, 'DELETE', '/instances/a');
+  }
+  assert.deepEqual(ports, [low, low + 1]);
+  const third = await fetch(`${runner.url}/instances/a`, {
+    method: 'POST', body: JSON.stringify({ release: 1, spec: 's', bundleUrl, entry: 'app.mjs', env: {}, storage: [], heapMb: 64, readyMs: 5000 }),
+  });
+  assert.equal(third.status, 503);
+});
+
+test('a worker line is also written to the runner stdout as one JSON line', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  await start(runner, await serveBundle(t), 'printer');
+  for (const end = Date.now() + 5000; !runner.stdout.some((l) => l.includes('fixture ready')); await sleep(50)) assert.ok(Date.now() < end, 'the line reached stdout');
+  const line = JSON.parse(runner.stdout.find((l) => l.includes('fixture ready'))!);
+  assert.deepEqual({ ...line, t: typeof line.t }, { t: 'number', app: 'printer', release: 1, stream: 'stdout', line: 'fixture ready' });
+});
