@@ -1,0 +1,292 @@
+# ADR 0019 item 10, plus the gateway metrics policy of ADR 0024 item 7.
+# An organization-hosted service replaces the Pod peer of its apps-reach policy with an ipBlock (README.md).
+# REPLACE_ME_*_CIDR values must equal PNEUMA_SPACE_K8S_CLUSTER_CIDRS in 20-config.yaml; check.mjs compares them.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pneuma-space-apps-default-deny
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pneuma-space-apps-from-gateway
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  podSelector:
+    matchLabels:
+      pneuma-space.role: instance
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pneuma-space
+          podSelector:
+            matchLabels:
+              pneuma-space.role: gateway
+      ports:
+        - port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pneuma-space-apps-dns
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  podSelector:
+    matchLabels:
+      pneuma-space.role: instance
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pneuma-space-apps-reach-postgres
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  podSelector:
+    matchLabels:
+      pneuma-space.reach.postgres: "1"
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pneuma-space
+          podSelector:
+            matchLabels:
+              pneuma-space.service: postgres
+      ports:
+        - port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pneuma-space-apps-reach-redis
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  podSelector:
+    matchLabels:
+      pneuma-space.reach.redis: "1"
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pneuma-space
+          podSelector:
+            matchLabels:
+              pneuma-space.service: redis
+      ports:
+        - port: 6379
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pneuma-space-apps-reach-object
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  podSelector:
+    matchLabels:
+      pneuma-space.reach.object: "1"
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pneuma-space
+          podSelector:
+            matchLabels:
+              pneuma-space.service: object
+      ports:
+        - port: 9000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pneuma-space-apps-reach-coturn
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  podSelector:
+    matchLabels:
+      pneuma-space.reach.coturn: "1"
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: pneuma-space
+          podSelector:
+            matchLabels:
+              pneuma-space.service: coturn
+      ports:
+        - port: 3478
+          protocol: UDP
+        - port: 3478
+          protocol: TCP
+        - port: 49160
+          endPort: 49200
+          protocol: UDP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pneuma-space-apps-internet
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  podSelector:
+    matchLabels:
+      pneuma-space.role: instance
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [REPLACE_ME_POD_CIDR, REPLACE_ME_SERVICE_CIDR, REPLACE_ME_NODE_CIDR]
+---
+# The worker port range is the Linux ephemeral range the runner takes worker ports from.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pneuma-space-runner-from-gateway
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  podSelector:
+    matchLabels:
+      pneuma-space.role: runner
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              pneuma-space.role: gateway
+      ports:
+        - port: 8082
+        - port: 32768
+          endPort: 60999
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              pneuma-space.service: postgres
+      ports:
+        - port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              pneuma-space.service: redis
+      ports:
+        - port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              pneuma-space.service: object
+      ports:
+        - port: 9000
+    - to:
+        - podSelector:
+            matchLabels:
+              pneuma-space.service: coturn
+      ports:
+        - port: 3478
+          protocol: UDP
+        - port: 3478
+          protocol: TCP
+        - port: 49160
+          endPort: 49200
+          protocol: UDP
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [REPLACE_ME_POD_CIDR, REPLACE_ME_SERVICE_CIDR, REPLACE_ME_NODE_CIDR]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pneuma-space-platform-db
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  podSelector:
+    matchLabels:
+      pneuma-space.service: store
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              pneuma-space.role: gateway
+      ports:
+        - port: 5432
+---
+# Selecting the gateway for ingress denies everything not listed, so the ingress and admin ports stay open to all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pneuma-space-gateway-metrics
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  podSelector:
+    matchLabels:
+      pneuma-space.role: gateway
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: 8080
+        - port: 8081
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: REPLACE_ME_MONITORING_NAMESPACE
+      ports:
+        - port: 9090

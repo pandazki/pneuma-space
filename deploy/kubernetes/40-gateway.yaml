@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pneuma-space-gateway
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+    pneuma-space.role: gateway
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      pneuma-space.role: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: pneuma-space
+        pneuma-space.role: gateway
+    spec:
+      serviceAccountName: pneuma-space-gateway
+      # preStop 5 s, then drain_timeout_seconds (default 30) for draining instances, then shutdown.
+      terminationGracePeriodSeconds: 45
+      imagePullSecrets:
+        - name: pneuma-space-registry
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    pneuma-space.role: gateway
+      containers:
+        - name: gateway
+          image: pneuma-space-gateway
+          envFrom:
+            - configMapRef:
+                name: pneuma-space-gateway
+            - secretRef:
+                name: pneuma-space-secrets
+          env:
+            - name: PNEUMA_SPACE_REPLICA
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: admin
+              containerPort: 8081
+            - name: metrics
+              containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: admin
+            periodSeconds: 2
+            failureThreshold: 2
+          lifecycle:
+            preStop:
+              exec:
+                command: [sleep, "5"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: registry
+              mountPath: /etc/pneuma-space/registry
+              readOnly: true
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: registry
+          secret:
+            secretName: pneuma-space-registry
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pneuma-space-gateway
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  selector:
+    pneuma-space.role: gateway
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: admin
+      port: 8081
+      targetPort: admin
+---
+# PNEUMA_SPACE_PEERS: resolves to every ready replica for the request fan-out (ADR 0024 item 5).
+apiVersion: v1
+kind: Service
+metadata:
+  name: pneuma-space-gateway-peers
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  clusterIP: None
+  selector:
+    pneuma-space.role: gateway
+  ports:
+    - name: admin
+      port: 8081
+      targetPort: admin
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pneuma-space-gateway
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      pneuma-space.role: gateway

@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pneuma-space-gateway
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+data:
+  PNEUMA_SPACE_PLANE: kubernetes
+  PNEUMA_SPACE_DATA: /data
+  PNEUMA_SPACE_APPS_ORIGIN: https://*.REPLACE_ME_APPS_DOMAIN
+  PNEUMA_SPACE_PLATFORM_ADMINS: REPLACE_ME_PLATFORM_ADMINS
+  PNEUMA_SPACE_PEERS: pneuma-space-gateway-peers
+  PNEUMA_SPACE_METRICS_PORT: "9090"
+  PNEUMA_SPACE_STORE_COMMANDS: "4"
+  PNEUMA_SPACE_CPU_REQUEST_MILLIS: "100"
+  PNEUMA_SPACE_REGISTRY: REPLACE_ME_REGISTRY
+  PNEUMA_SPACE_REGISTRY_AUTH: /etc/pneuma-space/registry/.dockerconfigjson
+  PNEUMA_SPACE_K8S_PULL_SECRETS: pneuma-space-registry
+  PNEUMA_SPACE_K8S_NODE_SELECTOR: ""
+  PNEUMA_SPACE_K8S_FS_GROUP: "2000"
+  PNEUMA_SPACE_K8S_RESTRICTED: ""
+  PNEUMA_SPACE_K8S_PENDING_SECONDS: "60"
+  PNEUMA_SPACE_K8S_STORAGE_CLASS: ""
+  PNEUMA_SPACE_K8S_VOLUME_SIZE: 1Gi
+  PNEUMA_SPACE_K8S_CLUSTER_CIDRS: REPLACE_ME_POD_CIDR,REPLACE_ME_SERVICE_CIDR,REPLACE_ME_NODE_CIDR
+  PNEUMA_SPACE_IDENTITY: upstream
+  PNEUMA_SPACE_IDENTITY_HEADER: REPLACE_ME_IDENTITY_HEADER
+  PNEUMA_SPACE_IDENTITY_JWKS_URL: REPLACE_ME_IDENTITY_JWKS_URL
+  PNEUMA_SPACE_IDENTITY_KEYS_FILE: ""
+  PNEUMA_SPACE_IDENTITY_ISSUER: REPLACE_ME_IDENTITY_ISSUER
+  PNEUMA_SPACE_IDENTITY_AUDIENCE: REPLACE_ME_IDENTITY_AUDIENCE
+  PNEUMA_SPACE_CONSOLE_AUDIENCE: REPLACE_ME_CONSOLE_AUDIENCE
+  PNEUMA_SPACE_IDENTITY_USER_CLAIM: sub
+  PNEUMA_SPACE_IDENTITY_NAME_CLAIMS: name,email
+  PNEUMA_SPACE_IDENTITY_GROUPS_CLAIM: groups
+  PNEUMA_SPACE_IDENTITY_LOGIN_URL: ""
+  PNEUMA_SPACE_IDENTITY_LOGOUT_URL: ""
+  PNEUMA_SPACE_IDENTITY_STRIP_COOKIES: ""
+  PNEUMA_SPACE_OBJECT_ENDPOINT: http://rustfs:9000
+  PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT: https://REPLACE_ME_OBJECTS_HOST
+  PNEUMA_SPACE_RTC_PUBLIC_HOST: REPLACE_ME_RTC_PUBLIC_HOST
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pneuma-space-secrets
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+type: Opaque
+stringData:
+  PNEUMA_SPACE_STORE_URL: postgres://pneuma_space:REPLACE_ME_STORE_PASSWORD@pneuma-space-store:5432/pneuma_space?sslmode=disable
+  PNEUMA_SPACE_POSTGRES_PASSWORD: REPLACE_ME_POSTGRES_PASSWORD
+  PNEUMA_SPACE_REDIS_PASSWORD: REPLACE_ME_REDIS_PASSWORD
+  PNEUMA_SPACE_OBJECT_ROOT_USER: REPLACE_ME_OBJECT_ROOT_USER
+  PNEUMA_SPACE_OBJECT_ROOT_PASSWORD: REPLACE_ME_OBJECT_ROOT_PASSWORD
+  PNEUMA_SPACE_RTC_SECRET: REPLACE_ME_RTC_SECRET
+---
+# The gateway reads it to resolve tags to digests and pulls its own image with it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pneuma-space-registry
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+type: kubernetes.io/dockerconfigjson
+stringData:
+  .dockerconfigjson: '{"auths":{"REPLACE_ME_REGISTRY_HOST":{"auth":"REPLACE_ME_REGISTRY_BASIC_AUTH"}}}'
+---
+# Instance Pods pull with this copy, named by PNEUMA_SPACE_K8S_PULL_SECRETS.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pneuma-space-registry
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+type: kubernetes.io/dockerconfigjson
+stringData:
+  .dockerconfigjson: '{"auths":{"REPLACE_ME_REGISTRY_HOST":{"auth":"REPLACE_ME_REGISTRY_BASIC_AUTH"}}}'

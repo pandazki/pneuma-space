@@ -1,0 +1,333 @@
+# Apps' `db` backend when an app's db_backend is postgres; compose service `postgres`.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pneuma-space-postgres
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+    pneuma-space.service: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      pneuma-space.service: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: pneuma-space
+        pneuma-space.service: postgres
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pneuma-space-secrets
+                  key: PNEUMA_SPACE_POSTGRES_PASSWORD
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, postgres]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/part-of: pneuma-space
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  selector:
+    pneuma-space.service: postgres
+  ports:
+    - name: postgres
+      port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pneuma-space-redis
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+    pneuma-space.service: redis
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      pneuma-space.service: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: pneuma-space
+        pneuma-space.service: redis
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          # requirepass is ignored once an aclfile is loaded, so the default user's password is rewritten into the file at every start.
+          command:
+            - sh
+            - -c
+            - 'touch /data/users.acl && sed -i "/^user default /d" /data/users.acl && echo "user default on >$PNEUMA_SPACE_REDIS_PASSWORD ~* &* +@all" >> /data/users.acl && exec redis-server --appendonly yes --aclfile /data/users.acl'
+          env:
+            - name: PNEUMA_SPACE_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pneuma-space-secrets
+                  key: PNEUMA_SPACE_REDIS_PASSWORD
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/part-of: pneuma-space
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  selector:
+    pneuma-space.service: redis
+  ports:
+    - name: redis
+      port: 6379
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pneuma-space-rustfs
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+    pneuma-space.service: object
+spec:
+  serviceName: rustfs
+  replicas: 1
+  selector:
+    matchLabels:
+      pneuma-space.service: object
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: pneuma-space
+        pneuma-space.service: object
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: rustfs
+          image: rustfs/rustfs:latest
+          env:
+            - name: RUSTFS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: pneuma-space-secrets
+                  key: PNEUMA_SPACE_OBJECT_ROOT_USER
+            - name: RUSTFS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: pneuma-space-secrets
+                  key: PNEUMA_SPACE_OBJECT_ROOT_PASSWORD
+          ports:
+            - name: s3
+              containerPort: 9000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: s3
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/part-of: pneuma-space
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 50Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  selector:
+    pneuma-space.service: object
+  ports:
+    - name: s3
+      port: 9000
+---
+# Browsers reach TURN on PNEUMA_SPACE_RTC_PUBLIC_HOST, which this ClusterIP Service does not expose (README.md).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pneuma-space-coturn
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+    pneuma-space.service: coturn
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      pneuma-space.service: coturn
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: pneuma-space
+        pneuma-space.service: coturn
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: coturn
+          image: coturn/coturn:4.6
+          args:
+            - --use-auth-secret
+            - --static-auth-secret=$(PNEUMA_SPACE_RTC_SECRET)
+            - --realm=pneuma
+            - --listening-port=3478
+            - --min-port=49160
+            - --max-port=49200
+            - --no-tls
+            - --no-dtls
+            - --log-file=stdout
+            - --no-cli
+          env:
+            - name: PNEUMA_SPACE_RTC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: pneuma-space-secrets
+                  key: PNEUMA_SPACE_RTC_SECRET
+          ports:
+            - name: turn-udp
+              containerPort: 3478
+              protocol: UDP
+            - name: turn-tcp
+              containerPort: 3478
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coturn
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  selector:
+    pneuma-space.service: coturn
+  ports:
+    - name: turn-udp
+      port: 3478
+      protocol: UDP
+    - name: turn-tcp
+      port: 3478
+      protocol: TCP
+---
+# Providers inject the compose host names (postgres:5432, redis:6379, rustfs:9000); these aliases resolve them for instance Pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  type: ExternalName
+  externalName: postgres.pneuma-space.svc.cluster.local
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  type: ExternalName
+  externalName: redis.pneuma-space.svc.cluster.local
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs
+  namespace: pneuma-space-apps
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+spec:
+  type: ExternalName
+  externalName: rustfs.pneuma-space.svc.cluster.local
