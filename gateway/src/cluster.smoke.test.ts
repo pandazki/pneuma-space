@@ -1,5 +1,5 @@
 // AC-OPS-11, 12, 14, 15 and 16 against a platform deployed on the cluster of PNEUMA_SPACE_TEST_KUBECONTEXT (see kube.harness.ts), through its admin API
-// at PNEUMA_SPACE_TEST_ADMIN_URL (default http://127.0.0.1:18081, the dev-cluster port-forward). PNEUMA_SPACE_TEST_IDENTITY_HEADER carries
+// at PNEUMA_SPACE_TEST_ADMIN_URL (default http://127.0.0.1:38081, the port-forward of deploy/kubernetes/README.md, "Local cluster"). PNEUMA_SPACE_TEST_IDENTITY_HEADER carries
 // PNEUMA_SPACE_TEST_ADMIN_JWT, a platform admin, or PNEUMA_SPACE_TEST_TENANT_JWT, an admin of PNEUMA_SPACE_TEST_TENANT (default `default`) only.
 // PNEUMA_SPACE_TEST_APP_IMAGE is an image the platform resolves that listens on 8000; PNEUMA_SPACE_TEST_STUCK_IMAGE, one that never does, enables
 // AC-OPS-15. Drain stops every instance on the node, the test's and any other.
@@ -11,7 +11,7 @@ import { kubectl, NAMESPACE, skip } from './kube.harness.ts';
 import { ADMIN_PATHS, type AuditRecord, type ClusterView, type Release } from './model.ts';
 
 const env = process.env;
-const ADMIN = env.PNEUMA_SPACE_TEST_ADMIN_URL ?? 'http://127.0.0.1:18081';
+const ADMIN = env.PNEUMA_SPACE_TEST_ADMIN_URL ?? 'http://127.0.0.1:38081';
 const TENANT = env.PNEUMA_SPACE_TEST_TENANT ?? 'default';
 const PLATFORM = 'pneuma-space';
 const RUNNER = 'pneuma-space-runner';
