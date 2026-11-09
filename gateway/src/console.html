@@ -734,7 +734,7 @@ button.pdots:hover .caret { color: var(--ink); }
 .nh b { font-size: 13.5px; }
 .nh .grow { flex: 1; }
 .loads { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 20px; }
-.ubar > div:first-child { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.ubar > div:first-child { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; font-size: 12px; color: var(--ink-2); }
 .ubar .num { font-size: 11.5px; color: var(--ink-3); }
 .ubar .bar { margin-top: 5px; }
 .groups { display: grid; gap: 10px; padding-bottom: 14px !important; }
@@ -854,6 +854,36 @@ input.lim-in { width: 96px; height: 22px; padding: 0 6px; border-radius: 6px; te
 .dout:empty { display: none; }
 .dout { display: flex; justify-content: flex-end; }
 @media (max-width: 900px) { .dside { justify-items: start; width: 100%; } .dact { justify-content: flex-start; } .trow { grid-template-columns: minmax(0, 1fr) auto; } }
+.plist { display: grid; padding: 2px 16px; }
+.prow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; gap: 6px 14px; min-height: 52px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.plist > .prow:last-of-type, .plist details .prow:last-child { border-bottom: 0; }
+.prow.gone { opacity: .6; }
+.prow .av { width: 28px; height: 28px; border-radius: 50%; background: var(--accent-tint); color: var(--accent-ink); font: 600 12px/28px var(--font); text-align: center; }
+.pwho { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+.pwho b { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+.pwho .mono { font-size: 11.5px; }
+.pmeta { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.prow > :last-child:not(.more) { grid-column: span 2; }
+.addrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 12px; padding: 12px; }
+.addrow input { flex: 1 1 200px; max-width: 320px; }
+.qbars { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 14px 24px; }
+.tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 12px; margin-top: 4px; }
+.tcard { display: grid; gap: 12px; align-content: start; color: var(--ink); }
+.tcard:hover { text-decoration: none; box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-sm); }
+.tcard.loading { opacity: .7; }
+.th { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.th b { font-size: 14px; font-weight: 600; }
+.th .when { margin-left: auto; font-size: 11.5px; }
+.tmeta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-2); }
+.tmeta .mono { font-size: 11.5px; }
+.tbars { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 20px; }
+.bar.none { background: none; box-shadow: none; border-top: 1px dashed var(--line-strong); border-radius: 0; height: 0; margin-top: 7px; }
+dialog { width: min(480px, calc(100vw - 32px)); }
+dialog .form { margin: -8px 0 20px; gap: 14px; }
+dialog .form .fields { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+dialog .form .field { margin: 0; }
+dialog .msg.err { margin: -8px 0 16px; }
+@media (max-width: 560px) { .prow { grid-template-columns: auto minmax(0, 1fr) auto; } .prow .pmeta { grid-column: 2 / -1; grid-row: 2; white-space: normal; } .tbars { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) {
   .frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; box-shadow: none; }
   aside { position: relative; width: auto; height: auto; padding: 16px 20px; border-right: 0; border-bottom: 1px dashed var(--line); }
@@ -909,6 +939,7 @@ input.lim-in { width: 96px; height: 22px; padding: 0 6px; border-radius: 6px; te
 <script>
 const I18N = {
   zh: {
+    'm.seen': '最近', 'm.roleOf': '{id} 的角色', 'm.group.admin': '管理员', 'm.group.member': '成员', 'm.removeItem': '移出租户…', 'm.removeNote': '他签发的个人令牌一并失效', 'tk.by': '签发人', 'tk.revokeItem': '吊销…', 'tk.revokeNote': '30 秒内在每个副本失效', 'tk.revokedN.one': '已吊销 {n} 个', 'tk.revokedN.other': '已吊销 {n} 个', 'q.used': '已用 {n}', 'q.edit': '修改上限…', 'q.editNote': '超出的部分不会被收回，只挡新的', 'q.editTitle': '修改 {tenant} 的配额', 'q.editBody': '留空表示不限。降到已用量以下不会停掉已有的应用或实例，只拒绝新的发布和唤醒。', 'q.save': '保存配额', 'team.youAdmin': '你是管理员', 'team.youMember': '你是成员', 'tn.open': '打开 {name} 的团队页', 'tn.adminsAre': '管理员', 'tn.createdAgo': '{ago}创建', 'tn.members.one': '{n} 名成员', 'tn.members.other': '{n} 名成员', 'tn.new': '新建租户', 'tn.q.apps': '应用', 'tn.q.awake': '醒着', 'tn.q.memory_mb': '内存 MiB', 'tn.q.storage_gb': '存储 GiB',
     'd.liftTitle': '解除 {name} 的隔离？', 'd.olderDeliveries.one': '更早的 {n} 次', 'd.olderDeliveries.other': '更早的 {n} 次', 'd.liftBody': '失败计数清零，下一次请求重新唤醒它。原因没修好会再次被隔离。', 'ac.title': '谁能打开 {name}', 'ac.save': '保存访问范围', 'd.liftNote': '下一次请求重新唤醒', 'ac.change': '更改访问…', 'd.removeItem': '移除…', 'd.removeNote': '地址 404，数据保留', 'd.purgeItem': '清除数据…', 'd.purgeNote': '删除全部数据，无法撤销', 'd.att.failed.one': '{n} 次投递失败', 'd.att.failed.other': '{n} 次投递失败', 'd.att.toDeliveries': '看投递', 'd.att.errors': '24 小时错误率 {pct}', 'd.att.errorsWhy': '{requests} 次请求里 {errors} 次错误', 'd.toLogs': '跳到日志', 'd.att.slow': '最近一次唤醒用了 {ms}，超过 3 秒门槛', 'd.att.slowWhy': '{at} 唤醒；看启动日志，或调大就绪超时', 'd.att.removed': '已移除：地址返回 404', 'd.att.removedWhy': '卷、数据库、键前缀和 bucket 都还在。再次发布即恢复，只有清除才删除。', 'd.bundle': '静态包', 'empty.releases': '还没有发布。', 'd.olderReleases.one': '更早的 {n} 个版本', 'd.olderReleases.other': '更早的 {n} 个版本', 'd.scheduledFor': '计划 {at}', 'd.attempts.one': '尝试 {n} 次', 'd.attempts.other': '尝试 {n} 次', 'd.nextAttempt': '下次尝试 {ago}', 'sec.data': '数据', 'sec.dataDesc': '每种能力的数据由哪个提供方持有、放在哪里。移除不动它们，只有清除删除。',
     'ap.search': '搜索应用或租户', 'ap.req24': '24 小时请求', 'ap.staticLine': '静态站点，请求直接返回文件，不唤醒', 'apps.filter': '按名称筛选', 'ap.b.awake': '醒着', 'ap.b.asleep': '睡眠', 'ap.b.quarantined': '隔离', 'ap.b.removed': '已移除', 'ap.in.awake': '醒着', 'ap.in.asleep': '睡眠', 'ap.in.waking': '唤醒中', 'ap.in.draining': '排空中', 'ap.in.stopping': '停止中', 'ap.never': '还没唤醒过', 'ap.quarantined': '隔离中 · {reason}', 'ap.sparkTip': '{requests} 请求 · {errors} 错误', 'ap.sparkLabel': '24 小时 {requests} 次请求，{errors} 次错误', 'ap.errors.one': '{n} 次错误', 'ap.errors.other': '{n} 次错误', 'ap.lastAccess': '最近访问', 'ap.removedNote': '地址返回 404，数据保留', 'ap.awakeN': '醒着 {n}', 'ap.groupRequests': '24 小时 {n} 次请求',
     'tp.lane.container.sub.k8s': 'Kubernetes · 每应用一个 Pod', 'tp.engine.container.k8s': 'Kubernetes', 'tp.unprobed.k8s': '随集群，不探测',
@@ -1111,7 +1142,7 @@ const I18N = {
     'nav.team': '团队', 'col.actions': '操作', 'top.tenant': '租户', 'lb.find': '查找', 'tn.all': '全部租户', 'top.signOut': '退出', 'top.platformAdmin': '平台管理员',
     'col.tenant': '租户', 'col.member': '成员', 'col.role': '角色', 'col.lastSeen': '最近登录', 'col.label': '标签', 'col.subject': '主体',
     'col.createdBy': '签发人', 'col.display': '显示名', 'col.apps': '应用', 'role.admin': '管理员', 'role.member': '成员',
-    'team.title': '团队', 'team.sub': '{tenant} 的成员和令牌。', 'team.subAll': '平台上的每个租户。点一行管理它的成员和令牌。',
+    'team.title': '团队', 'team.sub': '{tenant} 的成员和令牌。', 'team.subAll': '平台上的每个租户：谁快到配额、谁闲着、谁在管。',
     'team.none': '你还不属于任何租户。请租户管理员按你的 id（{id}）添加你。',
     'sec.members': '成员', 'sec.membersRead': '这个租户的成员和角色。租户管理员负责添加和移除。', 'sec.membersDesc': '按 id 添加，对方不必已经登录过。每个租户至少保留一个管理员。',
     'm.never': '从未登录', 'm.you': '你', 'm.add': '添加成员', 'm.id': '用户 id', 'm.idHint': '上游身份里的用户 id，不带 user:。',
@@ -1126,7 +1157,7 @@ const I18N = {
     'tk.revoke': '吊销', 'tk.revokeTitle': '吊销 {label}？', 'tk.revokeBody': '用它的请求 30 秒内在每个副本开始被拒绝。无法撤销。',
     'tk.revoked': '已吊销', 'tk.active': '有效',
     'empty.members': '还没有成员。', 'empty.tokens': '还没有令牌。', 'empty.tenants': '还没有租户。',
-    'sec.tenants': '租户', 'sec.tenantsDesc': '点一行切换到这个租户。', 'sec.newTenant': '新建租户', 'sec.newTenantDesc': '首批管理员按 id 填写，可以还没登录过。',
+    'sec.tenants': '租户', 'sec.tenantsDesc': '离配额最近的在前。点卡片切换到这个租户，管理它的成员、令牌和配额。', 'sec.newTenant': '新建租户', 'sec.newTenantDesc': '首批管理员按 id 填写，可以还没登录过。',
     'tn.name': '名称', 'tn.nameHint': '小写字母、数字和 -。', 'tn.display': '显示名（可选）', 'tn.admins': '首批管理员', 'tn.adminsHint': '用户 id，用逗号或空格分隔。',
     'tn.create': '创建租户', 'tn.created': '已创建 {name}。',
     'err.forbidden': '权限不足：{msg}', 'err.conflict': '无法完成：{msg}',
@@ -1188,6 +1219,7 @@ const I18N = {
     'empty.cl.instances': '没有醒着的实例。', 'empty.cl.volumes': '没有应用卷。',
   },
   en: {
+    'm.seen': 'seen', 'm.roleOf': 'Role of {id}', 'm.group.admin': 'Admins', 'm.group.member': 'Members', 'm.removeItem': 'Remove from tenant…', 'm.removeNote': 'Their personal tokens stop working too', 'tk.by': 'by', 'tk.revokeItem': 'Revoke…', 'tk.revokeNote': 'Stops working on every replica within 30 s', 'tk.revokedN.one': '{n} revoked', 'tk.revokedN.other': '{n} revoked', 'q.used': '{n} used', 'q.edit': 'Change limits…', 'q.editNote': 'Usage above a new limit is not taken back', 'q.editTitle': 'Change the quota of {tenant}', 'q.editBody': 'Empty means unlimited. A limit below current use stops no app or instance; it refuses new publishes and wakes.', 'q.save': 'Save quota', 'team.youAdmin': 'You are an admin', 'team.youMember': 'You are a member', 'tn.open': 'Open the team page of {name}', 'tn.adminsAre': 'Admins', 'tn.createdAgo': 'created {ago}', 'tn.members.one': '{n} member', 'tn.members.other': '{n} members', 'tn.new': 'New tenant', 'tn.q.apps': 'Apps', 'tn.q.awake': 'Awake', 'tn.q.memory_mb': 'Memory MiB', 'tn.q.storage_gb': 'Storage GiB',
     'd.liftTitle': 'Lift the quarantine of {name}?', 'd.olderDeliveries.one': '{n} earlier', 'd.olderDeliveries.other': '{n} earlier', 'd.liftBody': 'The failure count resets and the next request wakes it. If the cause remains, it is quarantined again.', 'ac.title': 'Who can open {name}', 'ac.save': 'Save access', 'd.liftNote': 'the next request wakes it', 'ac.change': 'Change access…', 'd.removeItem': 'Remove…', 'd.removeNote': 'address 404, data kept', 'd.purgeItem': 'Purge data…', 'd.purgeNote': 'deletes every byte, cannot be undone', 'd.att.failed.one': '{n} failed delivery', 'd.att.failed.other': '{n} failed deliveries', 'd.att.toDeliveries': 'See deliveries', 'd.att.errors': 'Error rate {pct} over 24 h', 'd.att.errorsWhy': '{errors} errors in {requests} requests', 'd.toLogs': 'Jump to logs', 'd.att.slow': 'The last wake took {ms}, over the 3 s gate', 'd.att.slowWhy': 'woke at {at}; check the start-up logs or raise the ready timeout', 'd.att.removed': 'Removed: the address answers 404', 'd.att.removedWhy': 'Volumes, databases, key prefixes and buckets are kept. Publishing again restores it; only purge deletes.', 'd.bundle': 'bundle', 'empty.releases': 'No release yet.', 'd.olderReleases.one': '{n} older release', 'd.olderReleases.other': '{n} older releases', 'd.scheduledFor': 'scheduled {at}', 'd.attempts.one': '{n} attempt', 'd.attempts.other': '{n} attempts', 'd.nextAttempt': 'next attempt {ago}', 'sec.data': 'Data', 'sec.dataDesc': 'Where each capability keeps its data and which provider holds it. Remove leaves it; only purge deletes it.',
     'ap.search': 'Search app or tenant', 'ap.req24': 'requests, 24 h', 'ap.staticLine': 'Static site: files answer without a wake', 'apps.filter': 'Filter by name', 'ap.b.awake': 'Awake', 'ap.b.asleep': 'Asleep', 'ap.b.quarantined': 'Quarantined', 'ap.b.removed': 'Removed', 'ap.in.awake': 'Awake for', 'ap.in.asleep': 'Asleep for', 'ap.in.waking': 'Waking for', 'ap.in.draining': 'Draining for', 'ap.in.stopping': 'Stopping for', 'ap.never': 'Never woken', 'ap.quarantined': 'Quarantined · {reason}', 'ap.sparkTip': '{requests} requests · {errors} errors', 'ap.sparkLabel': '{requests} requests and {errors} errors in 24 h', 'ap.errors.one': '{n} error', 'ap.errors.other': '{n} errors', 'ap.lastAccess': 'Last access', 'ap.removedNote': 'address answers 404, data kept', 'ap.awakeN': '{n} awake', 'ap.groupRequests': '{n} requests in 24 h',
     'tp.lane.container.sub.k8s': 'Kubernetes · one Pod per app', 'tp.engine.container.k8s': 'Kubernetes', 'tp.unprobed.k8s': 'with the cluster, not probed',
@@ -1390,7 +1422,7 @@ const I18N = {
     'nav.team': 'Team', 'col.actions': 'Actions', 'top.tenant': 'Tenant', 'lb.find': 'Find', 'tn.all': 'All tenants', 'top.signOut': 'Sign out', 'top.platformAdmin': 'Platform admin',
     'col.tenant': 'Tenant', 'col.member': 'Member', 'col.role': 'Role', 'col.lastSeen': 'Last seen', 'col.label': 'Label', 'col.subject': 'Subject',
     'col.createdBy': 'Issued by', 'col.display': 'Display name', 'col.apps': 'Apps', 'role.admin': 'admin', 'role.member': 'member',
-    'team.title': 'Team', 'team.sub': 'Members and tokens of {tenant}.', 'team.subAll': 'Every tenant on the platform. Click a row to manage its members and tokens.',
+    'team.title': 'Team', 'team.sub': 'Members and tokens of {tenant}.', 'team.subAll': 'Every tenant on the platform: who is near a quota, who is idle, who administers it.',
     'team.none': 'You are not in any tenant yet. Ask a tenant admin to add you by your id ({id}).',
     'sec.members': 'Members', 'sec.membersRead': 'The members of this tenant and their roles. A tenant admin adds and removes them.', 'sec.membersDesc': 'Add by id; the person need not have signed in yet. Every tenant keeps at least one admin.',
     'm.never': 'Never signed in', 'm.you': 'you', 'm.add': 'Add member', 'm.id': 'User id', 'm.idHint': 'The user id from the upstream identity, without user:.',
@@ -1405,7 +1437,7 @@ const I18N = {
     'tk.revoke': 'Revoke', 'tk.revokeTitle': 'Revoke {label}?', 'tk.revokeBody': 'Requests with it start failing on every replica within 30 s. This cannot be undone.',
     'tk.revoked': 'Revoked', 'tk.active': 'Active',
     'empty.members': 'No members yet.', 'empty.tokens': 'No tokens yet.', 'empty.tenants': 'No tenants yet.',
-    'sec.tenants': 'Tenants', 'sec.tenantsDesc': 'Click a row to switch to that tenant.', 'sec.newTenant': 'New tenant', 'sec.newTenantDesc': 'First admins by id; they need not have signed in yet.',
+    'sec.tenants': 'Tenants', 'sec.tenantsDesc': 'Nearest a limit first. Click a card to switch to that tenant and manage its members, tokens and quota.', 'sec.newTenant': 'New tenant', 'sec.newTenantDesc': 'First admins by id; they need not have signed in yet.',
     'tn.name': 'Name', 'tn.nameHint': 'Lowercase letters, digits and -.', 'tn.display': 'Display name (optional)', 'tn.admins': 'First admins', 'tn.adminsHint': 'User ids, separated by commas or spaces.',
     'tn.create': 'Create tenant', 'tn.created': 'Created {name}.',
     'err.forbidden': 'Not allowed: {msg}', 'err.conflict': 'Cannot do that: {msg}',
@@ -3846,6 +3878,20 @@ const say = (el, text, ok = false) => { el.className = ok ? 'msg' : 'msg err'; e
 const teamHead = (sub) => h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('team.title')), h('p', { class: 'sub' }, sub)));
 const youChip = (subject) => (subject === session.me.subject ? h('span', { class: 'chip text you' }, t('m.you')) : null);
 
+/** The quota resources a tenant card draws, in the order an operator reads them; CPU follows memory in practice and stays on the tenant page. */
+const TENANT_BARS = ['apps', 'awake', 'memory_mb', 'storage_gb'];
+const usedText = (n) => (Number.isInteger(n) ? nf(n) : n.toFixed(2));
+/** How close the tenant is to its tightest limit; a limit of 0 counts as full, an unlimited resource as empty. */
+const quotaPressure = ({ quota, used }) => Math.max(0, ...TENANT_BARS.map((r) => (quota[r] == null ? 0 : quota[r] === 0 ? 1 : used[r] / quota[r])));
+const initial = (text) => [...text][0]?.toUpperCase() ?? '?';
+
+function quotaBar(label, used, limit) {
+  const ratio = limit == null ? null : limit === 0 ? 1 : used / limit;
+  return h('div', { class: 'ubar', title: ratio == null ? t('team.unlimited') : pct(ratio) },
+    h('div', {}, h('span', {}, label), h('span', { class: 'num' }, `${usedText(used)} / ${limit == null ? t('team.unlimited') : nf(limit)}`)),
+    h('div', { class: ratio == null ? 'bar none' : 'bar' }, ratio == null ? null : h('i', { class: ratio > 0.85 ? 'hot' : null, style: `width:${Math.min(100, ratio * 100).toFixed(1)}%` })));
+}
+
 async function team() {
   const { scope } = session;
   if (scope === ALL) return tenantsPage();
@@ -3854,77 +3900,92 @@ async function team() {
   const base = `/api/tenants/${encodeURIComponent(scope)}`;
   const members = h('div');
   const tokens = h('div');
+  const quota = h('div');
   const secret = h('div');
   const memberMsg = h('div', { class: 'msg', role: 'status' });
   const tokenMsg = h('div', { class: 'msg', role: 'status' });
+  const quotaMenu = h('span');
 
   const loadMembers = async () => {
-    const rows = (await api('GET', `${base}/members`)).sort((a, b) => (a.role === b.role ? (a.id < b.id ? -1 : 1) : a.role === 'admin' ? -1 : 1));
-    const setRole = async (m, select) => {
+    const rows = await api('GET', `${base}/members`);
+    const setRole = async (m, role) => {
       try {
-        await api('PUT', `${base}/members/${encodeURIComponent(m.id)}`, { role: select.value });
-        say(memberMsg, t('m.roleSaved', { id: m.id, role: t(`role.${select.value}`) }), true);
-        await loadMembers();
-      } catch (error) {
-        select.value = m.role;
-        say(memberMsg, failText(error));
-      }
+        await api('PUT', `${base}/members/${encodeURIComponent(m.id)}`, { role });
+        say(memberMsg, t('m.roleSaved', { id: m.id, role: t(`role.${role}`) }), true);
+      } catch (error) { say(memberMsg, failText(error)); }
+      await loadMembers();
     };
     const remove = async (m) => {
-      if (!(await approve({ title: t('m.removeTitle', { id: m.id, tenant: scope }), body: t('m.removeBody'), action: t('m.remove'), danger: true }))) return;
-      try {
-        await api('DELETE', `${base}/members/${encodeURIComponent(m.id)}`);
-        say(memberMsg, '', true);
-        await Promise.all([loadMembers(), loadTokens()]);
-      } catch (error) { say(memberMsg, failText(error)); }
+      if (!(await approve({ title: t('m.removeTitle', { id: m.id, tenant: scope }), body: t('m.removeBody'), action: t('m.remove'), danger: true,
+        submit: () => api('DELETE', `${base}/members/${encodeURIComponent(m.id)}`) }))) return;
+      say(memberMsg, '', true);
+      await Promise.all([loadMembers(), loadTokens()]);
     };
-    members.replaceChildren(table(
-      [['col.member'], ['col.role'], ['col.lastSeen'], admin && ['col.actions', 'r']].filter(Boolean),
-      rows.map((m) => ({ cells: [
-        h('span', {}, h('span', { class: 'mono' }, m.id), m.name && m.name !== m.id ? h('span', { class: 'muted' }, ` · ${m.name}`) : null, youChip(`user:${m.id}`)),
-        admin ? h('select', { 'aria-label': t('col.role'), onchange: (e) => setRole(m, e.target) }, ['admin', 'member'].map((r) => h('option', { value: r, selected: r === m.role }, t(`role.${r}`))))
-          : t(`role.${m.role}`),
-        m.lastSeen == null ? h('span', { class: 'chip text' }, t('m.never')) : ago(m.lastSeen),
-        admin && h('button', { class: 'btn danger small', type: 'button', onclick: () => remove(m) }, t('m.remove')),
-      ].filter((cell) => cell !== false) })), 'empty.members'));
+    const named = (m) => m.name && m.name !== m.id;
+    const row = (m) => h('div', { class: 'prow' },
+      h('span', { class: 'av', 'aria-hidden': 'true' }, initial(m.name || m.id)),
+      h('div', { class: 'pwho' }, h('b', { class: named(m) ? null : 'mono' }, named(m) ? m.name : m.id), named(m) ? h('span', { class: 'mono muted' }, m.id) : null, youChip(`user:${m.id}`)),
+      h('span', { class: 'pmeta' }, m.lastSeen == null ? t('m.never') : [t('m.seen'), ' ', ago(m.lastSeen)]),
+      admin ? segmented([['member', t('role.member')], ['admin', t('role.admin')]], m.role, (r) => setRole(m, r), t('m.roleOf', { id: m.id })) : h('span', { class: 'chip text' }, t(`role.${m.role}`)),
+      admin ? moreMenu(t('cl.moreFor', { name: m.id }), [{ label: t('m.removeItem'), note: t('m.removeNote'), danger: true, onPick: () => remove(m) }]) : null);
+    const groups = ['admin', 'member'].map((role) => [role, rows.filter((m) => m.role === role).sort((a, b) => a.id.localeCompare(b.id))]).filter(([, list]) => list.length);
+    fill(members, rows.length === 0 ? h('div', { class: 'card' }, h('div', { class: 'empty' }, t('empty.members')))
+      : h('div', { class: 'ilist' }, groups.map(([role, list]) => h('div', { class: 'igroup' },
+        h('div', { class: 'igh' }, h('span', { class: 'st' }, t(`m.group.${role}`)), h('span', { class: 'num muted' }, nf(list.length))),
+        h('div', { class: 'card plist' }, list.map(row))))));
   };
 
   const loadTokens = async () => {
-    const rows = (await api('GET', `${base}/tokens`)).sort((a, b) => (a.revokedAt === null) !== (b.revokedAt === null) ? (a.revokedAt === null ? -1 : 1) : b.createdAt - a.createdAt);
+    const rows = (await api('GET', `${base}/tokens`)).sort((a, b) => b.createdAt - a.createdAt);
     const revoke = async (token) => {
-      if (!(await approve({ title: t('tk.revokeTitle', { label: token.label }), body: t('tk.revokeBody'), action: t('tk.revoke'), danger: true }))) return;
-      try {
-        await api('DELETE', `${base}/tokens/${encodeURIComponent(token.id)}`);
-        await loadTokens();
-      } catch (error) { say(tokenMsg, failText(error)); }
+      if (!(await approve({ title: t('tk.revokeTitle', { label: token.label }), body: t('tk.revokeBody'), action: t('tk.revoke'), danger: true,
+        submit: () => api('DELETE', `${base}/tokens/${encodeURIComponent(token.id)}`) }))) return;
+      await loadTokens();
     };
-    tokens.replaceChildren(table(
-      [['tk.kind'], ['col.label'], ['col.subject'], ['col.createdBy'], ['col.created'], ['col.state'], ['col.actions', 'r']],
-      rows.map((token) => ({ cells: [
-        h('span', { class: 'chip text' }, t(`tk.kind.${tokenKind(token)}`)),
-        token.label,
-        h('span', { class: 'mono' }, token.subject),
-        h('span', {}, h('span', { class: 'mono' }, token.createdBy), youChip(token.createdBy)),
-        ago(token.createdAt),
-        token.revokedAt === null ? h('span', { class: 'st green' }, t('tk.active')) : h('span', { class: 'st', title: stamp(token.revokedAt) }, t('tk.revoked')),
-        token.revokedAt === null && (admin || token.createdBy === session.me.subject)
-          ? h('button', { class: 'btn danger small', type: 'button', onclick: () => revoke(token) }, t('tk.revoke')) : null,
-      ] })), 'empty.tokens'));
+    const row = (token) => h('div', { class: `prow${token.revokedAt === null ? '' : ' gone'}` },
+      h('span', { class: 'chip text' }, t(`tk.kind.${tokenKind(token)}`)),
+      h('div', { class: 'pwho' }, h('b', {}, token.label), h('span', { class: 'mono muted' }, token.subject)),
+      h('span', { class: 'pmeta' }, token.revokedAt === null
+        ? [t('tk.by'), ' ', h('span', { class: 'mono' }, token.createdBy.replace(/^user:/, '')), youChip(token.createdBy), ' · ', ago(token.createdAt)]
+        : [t('tk.revoked'), ' ', ago(token.revokedAt)]),
+      token.revokedAt === null && (admin || token.createdBy === session.me.subject)
+        ? moreMenu(t('cl.moreFor', { name: token.label }), [{ label: t('tk.revokeItem'), note: t('tk.revokeNote'), danger: true, onPick: () => revoke(token) }]) : null);
+    const active = rows.filter((x) => x.revokedAt === null);
+    const revoked = rows.filter((x) => x.revokedAt !== null);
+    fill(tokens, rows.length === 0 ? h('div', { class: 'card' }, h('div', { class: 'empty' }, t('empty.tokens')))
+      : h('div', { class: 'card plist' }, active.map(row),
+        revoked.length ? h('details', { class: 'more-rel' }, h('summary', {}, plural('tk.revokedN', revoked.length)), revoked.map(row)) : null));
+  };
+
+  const loadQuota = async () => {
+    const { quota: limits, used } = await api('GET', `${base}/quota`);
+    fill(quota, h('div', { class: 'card' }, h('div', { class: 'qbars' }, QUOTA_RESOURCES.map((r) => quotaBar(t(`q.${r}`), used[r], limits[r])))));
+    if (!isPlatformAdmin()) return;
+    const edit = async () => {
+      const inputs = Object.fromEntries(QUOTA_RESOURCES.map((r) => [r, h('input', { type: 'number', min: 0, step: 1, value: limits[r] ?? '', placeholder: t('team.unlimited'), 'aria-label': t(`q.${r}`) })]));
+      const control = h('div', { class: 'form' }, h('div', { class: 'fields' }, QUOTA_RESOURCES.map((r) => h('label', { class: 'field' }, h('span', {}, t(`q.${r}`)), inputs[r], h('small', {}, t('q.used', { n: usedText(used[r]) }))))));
+      const patch = () => Object.fromEntries(QUOTA_RESOURCES.map((r) => [r, inputs[r].value === '' ? null : Number(inputs[r].value)]).filter(([r, v]) => v !== limits[r]));
+      if (await approve({ title: t('q.editTitle', { tenant: scope }), body: t('q.editBody'), control, action: t('q.save'), submit: () => api('PUT', `${base}/quota`, patch()) })) await loadQuota();
+    };
+    fill(quotaMenu, moreMenu(t('cl.moreFor', { name: t('team.quota') }), [{ label: t('q.edit'), note: t('q.editNote'), onPick: edit }]));
   };
 
   const id = h('input', { placeholder: t('m.id'), 'aria-label': t('m.id'), title: t('m.idHint'), autocomplete: 'off', spellcheck: 'false' });
-  const role = h('select', { 'aria-label': t('col.role') }, ['member', 'admin'].map((r) => h('option', { value: r }, t(`role.${r}`))));
-  const addForm = h('form', { class: 'toolbar', onsubmit: async (event) => {
+  let role = 'member';
+  const rolePick = h('span');
+  const paintRole = () => fill(rolePick, segmented([['member', t('role.member')], ['admin', t('role.admin')]], role, (r) => { role = r; paintRole(); }, t('col.role')));
+  paintRole();
+  const addForm = h('form', { class: 'card addrow', onsubmit: async (event) => {
     event.preventDefault();
     const who = id.value.trim().replace(/^user:/, '');
     if (!who) return id.focus();
     try {
-      await api('PUT', `${base}/members/${encodeURIComponent(who)}`, { role: role.value });
-      say(memberMsg, t('m.added', { id: who, role: t(`role.${role.value}`) }), true);
+      await api('PUT', `${base}/members/${encodeURIComponent(who)}`, { role });
+      say(memberMsg, t('m.added', { id: who, role: t(`role.${role}`) }), true);
       id.value = '';
       await loadMembers();
     } catch (error) { say(memberMsg, failText(error)); }
-  } }, id, role, h('button', { class: 'btn primary', type: 'submit' }, t('m.add')));
+  } }, id, rolePick, h('button', { class: 'btn primary', type: 'submit' }, t('m.add')));
 
   const kinds = admin ? ['service', 'personal'] : ['personal'];
   let kind = kinds[0];
@@ -3975,55 +4036,78 @@ async function team() {
     h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, t('tk.issue')), personalNote),
     tokenMsg);
 
-  const [quota] = await Promise.all([quotaSection(scope, isPlatformAdmin()), loadMembers(), loadTokens()]);
+  await Promise.all([loadMembers(), loadTokens(), loadQuota()]);
   show(
-    teamHead(t('team.sub', { tenant: scope })),
-    h('section', {}, sectionHead(1, 'sec.members', admin ? 'sec.membersDesc' : 'sec.membersRead'), admin ? addForm : null, members, memberMsg),
+    h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('team.title')), h('p', { class: 'sub' }, t('team.sub', { tenant: scope }))),
+      h('span', { class: 'chip text', title: t('top.tenant') }, t(admin ? 'team.youAdmin' : 'team.youMember'))),
+    h('section', {}, sectionHead(1, 'sec.members', admin ? 'sec.membersDesc' : 'sec.membersRead'), admin ? addForm : null, memberMsg, members),
     h('section', {}, sectionHead(2, 'sec.tokens', admin ? 'sec.tokensDesc' : 'sec.tokensMine'), secret, h('div', { class: 'stack' }, issueForm, tokens)),
-    quota,
+    h('section', {}, sectionHead(3, 'team.quota', 'team.quotaDesc', quotaMenu), quota),
   );
 }
 
+function tenantCard(x, data, requests) {
+  const title = x.display && x.display !== x.name ? x.display : null;
+  return h('a', { class: `card tcard${data ? '' : ' loading'}`, href: '#/team', 'aria-label': t('tn.open', { name: title ?? x.name }), onclick: (e) => { e.preventDefault(); setScope(x.name); } },
+    h('div', { class: 'th' }, h('b', {}, title ?? h('span', { class: 'mono' }, x.name)), title ? h('span', { class: 'mono muted' }, x.name) : null,
+      h('span', { class: 'muted when', title: stamp(x.createdAt) }, t('tn.createdAgo', { ago: since(x.createdAt) }))),
+    data ? [
+      h('div', { class: 'tmeta' },
+        h('span', {}, t('tn.adminsAre'), ' ', data.admins.length ? data.admins.map((id, i) => [i ? ', ' : '', h('span', { class: 'mono' }, id)]) : h('span', { class: 'muted' }, t('cl.none'))),
+        h('span', { class: 'muted' }, plural('tn.members', data.members)),
+        h('span', { class: 'muted' }, plural('apps.count', data.used.apps), ' · ', t('ap.awakeN', { n: nf(data.used.awake) })),
+        h('span', { class: 'muted num' }, t('ap.groupRequests', { n: nf(requests) }))),
+      h('div', { class: 'tbars' }, TENANT_BARS.map((r) => quotaBar(t(`tn.q.${r}`), data.used[r], data.quota[r])))]
+      : h('div', { class: 'tmeta' }, h('span', { class: 'spin', role: 'status', 'aria-label': t('cl.pending') })));
+}
+
+/** Every tenant as a card, the one nearest a limit first; a new tenant is created from the approval card. */
 async function tenantsPage() {
-  const list = h('div');
+  const grid = h('div', { class: 'tgrid' });
   const message = h('div', { class: 'msg', role: 'status' });
   const load = async () => {
     const [tenants, apps] = await Promise.all([api('GET', '/api/tenants'), api('GET', '/api/apps')]);
     session.tenants = tenants.map((x) => x.name);
     topbar();
-    list.replaceChildren(table(
-      [['col.name'], ['col.display'], ['col.apps', 'r'], ['col.created']],
-      tenants.map((x) => ({ onpick: () => setScope(x.name), cells: [
-        h('span', { class: 'mono' }, x.name), x.display, h('span', { class: 'num' }, nf(apps.filter((a) => a.tenant === x.name).length)), ago(x.createdAt),
-      ] })), 'empty.tenants'));
+    const requests = (name) => apps.reduce((n, a) => n + (a.tenant === name ? a.requests : 0), 0);
+    if (tenants.length === 0) return fill(grid, h('div', { class: 'card' }, h('div', { class: 'empty' }, t('empty.tenants'))));
+    const cards = tenants.map((x) => ({ x, el: tenantCard(x, null), pressure: -1 }));
+    const order = () => grid.append(...[...cards].sort((a, b) => b.pressure - a.pressure || a.x.name.localeCompare(b.x.name)).map((c) => c.el));
+    fill(grid, cards.map((c) => c.el));
+    await Promise.all(cards.map(async (c) => {
+      const base = `/api/tenants/${encodeURIComponent(c.x.name)}`;
+      const [{ quota, used }, members] = await Promise.all([api('GET', `${base}/quota`), api('GET', `${base}/members`)]);
+      const el = tenantCard(c.x, { quota, used, members: members.length, admins: members.filter((m) => m.role === 'admin').map((m) => m.id).sort() }, requests(c.x.name));
+      c.el.replaceWith(el);
+      c.el = el;
+      c.pressure = quotaPressure({ quota, used });
+      order();
+    }));
   };
-  const field = (key, control, hintKey) => h('label', { class: 'field' }, h('span', {}, t(key)), control, hintKey ? h('small', {}, t(hintKey)) : null);
-  const name = h('input', { required: true, pattern: '[a-z][a-z0-9\\-]{0,39}', placeholder: 'design', autocomplete: 'off', spellcheck: 'false' });
-  const display = h('input', { autocomplete: 'off' });
-  const admins = h('input', { placeholder: 'ana, bo', autocomplete: 'off', spellcheck: 'false' });
-  const form = h('form', { class: 'card form', novalidate: true, onsubmit: async (event) => {
-    event.preventDefault();
-    const body = {
+  const create = async () => {
+    const field = (key, control, hintKey) => h('label', { class: 'field' }, h('span', {}, t(key)), control, hintKey ? h('small', {}, t(hintKey)) : null);
+    const name = h('input', { required: true, pattern: '[a-z][a-z0-9\\-]{0,39}', placeholder: 'design', autocomplete: 'off', spellcheck: 'false' });
+    const display = h('input', { autocomplete: 'off' });
+    const admins = h('input', { placeholder: 'ana, bo', autocomplete: 'off', spellcheck: 'false' });
+    const body = () => ({
       name: name.value.trim(),
       admins: admins.value.split(/[\s,]+/).filter(Boolean).map((x) => x.replace(/^user:/, '')),
       ...(display.value.trim() && { display: display.value.trim() }),
-    };
-    try {
-      await api('POST', '/api/tenants', body);
-      say(message, t('tn.created', { name: body.name }), true);
-      name.value = display.value = admins.value = '';
-      await load();
-    } catch (error) { say(message, failText(error)); }
-  } },
-    h('div', { class: 'fields' }, field('tn.name', name, 'tn.nameHint'), field('tn.display', display), field('tn.admins', admins, 'tn.adminsHint')),
-    h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, t('tn.create'))),
-    message);
-  await load();
+    });
+    if (!(await approve({
+      title: t('sec.newTenant'), body: t('sec.newTenantDesc'), action: t('tn.create'),
+      control: h('div', { class: 'form' }, field('tn.name', name, 'tn.nameHint'), field('tn.display', display), field('tn.admins', admins, 'tn.adminsHint')),
+      submit: () => api('POST', '/api/tenants', body()),
+    }))) return;
+    say(message, t('tn.created', { name: body().name }), true);
+    await load();
+  };
   show(
-    teamHead(t('team.subAll')),
-    h('section', {}, sectionHead(1, 'sec.tenants', 'sec.tenantsDesc'), list),
-    h('section', {}, sectionHead(2, 'sec.newTenant', 'sec.newTenantDesc'), form),
+    h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('team.title')), h('p', { class: 'sub' }, t('team.subAll'))),
+      h('button', { class: 'btn primary', type: 'button', onclick: create }, t('tn.new'))),
+    h('section', {}, sectionHead(1, 'sec.tenants', 'sec.tenantsDesc'), message, grid),
   );
+  await load();
 }
 
 // Shell
@@ -5293,37 +5377,6 @@ function viewOf(hash) {
   return allowed(key) ? key : 'apps';
 }
 const QUOTA_RESOURCES = ['apps', 'awake', 'cpu_millis', 'memory_mb', 'storage_gb'];
-
-/** The tenant's quota as used over limit per resource; a platform admin edits a limit in place (PUT quota). */
-async function quotaSection(tenant, platformAdmin) {
-  const path = `/api/tenants/${encodeURIComponent(tenant)}/quota`;
-  const grid = h('div', { class: 'tiles' });
-  const paint = ({ quota, used }) => grid.replaceChildren(...QUOTA_RESOURCES.map((r) => {
-    const limit = quota[r];
-    const shown = Number.isInteger(used[r]) ? String(used[r]) : used[r].toFixed(2);
-    const edit = platformAdmin && h('input', {
-      type: 'number', min: 0, step: 1, value: limit ?? '', placeholder: t('team.unlimited'), 'aria-label': `${t(`q.${r}`)} ${t('team.limit')}`,
-      onkeydown: (e) => { if (e.key === 'Enter') e.target.blur(); },
-      // Not onchange: clearing a number input to mean unlimited does not always fire it.
-      onblur: async (e) => {
-        const next = e.target.value === '' ? null : Number(e.target.value);
-        if (next === limit) return;
-        e.target.disabled = true;
-        try {
-          await api('PUT', path, { [r]: next });
-          paint(await api('GET', path));
-        } catch (error) {
-          e.target.disabled = false;
-          e.target.setCustomValidity(error.message);
-          e.target.reportValidity();
-        }
-      },
-    });
-    return tile(t(`q.${r}`), `${shown} / ${limit ?? t('team.unlimited')}`, edit || '', limit == null ? null : limit === 0 ? 1 : used[r] / limit);
-  }));
-  paint(await api('GET', path));
-  return h('section', {}, sectionHead(3, 'team.quota', 'team.quotaDesc'), grid);
-}
 
 function shell() {
   const current = viewOf(location.hash);
