@@ -83,7 +83,7 @@ test('AC-P-6', { timeout: 30_000 }, async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /^text\/html/);
   const page = await response.text();
-  for (const field of ['/api/apps', '/api/metrics', 'leases', 'logs', '/release', '/policy', "act('remove')", "act('purge')", 'releases', 'bindings', 'deliveries', 'requests', 'errors']) {
+  for (const field of ['/api/apps', '/api/metrics', 'leases', 'logs', '/release', '/policy', "post('remove')", "post('purge')", 'releases', 'bindings', 'deliveries', 'requests', 'errors']) {
     assert.ok(page.includes(field), `console has ${field}`);
   }
   assert.doesNotMatch(page, /\/api\/tokens/, 'no token page');
