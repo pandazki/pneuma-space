@@ -154,13 +154,10 @@ const nodes = new NodeView({
   nameOf: (app) => registry.nameOf(app),
   instances,
   replicas: () => store.replicas(),
-  host: () => hostSample(data),
   runner: async (host) => {
     const res = await fetch(`http://${host}:${RUNNER_PORT}/health`, { signal: AbortSignal.timeout(RUNNER_HEALTH_MS) }).catch(() => null);
     return res?.ok ? ((await res.json()) as RunnerHealth) : null;
   },
-  runnerOnHost: () => resolvesOnNetwork(RUNTIMES.isolate.service),
-  replica,
 });
 
 process.on('unhandledRejection', (error) => log('unhandled-rejection', { error: String(error) }));

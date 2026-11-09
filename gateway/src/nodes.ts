@@ -1,19 +1,11 @@
 // The node view (ADR 0024 item 8) and the cluster view (ADR 0026): sampled every 15 s on every replica, answered from memory.
-import { hostname } from 'node:os';
 import { DEAD_MS, type Instances } from './instances.ts';
-import {
-  RUNTIMES,
-  type AppId, type AppName, type AppSummary, type ClusterView, type HostSample, type Infra, type Instance, type InstanceRow, type InstanceState,
-  type NodeEntry, type PlatformPod, type Replica, type ReplicaId, type VolumeRow,
+import type {
+  AppId, AppName, AppSummary, ClusterView, Infra, Instance, InstanceRow, InstanceState, NodeEntry, PlatformPod, Replica, VolumeRow,
 } from './model.ts';
-
-const MIB = 2 ** 20;
 
 /** The runner's own `GET /health` answer, the fields the node view shows. */
 export type RunnerHealth = { readonly workers: number; readonly stuck: number };
-export type NodesAnswer =
-  | { readonly source: 'k8s' | 'host'; readonly sampledAt: number; readonly nodes: readonly NodeEntry[] }
-  | { readonly source: null; readonly sampledAt: null; readonly nodes: readonly [] };
 
 export type NodeViewDeps = {
   readonly infra: Pick<Infra, 'nodes' | 'workloads' | 'volumes' | 'warnings'>;
@@ -22,13 +14,8 @@ export type NodeViewDeps = {
   readonly instances: Pick<Instances, 'row' | 'rows'>;
   /** The replica rows; the one whose heartbeat says it leads is the leading gateway. */
   readonly replicas: () => Promise<readonly Replica[]>;
-  readonly host: () => Promise<HostSample>;
   /** The runner at `host` on its control port; null when it does not answer. */
   readonly runner: (host: string) => Promise<RunnerHealth | null>;
-  /** Single host: whether the runner's compose profile is up. */
-  readonly runnerOnHost: () => Promise<boolean>;
-  readonly replica: ReplicaId;
-  readonly hostname?: string;
   readonly now?: () => number;
 };
 
@@ -38,7 +25,6 @@ const instancesOf = (apps: readonly AppSummary[]) => apps.flatMap((a) => (runnin
 export class NodeView {
   readonly #deps: NodeViewDeps;
   readonly #now: () => number;
-  #nodes: NodesAnswer = { source: null, sampledAt: null, nodes: [] };
   #cluster: ClusterView = { plane: 'docker', sampledAt: null, nodes: [], workloads: [], instances: [], volumes: [], warnings: [] };
   #pods: readonly PlatformPod[] = [];
 
@@ -52,10 +38,6 @@ export class NodeView {
     return this.#cluster;
   }
 
-  /** Memory only: the node view of the last sample, which GET /api/nodes answers until the cluster page replaces it. */
-  nodes(): NodesAnswer {
-    return this.#nodes;
-  }
 
   /** Where the app's instance runs: the row's node, else its Pod's, else its runner's (ADR 0024 item 8); null when asleep or not known. */
   nodeOf(app: AppId): string | null {
@@ -90,7 +72,6 @@ export class NodeView {
         instances: instancesOf(apps).filter((i) => i.node === n.name).map(({ node: _, ...i }) => i),
       };
     }));
-    this.#nodes = cluster === null ? { source: 'host', sampledAt: now, nodes: [await this.#host(apps)] } : { source: 'k8s', sampledAt: now, nodes };
     const leaders = new Set(replicas.filter((r) => r.leading && r.seenAt >= now - DEAD_MS).map((r) => r.id as string));
     this.#cluster = {
       plane: cluster === null ? 'docker' : 'kubernetes',
@@ -122,21 +103,5 @@ export class NodeView {
         restarts: pod?.role === 'instance' ? pod.restarts : null,
       }];
     }).sort((a, b) => (a.app < b.app ? -1 : 1));
-  }
-
-  /** The single host as one node: what awake instances took from it, and what the host itself reports. */
-  async #host(apps: readonly AppSummary[]): Promise<NodeEntry> {
-    const [used, runnerUp] = await Promise.all([this.#deps.host(), this.#deps.runnerOnHost()]);
-    const rows = [...this.#deps.instances.rows()].filter((r) => r.state !== 'asleep');
-    const health = runnerUp ? await this.#deps.runner(RUNTIMES.isolate.service) : null;
-    return {
-      name: this.#deps.hostname ?? hostname(), ready: true, schedulable: true, labels: {}, taints: [],
-      allocatable: { cpuMillis: used.cpus * 1000, memoryBytes: used.memory.totalBytes, pods: null },
-      requested: { cpuMillis: rows.reduce((sum, r) => sum + r.cpuMillis, 0), memoryBytes: rows.reduce((sum, r) => sum + r.memoryMb * MIB, 0), pods: rows.length },
-      used,
-      gateways: [{ pod: this.#deps.replica, ready: true }],
-      runner: runnerUp ? { pod: RUNTIMES.isolate.service, ready: health !== null, restarts: null, workers: health?.workers ?? null, stuck: health?.stuck ?? null } : null,
-      instances: instancesOf(apps).map(({ node: _, ...i }) => i),
-    };
   }
 }

@@ -21,7 +21,7 @@ export type AdminDeps = {
   readonly runtime: Pick<Runtimes, 'logs' | 'healthOf'>;
   readonly guard: Guard;
   readonly metrics: Pick<Metrics, 'snapshot' | 'events'>;
-  readonly nodes: Pick<NodeView, 'snapshot' | 'nodes'>;
+  readonly nodes: Pick<NodeView, 'snapshot'>;
   readonly infra: Pick<Infra, 'scale' | 'deletePod'>;
   /** PNEUMA_SPACE_SCALE_MAX: the most replicas the cluster page may ask of a workload (ADR 0026 item 3). */
   readonly scaleMax: number;
@@ -227,7 +227,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
       },
     },
     { method: 'GET', path: at(ADMIN_PATHS.metrics), action: 'platform.read', handle: async () => ({ ...metrics.snapshot(), events: await metrics.events() }) },
-    { method: 'GET', path: at(ADMIN_PATHS.nodes), action: 'platform.read', handle: () => nodes.nodes() },
+
     { method: 'GET', path: at(ADMIN_PATHS.cluster), action: 'cluster.read', handle: () => nodes.snapshot() },
     {
       method: 'PUT', path: at(ADMIN_PATHS.scale('<name>')), json: true, action: 'cluster.scale',

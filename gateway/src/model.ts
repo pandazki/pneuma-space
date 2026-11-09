@@ -1224,7 +1224,7 @@ export const ADMIN_PATHS = {
   apps: '/api/apps',
   metrics: '/api/metrics',
   requests: '/api/requests',
-  nodes: '/api/nodes',
+
   cluster: '/api/cluster',
   scale: (workload: string) => `/api/cluster/workloads/${workload}/scale`,
   restartPod: (pod: string) => `/api/cluster/pods/${pod}/restart`,
