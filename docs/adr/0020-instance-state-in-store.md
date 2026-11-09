@@ -5,11 +5,11 @@
 决定：
 
 1. **一个 App 最多一个实例，只靠实例行上的条件更新保证。** 领导者只为省事，不为正确：领导者错位或两个副本同时自认领导，都不会产生第二个实例。
-2. **四张表**（`Store` 提供读写和 CAS）： replica 表有 `leads` 列：每次心跳写本副本是否持有领导锁；集群视图（ADR 0026）以 `leads` 且 `seen_at` 在 10 s 内标出领导网关。
+2. **四张表**（`Store` 提供读写和 CAS）：
 
    | 表 | 键 | 列 | 写者 |
    | --- | --- | --- | --- |
-   | `replica` | `id`（Pod 名，`PNEUMA_SPACE_REPLICA`；单机取 `os.hostname()`） | `started_at`, `seen_at`（库时钟） | 自己每 2 s 心跳；领导者删 `seen_at` 超过 10 s 的行 |
+   | `replica` | `id`（Pod 名，`PNEUMA_SPACE_REPLICA`；单机取 `os.hostname()`） | `started_at`, `seen_at`（库时钟）, `leads`（是否持有领导锁；集群视图据此标出领导网关，ADR 0026） | 自己每 2 s 心跳；领导者删 `seen_at` 超过 10 s 的行 |
    | `instance` | `app` | `runtime`, `release`, `spec_hash`, `epoch`, `state`, `actor`（正在做暂态转换的副本）, `handle`, `address`, `node`, `home`, `since`, `awake_at`, `cpu_millis`, `memory_mb` | Lifecycle，只经 CAS |
    | `lease_tally` | `(app, replica)` | `epoch`, `request`, `channel`, `trigger`, `released_at` | 该副本自己；领导者删死副本的行 |
    | `guard` | `app` | `release`, `failures`（时间数组）, `quarantine_reason`, `quarantined_at` | Guard，事务里读改写 |
