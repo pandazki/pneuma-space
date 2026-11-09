@@ -94,7 +94,7 @@ body {
 }
 a { color: var(--accent-ink); text-decoration: none; }
 a:hover { text-decoration: underline; }
-button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+button, input, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
 .frame { display: grid; grid-template-columns: auto minmax(0, 1fr); max-width: 1568px; min-height: 100vh; margin: 0 auto; background: var(--page); box-shadow: var(--shadow-card); }
 aside { position: sticky; top: 0; height: 100vh; width: 288px; overflow: hidden; padding: 72px 12px 28px; border-right: 1px dashed var(--line); transition: width .28s var(--ease-nav); }
 .aside-in { width: 264px; height: 100%; display: flex; flex-direction: column; gap: 28px; }
@@ -158,10 +158,10 @@ section { padding: 40px 32px; border-top: 1px dashed var(--line); }
 .btn.danger { background: var(--red-tint); color: var(--red); }
 .btn.danger:hover { box-shadow: 0 0 0 1px var(--red); }
 .btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
-input, select, textarea { background: var(--field); border: 0; border-radius: 8px; box-shadow: 0 0 0 1px var(--line-strong); font-size: 13px; height: 30px; padding: 0 10px; outline: none; min-width: 0; }
+input, textarea { background: var(--field); border: 0; border-radius: 8px; box-shadow: 0 0 0 1px var(--line-strong); font-size: 13px; height: 30px; padding: 0 10px; outline: none; min-width: 0; }
 textarea { height: auto; padding: 8px 10px; font: 12px/18px var(--mono); resize: vertical; }
 input[type="file"] { padding: 4px 6px; font-size: 12.5px; }
-input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 2px var(--accent-tint), 0 0 0 1px var(--accent); }
+input:focus, textarea:focus, .lbtn:focus-visible { box-shadow: 0 0 0 2px var(--accent-tint), 0 0 0 1px var(--accent); }
 [aria-invalid="true"] { box-shadow: 0 0 0 1px var(--red); }
 .chip { display: inline-flex; align-items: center; height: 22px; padding: 0 7px; border-radius: 6px; background: var(--inset); box-shadow: 0 0 0 1px var(--line); font: 11.5px var(--mono); color: var(--ink-2); white-space: nowrap; }
 .chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
@@ -612,7 +612,6 @@ dialog .actions { justify-content: flex-end; }
 dialog .field { margin: 0 0 20px; }
 .frame { position: relative; }
 .topbar { position: absolute; top: 14px; right: 32px; z-index: 4; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-2); }
-.topbar select { height: 27px; border-radius: 999px; padding: 0 8px 0 12px; font-weight: 500; max-width: 220px; }
 .topbar .sep { width: 1px; height: 16px; background: var(--line-strong); flex: none; }
 .who { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .who .av { width: 22px; height: 22px; border-radius: 50%; flex: none; background: var(--accent-tint); color: var(--accent-ink); font: 600 11px/22px var(--font); text-align: center; letter-spacing: 0; }
@@ -620,7 +619,6 @@ dialog .field { margin: 0 0 20px; }
 .btn.ghost { background: none; color: var(--ink-2); padding: 0 10px; box-shadow: inset 0 0 0 1px var(--line); }
 .btn.ghost:hover { background: var(--hover); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .btn.small { height: 24px; padding: 0 10px; font-size: 12px; }
-td select { height: 26px; }
 .rows { display: grid; gap: 16px; }
 .rowkv { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .rowkv > .k { width: 112px; flex: none; font-size: 12.5px; font-weight: 500; }
@@ -647,6 +645,23 @@ td select { height: 26px; }
 .menu button + button.danger { margin-top: 4px; box-shadow: 0 -1px 0 var(--line); border-radius: 0 0 7px 7px; }
 .menu button:disabled { color: var(--ink-3); cursor: not-allowed; }
 @keyframes menuin { from { opacity: 0; transform: translateY(-3px); } }
+.lbox { position: relative; display: inline-flex; min-width: 0; }
+.lbtn { display: inline-flex; align-items: center; gap: 6px; height: 28px; max-width: 240px; padding: 0 8px 0 12px; border: 0; border-radius: 999px; background: var(--field); box-shadow: 0 0 0 1px var(--line-strong); font-size: 12.5px; font-weight: 500; color: var(--ink); cursor: pointer; outline: none; }
+.lbtn > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lbtn .ico { color: var(--ink-3); flex: none; }
+.lbtn:hover:not(:disabled) { background: var(--hover-2); }
+.lbtn[aria-expanded="true"] .ico { transform: rotate(180deg); }
+.lbtn:disabled { opacity: .6; cursor: not-allowed; }
+.lbox.wide, .lbox.wide .lbtn { width: 100%; max-width: none; }
+.lbox.wide .lbtn { height: 30px; justify-content: space-between; border-radius: 8px; font-weight: 400; font-size: 13px; padding: 0 8px 0 10px; }
+.lmenu { left: 0; right: auto; min-width: max(100%, 180px); max-height: 320px; overflow-y: auto; }
+.topbar .lmenu { left: auto; right: 0; }
+.lmenu button { display: flex; align-items: center; gap: 12px; }
+.lmenu button small { margin-left: auto; }
+.lmenu button .ico { margin-left: auto; color: var(--accent-ink); }
+.lmenu button small + .ico { margin-left: 0; }
+.lmenu button[aria-selected="true"] { font-weight: 600; }
+.lfind { height: 28px; margin: 2px 2px 6px; font-size: 12.5px; }
 dialog.approval .facts { margin: -8px 0 20px; padding: 10px 12px 10px 28px; max-height: 200px; overflow: auto; border-radius: 8px; background: var(--inset); box-shadow: 0 0 0 1px var(--line); font-size: 12.5px; }
 .stepper { display: flex; align-items: center; gap: 8px; margin: -8px 0 20px; }
 .stepper output { min-width: 40px; text-align: center; font: 600 20px/28px var(--mono); }
@@ -776,7 +791,7 @@ input.lim-in { width: 96px; height: 22px; padding: 0 6px; border-radius: 6px; te
   section { padding: 24px 20px; }
   .frame:has(> .topbar:not([hidden])) { grid-template-rows: auto auto 1fr; }
   .topbar { position: static; padding: 12px 20px 0; justify-content: flex-end; }
-  .topbar select { max-width: 140px; }
+  .topbar .lbtn { max-width: 150px; }
   .who .chip, .topbar .sep { display: none; }
   .rowkv > p { margin-left: 0; }
   .split { grid-template-columns: minmax(0, 1fr); }
@@ -1005,7 +1020,7 @@ const I18N = {
     'tp.check.ready': '唤醒后 ready_timeout_seconds 内没有应答。',
     'tp.check.hang': '醒着时不再应答心跳，被 terminate。',
     'tp.check.memory': '超过内存上限被结束。',
-    'nav.team': '团队', 'col.actions': '操作', 'top.tenant': '租户', 'tn.all': '全部租户', 'top.signOut': '退出', 'top.platformAdmin': '平台管理员',
+    'nav.team': '团队', 'col.actions': '操作', 'top.tenant': '租户', 'lb.find': '查找', 'tn.all': '全部租户', 'top.signOut': '退出', 'top.platformAdmin': '平台管理员',
     'col.tenant': '租户', 'col.member': '成员', 'col.role': '角色', 'col.lastSeen': '最近登录', 'col.label': '标签', 'col.subject': '主体',
     'col.createdBy': '签发人', 'col.display': '显示名', 'col.apps': '应用', 'role.admin': '管理员', 'role.member': '成员',
     'team.title': '团队', 'team.sub': '{tenant} 的成员和令牌。', 'team.subAll': '平台上的每个租户。点一行管理它的成员和令牌。',
@@ -1273,7 +1288,7 @@ const I18N = {
     'tp.check.ready': 'No answer within ready_timeout_seconds of a wake.',
     'tp.check.hang': 'Stopped answering the heartbeat while awake and was terminated.',
     'tp.check.memory': 'Went over its memory limit and was ended.',
-    'nav.team': 'Team', 'col.actions': 'Actions', 'top.tenant': 'Tenant', 'tn.all': 'All tenants', 'top.signOut': 'Sign out', 'top.platformAdmin': 'Platform admin',
+    'nav.team': 'Team', 'col.actions': 'Actions', 'top.tenant': 'Tenant', 'lb.find': 'Find', 'tn.all': 'All tenants', 'top.signOut': 'Sign out', 'top.platformAdmin': 'Platform admin',
     'col.tenant': 'Tenant', 'col.member': 'Member', 'col.role': 'Role', 'col.lastSeen': 'Last seen', 'col.label': 'Label', 'col.subject': 'Subject',
     'col.createdBy': 'Issued by', 'col.display': 'Display name', 'col.apps': 'Apps', 'role.admin': 'admin', 'role.member': 'member',
     'team.title': 'Team', 'team.sub': 'Members and tokens of {tenant}.', 'team.subAll': 'Every tenant on the platform. Click a row to manage its members and tokens.',
@@ -1480,21 +1495,131 @@ function segmented(items, current, onPick, label) {
     }, content)));
 }
 
-function confirmDialog(title, body, action, extra = null) {
+/**
+ * A list that opens under its trigger and closes on Escape, a pick or a click outside; arrows move between its buttons.
+ * `build(close)` returns the list element.
+ */
+function popover(wrap, button, build) {
+  let list = null;
+  const outside = (e) => { if (!wrap.contains(e.target)) close(); };
+  const keys = (e) => {
+    if (e.key === 'Escape') { close(); button.focus(); e.preventDefault(); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const all = [...list.querySelectorAll('button:not([disabled]):not([hidden])')];
+      all[(all.indexOf(document.activeElement) + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length]?.focus();
+      e.preventDefault();
+    }
+  };
+  function close() {
+    list?.remove();
+    list = null;
+    button.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', outside, true);
+    document.removeEventListener('keydown', keys, true);
+  }
+  button.addEventListener('click', () => {
+    if (list) return close();
+    list = build(close);
+    wrap.append(list);
+    button.setAttribute('aria-expanded', 'true');
+    (list.querySelector('input') ?? list.querySelector('[aria-selected="true"]') ?? list.querySelector('button:not([disabled])'))?.focus();
+    document.addEventListener('pointerdown', outside, true);
+    document.addEventListener('keydown', keys, true);
+  });
+  return close;
+}
+
+/**
+ * The secondary disclosure every capacity or destructive operation sits behind: a quiet trigger opening a short list, the
+ * destructive item last and red only inside it. `items` are { label, onPick, danger, disabled, note }.
+ */
+function moreMenu(label, items, text = null) {
+  const shown = items.filter(Boolean);
+  if (shown.length === 0) return null;
+  const wrap = h('span', { class: 'more' });
+  const button = h('button', { type: 'button', class: text ? 'btn ghost small' : 'ibtn dots', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': label, title: label }, text ?? '⋯');
+  popover(wrap, button, (close) => h('div', { class: 'menu', role: 'menu' }, shown.map((item) => h('button', {
+    type: 'button', role: 'menuitem', class: item.danger ? 'danger' : null, disabled: item.disabled,
+    onclick: () => { close(); item.onPick(); },
+  }, h('span', {}, item.label), item.note ? h('small', {}, item.note) : null))));
+  wrap.append(button);
+  return wrap;
+}
+
+/**
+ * One choice from a list that can grow: a button showing the value opens a menu-pattern list with a check on the chosen
+ * item, and a filter field past eight items. `options` are { value, label, note }.
+ */
+function listbox({ label, options, value, onPick, placeholder = null, disabled = false, wide = false }) {
+  const wrap = h('span', { class: `lbox${wide ? ' wide' : ''}` });
+  const text = h('span');
+  const button = h('button', { type: 'button', class: 'lbtn', 'aria-haspopup': 'listbox', 'aria-expanded': 'false', title: label, disabled }, text, icon('chevron'));
+  const show = () => {
+    const chosen = options.find((o) => o.value === value);
+    text.className = chosen ? '' : 'muted';
+    text.textContent = chosen?.label ?? placeholder ?? '';
+    button.setAttribute('aria-label', `${label}: ${text.textContent}`);
+  };
+  show();
+  popover(wrap, button, (close) => {
+    const items = options.map((o) => h('button', {
+      type: 'button', role: 'option', 'aria-selected': String(o.value === value), 'data-text': `${o.label} ${o.note ?? ''}`.toLowerCase(),
+      onclick: () => {
+        close();
+        button.focus();
+        if (o.value === value) return;
+        value = o.value;
+        show();
+        onPick(o.value);
+      },
+    }, h('span', {}, o.label), o.note ? h('small', {}, o.note) : null, o.value === value ? icon('check') : null));
+    const search = options.length > 8 ? h('input', { type: 'search', class: 'lfind', placeholder: t('lb.find'), 'aria-label': t('lb.find'),
+      oninput: () => { const q = search.value.trim().toLowerCase(); for (const b of items) b.hidden = q !== '' && !b.dataset.text.includes(q); },
+      onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); items.find((b) => !b.hidden)?.click(); } } }) : null;
+    return h('div', { class: 'menu lmenu', role: 'listbox', 'aria-label': label }, search, items);
+  });
+  button.addEventListener('keydown', (e) => {
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && button.getAttribute('aria-expanded') !== 'true') { e.preventDefault(); button.click(); }
+  });
+  wrap.append(button);
+  return wrap;
+}
+
+/** The approval card and the console's only confirmation: what will happen, in the reader's words, then Cancel and the action. */
+function approve({ title, body, facts = [], control = null, danger = false, action = null }) {
   return new Promise((resolve) => {
-    const dialog = h('dialog', {},
-      h('h3', {}, title), h('p', {}, body), extra,
+    const dialog = h('dialog', { class: 'approval' },
+      h('h3', {}, title), h('p', {}, body),
+      facts.length ? h('ul', { class: 'facts' }, facts.map((f) => h('li', {}, f))) : null,
+      control,
       h('form', { method: 'dialog', class: 'actions' },
         h('button', { class: 'btn', value: 'cancel', autofocus: true }, t('cancel')),
-        h('button', { class: 'btn danger', value: 'ok' }, action)));
+        h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, value: 'ok' }, action ?? t('cl.continue'))));
     dialog.addEventListener('close', () => { resolve(dialog.returnValue === 'ok'); dialog.remove(); });
     document.body.append(dialog);
     dialog.showModal();
   });
 }
 
+function stepper(value, min, max, label, onChange) {
+  const out = h('output', { class: 'num' });
+  const minus = h('button', { type: 'button', class: 'ibtn', 'aria-label': t('cl.fewer'), onclick: () => set(n - 1) }, '−');
+  const plus = h('button', { type: 'button', class: 'ibtn', 'aria-label': t('cl.moreOne'), onclick: () => set(n + 1) }, '+');
+  let n = value;
+  const set = (v) => {
+    n = Math.min(max, Math.max(min, v));
+    out.textContent = nf(n);
+    minus.disabled = n <= min;
+    plus.disabled = n >= max;
+    onChange(n);
+  };
+  set(value);
+  return h('div', { class: 'stepper', role: 'group', 'aria-label': label }, minus, out, plus, h('span', { class: 'muted' }, t('cl.range', { max: nf(max) })));
+}
+
 const ICON = {
   sun: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/></svg>',
+  chevron: '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 4.5 3 3 3-3"/></svg>',
   check: '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2 5 8.5l4.5-5"/></svg>',
   search: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>',
   'nav-overview': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.25" y="2.25" width="13.5" height="13.5" rx="3.5"/><path d="M5 9.5h1.75l1.5-3.25 1.75 5.5 1.5-2.25H13"/></svg>',
@@ -1565,8 +1690,7 @@ function topbar() {
   const offered = offeredOf(session);
   const label = (x) => (x === ALL ? t('tn.all') : x);
   const tenant = offered.length > 1
-    ? h('select', { 'aria-label': t('top.tenant'), title: t('top.tenant'), onchange: (e) => setScope(e.target.value) },
-      offered.map((x) => h('option', { value: x, selected: x === scope }, label(x))))
+    ? listbox({ label: t('top.tenant'), options: offered.map((x) => ({ value: x, label: label(x) })), value: scope, onPick: setScope })
     : scope === null ? null : h('span', { class: 'chip', title: t('top.tenant') }, label(scope));
   bar.replaceChildren(
     tenant, tenant && h('span', { class: 'sep', 'aria-hidden': 'true' }),
@@ -3086,7 +3210,7 @@ async function detail(name) {
   renderHead(apps.find((a) => a.name === app.name), stats, recent);
 
   const act = (kind) => async () => {
-    if (!(await confirmDialog(t(`d.${kind}Title`, { name: app.name }), t(`d.${kind}Body`), t(`d.${kind}`)))) return;
+    if (!(await approve({ title: t(`d.${kind}Title`, { name: app.name }), body: t(`d.${kind}Body`), action: t(`d.${kind}`), danger: true }))) return;
     try {
       await api('POST', `${appPath(app.name)}/${kind}`);
       if (kind === 'purge') location.hash = '#/apps';
@@ -3158,10 +3282,11 @@ function accessCard(app, reload) {
   };
   const others = session.tenants.filter((x) => x !== app.tenant);
   const move = async () => {
-    const select = h('select', {}, others.map((x) => h('option', { value: x }, x)));
-    if (!(await confirmDialog(t('mv.title', { name: app.name }), t('mv.body'), t('mv.action'), h('label', { class: 'field' }, h('span', {}, t('mv.to')), select)))) return;
+    let to = others[0];
+    const control = h('div', { class: 'field' }, h('span', {}, t('mv.to')), listbox({ label: t('mv.to'), options: others.map((x) => ({ value: x, label: x })), value: to, onPick: (v) => { to = v; }, wide: true }));
+    if (!(await approve({ title: t('mv.title', { name: app.name }), body: t('mv.body'), action: t('mv.action'), control }))) return;
     try {
-      await api('PUT', `${appPath(app.name)}/tenant`, { tenant: select.value });
+      await api('PUT', `${appPath(app.name)}/tenant`, { tenant: to });
       await reload();
     } catch (error) { failed(error); }
   };
@@ -3294,7 +3419,7 @@ async function team() {
       }
     };
     const remove = async (m) => {
-      if (!(await confirmDialog(t('m.removeTitle', { id: m.id, tenant: scope }), t('m.removeBody'), t('m.remove')))) return;
+      if (!(await approve({ title: t('m.removeTitle', { id: m.id, tenant: scope }), body: t('m.removeBody'), action: t('m.remove'), danger: true }))) return;
       try {
         await api('DELETE', `${base}/members/${encodeURIComponent(m.id)}`);
         say(memberMsg, '', true);
@@ -3315,7 +3440,7 @@ async function team() {
   const loadTokens = async () => {
     const rows = (await api('GET', `${base}/tokens`)).sort((a, b) => (a.revokedAt === null) !== (b.revokedAt === null) ? (a.revokedAt === null ? -1 : 1) : b.createdAt - a.createdAt);
     const revoke = async (token) => {
-      if (!(await confirmDialog(t('tk.revokeTitle', { label: token.label }), t('tk.revokeBody'), t('tk.revoke')))) return;
+      if (!(await approve({ title: t('tk.revokeTitle', { label: token.label }), body: t('tk.revokeBody'), action: t('tk.revoke'), danger: true }))) return;
       try {
         await api('DELETE', `${base}/tokens/${encodeURIComponent(token.id)}`);
         await loadTokens();
@@ -4258,80 +4383,6 @@ function usage(label, text, used, total) {
   const ratio = total > 0 ? used / total : 0;
   return h('div', { class: 'ubar', title: pct(ratio) }, h('div', {}, h('span', {}, label), h('span', { class: 'num' }, text)),
     h('div', { class: 'bar' }, h('i', { class: ratio > 0.85 ? 'hot' : null, style: `width:${Math.min(100, ratio * 100).toFixed(1)}%` })));
-}
-
-/**
- * The secondary disclosure every capacity or destructive operation sits behind: a quiet trigger opening a short list, the
- * destructive item last and red only inside it. `items` are { label, onPick, danger, disabled, note }.
- */
-function moreMenu(label, items, text = null) {
-  const shown = items.filter(Boolean);
-  if (shown.length === 0) return null;
-  const wrap = h('span', { class: 'more' });
-  const button = h('button', { type: 'button', class: text ? 'btn ghost small' : 'ibtn dots', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': label, title: label }, text ?? '⋯');
-  let list = null;
-  const outside = (e) => { if (!wrap.contains(e.target)) close(); };
-  const keys = (e) => {
-    if (e.key === 'Escape') { close(); button.focus(); }
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      const all = [...list.querySelectorAll('button:not([disabled])')];
-      all[(all.indexOf(document.activeElement) + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length]?.focus();
-      e.preventDefault();
-    }
-  };
-  function close() {
-    list?.remove();
-    list = null;
-    button.setAttribute('aria-expanded', 'false');
-    document.removeEventListener('pointerdown', outside, true);
-    document.removeEventListener('keydown', keys, true);
-  }
-  button.addEventListener('click', () => {
-    if (list) return close();
-    list = h('div', { class: 'menu', role: 'menu' }, shown.map((item) => h('button', {
-      type: 'button', role: 'menuitem', class: item.danger ? 'danger' : null, disabled: item.disabled,
-      onclick: () => { close(); item.onPick(); },
-    }, h('span', {}, item.label), item.note ? h('small', {}, item.note) : null)));
-    wrap.append(list);
-    button.setAttribute('aria-expanded', 'true');
-    list.querySelector('button:not([disabled])')?.focus();
-    document.addEventListener('pointerdown', outside, true);
-    document.addEventListener('keydown', keys, true);
-  });
-  wrap.append(button);
-  return wrap;
-}
-
-/** The approval card: what will happen, in the operator's words, then 取消 / 继续. */
-function approve({ title, body, facts = [], control = null, danger = false }) {
-  return new Promise((resolve) => {
-    const dialog = h('dialog', { class: 'approval' },
-      h('h3', {}, title), h('p', {}, body),
-      facts.length ? h('ul', { class: 'facts' }, facts.map((f) => h('li', {}, f))) : null,
-      control,
-      h('form', { method: 'dialog', class: 'actions' },
-        h('button', { class: 'btn', value: 'cancel', autofocus: true }, t('cancel')),
-        h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, value: 'ok' }, t('cl.continue'))));
-    dialog.addEventListener('close', () => { resolve(dialog.returnValue === 'ok'); dialog.remove(); });
-    document.body.append(dialog);
-    dialog.showModal();
-  });
-}
-
-function stepper(value, min, max, label, onChange) {
-  const out = h('output', { class: 'num' });
-  const minus = h('button', { type: 'button', class: 'ibtn', 'aria-label': t('cl.fewer'), onclick: () => set(n - 1) }, '−');
-  const plus = h('button', { type: 'button', class: 'ibtn', 'aria-label': t('cl.moreOne'), onclick: () => set(n + 1) }, '+');
-  let n = value;
-  const set = (v) => {
-    n = Math.min(max, Math.max(min, v));
-    out.textContent = nf(n);
-    minus.disabled = n <= min;
-    plus.disabled = n >= max;
-    onChange(n);
-  };
-  set(value);
-  return h('div', { class: 'stepper', role: 'group', 'aria-label': label }, minus, out, plus, h('span', { class: 'muted' }, t('cl.range', { max: nf(max) })));
 }
 
 function cluster() {
