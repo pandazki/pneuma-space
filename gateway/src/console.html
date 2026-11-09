@@ -334,8 +334,7 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .item .what .mono { font-size: 12px; font-weight: 400; }
 .item .why { grid-column: 2; font: 11.5px/17px var(--mono); color: var(--ink-3); overflow-wrap: anywhere; }
 .item .side { display: grid; justify-items: end; gap: 4px; font: 11px var(--mono); color: var(--ink-3); }
-.item .side button { border: 0; background: none; padding: 2px 6px; border-radius: 6px; font: 500 11.5px var(--font); color: var(--ink-2); cursor: pointer; }
-.item .side button:hover { background: var(--hover-2); }
+.item .side .btn { height: 22px; font-size: 11.5px; padding: 0 8px; }
 .item.enter { animation: slidein .6s cubic-bezier(.2, .9, .3, 1); }
 @keyframes slidein { from { transform: translateX(-12px); opacity: 0; background: var(--red-tint); } }
 .linkish { border: 0; background: none; padding: 0; font: inherit; font-size: 12px; color: var(--accent-ink); cursor: pointer; }
@@ -349,6 +348,16 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .ev.fresh > * { animation: enter .45s cubic-bezier(.2, .9, .3, 1); }
 @keyframes fresh { from { background: var(--accent-tint); } }
 @keyframes enter { from { transform: translateY(-10px); opacity: 0; } }
+.ev.fold { cursor: pointer; outline: none; }
+.ev.fold:hover, .evx.open > .ev.fold { background: var(--hover); }
+.ev.fold:focus-visible { box-shadow: inset 2px 0 0 var(--accent); }
+.ev.fold .st b { margin-left: 6px; font-weight: 600; color: var(--ink); }
+.ev.fold .f { display: flex; align-items: center; gap: 8px; font-family: var(--font); }
+.ev.fold .caret { margin-left: auto; color: var(--ink-3); transition: transform .15s; }
+.evx.open .caret { transform: rotate(90deg); }
+.evs { background: var(--inset); box-shadow: inset 2px 0 0 var(--accent); border-bottom: 1px solid var(--line); }
+.evs .ev { height: 30px; border-bottom-color: var(--line-soft); }
+.evx.fresh { animation: fresh 2.4s ease-out; }
 .ev.mark { display: block; height: auto; padding: 7px 14px; font-size: 12px; color: var(--orange); background: var(--orange-tint); text-align: center; white-space: normal; }
 @container tail (max-width: 560px) {
   .ev { grid-template-columns: 58px minmax(0, 1fr) minmax(0, 1fr); height: auto; padding: 7px 14px; gap: 2px 10px; }
@@ -831,13 +840,14 @@ input.lim-in { width: 96px; height: 22px; padding: 0 6px; border-radius: 6px; te
 <script>
 const I18N = {
   zh: {
+    'fold.trigger': '触发 {name}', 'fold.wake': '唤醒后休眠', 'fold.leader': '领导权', 'fold.meanWake': '平均唤醒 {ms}', 'fold.meanDelivery': '平均投递 {ms}', 'fold.since': '自 {time} 起', 'fold.started': '已 {d}', 'fold.expand': '展开这些事件',
     'brand.sub': '控制台', 'nav.group': '平台', 'nav.overview': '总览', 'nav.apps': '项目', 'nav.publish': '发布',
     'theme.light': '浅色', 'theme.dark': '深色', 'theme.toLight': '切换到浅色', 'theme.toDark': '切换到深色',
     'lang.toZh': '切换到中文', 'lang.toEn': '切换到 English', 'nav.collapse': '收起侧栏', 'nav.expand': '展开侧栏',
     'ov.title': '总览', 'ov.waiting': '等待第一次采样',
     'svc.gateway': '网关', 'svc.redis': 'Redis', 'svc.object': '对象存储', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn', 'svc.runner': 'runner',
     'svc.gatewaySub': '已运行 {up} · 内存 {rss}', 'svc.off': '未启用 profile', 'svc.down': '不可达', 'svc.unknown': '等待第一次采样',
-    'sec.fleet': '席位、唤醒与主机', 'sec.fleetDesc': '醒着的实例占一个席位；唤醒对照 3 秒门槛。',
+    'sec.fleet': '席位、唤醒与主机', 'sec.fleetDesc': '醒着的实例占一个席位；唤醒耗时对照 3 秒目标。',
     'k.awakeSub': '唤醒中 {waking} · 排空中 {draining} · 停止中 {stopping}',
     'k.wakes': '唤醒（1 小时）',
     'k.host': '主机负载', 'k.cores': '/ {n} 核',
@@ -854,7 +864,7 @@ const I18N = {
     'heat.total': '合计请求', 'heat.peak': '最忙的钟点', 'heat.none': '这段时间没有请求。',
     'heat.span': '{from} 起的 30 天，当地时间',
     's.deliveriesDone': '完成', 's.deliveriesFailed': '失败', 's.deliveriesRetried': '重试',
-    'sec.attention': '需要关注', 'sec.attentionDesc': '投递失败、唤醒失败、服务不可达、唤醒 p95 超门槛。已读只记在这个浏览器里。',
+    'sec.attention': '需要关注', 'sec.attentionDesc': '投递失败、唤醒失败、服务不可达、唤醒 p95 超过 3 秒目标。已读只记在这个浏览器里。',
     'sec.events': '事件流', 'sec.eventsDesc': '生命周期事件，最新在上。悬停或向下滚动即暂停跟随。', 'ev.filter': '筛选事件',
     'col.name': '名称', 'col.state': '状态', 'col.since': '进入时间', 'col.requests': '请求（24 小时）', 'col.errors': '错误（24 小时）',
     'col.status': '状态',
@@ -895,9 +905,9 @@ const I18N = {
     'live.on': '直播中', 'live.paused': '已暂停', 'live.offline': '网关无响应，重试中', 'live.pause': '暂停', 'live.resume': '继续',
     'live.last': '上一条事件 {ago}', 'live.none': '还没有事件', 'live.restarted': '网关在 {time} 重启，计数从零开始',
     'svc.probed': '{ago}探测',
-    'seats.title': '并发席位', 'seats.gate': '醒着门槛 {n}', 'seats.free': '空闲席位', 'seats.over': '超出门槛 {n} 个',
+    'seats.title': '并发席位', 'seats.gate': '设计容量 {n}', 'seats.free': '空闲席位', 'seats.over': '超出容量 {n} 个',
     'seats.fleet': '已注册 {registered} · 24 小时内访问 {active} · 已移除 {removed}',
-    'gate.sub': 'p50 {p50} · p95 {p95} · 失败 {failures}', 'gate.line': '3 秒门槛', 'gate.latest': '最近一次 {ms}', 'gate.failed': '最近一次失败', 'gate.none': '这一小时还没有唤醒。',
+    'gate.sub': 'p50 {p50} · p95 {p95} · 失败 {failures}', 'gate.line': '3 秒目标', 'gate.latest': '最近一次 {ms}', 'gate.failed': '最近一次失败', 'gate.none': '这一小时还没有唤醒。',
     'host.mem': '内存', 'host.disk': '数据盘', 'host.diskFree': '剩余 {free}',
     'sec.timeline': '醒着的实例', 'sec.timelineDesc': '最近 15 分钟醒过的每个实例：唤醒和耗时、醒着、排空；右侧是它为什么还醒着。',
     'tl.minus': '-{n} 分', 'tl.now': '现在', 'tl.empty': '最近 15 分钟没有实例醒过。', 'tl.nodata': '无数据：早于网关保留的最早事件', 'tl.wake': '唤醒 {ms}', 'tl.sleepsAt': '{time} 休眠',
@@ -1099,13 +1109,14 @@ const I18N = {
     'empty.cl.instances': '没有醒着的实例。', 'empty.cl.volumes': '没有应用卷。',
   },
   en: {
+    'fold.trigger': 'trigger {name}', 'fold.wake': 'woke and slept', 'fold.leader': 'leader', 'fold.meanWake': 'mean wake {ms}', 'fold.meanDelivery': 'mean delivery {ms}', 'fold.since': 'since {time}', 'fold.started': 'for {d}', 'fold.expand': 'Show these events',
     'brand.sub': 'Console', 'nav.group': 'Platform', 'nav.overview': 'Overview', 'nav.apps': 'Projects', 'nav.publish': 'Publish',
     'theme.light': 'Light', 'theme.dark': 'Dark', 'theme.toLight': 'Switch to light theme', 'theme.toDark': 'Switch to dark theme',
     'lang.toZh': 'Switch to 中文', 'lang.toEn': 'Switch to English', 'nav.collapse': 'Collapse sidebar', 'nav.expand': 'Expand sidebar',
     'ov.title': 'Overview', 'ov.waiting': 'Waiting for the first sample',
     'svc.gateway': 'Gateway', 'svc.redis': 'Redis', 'svc.object': 'Object store', 'svc.postgres': 'PostgreSQL', 'svc.coturn': 'coturn', 'svc.runner': 'runner',
     'svc.gatewaySub': 'up {up} · RSS {rss}', 'svc.off': 'profile not running', 'svc.down': 'not reachable', 'svc.unknown': 'waiting for the first sample',
-    'sec.fleet': 'Seats, wakes and host', 'sec.fleetDesc': 'Each awake instance takes a seat; wakes are measured against the 3 s gate.',
+    'sec.fleet': 'Seats, wakes and host', 'sec.fleetDesc': 'Each awake instance takes a seat; wakes are measured against the 3 s target.',
     'k.awakeSub': 'waking {waking} · draining {draining} · stopping {stopping}',
     'k.wakes': 'Wakes, 1 h',
     'k.host': 'Host load', 'k.cores': '/ {n} cores',
@@ -1122,7 +1133,7 @@ const I18N = {
     'heat.total': 'Total requests', 'heat.peak': 'Busiest hour', 'heat.none': 'No requests in this period.',
     'heat.span': '30 days from {from}, local time',
     's.deliveriesDone': 'done', 's.deliveriesFailed': 'failed', 's.deliveriesRetried': 'retried',
-    'sec.attention': 'Attention', 'sec.attentionDesc': 'Failed deliveries and wakes, a service down, wake p95 over the gate. Seen marks stay in this browser.',
+    'sec.attention': 'Attention', 'sec.attentionDesc': 'Failed deliveries and wakes, a service down, wake p95 over the 3 s target. Seen marks stay in this browser.',
     'sec.events': 'Event tail', 'sec.eventsDesc': 'Lifecycle events, newest on top. Hover or scroll down to pause following.', 'ev.filter': 'Filter events',
     'col.name': 'Name', 'col.state': 'State', 'col.since': 'Since', 'col.requests': 'Requests, 24 h', 'col.errors': 'Errors, 24 h',
     'col.status': 'Status',
@@ -1163,9 +1174,9 @@ const I18N = {
     'live.on': 'Live', 'live.paused': 'Paused', 'live.offline': 'Gateway not answering; retrying', 'live.pause': 'Pause', 'live.resume': 'Resume',
     'live.last': 'last event {ago}', 'live.none': 'no event yet', 'live.restarted': 'gateway restarted at {time}; counters start over',
     'svc.probed': 'probed {ago}',
-    'seats.title': 'Seats', 'seats.gate': 'awake gate {n}', 'seats.free': 'free seat', 'seats.over': '{n} over the gate',
+    'seats.title': 'Seats', 'seats.gate': 'capacity {n}', 'seats.free': 'free seat', 'seats.over': '{n} over capacity',
     'seats.fleet': 'registered {registered} · accessed in 24 h {active} · removed {removed}',
-    'gate.sub': 'p50 {p50} · p95 {p95} · failed {failures}', 'gate.line': '3 s gate', 'gate.latest': 'latest {ms}', 'gate.failed': 'latest failed', 'gate.none': 'No wake in the last hour.',
+    'gate.sub': 'p50 {p50} · p95 {p95} · failed {failures}', 'gate.line': '3 s target', 'gate.latest': 'latest {ms}', 'gate.failed': 'latest failed', 'gate.none': 'No wake in the last hour.',
     'host.mem': 'Memory', 'host.disk': 'Data disk', 'host.diskFree': '{free} free',
     'sec.timeline': 'Awake timeline', 'sec.timelineDesc': 'Every instance awake in the last 15 min: wakes with their latency, awake, draining; on the right, why it is still up.',
     'tl.minus': '-{n} min', 'tl.now': 'now', 'tl.empty': 'No instance has been awake in the last 15 minutes.', 'tl.nodata': 'No data: older than the oldest event the gateway keeps', 'tl.wake': 'wake {ms}', 'tl.sleepsAt': 'sleeps at {time}',
@@ -2445,7 +2456,7 @@ function attentionItems(model, downSince) {
 
 function attentionInbox() {
   const list = h('div', { class: 'card inbox' });
-  const all = h('button', { class: 'linkish', type: 'button', onclick: () => { for (const i of items) seen.add(i.id); save(); paint(false); } }, t('att.allSeen'));
+  const all = h('button', { class: 'btn ghost small', type: 'button', onclick: () => { for (const i of items) seen.add(i.id); save(); paint(false); } }, t('att.allSeen'));
   const el = h('div', { 'data-section': 'attention' }, list);
   const seen = loadSeen();
   const downSince = new Map();
@@ -2457,7 +2468,7 @@ function attentionInbox() {
     h('div', { class: 'what' }, i.what, i.app ? appLink(i.app) : null, i.count > 1 ? h('span', { class: 'chip' }, `×${nf(i.count)}`) : null),
     h('div', { class: 'side', style: 'grid-row: span 2' },
       h('span', { title: stamp(i.at) }, clock(i.at, true)),
-      seen.has(i.id) ? null : h('button', { type: 'button', onclick: () => { seen.add(i.id); save(); paint(false); } }, t('att.seen'))),
+      seen.has(i.id) ? null : h('button', { class: 'btn ghost small', type: 'button', 'aria-label': `${t('att.seen')}: ${typeof i.what === 'string' ? i.what : ''} ${i.app ?? ''}`, onclick: () => { seen.add(i.id); save(); paint(false); } }, t('att.seen'))),
     h('div', { class: 'why' }, i.why));
   const paint = (animate) => {
     const unseen = items.filter((i) => !seen.has(i.id));
@@ -2466,7 +2477,7 @@ function attentionInbox() {
     fill(list,
       unseen.length ? unseen.map((i) => row(i, fresh(i))) : h('div', { class: 'empty' }, t('empty.attention')),
       done.length ? h('div', { class: 'item', style: 'display:block;padding:8px 14px' },
-        h('button', { class: 'linkish', type: 'button', onclick: () => { open = !open; paint(false); } }, open ? t('att.hideSeen') : t('att.showSeen', { n: done.length }))) : null,
+        h('button', { class: 'btn ghost small', type: 'button', 'aria-expanded': String(open), onclick: () => { open = !open; paint(false); } }, open ? t('att.hideSeen') : t('att.showSeen', { n: done.length }))) : null,
       open ? done.map((i) => row(i, false)) : null);
     all.hidden = unseen.length === 0;
     known = new Set(items.map((i) => i.id));
@@ -2499,7 +2510,7 @@ function eventFields(e) {
 
 const eventText = (e) => `${e.ev} ${e.app ?? ''} ${eventFields(e)}`.toLowerCase();
 
-function eventLine({ item: e }) {
+function eventRow(e) {
   return h('div', { class: 'ev', title: `#${e.id} · ${e.replica} · ${stamp(e.t)}` },
     h('span', { class: 'mono' }, clock(e.t, true)),
     h('span', { class: `st ${eventTone(e)}` }, h('span', { class: 'mono' }, e.ev)),
@@ -2509,77 +2520,243 @@ function eventLine({ item: e }) {
 
 const eventMarks = (diff) => (diff.missed > 0 ? [t('tail.gap', { n: nf(diff.missed) })] : []);
 
+// Folding (docs/console.md, Streams): a cron tick is seven events a minute, so healthy cycles of one app become one line.
+
+const WAKE_FAMILY = new Set(['waking', 'awake', 'draining', 'stopping', 'asleep', 'memory-clamped']);
+const DELIVERY_FAMILY = new Set(['delivery.due', 'delivery.delivering', 'delivery.done', 'delivery.failed']);
+const PLATFORM_RUNS = new Set(['leader']);
+const SLEEP_SIDE = new Set(['draining', 'stopping', 'asleep']);
+
+/** A cycle that delivered is its trigger's, whether or not it woke the app; one that only woke and slept is a wake. */
+function cycleKind(c) {
+  const done = c.events.find((e) => e.ev === 'delivery.done');
+  if (done) return `trigger:${done.trigger}`;
+  return c.woke && c.slept ? 'wake' : null;
+}
+
+/**
+ * Consumes events oldest first and answers keyed line operations: { key, item } puts the line on top, replacing the line
+ * with that key; { remove: key } takes it away. An item is { kind: 'event', e }, { kind: 'open', app, events } for a cycle
+ * in progress, or { kind: 'run', app, cycle, cycles, events } for consecutive healthy cycles of one kind.
+ */
+function eventFolder() {
+  const open = new Map();
+  const runs = new Map();
+  const raw = (e) => ({ key: `e:${e.id}`, item: { kind: 'event', e, events: [e] } });
+  const extend = (scope, cycle, events, ops) => {
+    const run = runs.get(scope);
+    const next = run && run.cycle === cycle
+      ? { ...run, cycles: [...run.cycles, events], events: [...run.events, ...events] }
+      : { kind: 'run', key: `r:${events[0].id}`, app: events[0].app ?? null, replica: events[0].replica, cycle, cycles: [events], events };
+    runs.set(scope, next);
+    ops.push({ key: next.key, item: next });
+  };
+  const close = (app, c, ops) => {
+    open.delete(app);
+    ops.push({ remove: c.key });
+    const kind = cycleKind(c);
+    if (c.bad || kind === null) {
+      runs.delete(app);
+      for (const e of c.events) ops.push(raw(e));
+    } else extend(app, kind, c.events, ops);
+  };
+  return (e) => {
+    const ops = [];
+    if (!e.app) {
+      const scope = `p:${e.ev}:${e.replica}`;
+      for (const key of runs.keys()) if (key.startsWith('p:') && key.endsWith(`:${e.replica}`) && key !== scope) runs.delete(key);
+      if (PLATFORM_RUNS.has(e.ev) && e.error === undefined) extend(scope, e.ev, [e], ops);
+      else ops.push(raw(e));
+      return ops;
+    }
+    if (!WAKE_FAMILY.has(e.ev) && !DELIVERY_FAMILY.has(e.ev)) {
+      const c = open.get(e.app);
+      if (c) close(e.app, { ...c, bad: true }, ops);
+      runs.delete(e.app);
+      ops.push(raw(e));
+      return ops;
+    }
+    let c = open.get(e.app);
+    if (c && e.ev === 'delivery.due' && c.pending.size === 0 && c.woke && !c.slept) {
+      close(e.app, c, ops);
+      c = undefined;
+    }
+    c ??= { key: `c:${e.id}`, events: [], pending: new Set(), woke: false, slept: false, bad: false };
+    open.set(e.app, c);
+    c.events.push(e);
+    if (e.error !== undefined || e.ev === 'delivery.failed' || (e.ev === 'delivery.due' && Number(e.attempt) > 0)) c.bad = true;
+    if (e.ev === 'delivery.due' || e.ev === 'delivery.delivering') c.pending.add(e.delivery);
+    if (e.ev === 'delivery.done' || e.ev === 'delivery.failed') c.pending.delete(e.delivery);
+    if (e.ev === 'waking') c.woke = true;
+    if (e.ev === 'asleep') c.slept = true;
+    const quiet = c.pending.size === 0 && (c.slept || (!c.woke && !c.events.some((x) => SLEEP_SIDE.has(x.ev)) && c.events.some((x) => x.ev === 'delivery.done')));
+    if (quiet || c.bad) close(e.app, c, ops);
+    else ops.push({ key: c.key, item: { kind: 'open', app: e.app, events: [...c.events] } });
+    return ops;
+  };
+}
+
+const mean = (list) => (list.length ? list.reduce((n, v) => n + v, 0) / list.length : null);
+
+/** What a run line says after its count: the mean wake latency, or the mean delivery time while the app was already up. */
+function runMeta(item) {
+  const wakes = item.events.filter((e) => e.ev === 'awake' && typeof e.ms === 'number').map((e) => e.ms);
+  if (wakes.length) return t('fold.meanWake', { ms: ms(mean(wakes)) });
+  const spans = item.cycles.map((c) => {
+    const from = c.find((e) => e.ev === 'delivery.delivering')?.t;
+    const to = c.find((e) => e.ev === 'delivery.done')?.t;
+    return from != null && to != null ? to - from : null;
+  }).filter((v) => v != null);
+  return spans.length ? t('fold.meanDelivery', { ms: ms(mean(spans)) }) : null;
+}
+
+/** The event stream of the overview and the realtime page: folded lines that expand to their events, the filter applied to the events. */
+function eventStream({ keep, limit, attrs }) {
+  const expanded = new Set();
+  let match = () => true;
+  const line = (entry) => {
+    const item = entry.item;
+    if (item.kind === 'event') return eventRow(item.e);
+    const last = item.events.at(-1);
+    const shown = item.events.filter((e) => match(e));
+    const isOpen = expanded.has(entry.key);
+    const toggle = () => {
+      if (isOpen) expanded.delete(entry.key); else expanded.add(entry.key);
+      entry.redraw().firstChild.focus({ preventScroll: true });
+    };
+    const state = last.ev.startsWith('delivery.') ? 'delivering' : last.ev === 'memory-clamped' ? 'waking' : last.ev;
+    const label = item.kind === 'open'
+      ? h('span', { class: `st ${tone(state)}` }, t(`st.${state}`))
+      : h('span', { class: 'st green' }, item.cycle.startsWith('trigger:') ? t('fold.trigger', { name: item.cycle.slice(8) }) : t(`fold.${item.cycle}`), h('b', { class: 'num' }, `×${nf(item.cycles.length)}`));
+    const meta = item.kind === 'run' ? [runMeta(item), item.cycles.length > 1 ? t('fold.since', { time: clock(item.events[0].t) }) : null].filter(Boolean).join(' · ') : t('fold.started', { d: duration(Date.now() - item.events[0].t) });
+    const wrap = h('div', { class: `evx${isOpen ? ' open' : ''}` },
+      h('div', { class: 'ev fold', role: 'button', tabindex: '0', 'aria-expanded': String(isOpen), title: t('fold.expand'),
+        onclick: toggle, onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } } },
+        h('span', { class: 'mono' }, clock(last.t, true)),
+        label,
+        item.app ? appLink(item.app) : h('span', { class: 'mono muted' }, item.replica ?? '-'),
+        h('span', { class: 'f' }, meta, h('span', { class: 'caret', 'aria-hidden': 'true' }, '›'))),
+      isOpen ? h('div', { class: 'evs' }, [...shown].reverse().map(eventRow)) : null);
+    return wrap;
+  };
+  const stream = follow({ line, keep, limit, hold: EVENT_RING, empty: 'empty.events', newKey: 'tail.new', attrs });
+  const fold = eventFolder();
+  const opsOf = (events) => events.flatMap(fold);
+  return {
+    el: stream.el,
+    get counts() { return stream.counts; },
+    onChange: (fn) => stream.onChange(fn),
+    setMatch(fn) { match = fn; stream.setMatch((item) => item.events.some((e) => fn(e))); },
+    seed: (events) => stream.seed(opsOf(events)),
+    push: (marks, events) => stream.push(marks, opsOf(events)),
+  };
+}
+
 /**
  * A newest-on-top stream that follows arrivals (ADR 0015): while the pointer is over it or it is scrolled down, new
- * entries wait behind a pill, at most `hold` of them, the gateway's ring for that stream. An entry is `{ item }` or
- * `{ mark }`; a mark (a gap, a restart) shows whatever the filter.
+ * entries wait behind a pill, at most `hold` of them, the gateway's ring for that stream. Arrivals are keyed operations:
+ * { key, item } puts a line on top and replaces the line with that key; { remove: key } drops one. A mark (a gap, a
+ * restart) shows whatever the filter.
  */
 function follow({ line, keep, limit, hold, empty, newKey, attrs = {}, head = null }) {
   const rows = h('div', { class: 'rows' });
   const pill = h('button', { class: 'pill', type: 'button', hidden: true, onclick: () => { rows.scrollTo({ top: 0 }); hovering = false; flush(); } });
   const el = h('div', { ...attrs, class: `card tailbox ${attrs.class ?? ''}` }, pill, head, rows);
   let entries = [];
-  const pending = [];
+  let pending = [];
+  const nodes = new Map();
+  let marks = 0;
   let dropped = 0;
   let match = () => true;
   let hovering = false;
   let changed = () => {};
   const paused = () => hovering || rows.scrollTop > 4;
   const shows = (entry) => entry.mark !== undefined || match(entry.item);
-  const node = (entry) => (entry.mark !== undefined ? h('div', { class: 'ev mark' }, entry.mark) : line(entry));
+  const node = (entry) => {
+    const n = entry.mark !== undefined ? h('div', { class: 'ev mark' }, entry.mark) : line(entry);
+    nodes.set(entry.key, n);
+    entry.redraw = () => {
+      const was = nodes.get(entry.key);
+      const next = node(entry);
+      was?.replaceWith(next);
+      return next;
+    };
+    return n;
+  };
+  const placeholder = () => h('div', { class: 'empty' }, t(entries.some((e) => e.item) ? 'empty.filtered' : empty));
   const rebuild = () => {
+    nodes.clear();
     const shown = [];
     for (const entry of entries) {
       if (shown.length >= limit) break;
       if (shows(entry)) shown.push(node(entry));
     }
-    fill(rows, shown.length ? shown : h('div', { class: 'empty' }, t(entries.some((e) => e.item) ? 'empty.filtered' : empty)));
+    fill(rows, shown.length ? shown : placeholder());
     changed();
+  };
+  /** Applies operations oldest first to the entry list; answers the entries put on top, newest first. */
+  const apply = (ops) => {
+    const added = [];
+    for (const op of ops) {
+      const key = op.remove ?? op.key;
+      const at = entries.findIndex((x) => x.key === key);
+      if (at >= 0) entries.splice(at, 1);
+      nodes.get(key)?.remove();
+      nodes.delete(key);
+      if (op.remove === undefined) { entries.unshift(op); added.push(op); }
+    }
+    for (const gone of entries.splice(keep)) nodes.delete(gone.key);
+    const kept = new Set(entries);
+    return added.filter((x) => kept.has(x)).reverse();
   };
   const flush = () => {
     pill.hidden = true;
-    if (dropped) pending.unshift({ mark: t('tail.dropped', { n: nf(dropped) }) });
+    const ops = pending.splice(0);
+    if (dropped) ops.push({ key: `m:${++marks}`, mark: t('tail.dropped', { n: nf(dropped) }) });
     dropped = 0;
-    if (pending.length) {
-      const batch = pending.splice(0).reverse();
-      entries = batch.concat(entries);
-      entries.splice(keep);
+    if (ops.length) {
       for (const old of rows.querySelectorAll('.fresh')) old.classList.remove('fresh');
-      const shown = batch.filter(shows).slice(0, limit);
+      const shown = apply(ops).filter(shows).slice(0, limit);
       // A batch held back by a pause arrives at once; flashing hundreds of rows says nothing.
-      const nodes = shown.map((entry) => {
+      const fresh = shown.map((entry) => {
         const n = node(entry);
         if (shown.length <= FRESH_ROWS) n.classList.add('fresh');
         return n;
       });
-      if (nodes.length) rows.querySelector('.empty')?.remove();
-      rows.prepend(...nodes);
+      if (fresh.length) rows.querySelector(':scope > .empty')?.remove();
+      rows.prepend(...fresh);
       while (rows.children.length > limit) rows.lastChild.remove();
+      if (!rows.children.length) rows.append(placeholder());
     }
     changed();
   };
+  const waiting = () => new Set(pending.filter((p) => p.item && match(p.item)).map((p) => p.key)).size;
   rows.addEventListener('pointerenter', () => { hovering = true; });
   rows.addEventListener('pointerleave', () => { hovering = false; if (!paused()) flush(); });
   rows.addEventListener('scroll', () => { if (!paused()) flush(); }, { passive: true });
   return {
     el,
-    /** Items shown, items kept, and how many matching ones wait behind the pill. */
+    /** Lines shown, lines kept, and how many matching ones wait behind the pill. */
     get counts() {
-      return { shown: rows.querySelectorAll(':scope > :not(.mark):not(.empty)').length, kept: entries.filter((e) => e.item).length, waiting: pending.filter((p) => p.item && match(p.item)).length };
+      return { shown: rows.querySelectorAll(':scope > :not(.mark):not(.empty)').length, kept: entries.filter((e) => e.item).length, waiting: waiting() };
     },
     onChange(fn) { changed = fn; },
     setMatch(fn) { match = fn; rebuild(); },
-    seed(items) {
-      entries.unshift(...[...items].reverse().map((item) => ({ item })));
-      entries.splice(keep);
+    seed(ops) {
+      apply(ops);
       rebuild();
     },
-    push(marks, items) {
-      for (const mark of marks) pending.push({ mark });
-      for (const item of items) pending.push({ item });
+    push(newMarks, ops) {
+      for (const mark of newMarks) pending.push({ key: `m:${++marks}`, mark });
+      pending.push(...ops);
       if (!paused()) return flush();
-      for (const old of pending.splice(0, Math.max(0, pending.length - hold))) if (old.item) dropped += 1;
-      const n = pending.filter((p) => p.item && match(p.item)).length;
+      const keys = new Set(pending.filter((p) => p.item).map((p) => p.key));
+      if (keys.size > hold) {
+        const over = new Set([...keys].slice(0, keys.size - hold));
+        dropped += over.size;
+        pending = pending.filter((p) => !over.has(p.key));
+      }
+      const n = waiting();
       pill.hidden = !n && !dropped;
       pill.textContent = [`↑ ${t(newKey, { n: nf(n) })}`, dropped && t('tail.dropped', { n: nf(dropped) })].filter(Boolean).join(' · ');
       changed();
@@ -2588,7 +2765,7 @@ function follow({ line, keep, limit, hold, empty, newKey, attrs = {}, head = nul
 }
 
 function eventTail() {
-  const stream = follow({ line: eventLine, keep: TAIL_ROWS, limit: TAIL_ROWS, hold: EVENT_RING, empty: 'empty.events', newKey: 'tail.new', attrs: { 'data-section': 'tail' } });
+  const stream = eventStream({ keep: TAIL_ROWS, limit: TAIL_ROWS, attrs: { 'data-section': 'tail' } });
   const filter = h('input', { type: 'search', name: 'filter', placeholder: t('ev.filter'), 'aria-label': t('ev.filter'), oninput: () => {
     const needle = filter.value.trim().toLowerCase();
     stream.setMatch((e) => !needle || eventText(e).includes(needle));
@@ -2931,15 +3108,13 @@ function realtime() {
     const wrap = h('div', { class: `rqx${entry.open ? ' open' : ''}` }, row, entry.open ? detail(r) : null);
     const toggle = () => {
       entry.open = !entry.open;
-      const next = requestLine(entry);
-      wrap.replaceWith(next);
-      next.firstChild.focus({ preventScroll: true });
+      entry.redraw().firstChild.focus({ preventScroll: true });
     };
     return wrap;
   };
 
   const requests = follow({ line: requestLine, keep: KEEP_REQUESTS, limit: REQUEST_ROWS, hold: REQUEST_RING, empty: 'empty.requests', newKey: 'rt.new', head: requestHead, attrs: { class: 'reqs', 'data-section': 'requests' } });
-  const events = follow({ line: eventLine, keep: KEEP_EVENTS, limit: TAIL_ROWS, hold: EVENT_RING, empty: 'empty.events', newKey: 'tail.new', attrs: { 'data-section': 'realtime-events' } });
+  const events = eventStream({ keep: KEEP_EVENTS, limit: TAIL_ROWS, attrs: { 'data-section': 'realtime-events' } });
   const count = (stream) => {
     const el = h('span', { class: 'cnt' });
     stream.onChange(() => {
@@ -3015,8 +3190,9 @@ function realtime() {
       }
       page.records.push(...batch.records);
       page.records.splice(0, Math.max(0, page.records.length - KEEP_REQUESTS));
-      if (!page.seeded) requests.seed(batch.records);
-      if (marks.length || (page.seeded && batch.records.length)) requests.push(marks, page.seeded ? batch.records : []);
+      const ops = batch.records.map((r) => ({ key: `${r.replica}:${r.seq}:${r.t}`, item: r }));
+      if (!page.seeded) requests.seed(ops);
+      if (marks.length || (page.seeded && batch.records.length)) requests.push(marks, page.seeded ? ops : []);
       if (page.seeded && batch.records.length) header.beat();
       page.seeded = true;
       if (batch.records.length < REQUEST_PAGE) break;
