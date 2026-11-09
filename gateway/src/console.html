@@ -840,6 +840,13 @@ input.lim-in { width: 96px; height: 22px; padding: 0 6px; border-radius: 6px; te
 <script>
 const I18N = {
   zh: {
+    'tp.lane.container.sub.k8s': 'Kubernetes · 每应用一个 Pod', 'tp.engine.container.k8s': 'Kubernetes', 'tp.unprobed.k8s': '随集群，不探测',
+    'tp.keep.container.k8s': '每应用的 PVC', 'tp.keep.isolate.k8s': 'runner 的 PVC', 'tp.fixDown.k8s': '到集群页看 {service} 的 Pod', 'tp.fixOff.k8s': '部署里没有 {profile}',
+    'tp.x.container.request.k8s': '入口按应用地址{address}找到应用，经 Runtime.acquire 拿到实例，再转发到这个应用 Pod 的 8000 端口。',
+    'tp.x.container.wake.k8s': '睡着的应用收到请求时，网关用当前版本的镜像建 Pod，把绑定变成挂载和 PNEUMA_SPACE_* 环境变量，等端口应答。没有 Lease 满 {idle} 秒后排空并删掉 Pod。',
+    'tp.x.container.state.k8s': 'files 和 SQLite 在每应用的 PVC 里；kv、object 和 PostgreSQL 在平台服务里。Pod 的文件系统每次停止都丢掉。',
+    'tp.x.container.failure.k8s': 'Pod 状态报告退出，唤醒后 {ready} 秒内不应答算唤醒失败；醒着时卡死的 Pod 检测不到。Guard 按版本计失败：{window} 秒内 {max} 次即隔离，失败后 {backoff} 秒内不再唤醒，直到新版本或手动解除。',
+    'tp.x.isolate.state.k8s': 'files 和 SQLite 在 runner PVC 的 /data/apps/<id>/ 下；kv、object 和 PostgreSQL 在平台服务里。worker 停下后内存里的东西都没了。',
     'fold.trigger': '触发 {name}', 'fold.wake': '唤醒后休眠', 'fold.leader': '领导权', 'fold.meanWake': '平均唤醒 {ms}', 'fold.meanDelivery': '平均投递 {ms}', 'fold.since': '自 {time} 起', 'fold.started': '已 {d}', 'fold.expand': '展开这些事件',
     'brand.sub': '控制台', 'nav.group': '平台', 'nav.overview': '总览', 'nav.apps': '项目', 'nav.publish': '发布',
     'theme.light': '浅色', 'theme.dark': '深色', 'theme.toLight': '切换到浅色', 'theme.toDark': '切换到深色',
@@ -1109,6 +1116,13 @@ const I18N = {
     'empty.cl.instances': '没有醒着的实例。', 'empty.cl.volumes': '没有应用卷。',
   },
   en: {
+    'tp.lane.container.sub.k8s': 'Kubernetes · one Pod per app', 'tp.engine.container.k8s': 'Kubernetes', 'tp.unprobed.k8s': 'with the cluster, not probed',
+    'tp.keep.container.k8s': 'per-app PVCs', 'tp.keep.isolate.k8s': 'runner PVC', 'tp.fixDown.k8s': 'see the {service} Pods on the cluster page', 'tp.fixOff.k8s': 'not deployed: {profile}',
+    'tp.x.container.request.k8s': 'The ingress matches the app’s address{address}, takes an instance through Runtime.acquire and proxies to port 8000 of the app’s Pod.',
+    'tp.x.container.wake.k8s': 'A request to an asleep app creates a Pod from the release image, turns bindings into mounts and PNEUMA_SPACE_* variables, and waits for the port. After {idle} s without a lease it drains and the Pod is deleted.',
+    'tp.x.container.state.k8s': 'Files and SQLite live in the app’s PVCs; kv, object and PostgreSQL in platform services. The Pod filesystem is discarded on every stop.',
+    'tp.x.container.failure.k8s': 'The Pod status reports an exit; no answer within {ready} s of a wake fails the wake. A Pod that hangs while awake is not detected. The Guard counts failures per release: {max} within {window} s quarantine the app, and for {backoff} s after a failure it does not wake, until a new release or an unquarantine.',
+    'tp.x.isolate.state.k8s': 'Files and SQLite live in the runner PVC under /data/apps/<id>/; kv, object and PostgreSQL in platform services. A worker’s memory is gone when it stops.',
     'fold.trigger': 'trigger {name}', 'fold.wake': 'woke and slept', 'fold.leader': 'leader', 'fold.meanWake': 'mean wake {ms}', 'fold.meanDelivery': 'mean delivery {ms}', 'fold.since': 'since {time}', 'fold.started': 'for {d}', 'fold.expand': 'Show these events',
     'brand.sub': 'Console', 'nav.group': 'Platform', 'nav.overview': 'Overview', 'nav.apps': 'Projects', 'nav.publish': 'Publish',
     'theme.light': 'Light', 'theme.dark': 'Dark', 'theme.toLight': 'Switch to light theme', 'theme.toDark': 'Switch to dark theme',
@@ -3819,7 +3833,7 @@ const laneDown = (model, lane) => lane === 'isolate' && unreachable(model, 'runn
 function fixFor(model, name) {
   const [service, profile] = COMPOSE[name];
   const p = name === 'runner' ? model.health?.runtimes.isolate.profile ?? profile : profile;
-  return svcStatus(model, name) === 'off' ? t('tp.fixOff', { profile: p }) : t('tp.fixDown', { service });
+  return svcStatus(model, name) === 'off' ? planeT('tp.fixOff', { profile: p }) : planeT('tp.fixDown', { service });
 }
 
 const measureCtx = document.createElement('canvas').getContext('2d');
@@ -4015,7 +4029,7 @@ function laneScene(model, width, shown, on) {
         tx(inner + innerW - 10, qy + 32, meta, 'm t3 small', { 'text-anchor': 'end' }),
         titled(tx(inner + 21, qy + 32, fit(a.quarantine.reason, 11, false, innerW - 44 - textWidth(meta, 11.5, true)), 'small t2'), a.quarantine.reason)), button.el);
     });
-    const kept = lane === 'static' ? t('tp.keep.static') : [t(`tp.keep.${lane}`), ...['files', 'db:sqlite'].map((cap) => {
+    const kept = lane === 'static' ? t('tp.keep.static') : [planeT(`tp.keep.${lane}`), ...['files', 'db:sqlite'].map((cap) => {
       const n = all.filter((a) => needs(a).some((x) => x.cap === cap)).length;
       return n ? `${cap === 'files' ? 'files' : 'sqlite'} ${n}` : null;
     })].filter(Boolean).join(' · ');
@@ -4337,7 +4351,7 @@ function explainPanel(model, kind) {
   const p = model.health?.policy ?? {};
   const pattern = addressPattern(model.apps);
   const vars = { max: p.max_failures, window: p.failure_window_seconds, backoff: p.restart_backoff_seconds, idle: p.idle_seconds, ready: p.ready_timeout_seconds, address: pattern ? t('tp.x.addr', { p: pattern }) : '' };
-  const block = (key) => h('div', { class: 'xb' }, h('h3', {}, t(`tp.x.${key}`)), h('p', {}, t(`tp.x.${kind}.${key}`, vars)));
+  const block = (key) => h('div', { class: 'xb' }, h('h3', {}, t(`tp.x.${key}`)), h('p', {}, planeT(`tp.x.${kind}.${key}`, vars)));
   return h('div', { class: 'card explain', 'data-section': 'explain' },
     h('div', { class: 'xh' }, h('b', { class: 'mono' }, kind), h('span', { class: 'muted' }, planeT(`tp.lane.${kind}.sub`))),
     h('div', { class: 'xg' }, ['request', 'wake', 'state', 'failure'].map(block),
