@@ -1,7 +1,0 @@
-uid=8_0 RootWebArea "PneumaSpace" url="http://127.0.0.1:18081/#/cluster"
-  uid=12_0 dialog modal
-    uid=12_1 heading "Force release k6?" level="3"
-    uid=12_2 "No drain: deletes its Pod or container at once (grace 0), forces the instance row asleep and clears its lease tallies on every replica and its wake claim. Requests and connections in flight are cut. Only for a stuck instance."
-    uid=12_3 form
-      uid=12_4 button "Cancel" focusable focused
-      uid=12_5 button "Continue"

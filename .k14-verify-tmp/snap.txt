@@ -1,7 +1,0 @@
-uid=8_0 RootWebArea "PneumaSpace" url="http://127.0.0.1:18081/#/cluster"
-  uid=10_0 dialog modal
-    uid=10_1 heading "Stop k12?" level="3"
-    uid=10_2 "Drains the instance and deletes it; the next request wakes it. Data is untouched."
-    uid=10_3 form
-      uid=10_4 button "Cancel" focusable focused
-      uid=10_5 button "Continue"

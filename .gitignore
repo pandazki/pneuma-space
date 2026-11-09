@@ -41,3 +41,7 @@ prototype/04-agent-recheck/run_logged.py
 
 # Assembled examples
 examples/.build/
+
+# scratch of verifiers and workers, never content
+/.*-tmp/
+/.screens/
