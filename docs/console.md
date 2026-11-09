@@ -10,7 +10,7 @@ Before a page changes, write down three things in order:
 2. **Consumption.** The question the reader arrives with, what they compare, what they act on.
 3. **Form.** Only then the layout and controls.
 
-Grouping, hierarchy, status and time come before tables. A table is allowed only where the reader scans homogeneous records and loses no grouping, status or time order by it: releases, trigger deliveries, raw warning lists. Everything else is a list of rows or cards grouped by what the reader asks first (state, tenant, pressure). Within a group, the worst sorts first.
+Grouping, hierarchy, status and time come before tables. A table is allowed only where the reader scans homogeneous records and loses no grouping, status or time order by it: releases, trigger deliveries, raw warning lists, the request log. The request log is rows on one grid template under a header row, not a `<table>`: it streams behind the arrival pill and a row expands in place. Everything else is a list of rows or cards grouped by what the reader asks first (state, tenant, pressure). Within a group, the worst sorts first.
 
 ## Type and space
 
@@ -46,17 +46,17 @@ A status is a dot plus a word (`.st`). Red text appears only for a failure or in
 
 There is one of each. No native `<select>`, no OS-styled file input, no checkbox outside a toggle chip.
 
-- **Buttons by weight.** `.btn.primary`: the one action the page or form exists for. `.btn`: a neutral filled action. `.btn.ghost`: a quiet, edged action for safe, frequent, reversible operations in rows (stop, restart, open); it acts at once, no modal. `.ibtn`: an icon. A control is never a bare word: every clickable carries an edge, a fill or an icon.
+- **Buttons by weight.** `.btn.primary`: the one action the page or form exists for. `.btn`: a neutral filled action. `.btn.ghost`: a quiet, edged action for safe, frequent, reversible operations in rows (stop, restart, open); it acts at once, no modal. `.ibtn`: an icon. A control is never a bare word: every clickable carries an edge, a fill or an icon. A link inside running text and an app name in a row stay plain accent links; a link that stands alone (back, to another page) is a `.btn.ghost.small`; a row that navigates carries a ring at rest.
 - **Segmented** (`segmented`): two to four mutually exclusive options always visible: theme, language, time window, access, role, token kind, database engine.
 - **Listbox** (`listbox`): one choice from a list that can grow (tenant scope, move to tenant, state filter, publish tenant). A button showing the value and a chevron opens a menu-pattern list; the chosen item carries a check; past eight items a filter field leads the list. Arrow keys, Enter, Escape, type-ahead.
-- **Filter chips** (`.fchip`): dot, label, count; one pressed per field. **Toggle chips** (`.tog`): independent on/off filters.
+- **Filter chips** (`.fchip`): dot, label, count, a ring at rest; one pressed per field. **Toggle chips** (`.tog`): independent on/off filters.
 - **Chips** (`.chip`): identifiers and kinds, mono; `.chip.text` for a word.
 - **Inputs**: one style for text, number, search and textarea. A file is chosen with `fileField`: a quiet button plus the chosen name and size, and the whole field accepts a drop.
-- **⋯ menu** (`moreMenu`): every destructive or capacity action (remove, purge, force release, drain, scale, Pod restart, revoke, remove member, move tenant). Destructive items come last, red only inside the menu, each with a one-line note.
+- **⋯ menu** (`moreMenu`): every destructive or capacity action (remove, purge, force release, drain, scale, Pod restart, revoke, remove member, move tenant). Destructive items come last, red only inside the menu, each with a one-line note. A menu lists only what the caller's role may do (`/api/me` roles against ADR 0022's table); a missing role is never a disabled item.
 - **Approval card** (`approve`): after a ⋯ item. Title names the object, the body says in plain words what will happen and what stays, facts list the objects affected, then Cancel and Continue. It is the only confirmation dialog.
 - **Empty state** (`.empty`): one sentence of what is absent and, when there is one, the action that fills it.
 - **Live indicator** (`liveHeader`): dot and word (live, paused, offline), the age of the latest arrival, and Pause or Resume.
-- **Relative time**: `ago` or `agoTick`, ticking each second; the absolute time is the title.
+- **Relative time**: `ago`, ticking each second in the console's own spaced units (`47 秒前`, `3 min ago`, `in 2 min`), never `Intl.RelativeTimeFormat`; the absolute time is the title.
 - **Outcome line**: the result of an operation sits under the object it changed, with a quiet Dismiss; it clears itself when the state it reports is gone.
 
 Every control has an accessible name, is reachable by Tab, and works with Enter and Space; menus and listboxes also with arrows and Escape.
