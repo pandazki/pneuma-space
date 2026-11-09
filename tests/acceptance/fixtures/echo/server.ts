@@ -214,3 +214,5 @@ async function main(): Promise<void> {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await main();
+// PID 1 in the container gets no default signal disposition, so the stop would otherwise wait out the grace period.
+process.on('SIGTERM', () => process.exit(0));
