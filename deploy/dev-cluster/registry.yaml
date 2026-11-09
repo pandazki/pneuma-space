@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pneuma-space-registry
+  namespace: pneuma-space
+  labels: { app.kubernetes.io/part-of: pneuma-space, pneuma-space.role: registry }
+spec:
+  replicas: 1
+  selector: { matchLabels: { pneuma-space.role: registry } }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/part-of: pneuma-space, pneuma-space.role: registry }
+    spec:
+      containers:
+        - name: registry
+          image: registry:2
+          ports: [{ containerPort: 5000 }]
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 512Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pneuma-space-registry
+  namespace: pneuma-space
+  labels: { app.kubernetes.io/part-of: pneuma-space }
+spec:
+  type: NodePort
+  selector: { pneuma-space.role: registry }
+  ports: [{ port: 5000, targetPort: 5000, nodePort: 30500 }]

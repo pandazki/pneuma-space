@@ -126,8 +126,8 @@ const metrics = new Metrics({
   probes: {
     redis: tcpProbe('redis', 6379),
     object: httpProbe(`${config.object.endpoint}/health`),
-    postgres: profileProbe('postgres', 5432),
-    coturn: profileProbe('coturn', 3478),
+    postgres: setup.pods ? tcpProbe('postgres', config.postgres.port) : profileProbe('postgres', 5432),
+    coturn: setup.pods ? tcpProbe('coturn', 3478) : profileProbe('coturn', 3478),
     runner: setup.pods ? async () => ((await runnerUp()) ? 'up' : 'down') : profileProbe('runner', RUNNER_PORT),
   },
   host: () => hostSample(data),

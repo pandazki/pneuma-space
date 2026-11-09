@@ -1,0 +1,28 @@
+# A single-node developer cluster (Docker Desktop, kind with a Docker runtime): the base plus an in-cluster registry,
+# a static identity key and two gateway replicas. Fill the base's REPLACE_ME_* tokens first (see ../kubernetes/README.md, "Local cluster").
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../kubernetes
+  - registry.yaml
+secretGenerator:
+  - name: pneuma-space-identity
+    namespace: pneuma-space
+    files:
+      - keys.json # a JWKS with the public key you sign test JWTs with; see ../kubernetes/README.md
+    options:
+      disableNameSuffixHash: true
+      labels:
+        app.kubernetes.io/part-of: pneuma-space
+patches:
+  - target: { kind: Deployment, name: pneuma-space-gateway, namespace: pneuma-space }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value: { name: identity, secret: { secretName: pneuma-space-identity } }
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value: { name: identity, mountPath: /etc/pneuma-space/identity, readOnly: true }
