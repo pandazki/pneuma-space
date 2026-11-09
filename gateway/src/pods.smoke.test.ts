@@ -1,4 +1,4 @@
-// See kube.harness.ts. The instance runs PNEUMA_SPACE_TEST_APP_IMAGE (default traefik/whoami:v1.10, told to listen on 8000 by
+// See kube.harness.ts. The instance runs PNEUMA_SPACE_TEST_POD_IMAGE (default traefik/whoami:v1.10, told to listen on 8000 by
 // WHOAMI_PORT_NUMBER) as ServiceAccount `pneuma-space-app` from deploy/kubernetes/10-rbac.yaml, with one claim of the cluster's
 // default storage class. The TCP probe dials the Pod IP from this host; where Pod IPs do not route here, set
 // PNEUMA_SPACE_TEST_POD_ROUTABLE=0 and the probe is skipped.
@@ -15,7 +15,7 @@ const app = randomBytes(6).toString('hex') as AppId;
 const claim = `pneuma-space-files-${app}`;
 const spec = {
   app, name: appName(`smoke-${app}`), tenant: DEFAULT_TENANT, release: 1 as ReleaseNumber,
-  runtime: { kind: 'container', image: (process.env.PNEUMA_SPACE_TEST_APP_IMAGE ?? 'traefik/whoami:v1.10') as ImageId },
+  runtime: { kind: 'container', image: (process.env.PNEUMA_SPACE_TEST_POD_IMAGE ?? 'traefik/whoami:v1.10') as ImageId },
   injection: { env: { WHOAMI_PORT_NUMBER: '8000' }, storage: [{ id: claim, target: '/data', env: {} }], services: [] },
   policy: { ...DEFAULT_POLICY, ready_timeout_seconds: 60 },
   version: 1,

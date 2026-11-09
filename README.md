@@ -3,7 +3,7 @@
   <img alt="PneumaSpace. No agent inside. Built for what agents build. A directory with a manifest and src is published in 6.9 s with no image build and lands in the isolate lane as a worker. A visitor's request passes the gateway and wakes it, 460 to 700 ms the first time, 62 to 87 ms after a sleep; its db, kv, object and ws edges light up, and when it idles it goes dark while its data stays. A container app wakes in about 260 ms, a static site answers without waking anything. One worker hangs, is stopped 3.5 to 4 s after the stuck request and quarantined by the Guard while its neighbours keep answering, and a new release replaces it." src="docs/assets/hero-light.svg" width="100%">
 </picture>
 
-PneumaSpace runs many small stateful web apps on one machine you own. An app is a directory whose manifest, `pneuma-space.json`, names the infrastructure it needs; publishing provisions it and gives the app a stable address. The first request wakes the app, idleness puts it to sleep, and its data outlives every sleep and every release. It is built for developers and for the tools that write code for them: publishing is an upload, not a build, and a hung app is stopped without taking its neighbours down. Every app on the host is trusted; [`REQUIREMENTS.md`](REQUIREMENTS.md) draws that boundary and [`DESIGN.md`](DESIGN.md) holds the model.
+PneumaSpace runs many small stateful web apps on one machine you own, or on your organization's Kubernetes cluster. An app is a directory whose manifest, `pneuma-space.json`, names the infrastructure it needs; publishing provisions it and gives the app a stable address. The first request wakes the app, idleness puts it to sleep, and its data outlives every sleep and every release. It is built for developers and for the tools that write code for them: publishing is an upload, not a build, and a hung app is stopped without taking its neighbours down. On one machine every app is trusted; on a cluster the organization's members may err but are not hostile. [`REQUIREMENTS.md`](REQUIREMENTS.md) and [`REQUIREMENTS-M2.md`](REQUIREMENTS-M2.md) draw those boundaries and [`DESIGN.md`](DESIGN.md) holds the model.
 
 ## Run and publish
 
@@ -54,9 +54,15 @@ The console at `:8081` shows the platform live; its topology page is the two pic
 | **Topology, lanes** | **Topology, graph** |
 | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/console/lanes-dark.png"><img alt="Topology lanes: the gateway, three runtime lanes holding the published apps, and the platform services with per-capability edge counts." src="docs/assets/console/lanes-light.png"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/console/graph-dark.png"><img alt="Topology graph: one app selected, its path lit from the visitor through the gateway stages to its capabilities and services." src="docs/assets/console/graph-light.png"></picture> |
 
+## On a Kubernetes cluster
+
+The organization edition runs the same platform on a Kubernetes cluster ([ADR 0019](docs/adr/0019-kubernetes-plane.md) to [ADR 0026](docs/adr/0026-cluster-page-and-operations.md)). An app publishes there unchanged and gets its own subdomain. Each instance is a Pod with its own volume, isolate apps run in a pool of runner Pods, and the gateway runs as several replicas that keep instance state in PostgreSQL. People sign in through the organization's authenticating proxy, which hands the gateway a signed JWT; the platform has no login of its own. Apps belong to tenants, one per team, with members, tokens and quotas on the Team page. The Cluster page shows nodes, replicas, platform services and every instance; a platform admin scales the gateway and the runners there, restarts their Pods, moves the instances off a node, and stops, restarts or force-releases an instance. [`deploy/kubernetes/README.md`](deploy/kubernetes/README.md) installs it; its last section runs it on Docker Desktop.
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/console/cluster-dark.png"><img alt="Cluster page on a one-node cluster: the node frame with CPU and memory requested, two gateway replicas with the leader marked, two runner replicas and six instance chips; below, the six awake instances of team-a and team-b with their placement, limits, and quiet Stop and Restart buttons beside a menu." src="docs/assets/console/cluster-light.png"></picture>
+
 ## Compared with Vercel and Supabase
 
-Vercel and Supabase run your app on their infrastructure. PneumaSpace runs every app on one machine you own.
+Vercel and Supabase run your app on their infrastructure. PneumaSpace runs every app on a machine or a cluster you own.
 
 You gain:
 
@@ -68,19 +74,22 @@ You gain:
 
 You give up:
 
-- Reach: one host, one location, that machine's bandwidth; no CDN, no edge.
-- Isolation between apps: the operator and every image are trusted.
-- Authentication: the built-in login asks only for a name; it identifies, it does not authenticate.
-- Managed operations: you run Docker, TLS, backups and upgrades.
+- Reach: your own machines in one location; no CDN, no edge.
+- Isolation between apps: every image is trusted, and no tenant is isolated against a hostile one.
+- Authentication on one machine: the built-in login asks only for a name; it identifies, it does not authenticate. A cluster relies on your organization's proxy.
+- Managed operations: you run Docker or Kubernetes, TLS, backups and upgrades.
 
-Company sign-in, several nodes, quotas and a CDN are later milestones, not M1.
+Metering, billing, a CDN and isolation against hostile tenants are in neither edition.
 
 ## Where the facts live
 
 - [`REQUIREMENTS.md`](REQUIREMENTS.md): goals, capabilities, app types and the trust boundary.
+- [`REQUIREMENTS-M2.md`](REQUIREMENTS-M2.md): users, tenants, the cluster and its operation in the organization edition.
 - [`DESIGN.md`](DESIGN.md): the model and the architecture.
 - [`docs/app-contract.md`](docs/app-contract.md): what an app sees.
 - [`docs/acceptance.md`](docs/acceptance.md): acceptance checks and thresholds.
+- [`docs/console.md`](docs/console.md): how every console page is designed.
+- [`deploy/kubernetes/README.md`](deploy/kubernetes/README.md): installing on a cluster.
 - [`docs/adr/`](docs/adr/): decisions and the options they rejected.
 - [`AGENTS.md`](AGENTS.md): conventions for working on this repository.
 
@@ -92,6 +101,7 @@ The design documents are in Chinese; everything an app developer reads is in Eng
 npm run test:unit                                 # in-process, seconds
 npm test                                          # also the runner and Docker suites (AGENTS.md says which change needs which)
 npm run test:acceptance                           # docs/acceptance.md against a real stack on its own ports (project pneuma-space-acc)
+npm run test:k8s                                  # the cluster rows, against the context PNEUMA_SPACE_TEST_KUBECONTEXT names
 ```
 
 Run the two one after the other: the provider suite inside `npm test` and the acceptance stack both bind the TURN port 3478.

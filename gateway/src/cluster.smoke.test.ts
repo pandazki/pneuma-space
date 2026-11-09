@@ -1,17 +1,17 @@
 // AC-OPS-11, 12, 14, 15 and 16 against a platform deployed on the cluster of PNEUMA_SPACE_TEST_KUBECONTEXT (see kube.harness.ts), through its admin API
-// at PNEUMA_SPACE_TEST_ADMIN_URL (default http://127.0.0.1:18081, the dev-cluster port-forward). PNEUMA_SPACE_TEST_IDENTITY_HEADER carries
+// at PNEUMA_SPACE_TEST_ADMIN_URL (default http://127.0.0.1:38081, the port-forward of deploy/kubernetes/README.md, "Local cluster"). PNEUMA_SPACE_TEST_IDENTITY_HEADER carries
 // PNEUMA_SPACE_TEST_ADMIN_JWT, a platform admin, or PNEUMA_SPACE_TEST_TENANT_JWT, an admin of PNEUMA_SPACE_TEST_TENANT (default `default`) only.
 // PNEUMA_SPACE_TEST_APP_IMAGE is an image the platform resolves that listens on 8000; PNEUMA_SPACE_TEST_STUCK_IMAGE, one that never does, enables
 // AC-OPS-15. Drain stops every instance on the node, the test's and any other.
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { after, test } from 'node:test';
+import { afterEach, test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { kubectl, NAMESPACE, skip } from './kube.harness.ts';
 import { ADMIN_PATHS, type AuditRecord, type ClusterView, type Release } from './model.ts';
 
 const env = process.env;
-const ADMIN = env.PNEUMA_SPACE_TEST_ADMIN_URL ?? 'http://127.0.0.1:18081';
+const ADMIN = env.PNEUMA_SPACE_TEST_ADMIN_URL ?? 'http://127.0.0.1:38081';
 const TENANT = env.PNEUMA_SPACE_TEST_TENANT ?? 'default';
 const PLATFORM = 'pneuma-space';
 const RUNNER = 'pneuma-space-runner';
@@ -51,7 +51,7 @@ const podUid = async (app: string): Promise<string | null> =>
   (await kubectl('-n', NAMESPACE, 'get', 'pod', `pneuma-space-${app}`, '--ignore-not-found', '-o', 'jsonpath={.metadata.uid}')).trim() || null;
 const audited = async (action: string, target: string): Promise<AuditRecord[]> => ok('admin', 'GET', `${ADMIN_PATHS.audit}?action=${action}&target=${target}`);
 
-/** Publishes an app with a files binding, so it has a claim; the after hook removes and purges it. */
+/** Publishes an app with a files binding, so it has a claim; the afterEach hook removes and purges it, so a later row's quota does not carry it. */
 async function publish(prefix: string, image = env.PNEUMA_SPACE_TEST_APP_IMAGE): Promise<{ name: string; id: string }> {
   const name = `${prefix}-${tag}`;
   created.push(name);
@@ -61,9 +61,9 @@ async function publish(prefix: string, image = env.PNEUMA_SPACE_TEST_APP_IMAGE):
 
 const wake = (name: string) => ok('admin', 'POST', ADMIN_PATHS.restart(name));
 
-after(async () => {
+afterEach(async () => {
   if (skip) return;
-  for (const name of created) {
+  for (const name of created.splice(0)) {
     await api('admin', 'POST', ADMIN_PATHS.remove(name));
     await api('admin', 'POST', ADMIN_PATHS.purge(name));
   }

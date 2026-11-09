@@ -9,7 +9,7 @@ secretGenerator:
   - name: pneuma-space-identity
     namespace: pneuma-space
     files:
-      - keys.json # a JWKS with the public key you sign test JWTs with; see ../kubernetes/README.md
+      - keys.json # written by `node deploy/dev-cluster/identity.mjs keys`; see ../kubernetes/README.md
     options:
       disableNameSuffixHash: true
       labels:

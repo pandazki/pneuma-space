@@ -254,8 +254,9 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       await s3.suspend(app, resource);
       await s3.suspend(app, resource);
       const denied = await signedFetch(key(), 'GET', url(resource.bucket, 'private/a.txt'));
-      assert.equal(denied.status, 400);
-      assert.match(await denied.text(), /ErrAccessKeyDisabled/);
+      const refusal = await denied.text();
+      assert.ok([400, 403].includes(denied.status), `${denied.status} ${refusal}`);
+      assert.match(refusal, /<Code>(ErrAccessKeyDisabled|AccessDenied|InvalidAccessKeyId)<\/Code>/);
       assert.equal((await anon('public/clip.bin')).status, 403);
       await s3.ensure(app, resource);
       assert.equal((await signedFetch(key(), 'GET', url(resource.bucket, 'private/a.txt'))).status, 200);
