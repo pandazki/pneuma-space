@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { KubeClient, type Node, type Pod } from './kube.ts';
 import { KubeInfra } from './kube-infra.ts';
+import { Conflict } from './model.ts';
 
 const nowhere = new KubeClient({ server: 'http://127.0.0.1:9', token: async () => 't', namespace: 'pneuma-space' });
 const BASIC = `Basic ${Buffer.from('ann:secret').toString('base64')}`;
@@ -35,7 +36,7 @@ async function registry(
   const host = `127.0.0.1:${(server.address() as AddressInfo).port}`;
   const authFile = join(await mkdtemp(join(tmpdir(), 'registry-')), '.dockerconfigjson');
   await writeFile(authFile, JSON.stringify({ auths: { [pull ?? host]: { auth: BASIC.slice('Basic '.length) } } }));
-  return { host, seen, infra: new KubeInfra({ namespaces: [nowhere], registry: pull ?? host, registryApi: pull ? `http://${host}` : null, authFile }) };
+  return { host, seen, infra: new KubeInfra({ platform: nowhere, apps: nowhere, registry: pull ?? host, registryApi: pull ? `http://${host}` : null, authFile }) };
 }
 
 test('resolveImage answers a Basic challenge with the dockerconfigjson credentials and returns the digest reference', async (t) => {
@@ -93,11 +94,58 @@ test('nodes sums the requests of the platform Pods on each node across both name
   await once(server, 'listening');
   t.after(() => server.close());
   const at = (namespace: string) => new KubeClient({ server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, token: async () => 't', namespace });
-  const nodes = await new KubeInfra({ namespaces: [at('pneuma-space'), at('pneuma-space-apps')], registry: null, registryApi: null, authFile: null }).nodes();
+  const nodes = await new KubeInfra({ platform: at('pneuma-space'), apps: at('pneuma-space-apps'), registry: null, registryApi: null, authFile: null }).nodes();
   assert.deepEqual(nodes.map((n) => [n.name, n.schedulable, n.requested, n.allocatable]), [
     ['n1', true, { cpuMillis: 350, memoryBytes: 384 * 2 ** 20, pods: 2 }, { cpuMillis: 3500, memoryBytes: 8 * 2 ** 30, pods: 110 }],
     ['n2', false, { cpuMillis: 1000, memoryBytes: 2 ** 30, pods: 1 }, { cpuMillis: 3500, memoryBytes: 8 * 2 ** 30, pods: 110 }],
   ]);
   assert.deepEqual(nodes[1]!.pods.map((p) => [p.name, p.role, p.ready, p.restarts]), [['runner-0', 'runner', true, 2]]);
   assert.deepEqual(listed.filter((l) => l.includes('/pods')).sort(), ['/api/v1/namespaces/pneuma-space-apps/pods?pneuma-space.role', '/api/v1/namespaces/pneuma-space/pods?pneuma-space.role']);
+});
+
+/** A platform namespace holding `pods`; records every request as `METHOD path body`. */
+async function platform(t: TestContext, pods: readonly Pod[]) {
+  const seen: string[] = [];
+  const server = http.createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    seen.push(`${req.method} ${req.url} ${req.headers['content-type'] ?? ''} ${body}`.replace(/ +/g, ' ').trim());
+    const name = req.url!.split('/').at(-1);
+    const pod = pods.find((p) => p.metadata.name === name);
+    if (req.method === 'GET' && !pod) return res.writeHead(404, { 'content-type': 'application/json' }).end(JSON.stringify({ kind: 'Status', code: 404, reason: 'NotFound' }));
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(pod ?? {}));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => server.close());
+  const kube = new KubeClient({ server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, token: async () => 't', namespace: 'pneuma-space' });
+  return { seen, infra: new KubeInfra({ platform: kube, apps: kube, registry: null, registryApi: null, authFile: null }) };
+}
+
+const named = (name: string, labels: Record<string, string>): Pod => ({ metadata: { name, uid: `uid-${name}`, labels }, spec: { containers: [] } });
+
+test('scaling pneuma-space-postgres is a Conflict and sends nothing to Kubernetes (AC-OPS-12)', async (t) => {
+  const { seen, infra } = await platform(t, []);
+  await assert.rejects(infra.scale('pneuma-space-postgres', 2), Conflict);
+  assert.deepEqual(seen, []);
+});
+
+test('scaling the runner merge-patches the StatefulSet scale subresource (AC-OPS-12)', async (t) => {
+  const { seen, infra } = await platform(t, []);
+  await infra.scale('pneuma-space-runner', 3);
+  assert.deepEqual(seen, ['PATCH /apis/apps/v1/namespaces/pneuma-space/statefulsets/pneuma-space-runner/scale application/merge-patch+json {"spec":{"replicas":3}}']);
+});
+
+test('restarting a postgres Pod is a Conflict and deletes nothing (AC-OPS-13)', async (t) => {
+  const { seen, infra } = await platform(t, [named('pneuma-space-postgres-0', { 'app.kubernetes.io/part-of': 'pneuma-space' })]);
+  await assert.rejects(infra.deletePod('pneuma-space-postgres-0'), Conflict);
+  assert.equal(seen.filter((s) => s.startsWith('DELETE')).length, 0);
+});
+
+test('restarting a gateway Pod deletes it under its uid', async (t) => {
+  const { seen, infra } = await platform(t, [named('pneuma-space-gateway-7f9-x2', { 'pneuma-space.role': 'gateway' })]);
+  await infra.deletePod('pneuma-space-gateway-7f9-x2');
+  const deleted = seen.find((s) => s.startsWith('DELETE'))!;
+  assert.match(deleted, /^DELETE \/api\/v1\/namespaces\/pneuma-space\/pods\/pneuma-space-gateway-7f9-x2 /);
+  assert.equal(JSON.parse(deleted.slice(deleted.indexOf('{'))).preconditions.uid, 'uid-pneuma-space-gateway-7f9-x2');
 });

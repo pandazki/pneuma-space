@@ -117,6 +117,16 @@ class DockerDriver implements Driver<ContainerRun, string> {
     this.#startedAt.delete(container);
   }
 
+  /** A forced remove is a SIGKILL; the label finds a container a waker created but has not recorded. */
+  async kill(app: AppId): Promise<void> {
+    const found = await this.#docker.list({ label: [`${LABEL.app}=${app}`, `${LABEL.network}=${this.#network}`] });
+    for (const { Id } of found) {
+      this.#signalled.add(Id);
+      await this.#docker.remove(Id);
+      this.#startedAt.delete(Id);
+    }
+  }
+
   /** Docker is the gateway's own dependency: a failure here fails the start. */
   async discard(app: AppId, container: string): Promise<boolean> {
     await this.remove(app, container);

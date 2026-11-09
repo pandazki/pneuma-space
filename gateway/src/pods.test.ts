@@ -329,6 +329,13 @@ test('a Pod deleted from outside is reported stopped', async (t) => {
   assert.deepEqual(s.gone, [{ app: APP, uid: into.handle, ending: { ev: 'stopped' } }]);
 });
 
+test('kill deletes the app\'s Pod by name with grace 0, also one a waker has not recorded (AC-OPS-15)', async (t) => {
+  const s = await setup(t);
+  s.kube.pod(NAME);
+  await s.driver.kill(APP);
+  assert.deepEqual([s.kube.journal, s.kube.pods.has(NAME)], [['delete pod uid-1 grace 0'], false]);
+});
+
 test('an OOMKilled container is reported crashed for memory', async (t) => {
   const s = await setup(t);
   await started(s);

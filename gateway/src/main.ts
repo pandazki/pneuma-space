@@ -9,8 +9,8 @@ import { Authority, parsePlatformAdmins } from './authz.ts';
 import { loadOrCreateSecret, LocalIdentity, parseIdentityEnv, UpstreamIdentity, type Identity } from './identity.ts';
 import { JwtVerifier } from './jwt.ts';
 import { Ingress } from './ingress.ts';
-import { hostSample, httpProbe, Metrics, profileProbe, serveMetrics, Series, tcpProbe } from './metrics.ts';
-import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId } from './model.ts';
+import { hostSample, httpProbe, Metrics, profileProbe, serveMetrics, Series, tcpProbe, type Probe, type ServiceName } from './metrics.ts';
+import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId, type VolumeSample } from './model.ts';
 import { DockerInfra } from './infra.ts';
 import { inClusterClient } from './kube.ts';
 import { NodeView, type RunnerHealth } from './nodes.ts';
@@ -39,7 +39,9 @@ const setup = (() => {
     const admins = parsePlatformAdmins(process.env.PNEUMA_SPACE_PLATFORM_ADMINS);
     const upstream = identity.kind === 'upstream' ? { ...identity.options, verifier: new JwtVerifier(identity.jwt), audiences: identity.jwt.audiences } : null;
     const consoleIdentity = identity.kind === 'upstream' && upstream ? { ...upstream, audiences: identity.consoleAudiences } : null;
-    return { pods, admins, upstream, consoleIdentity, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
+    const scaleMax = Number(process.env.PNEUMA_SPACE_SCALE_MAX || 10);
+    if (!Number.isInteger(scaleMax) || scaleMax < 1) throw new Error(`PNEUMA_SPACE_SCALE_MAX must be a whole number of at least 1, got "${process.env.PNEUMA_SPACE_SCALE_MAX}"`);
+    return { pods, admins, upstream, consoleIdentity, scaleMax, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
   } catch (error) {
     console.error(`pneuma-space: ${(error as Error).message}`);
     process.exit(1);
@@ -65,6 +67,18 @@ await instances.ready();
 await instances.start();
 const specFor = (app: AppId) => registry.runSpec(app);
 const guard = new AppGuard({ instances, specFor, series });
+const probes: Readonly<Record<ServiceName, Probe>> = {
+  redis: tcpProbe('redis', 6379),
+  object: httpProbe(`${config.object.endpoint}/health`),
+  postgres: setup.pods ? tcpProbe('postgres', config.postgres.port) : profileProbe('postgres', 5432),
+  coturn: setup.pods ? tcpProbe('coturn', 3478) : profileProbe('coturn', 3478),
+  runner: setup.pods ? async () => ((await runnerUp()) ? 'up' : 'down') : profileProbe('runner', RUNNER_PORT),
+};
+/** What the state inventory lists as volumes, at the nominal single-host size. */
+const volumes = async (): Promise<VolumeSample[]> => (await store.bindings()).flatMap((binding) => {
+  const name = providers.find((p) => p.name === binding.provider)?.location(binding.resource).volume;
+  return name ? [{ app: binding.app, name, sizeGb: config.volumeGb, storageClass: null, phase: null, node: null }] : [];
+});
 // The plane swaps the container driver, the runner pool and Infra; everything else is shared (ADR 0019 item 1).
 const { infra, container, pool } = setup.pods
   ? await (async (pods) => {
@@ -73,7 +87,7 @@ const { infra, container, pool } = setup.pods
     const platform = await inClusterClient();
     return {
       infra: new KubeInfra({
-        namespaces: [platform, apps],
+        platform, apps,
         registry: process.env.PNEUMA_SPACE_REGISTRY?.trim() || null,
         registryApi: process.env.PNEUMA_SPACE_REGISTRY_API?.trim() || null,
         authFile: process.env.PNEUMA_SPACE_REGISTRY_AUTH?.trim() || null,
@@ -85,7 +99,7 @@ const { infra, container, pool } = setup.pods
   : await (async () => {
     const docker = new Docker();
     return {
-      infra: new DockerInfra(docker), container: new DockerRuntime({ docker, network, specFor, instances, guard }),
+      infra: new DockerInfra({ docker, probes, volumes }), container: new DockerRuntime({ docker, network, specFor, instances, guard }),
       pool: new StaticPool(`http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`),
     };
   })();
@@ -123,13 +137,7 @@ const metrics = new Metrics({
   apps: () => registry.listing(),
   deliveries: { counts: () => store.deliveryCounts(), failed: (limit) => store.deliveries({ state: 'failed', limit }) },
   nameOf: (app) => registry.nameOf(app),
-  probes: {
-    redis: tcpProbe('redis', 6379),
-    object: httpProbe(`${config.object.endpoint}/health`),
-    postgres: setup.pods ? tcpProbe('postgres', config.postgres.port) : profileProbe('postgres', 5432),
-    coturn: setup.pods ? tcpProbe('coturn', 3478) : profileProbe('coturn', 3478),
-    runner: setup.pods ? async () => ((await runnerUp()) ? 'up' : 'down') : profileProbe('runner', RUNNER_PORT),
-  },
+  probes,
   host: () => hostSample(data),
   store,
   policy: () => registry.policy(),
@@ -143,7 +151,9 @@ const metrics = new Metrics({
 const nodes = new NodeView({
   infra,
   apps: () => registry.listing(),
+  nameOf: (app) => registry.nameOf(app),
   instances,
+  replicas: () => store.replicas(),
   host: () => hostSample(data),
   runner: async (host) => {
     const res = await fetch(`http://${host}:${RUNNER_PORT}/health`, { signal: AbortSignal.timeout(RUNNER_HEALTH_MS) }).catch(() => null);
@@ -175,7 +185,9 @@ const upstream = setup.consoleIdentity ? { identity: new UpstreamIdentity(setup.
 const peers = process.env.PNEUMA_SPACE_PEERS
   ? { host: process.env.PNEUMA_SPACE_PEERS, forward: ['authorization', ...(setup.upstream ? [setup.upstream.header] : [])] }
   : undefined;
-const admin = await startAdmin({ registry, bundles, runtime, guard, metrics, nodes, requests, replica, peers, store, ingressPort, upstream, providers }, { port: ADMIN_PORT, host: '0.0.0.0' });
+const admin = await startAdmin({
+  registry, bundles, runtime, guard, metrics, nodes, infra, scaleMax: setup.scaleMax, requests, replica, peers, store, ingressPort, upstream, providers,
+}, { port: ADMIN_PORT, host: '0.0.0.0' });
 const exporter = await serveMetrics(process.env.PNEUMA_SPACE_METRICS_PORT, () => metrics.prometheus());
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
 const flusher = setInterval(() => {

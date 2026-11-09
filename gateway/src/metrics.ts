@@ -7,7 +7,7 @@ import type { RequestKind } from './requests.ts';
 import { canConnect } from './runtime.ts';
 import {
   EVENT_SETTLE_MS, QUOTA_RESOURCES, USAGE_COUNTERS,
-  type AppId, type AppName, type AppStatus, type AppSummary, type Delivery, type DeliveryState, type EventRecord, type InstanceState, type LeaseKind,
+  type AppId, type AppName, type AppStatus, type AppSummary, type Delivery, type DeliveryState, type EventRecord, type HostSample, type InstanceState, type LeaseKind,
   type Policy, type Quota, type QuotaResource, type QuotaUsage, type ReplicaId, type RuntimeKind, type StoreOps, type TenantName, type Traffic, type UsageBucket, type UsageStep,
 } from './model.ts';
 
@@ -32,14 +32,6 @@ export type ServiceName = 'redis' | 'object' | 'postgres' | 'coturn' | 'runner';
 export type ServiceStatus = 'up' | 'down' | 'off';
 export type Probe = () => Promise<ServiceStatus>;
 type ServiceSample = { readonly status: ServiceStatus; readonly latencyMs: number | null };
-export type HostSample = {
-  readonly cpus: number;
-  readonly load: readonly number[];
-  readonly memory: { readonly totalBytes: number; readonly freeBytes: number };
-  /** The filesystem holding the platform data directory. */
-  readonly data: { readonly totalBytes: number; readonly freeBytes: number } | null;
-};
-
 export type MetricsDeps = {
   readonly events: Pick<EventLog, 'onEvent'>;
   /** Ingress counters, read from memory. */

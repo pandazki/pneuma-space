@@ -127,10 +127,33 @@ test('a row whose actor is another live replica is left alone at startup', async
   const store = tempStore();
   const { app, specFor } = await registered(store);
   await store.insertInstance(instance(app, 'waking', 'replica-b'));
-  await store.putReplica({ id: 'replica-b' as ReplicaId, startedAt: Date.now(), seenAt: Date.now() });
+  await store.putReplica({ id: 'replica-b' as ReplicaId, startedAt: Date.now(), seenAt: Date.now(), leading: false });
   const { driver, lifecycle } = replica(store, specFor);
   await lifecycle.reconcile();
   assert.deepEqual([(await store.instance(app))?.state, driver.removed], ['waking', []]);
+});
+
+test('kill puts a waking row whose actor is live asleep, kills the instance and clears every replica\'s tally (AC-OPS-15)', async () => {
+  const store = tempStore();
+  const { app, specFor } = await registered(store);
+  await store.insertInstance(instance(app, 'waking', 'replica-b'));
+  await store.putReplica({ id: 'replica-b' as ReplicaId, startedAt: Date.now(), seenAt: Date.now(), leading: false });
+  for (const id of ['replica-a', 'replica-b']) await store.putLeaseTally({ app, replica: id as ReplicaId, epoch: 3, request: 0, channel: 1, trigger: 0, releasedAt: null });
+  const { driver, lifecycle, events } = replica(store, specFor);
+  await lifecycle.kill(app);
+  const row = await store.instance(app);
+  assert.deepEqual([row?.state, row?.actor, driver.killed, await store.leaseTallies(app)], ['asleep', null, [app], []]);
+  assert.deepEqual(events.at(-1), { ev: 'asleep', reason: 'kill', runtime: 'container' });
+});
+
+test('after kill the next acquire wakes the app normally', async () => {
+  const store = tempStore();
+  const { app, specFor } = await registered(store);
+  await store.insertInstance(instance(app, 'waking', 'replica-b'));
+  const { driver, lifecycle } = replica(store, specFor);
+  await lifecycle.kill(app);
+  await lifecycle.acquire(app, 'request');
+  assert.deepEqual([(await store.instance(app))?.state, driver.starts], ['awake', 1]);
 });
 
 test('a replica that gains the lead after it started discards an instance no row names', async () => {
@@ -166,7 +189,7 @@ test('the sweep keeps an instance whose row is waking, as its waker may still be
   const { driver, lifecycle } = replica(store, specFor);
   await lifecycle.reconcile();
   await store.insertInstance(instance(waking.app, 'waking', 'replica-b', null));
-  await store.putReplica({ id: 'replica-b' as ReplicaId, startedAt: Date.now(), seenAt: Date.now() });
+  await store.putReplica({ id: 'replica-b' as ReplicaId, startedAt: Date.now(), seenAt: Date.now(), leading: false });
   driver.adopted = [{ ...orphan(waking.app), handle: 'creating' }, orphan(gone.app)];
   t.mock.timers.tick(60_000);
   await until('the orphan is discarded', () => driver.discarded.includes('orphan'));

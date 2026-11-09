@@ -224,7 +224,7 @@ test('resume leaves a delivery claimed by another live replica delivering', asyn
   const { scheduler, rows, state, invoke } = harness();
   await invoke();
   rows[0] = { ...rows[0], state: 'delivering', attempts: 1, replica: 'other' as ReplicaId };
-  state.replicas = [{ id: 'other' as ReplicaId, startedAt: 0, seenAt: Date.now() }];
+  state.replicas = [{ id: 'other' as ReplicaId, startedAt: 0, seenAt: Date.now(), leading: false }];
   await scheduler.resume();
   scheduler.stop();
   assert.equal(rows[0].state, 'delivering');

@@ -16,6 +16,7 @@ export type ObjectMeta = {
   readonly resourceVersion?: string;
   readonly uid?: string;
   readonly deletionTimestamp?: string;
+  readonly creationTimestamp?: string;
 };
 
 export type Container = {
@@ -66,6 +67,7 @@ export type Pod = {
     readonly reason?: string;
     readonly message?: string;
     readonly podIP?: string;
+    readonly startTime?: string;
     readonly conditions?: readonly { readonly type: string; readonly status: 'True' | 'False' | 'Unknown' }[];
     readonly containerStatuses?: readonly { readonly name: string; readonly ready: boolean; readonly restartCount?: number; readonly state?: ContainerState }[];
   };
@@ -90,13 +92,40 @@ export type Node = {
   };
 };
 
-type Objects = { pods: Pod; persistentvolumeclaims: PersistentVolumeClaim; nodes: Node };
-export type Kind = keyof Objects;
-/** The verbs ADR 0019 uses, per kind: claims are never listed, nodes never written. */
-export type Writable = 'pods' | 'persistentvolumeclaims';
-export type Listable = 'pods' | 'nodes';
+/** A Deployment or StatefulSet, the fields the cluster page reads. */
+export type Workload = {
+  readonly metadata: ObjectMeta;
+  readonly spec: { readonly replicas?: number; readonly template: { readonly spec: { readonly containers: readonly Container[] } } };
+  readonly status?: { readonly replicas?: number; readonly readyReplicas?: number };
+};
 
-const NAMESPACED: Readonly<Record<Kind, boolean>> = { pods: true, persistentvolumeclaims: true, nodes: false };
+export type Event = {
+  readonly metadata: ObjectMeta;
+  readonly type?: 'Normal' | 'Warning';
+  readonly reason?: string;
+  readonly message?: string;
+  readonly count?: number;
+  readonly lastTimestamp?: string;
+  readonly eventTime?: string;
+  readonly series?: { readonly count?: number; readonly lastObservedTime?: string };
+  readonly involvedObject: { readonly kind?: string; readonly name?: string };
+};
+
+type Objects = { pods: Pod; persistentvolumeclaims: PersistentVolumeClaim; nodes: Node; deployments: Workload; statefulsets: Workload; events: Event };
+export type Kind = keyof Objects;
+/** The verbs ADR 0019 and ADR 0026 use, per kind: nodes are never written. */
+export type Writable = 'pods' | 'persistentvolumeclaims';
+export type Listable = 'pods' | 'nodes' | 'persistentvolumeclaims' | 'deployments' | 'statefulsets' | 'events';
+export type Scalable = 'deployments' | 'statefulsets';
+
+const BASE: Readonly<Record<Kind, { readonly api: string; readonly namespaced: boolean }>> = {
+  pods: { api: '/api/v1', namespaced: true },
+  persistentvolumeclaims: { api: '/api/v1', namespaced: true },
+  events: { api: '/api/v1', namespaced: true },
+  nodes: { api: '/api/v1', namespaced: false },
+  deployments: { api: '/apis/apps/v1', namespaced: true },
+  statefulsets: { api: '/apis/apps/v1', namespaced: true },
+};
 
 export type List<T> = { readonly metadata: { readonly resourceVersion: string }; readonly items: readonly T[] };
 export type Selectors = { readonly labelSelector?: string; readonly fieldSelector?: string };
@@ -210,6 +239,11 @@ export class KubeClient {
     return JSON.parse(await this.#call('GET', this.#path(kind) + query(selectors)));
   }
 
+  /** A JSON merge patch of the `scale` subresource. */
+  async scale(kind: Scalable, name: string, replicas: number): Promise<void> {
+    await this.#call('PATCH', this.#path(kind, name, 'scale'), { spec: { replicas } }, 'application/merge-patch+json');
+  }
+
   async log(pod: string, options: { readonly container?: string; readonly tailLines?: number; readonly limitBytes?: number } = {}): Promise<string> {
     return this.#call('GET', this.#path('pods', pod, 'log') + query(options));
   }
@@ -275,12 +309,12 @@ export class KubeClient {
   }
 
   #path(kind: Kind, name?: string, sub?: string): string {
-    const scope = NAMESPACED[kind] ? `/namespaces/${this.namespace}` : '';
-    return `/api/v1${scope}/${kind}${name ? `/${name}` : ''}${sub ? `/${sub}` : ''}`;
+    const { api, namespaced } = BASE[kind];
+    return `${api}${namespaced ? `/namespaces/${this.namespace}` : ''}/${kind}${name ? `/${name}` : ''}${sub ? `/${sub}` : ''}`;
   }
 
-  async #call(method: string, path: string, body?: unknown): Promise<string> {
-    const res = await this.#open(method, path, AbortSignal.timeout(this.#timeoutMs), body);
+  async #call(method: string, path: string, body?: unknown, contentType?: string): Promise<string> {
+    const res = await this.#open(method, path, AbortSignal.timeout(this.#timeoutMs), body, contentType);
     const text = await read(res);
     const status = res.statusCode ?? 0;
     if (status < 200 || status >= 300) throw KubeError.from(method, path, status, text);
@@ -288,10 +322,10 @@ export class KubeClient {
   }
 
   /** No answer at all (refused, timed out, TLS rejected) is Unavailable, so the Guard does not count it against the app. */
-  async #open(method: string, path: string, signal: AbortSignal, body?: unknown): Promise<IncomingMessage> {
+  async #open(method: string, path: string, signal: AbortSignal, body?: unknown, contentType = 'application/json'): Promise<IncomingMessage> {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const headers: http.OutgoingHttpHeaders = { authorization: `Bearer ${await this.#token()}`, accept: 'application/json' };
-    if (payload !== undefined) Object.assign(headers, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) });
+    if (payload !== undefined) Object.assign(headers, { 'content-type': contentType, 'content-length': Buffer.byteLength(payload) });
     return new Promise((resolve, reject) => {
       const req = this.#transport.request(this.#server + path, { method, headers, agent: this.#agent, signal }, resolve);
       req.on('error', (error) => reject(Object.assign(new Unavailable('container', NO_ANSWER), { cause: error })));

@@ -87,6 +87,10 @@ export class Runtimes implements Omit<Runtime, 'kind'> {
     await Promise.all(this.#all().map((runtime) => runtime.retire(app)));
   }
 
+  async kill(app: AppId): Promise<void> {
+    await Promise.all(this.#all().map((runtime) => runtime.kill(app)));
+  }
+
   async reconcile(): Promise<void> {
     await Promise.all(this.#all().map((runtime) => runtime.reconcile()));
   }

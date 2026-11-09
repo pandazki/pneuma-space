@@ -60,7 +60,12 @@ before(async () => {
   const identity = new UpstreamIdentity(config('console'), authority, registry);
   const server = await startAdmin({
     registry, bundles: w.bundles, runtime: { logs: async () => '', healthOf: () => [] }, guard: w.runtime,
-    metrics: { snapshot: () => ({}) as never, events: async () => [] }, nodes: { snapshot: () => ({ source: null, sampledAt: null, nodes: [] }) }, requests: { after: () => [] }, replica: 'r1' as ReplicaId, store, ingressPort: 18080, upstream: { identity, authority }, providers: [...w.providers.values()],
+    metrics: { snapshot: () => ({}) as never, events: async () => [] }, requests: { after: () => [] }, replica: 'r1' as ReplicaId, store, ingressPort: 18080, upstream: { identity, authority }, providers: [...w.providers.values()],
+    nodes: {
+      snapshot: () => ({ plane: 'kubernetes', sampledAt: null, nodes: [], workloads: [], instances: [], volumes: [], warnings: [] }),
+      nodes: () => ({ source: null, sampledAt: null, nodes: [] }),
+    },
+    infra: w.runtime, scaleMax: 10,
   }, { port: 0 });
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   close = async () => void server.close();
@@ -89,6 +94,10 @@ const TABLE: [row: string, method: string, path: string, body: unknown, allowed:
   ['metrics', 'GET', '/api/metrics', undefined, 'root', 'ana', 403, true],
   ['requests', 'GET', '/api/requests', undefined, 'root', 'ana', 403, true],
   ['nodes', 'GET', '/api/nodes', undefined, 'root', 'ana', 403, true],
+  ['cluster', 'GET', '/api/cluster', undefined, 'root', 'ana', 403, true],
+  ['scale', 'PUT', '/api/cluster/workloads/pneuma-space-runner/scale', { replicas: 2 }, 'root', 'ana', 403, true],
+  ['restart a Pod', 'POST', '/api/cluster/pods/pneuma-space-gateway-0/restart', undefined, 'root', 'ana', 403, true],
+  ['drain', 'POST', '/api/cluster/nodes/n1/drain', undefined, 'root', 'ana', 403, true],
   ['app detail', 'GET', '/api/apps/alpha', undefined, 'bob', 'cid', 404],
   ['app logs', 'GET', '/api/apps/alpha/logs', undefined, 'token:bob', 'cid', 404],
   ['usage by tenant', 'GET', `/api/usage?tenant=${A}`, undefined, 'bob', 'cid', 403],
@@ -116,6 +125,10 @@ const TABLE: [row: string, method: string, path: string, body: unknown, allowed:
   ['revoke token', 'DELETE', `/api/tenants/${A}/tokens/<old>`, undefined, 'ana', 'bob', 403, true],
   ['state', 'GET', '/api/apps/gamma/state', undefined, 'cid', 'token:bob', 404],
   ['tenant state', 'GET', `/api/state?tenant=${B}`, undefined, 'cid', 'token:bob', 403],
+  ['stop', 'POST', '/api/apps/alpha/stop', undefined, 'ana', 'bob', 403, true],
+  ['stop another tenant\'s app', 'POST', '/api/apps/alpha/stop', undefined, 'ana', 'cid', 404],
+  ['restart', 'POST', '/api/apps/alpha/restart', undefined, 'ana', 'bob', 403, true],
+  ['kill', 'POST', '/api/apps/alpha/kill', undefined, 'root', 'ana', 403, true],
   ['remove', 'POST', '/api/apps/alpha/remove', undefined, 'bob', 'cid', 404],
   ['unquarantine', 'POST', '/api/apps/alpha/unquarantine', undefined, 'bob', 'cid', 404],
   ['purge', 'POST', '/api/apps/alpha/purge', undefined, 'ana', 'bob', 403, true],

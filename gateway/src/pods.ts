@@ -247,6 +247,13 @@ export class PodDriver implements Driver<ContainerRun, string> {
     await this.#retire(app, uid, 'remove', true);
   }
 
+  /** By name and without a uid: the Pod a waker is still creating has no uid in the row yet. */
+  async kill(app: AppId): Promise<void> {
+    await this.#kube.delete('pods', podName(app), { gracePeriodSeconds: 0 }).catch((error) => {
+      if (!missing(error)) throw error;
+    });
+  }
+
   /** Deletes without waiting; a failure leaves the Pod to the next start, which removes any Pod under the app's name. */
   async discard(app: AppId, uid: string): Promise<boolean> {
     return this.#delete(app, uid).then(() => true, () => false);

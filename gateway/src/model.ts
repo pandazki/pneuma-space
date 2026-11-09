@@ -644,7 +644,8 @@ export type DeliveryFilter = {
 
 /** Pod name under Kubernetes, the host name on a single host. */
 export type ReplicaId = Brand<string, 'ReplicaId'>;
-export type Replica = { readonly id: ReplicaId; readonly startedAt: number; readonly seenAt: number };
+/** `leading` is what the replica's last heartbeat said of its own tenure; the cluster view marks the leading gateway with it. */
+export type Replica = { readonly id: ReplicaId; readonly startedAt: number; readonly seenAt: number; readonly leading: boolean };
 
 export type Instance = {
   readonly app: AppId;
@@ -741,6 +742,7 @@ export const EVENT_SETTLE_MS = 2000;
 export const AUDIT_ACTIONS = [
   'app.publish', 'app.remove', 'app.purge', 'app.policy', 'app.owner', 'app.access', 'app.move', 'app.unquarantine',
   'policy.global', 'token.issue', 'token.revoke', 'tenant.create', 'tenant.quota', 'member.add', 'member.role', 'member.remove',
+  'app.stop', 'app.restart', 'app.kill', 'cluster.scale', 'cluster.restart', 'cluster.drain',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export type AuditRecord = {
@@ -752,7 +754,7 @@ export type AuditRecord = {
   /** The tenant of what was acted on. */
   readonly tenant: TenantName | null;
   readonly action: AuditAction;
-  readonly targetKind: 'app' | 'tenant' | 'token' | 'member' | 'policy';
+  readonly targetKind: 'app' | 'tenant' | 'token' | 'member' | 'policy' | 'workload' | 'pod' | 'node';
   readonly target: string;
   readonly result: 'started' | 'ok' | 'refused' | 'error';
   /** Never a secret. */
@@ -870,6 +872,8 @@ export interface StoreOps {
   casInstance(expected: Pick<Instance, 'runtime' | 'state' | 'epoch'>, next: Instance): Promise<boolean>;
   /** Deletes the app's instance and lease_tally rows; purge cleanup, idempotent (ADR 0020 item 8). */
   deleteInstance(app: AppId): Promise<void>;
+  /** Every replica's lease_tally row of the app; the operator's kill (ADR 0026 item 3). */
+  deleteLeaseTallies(app: AppId): Promise<void>;
 
   leaseTallies(app?: AppId): Promise<LeaseTally[]>;
   /** Announces no change (ADR 0020 item 2). */
@@ -939,6 +943,8 @@ export interface Runtime {
   channel(lease: Lease, onRetire: () => void): void;
   /** Drains and removes the app's container; the next acquire creates one for the current release. */
   retire(app: AppId): Promise<void>;
+  /** Removes the instance without draining and puts its row asleep whatever its state and actor, clearing every replica's tally (ADR 0026 item 3). */
+  kill(app: AppId): Promise<void>;
   /** Startup: adopt or remove containers by label, then follow Docker events. */
   reconcile(): Promise<void>;
   state(app: AppId): InstanceState | 'none';
@@ -955,7 +961,7 @@ export interface Runtime {
 }
 
 export type NodeResources = { readonly cpuMillis: number; readonly memoryBytes: number; readonly pods: number };
-/** A Pod carrying a `pneuma-space.role` label in a platform namespace. */
+/** A Pod carrying a `pneuma-space.role` label in a platform namespace; `leading` marks the gateway replica that leads (ADR 0026 item 2). */
 export type PlatformPod = {
   readonly name: string;
   readonly role: string;
@@ -964,6 +970,9 @@ export type PlatformPod = {
   readonly phase: string;
   readonly ready: boolean;
   readonly restarts: number;
+  readonly node: string | null;
+  readonly startedAt: number | null;
+  readonly leading: boolean;
 };
 /** One cluster node (ADR 0024 item 8); `requested` sums the platform's own Pods on it, not every Pod. */
 export type NodeSample = {
@@ -977,11 +986,103 @@ export type NodeSample = {
   readonly pods: readonly PlatformPod[];
 };
 
-/** What the plane answers for publish and the nodes view, whatever runtime an app uses. */
+export type Plane = 'docker' | 'kubernetes';
+/** A platform Deployment or StatefulSet, or a compose service with no Pods (ADR 0026 item 2). */
+export type Workload = {
+  readonly name: string;
+  readonly role: string;
+  readonly kind: 'Deployment' | 'StatefulSet' | 'service';
+  readonly desired: number;
+  readonly ready: number;
+  readonly scalable: boolean;
+  readonly image: string | null;
+  readonly pods: readonly PlatformPod[];
+};
+/** An instance row joined to its Pod; `pod` is the container id on a single host. */
+export type InstanceRow = {
+  readonly app: AppName;
+  readonly tenant: TenantName;
+  readonly runtime: RuntimeKind;
+  readonly state: InstanceState;
+  readonly since: number;
+  readonly actor: ReplicaId | null;
+  readonly node: string | null;
+  readonly pod: string | null;
+  readonly leases: Readonly<Record<LeaseKind, number>>;
+  readonly requests: number;
+  readonly restarts: number | null;
+};
+export type VolumeRow = {
+  readonly app: AppName;
+  readonly name: string;
+  readonly sizeGb: number | null;
+  readonly storageClass: string | null;
+  readonly phase: string | null;
+  readonly node: string | null;
+};
+/** What Infra lists: the app by id, named by the sampler. */
+export type VolumeSample = Omit<VolumeRow, 'app'> & { readonly app: AppId };
+/** A `type=Warning` Event of the last hour in a platform namespace. */
+export type Warning = {
+  readonly at: number;
+  readonly kind: 'Pod' | 'Node' | 'PersistentVolumeClaim';
+  readonly object: string;
+  readonly reason: string;
+  readonly message: string;
+  readonly count: number;
+};
+export type HostSample = {
+  readonly cpus: number;
+  readonly load: readonly number[];
+  readonly memory: { readonly totalBytes: number; readonly freeBytes: number };
+  /** The filesystem holding the platform data directory. */
+  readonly data: { readonly totalBytes: number; readonly freeBytes: number } | null;
+};
+type Amounts = { readonly cpuMillis: number; readonly memoryBytes: number; readonly pods: number | null };
+/** One node of the node view (ADR 0024 item 8). */
+export type NodeEntry = {
+  readonly name: string;
+  readonly ready: boolean;
+  readonly schedulable: boolean;
+  readonly labels: Readonly<Record<string, string>>;
+  readonly taints: NodeSample['taints'];
+  readonly allocatable: Amounts;
+  readonly requested: Amounts;
+  readonly used: HostSample | null;
+  readonly gateways: readonly { readonly pod: string; readonly ready: boolean }[];
+  readonly runner: { readonly pod: string; readonly ready: boolean; readonly restarts: number | null; readonly workers: number | null; readonly stuck: number | null } | null;
+  readonly instances: readonly { readonly app: AppName; readonly runtime: RuntimeKind | null; readonly state: InstanceState }[];
+};
+/** ADMIN_PATHS.cluster, answered from the sampler's memory (ADR 0026 item 1). */
+export type ClusterView = {
+  readonly plane: Plane;
+  readonly sampledAt: number | null;
+  readonly nodes: readonly NodeEntry[];
+  readonly workloads: readonly Workload[];
+  readonly instances: readonly InstanceRow[];
+  readonly volumes: readonly VolumeRow[];
+  readonly warnings: readonly Warning[];
+};
+
+/** What the plane answers for publish, the nodes view and the cluster page, whatever runtime an app uses. */
 export interface Infra {
   resolveImage(reference: string): Promise<ImageId | null>;
   /** The cluster's nodes with the platform's Pods on them; null on a single host. */
   nodes(): Promise<NodeSample[] | null>;
+  workloads(): Promise<Workload[]>;
+  volumes(): Promise<VolumeSample[]>;
+  warnings(): Promise<Warning[]>;
+  /** Only a `scalable` workload; Conflict otherwise, and NotOnThisPlane on a single host. */
+  scale(name: string, replicas: number): Promise<void>;
+  /** Only a gateway or runner Pod, by its uid so a replacement under the same name stays; Conflict otherwise. */
+  deletePod(name: string): Promise<void>;
+}
+
+/** An operation the cluster page offers that a single host does not have. */
+export class NotOnThisPlane extends Conflict {
+  constructor(what: string) {
+    super(`${what} needs the kubernetes plane`);
+  }
 }
 
 /** Hides one backend for one resource kind. Every method is idempotent. */
@@ -1066,6 +1167,14 @@ export interface Registry {
   setAccess(name: AppName, access: Access): Promise<void>;
   /** Retires the instance, then moves the row, so quota, labels and tokens switch at once (ADR 0022 item 3). */
   moveApp(name: AppName, tenant: TenantName): Promise<void>;
+  /** Retires the instance; the next request wakes it (ADR 0026 item 3). */
+  stop(name: AppName): Promise<void>;
+  /** Retires the instance and wakes it again at once. */
+  restart(name: AppName): Promise<void>;
+  /** Runtime.kill, outside the command lock so a command stuck on the instance cannot hold it back. */
+  kill(name: AppName): Promise<void>;
+  /** Stops every instance the sampler places on `node`, one at a time, past a failure. */
+  drain(node: string): Promise<{ readonly stopped: readonly AppName[]; readonly failed: readonly { readonly app: AppName; readonly error: string }[] }>;
   view(name: AppName): RouteView | null;
   nameOf(id: AppId): AppName | null;
   /** The global snapshot; merge with a RouteView's override via effectivePolicy. */
@@ -1116,6 +1225,10 @@ export const ADMIN_PATHS = {
   metrics: '/api/metrics',
   requests: '/api/requests',
   nodes: '/api/nodes',
+  cluster: '/api/cluster',
+  scale: (workload: string) => `/api/cluster/workloads/${workload}/scale`,
+  restartPod: (pod: string) => `/api/cluster/pods/${pod}/restart`,
+  drain: (node: string) => `/api/cluster/nodes/${node}/drain`,
   usage: '/api/usage',
   usageApps: '/api/usage/apps',
   audit: '/api/audit',
@@ -1132,6 +1245,9 @@ export const ADMIN_PATHS = {
   remove: (name: string) => `/api/apps/${name}/remove`,
   purge: (name: string) => `/api/apps/${name}/purge`,
   unquarantine: (name: string) => `/api/apps/${name}/unquarantine`,
+  stop: (name: string) => `/api/apps/${name}/stop`,
+  restart: (name: string) => `/api/apps/${name}/restart`,
+  kill: (name: string) => `/api/apps/${name}/kill`,
   access: (name: string) => `/api/apps/${name}/access`,
   move: (name: string) => `/api/apps/${name}/tenant`,
   me: '/api/me',

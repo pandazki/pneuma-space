@@ -1,7 +1,11 @@
-// Infra of the kubernetes plane: image references resolve to digests in the organization's registry (ADR 0019 item 6), nodes are listed for the node view (ADR 0024 item 8).
+// Infra of the kubernetes plane: image references resolve to digests in the organization's registry (ADR 0019 item 6), nodes are listed for the node view
+// (ADR 0024 item 8), and the platform's own objects for the cluster page (ADR 0026).
 import { readFile } from 'node:fs/promises';
-import type { KubeClient, Node, Pod } from './kube.ts';
-import type { AppId, ImageId, Infra, NodeSample, PlatformPod } from './model.ts';
+import type { Event, KubeClient, Node, Pod, Scalable, Workload as KubeWorkload } from './kube.ts';
+import {
+  Conflict, NotFound,
+  type AppId, type ImageId, type Infra, type NodeSample, type PlatformPod, type VolumeSample, type Warning, type Workload,
+} from './model.ts';
 
 const MANIFESTS = [
   'application/vnd.oci.image.index.v1+json',
@@ -46,6 +50,15 @@ function quantity(raw: string | undefined): number {
 
 const ROLE = 'pneuma-space.role';
 const APP = 'pneuma-space.app';
+const GIB = 2 ** 30;
+const HOUR = 3_600_000;
+/** The only workloads an operator scales from the page (ADR 0026 item 3). */
+const SCALABLE: ReadonlyMap<string, Scalable> = new Map([['pneuma-space-gateway', 'deployments'], ['pneuma-space-runner', 'statefulsets']]);
+const RESTARTABLE: ReadonlySet<string> = new Set(['gateway', 'runner']);
+const WARNED: ReadonlySet<string> = new Set<Warning['kind']>(['Pod', 'Node', 'PersistentVolumeClaim']);
+const instant = (raw: string | undefined): number | null => (raw ? Date.parse(raw) : null);
+/** A KubeError's status, read structurally: appctl imports this module for parseReference, without kube.ts. */
+const statusOf = (error: unknown): number | null => (error instanceof Error && 'status' in error && typeof error.status === 'number' ? error.status : null);
 
 /** What the scheduler counts against a node: Pods that are bound and not finished. */
 const holds = (pod: Pod): boolean => pod.status?.phase !== 'Succeeded' && pod.status?.phase !== 'Failed';
@@ -60,6 +73,33 @@ function platformPod(pod: Pod): PlatformPod {
     phase: pod.status?.phase ?? 'Unknown',
     ready: statuses.length > 0 && statuses.every((c) => c.ready),
     restarts: statuses.reduce((sum, c) => sum + (c.restartCount ?? 0), 0),
+    node: pod.spec.nodeName ?? null,
+    startedAt: instant(pod.status?.startTime),
+    leading: false,
+  };
+}
+
+function workload(kind: 'Deployment' | 'StatefulSet', object: KubeWorkload, pods: readonly Pod[]): Workload {
+  const role = object.metadata.labels?.[ROLE] ?? '';
+  return {
+    name: object.metadata.name,
+    role,
+    kind,
+    desired: object.spec.replicas ?? 1,
+    ready: object.status?.readyReplicas ?? 0,
+    scalable: SCALABLE.has(object.metadata.name),
+    image: object.spec.template.spec.containers[0]?.image ?? null,
+    pods: pods.filter((pod) => pod.metadata.labels?.[ROLE] === role).map(platformPod),
+  };
+}
+
+function warning(event: Event): Warning | null {
+  const kind = event.involvedObject.kind ?? '';
+  const at = instant(event.series?.lastObservedTime ?? event.lastTimestamp ?? event.eventTime ?? event.metadata.creationTimestamp);
+  if (!WARNED.has(kind) || at === null) return null;
+  return {
+    at, kind: kind as Warning['kind'], object: event.involvedObject.name ?? '', reason: event.reason ?? '', message: event.message ?? '',
+    count: event.series?.count ?? event.count ?? 1,
   };
 }
 
@@ -88,8 +128,10 @@ const hostOf = (key: string): string => key.replace(/^https?:\/\//, '').replace(
 const scheme = (host: string): string => (/^(localhost|127\.0\.0\.1)(:|$)/.test(host) ? 'http' : 'https');
 
 export type KubeInfraOptions = {
-  /** One client per platform namespace, whose Pods with a `pneuma-space.role` label the node view counts; nodes are listed through the first. */
-  readonly namespaces: readonly [KubeClient, ...KubeClient[]];
+  /** The gateway's namespace, holding the gateway Deployment and the runner StatefulSet; nodes are listed through it. */
+  readonly platform: KubeClient;
+  /** `pneuma-space-apps`, holding the instance Pods and the app claims. */
+  readonly apps: KubeClient;
   /** PNEUMA_SPACE_REGISTRY. */
   readonly registry: string | null;
   /** PNEUMA_SPACE_REGISTRY_API: where the gateway reaches the registry's host when that differs from where nodes pull. */
@@ -99,13 +141,17 @@ export type KubeInfraOptions = {
 };
 
 export class KubeInfra implements Infra {
-  readonly #namespaces: KubeInfraOptions['namespaces'];
+  readonly #platform: KubeClient;
+  readonly #apps: KubeClient;
   readonly #registry: string | null;
   readonly #authFile: string | null;
   readonly #api: { readonly host: string; readonly origin: string } | null;
+  readonly #now: () => number;
 
-  constructor(options: KubeInfraOptions) {
-    this.#namespaces = options.namespaces;
+  constructor(options: KubeInfraOptions & { readonly now?: () => number }) {
+    this.#platform = options.platform;
+    this.#apps = options.apps;
+    this.#now = options.now ?? Date.now;
     this.#registry = options.registry;
     this.#authFile = options.authFile;
     this.#api = options.registry && options.registryApi ? { host: hostOf(options.registry), origin: new URL(options.registryApi).origin } : null;
@@ -118,11 +164,62 @@ export class KubeInfra implements Infra {
   /** One list of nodes and one list of role-labelled Pods per namespace; never `metrics.k8s.io`. */
   async nodes(): Promise<NodeSample[]> {
     const [nodes, ...pods] = await Promise.all([
-      this.#namespaces[0].list('nodes'),
-      ...this.#namespaces.map((kube) => kube.list('pods', { labelSelector: ROLE })),
+      this.#platform.list('nodes'),
+      ...[this.#platform, this.#apps].map((kube) => kube.list('pods', { labelSelector: ROLE })),
     ]);
     const all = pods.flatMap((list) => list.items);
     return nodes.items.map((node) => nodeSample(node, all)).sort((a, b) => (a.name < b.name ? -1 : 1));
+  }
+
+  /** The role-labelled Deployments and StatefulSets of the platform namespace, each with its Pods. */
+  async workloads(): Promise<Workload[]> {
+    const selector = { labelSelector: ROLE };
+    const [deployments, statefulsets, pods] = await Promise.all([
+      this.#platform.list('deployments', selector), this.#platform.list('statefulsets', selector), this.#platform.list('pods', selector),
+    ]);
+    return [
+      ...deployments.items.map((d) => workload('Deployment', d, pods.items)),
+      ...statefulsets.items.map((s) => workload('StatefulSet', s, pods.items)),
+    ].sort((a, b) => (a.name < b.name ? -1 : 1));
+  }
+
+  /** The app claims; `node` is where the scheduler bound a claim of a WaitForFirstConsumer class. */
+  async volumes(): Promise<VolumeSample[]> {
+    const { items } = await this.#apps.list('persistentvolumeclaims', { labelSelector: APP });
+    return items.map((claim) => ({
+      app: claim.metadata.labels![APP] as AppId,
+      name: claim.metadata.name,
+      sizeGb: quantity(claim.spec.resources.requests.storage) / GIB,
+      storageClass: claim.spec.storageClassName ?? null,
+      phase: claim.status?.phase ?? null,
+      node: claim.metadata.annotations?.['volume.kubernetes.io/selected-node'] ?? null,
+    }));
+  }
+
+  /** Warning events of the last hour about Pods, Nodes and claims, in both namespaces, newest first. */
+  async warnings(): Promise<Warning[]> {
+    const lists = await Promise.all([this.#platform, this.#apps].map((kube) => kube.list('events', { fieldSelector: 'type=Warning' })));
+    const since = this.#now() - HOUR;
+    return lists.flatMap((list) => list.items.map(warning)).filter((w): w is Warning => w !== null && w.at >= since).sort((a, b) => b.at - a.at);
+  }
+
+  async scale(name: string, replicas: number): Promise<void> {
+    const kind = SCALABLE.get(name);
+    if (!kind) throw new Conflict(`${name} is not scalable; only ${[...SCALABLE.keys()].join(' and ')} are`);
+    await this.#platform.scale(kind, name, replicas);
+  }
+
+  /** The uid precondition keeps a replacement the controller already made under the same name. */
+  async deletePod(name: string): Promise<void> {
+    const pod = await this.#platform.get('pods', name).catch((error: unknown) => {
+      if (statusOf(error) === 404) throw new NotFound(`no platform Pod named "${name}"`);
+      throw error;
+    });
+    const role = pod.metadata.labels?.[ROLE];
+    if (!role || !RESTARTABLE.has(role)) throw new Conflict(`Pod ${name} is not a gateway or runner Pod; restart it with kubectl`);
+    await this.#platform.delete('pods', name, { uid: pod.metadata.uid }).catch((error: unknown) => {
+      if (statusOf(error) !== 404 && statusOf(error) !== 409) throw error;
+    });
   }
 
   /** `HEAD /v2/<repo>/manifests/<ref>`; a 401 is answered once, with Basic credentials or a Bearer token exchanged for them. Null when the registry has no such image. */

@@ -326,7 +326,7 @@ function inner(image: ImageId, network: string): void {
     assert.equal(await answer(lease.address), 'fixture 1');
   });
 
-  const infra = new DockerInfra(raw);
+  const infra = new DockerInfra({ docker: raw, probes: {} as never, volumes: async () => [] });
 
   test('resolveImage returns the id of an existing image and null for a missing one', async () => {
     assert.equal(await infra.resolveImage(image), image);

@@ -11,7 +11,7 @@ import type { Answer, Identity } from './identity.ts';
 import {
   ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, LOGOUT_PATH, NotFound, QuotaExceeded, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
   appName, bundleId, parseManifest, subject, tenantName,
-  type Access, type Actor, type App, type AppId, type AuditAction, type AuditRecord, type Binding, type BundleStore, type Caller, type CapabilityProvider, type Guard,
+  type Access, type Actor, type App, type AppId, type AuditAction, type AuditRecord, type Binding, type BundleStore, type Caller, type CapabilityProvider, type Guard, type Infra,
   type Registry, type Release, type ReplicaId, type Role, type StateInventory, type StoreOps, type Subject, type TenantName, type UsageBucket, type UsageCounters,
 } from './model.ts';
 
@@ -21,7 +21,10 @@ export type AdminDeps = {
   readonly runtime: Pick<Runtimes, 'logs' | 'healthOf'>;
   readonly guard: Guard;
   readonly metrics: Pick<Metrics, 'snapshot' | 'events'>;
-  readonly nodes: Pick<NodeView, 'snapshot'>;
+  readonly nodes: Pick<NodeView, 'snapshot' | 'nodes'>;
+  readonly infra: Pick<Infra, 'scale' | 'deletePod'>;
+  /** PNEUMA_SPACE_SCALE_MAX: the most replicas the cluster page may ask of a workload (ADR 0026 item 3). */
+  readonly scaleMax: number;
   readonly requests: Pick<RequestLog, 'after'>;
   /** This replica, named in its request records and cursor entries. */
   readonly replica: ReplicaId;
@@ -158,7 +161,7 @@ function firstTenant({ body, caller }: Ctx): TenantName {
   throw new InputError(`tenant is required on a first publish${mine.length ? `; you are in ${mine.join(', ')}` : ''}`);
 }
 
-function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, replica, peers, store, ingressPort, upstream, providers }: AdminDeps): Route[] {
+function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scaleMax, requests, replica, peers, store, ingressPort, upstream, providers }: AdminDeps): Route[] {
   const app = (name: string | undefined) => appName(name!);
   const found = <T>(value: T | null, name: string | undefined): T => {
     if (value === null) throw new NotFound(`no app named "${name}"`);
@@ -224,7 +227,32 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, r
       },
     },
     { method: 'GET', path: at(ADMIN_PATHS.metrics), action: 'platform.read', handle: async () => ({ ...metrics.snapshot(), events: await metrics.events() }) },
-    { method: 'GET', path: at(ADMIN_PATHS.nodes), action: 'platform.read', handle: () => nodes.snapshot() },
+    { method: 'GET', path: at(ADMIN_PATHS.nodes), action: 'platform.read', handle: () => nodes.nodes() },
+    { method: 'GET', path: at(ADMIN_PATHS.cluster), action: 'cluster.read', handle: () => nodes.snapshot() },
+    {
+      method: 'PUT', path: at(ADMIN_PATHS.scale('<name>')), json: true, action: 'cluster.scale',
+      audit: { action: 'cluster.scale', target: ({ params: [name] }) => ({ kind: 'workload', id: name ?? '', tenant: null }), details: (body) => ({ replicas: body.replicas }) },
+      handle: async ({ params: [name], body: { replicas } }) => {
+        if (typeof replicas !== 'number' || !Number.isInteger(replicas) || replicas < 1 || replicas > scaleMax) {
+          throw new InputError(`replicas must be a whole number from 1 to ${scaleMax} (PNEUMA_SPACE_SCALE_MAX)`);
+        }
+        await infra.scale(name!, replicas);
+        return { workload: name, replicas };
+      },
+    },
+    {
+      method: 'POST', path: at(ADMIN_PATHS.restartPod('<name>')), action: 'cluster.restart',
+      audit: { action: 'cluster.restart', target: ({ params: [name] }) => ({ kind: 'pod', id: name ?? '', tenant: null }) },
+      handle: async ({ params: [name] }) => (await infra.deletePod(name!), { restarted: name }),
+    },
+    {
+      method: 'POST', path: at(ADMIN_PATHS.drain('<name>')), action: 'cluster.drain',
+      audit: {
+        action: 'cluster.drain', target: ({ params: [name] }) => ({ kind: 'node', id: name ?? '', tenant: null }),
+        details: (_, result) => (result ? { ...(result as Record<string, unknown>) } : {}),
+      },
+      handle: ({ params: [name] }) => registry.drain(name!),
+    },
     {
       method: 'GET', path: at(ADMIN_PATHS.usage),
       action: ({ query }) => (query.get('app') ?? '*') === '*' ? 'records' : 'app.read',
@@ -334,6 +362,15 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, requests, r
       await guard.unquarantine(found(registry.view(app(name)), name).app);
       return { quarantine: null };
     }, { audit: onAppAudit('app.unquarantine') }),
+    appRoute('POST', ADMIN_PATHS.stop('<name>'), 'app.stop', async ({ params: [name] }) => (await registry.stop(app(name)), { instance: 'asleep' }), {
+      audit: onAppAudit('app.stop'),
+    }),
+    appRoute('POST', ADMIN_PATHS.restart('<name>'), 'app.stop', async ({ params: [name] }) => (await registry.restart(app(name)), { instance: 'awake' }), {
+      audit: onAppAudit('app.restart'),
+    }),
+    appRoute('POST', ADMIN_PATHS.kill('<name>'), 'app.kill', async ({ params: [name] }) => (await registry.kill(app(name)), { instance: 'asleep' }), {
+      audit: onAppAudit('app.kill'),
+    }),
     appRoute('POST', ADMIN_PATHS.purge('<name>'), 'app.purge', async ({ params: [name] }) => (await registry.purge(app(name)), { status: 'purged' }), {
       audit: onAppAudit('app.purge'),
     }),

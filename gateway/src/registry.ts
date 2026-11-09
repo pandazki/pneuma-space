@@ -17,7 +17,7 @@ import { resolvesOnNetwork, type ServiceProbe } from './providers.ts';
 
 export type RegistryDeps = {
   readonly store: Store;
-  readonly runtime: Pick<Runtime, 'retire' | 'state' | 'since' | 'leases' | 'sleepsAt'>;
+  readonly runtime: Pick<Runtime, 'retire' | 'kill' | 'acquire' | 'release' | 'state' | 'since' | 'leases' | 'sleepsAt'>;
   readonly guard: Pick<Guard, 'quarantine'>;
   readonly infra: Pick<Infra, 'resolveImage'>;
   readonly bundles: BundleStore;
@@ -461,6 +461,39 @@ export class PlatformRegistry implements Registry {
       this.#emit(app.id);
       log('move', name, { from: app.tenant, to: tenant });
     });
+  }
+
+  stop(name: AppName): Promise<void> {
+    return this.#store.exclusive(name, async () => {
+      await this.#runtime.retire((await this.#mustApp(name)).id);
+      log('stop', name);
+    });
+  }
+
+  restart(name: AppName): Promise<void> {
+    return this.#store.exclusive(name, async () => {
+      const app = await this.#mustApp(name);
+      if (app.status !== 'registered') throw new Conflict(`app "${name}" is ${app.status}; only a registered app restarts`);
+      await this.#runtime.retire(app.id);
+      this.#runtime.release(await this.#runtime.acquire(app.id, 'trigger'));
+      log('restart', name);
+    });
+  }
+
+  async kill(name: AppName): Promise<void> {
+    await this.#runtime.kill((await this.#mustApp(name)).id);
+    log('kill', name);
+  }
+
+  async drain(node: string): Promise<{ stopped: AppName[]; failed: { app: AppName; error: string }[] }> {
+    const on = [...this.#views.values()].filter((view) => this.#nodeOf(view.app) === node).map((view) => view.name);
+    const stopped: AppName[] = [];
+    const failed: { app: AppName; error: string }[] = [];
+    for (const name of on) {
+      await this.stop(name).then(() => stopped.push(name), (error: Error) => failed.push({ app: name, error: error.message }));
+    }
+    log('drain', null, { node, stopped: stopped.length, failed: failed.length });
+    return { stopped, failed };
   }
 
   /** The authentication path's User write: once per user per 5 min on this replica, at once when the name or groups change (ADR 0022 item 1). */
