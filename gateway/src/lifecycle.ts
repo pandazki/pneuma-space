@@ -12,6 +12,7 @@ const MAX_TICK_SECONDS = 10;
 /** A release that leaves the tally at 0, or changes its kinds, is written at most this much later (ADR 0020 item 4). */
 const FLUSH_MS = 1000;
 const TAKEOVER_MS = 5000;
+const SWEEP_MS = 60_000;
 /** How long a wake waits for the Registry to catch up with a newer app row before reading the RunSpec again. */
 const STALE_MS = 50;
 
@@ -49,6 +50,8 @@ export interface Driver<S extends RunSpec, H extends string> {
   discard(app: AppId, handle: H): Promise<boolean>;
   /** Null when the runtime's service could not be asked, so nothing it holds is known to be gone. */
   adopt(): Promise<readonly Adopted<H>[] | null>;
+  /** What runs now, without side effects, so the leader may ask while other replicas wake instances; without it only reconcile finds orphans. */
+  list?(): Promise<readonly Adopted<H>[] | null>;
   /** Reports instances that end on their own until `signal` aborts. */
   follow(gone: Gone<H>, signal: AbortSignal): void;
   logs(app: AppId, handle: H | null, tail: number): Promise<string>;
@@ -115,6 +118,8 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
   #timer: NodeJS.Timeout | null = null;
   #due = 0;
   #takeover: NodeJS.Timeout | null = null;
+  #sweeper: NodeJS.Timeout | null = null;
+  #sweeping: Promise<void> | null = null;
   #following = false;
 
   constructor(driver: Driver<S, H>, options: LifecycleOptions) {
@@ -225,10 +230,11 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
     }
   }
 
-  /** Startup: load the mirror, compare it with what the driver reports, take over transitions left by a dead replica, then follow the driver. */
+  /** Startup: load the mirror, compare it with what the driver reports, take over stale transitions, then follow the driver. */
   async reconcile(): Promise<void> {
     await this.#instances.ready();
     if (this.#instances.leading) await this.#adopt();
+    await this.#takeOver(true);
     if (!this.#following) {
       this.#following = true;
       this.#driver.follow(this.#gone, this.#events.signal);
@@ -609,7 +615,7 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
 
   /**
    * Leader at startup: an instance the driver reports without a matching row, or for another release or spec, is removed;
-   * an awake row whose instance is gone goes asleep as crashed; transitions this replica left before it restarted are taken over.
+   * an awake row whose instance is gone goes asleep as crashed.
    */
   async #adopt(): Promise<void> {
     const found = await this.#driver.adopt();
@@ -640,22 +646,20 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
         await this.#cas(row, { ...row, handle: null }, { adopted: true });
       }
     }
-    await this.#takeOver(true);
   }
 
   /**
-   * Leader, every 5 s: a waking or stopping row whose actor is dead loses its handle and goes asleep; a draining one is drained here.
-   * At startup this replica's own earlier transitions count as dead too.
+   * A stale waking or stopping row loses its handle and goes asleep; a stale draining one is drained here. A row is stale when its actor is
+   * this replica at startup (a fresh process continues no transition; every replica checks), or, for the leader, when its actor is dead.
    */
   async #takeOver(startup = false): Promise<void> {
     const stuck = [...this.#instances.rows()].filter((r) => r.runtime === this.kind && (r.state === 'waking' || r.state === 'stopping' || r.state === 'draining'));
     if (stuck.length === 0) return;
     const now = Date.now();
     const live = new Set((await this.#store.replicas()).filter((r) => r.seenAt >= now - DEAD_MS).map((r) => r.id));
+    const stale = (row: Instance) => (row.actor === this.#me ? startup : this.#instances.leading && (row.actor === null || !live.has(row.actor)));
     for (const row of stuck) {
-      const mine = row.actor === this.#me;
-      if (row.actor !== null && live.has(row.actor) && !(mine && startup)) continue;
-      if (mine && !startup) continue;
+      if (!stale(row)) continue;
       if (row.state === 'draining') {
         const taken = await this.#cas(row, { ...row, actor: this.#me }, { takeover: row.actor });
         if (taken) void this.#drain(taken).catch((error: Error) => this.#emit('drain-failed', row.app, { error: error.message }));
@@ -671,14 +675,38 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
     }
   }
 
+  /**
+   * Leader, on gaining the lead and every 60 s: an instance the driver lists is discarded when its row, read after the listing, neither names
+   * its handle nor is waking. A waking row's instance may be one its waker is still creating; a dead waker's row goes asleep without a handle
+   * by takeover, and the next sweep discards what it left.
+   */
+  async #sweep(): Promise<void> {
+    for (const { app, handle } of (await this.#driver.list?.()) ?? []) {
+      const row = await this.#store.instance(app);
+      if (row?.runtime === this.kind && (row.handle === handle || row.state === 'waking')) continue;
+      if (await this.#driver.discard(app, handle)) this.#emit('removed', app, { [this.#driver.handleKey]: handle });
+    }
+  }
+
+  #sweepOnce(): void {
+    this.#sweeping ??= this.#sweep()
+      .catch((error: Error) => this.#log('sweep-failed', null, { error: error.message }))
+      .finally(() => (this.#sweeping = null));
+  }
+
   #lead(leading: boolean): void {
     if (!leading || this.#events.signal.aborted) {
       if (this.#timer) clearTimeout(this.#timer);
       if (this.#takeover) clearInterval(this.#takeover);
-      this.#timer = this.#takeover = null;
+      if (this.#sweeper) clearInterval(this.#sweeper);
+      this.#timer = this.#takeover = this.#sweeper = null;
       return;
     }
     this.#takeover ??= setInterval(() => void this.#takeOver().catch(() => {}), TAKEOVER_MS).unref();
+    if (!this.#sweeper) {
+      this.#sweeper = setInterval(() => this.#sweepOnce(), SWEEP_MS).unref();
+      this.#sweepOnce();
+    }
     if ([...this.#instances.rows()].some((r) => r.runtime === this.kind && r.state === 'awake')) this.#arm(1);
   }
 

@@ -252,6 +252,10 @@ export class PodDriver implements Driver<ContainerRun, string> {
     return this.#delete(app, uid).then(() => true, () => false);
   }
 
+  list(): Promise<readonly Adopted<string>[] | null> {
+    return this.adopt();
+  }
+
   async adopt(): Promise<readonly Adopted<string>[] | null> {
     let pods: readonly Pod[];
     try {

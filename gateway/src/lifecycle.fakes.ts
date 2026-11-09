@@ -26,6 +26,7 @@ export class FakeDriver implements Driver<RunSpec, string> {
   readonly handleKey = 'fake';
   starts = 0;
   readonly removed: string[] = [];
+  readonly discarded: string[] = [];
   failure: Error | null = null;
   serving = true;
   node: string | undefined = undefined;
@@ -54,12 +55,17 @@ export class FakeDriver implements Driver<RunSpec, string> {
     this.removed.push(handle);
   }
 
-  async discard(): Promise<boolean> {
+  async discard(_app: AppId, handle: string): Promise<boolean> {
+    this.discarded.push(handle);
     return true;
   }
 
   async adopt(): Promise<readonly Adopted<string>[]> {
     return this.adopted;
+  }
+
+  list(): Promise<readonly Adopted<string>[]> {
+    return this.adopt();
   }
 
   follow(gone: Gone<string>): void {
