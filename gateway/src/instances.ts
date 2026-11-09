@@ -164,8 +164,12 @@ export class Instances {
     }
   }
 
-  /** Writes this replica's row now and every 2 s, asking for the lead each time; the leader also sweeps the rows of replicas not seen for 10 s. */
+  /**
+   * Writes this replica's row now and every 2 s, asking for the lead each time; the leader also sweeps the rows of replicas not seen for 10 s.
+   * First deletes what an earlier process under this id left: a fresh process holds no leases.
+   */
   async start(): Promise<void> {
+    await this.store.deleteReplica(this.replica);
     const startedAt = Date.now();
     const beat = async () => {
       const now = Date.now();

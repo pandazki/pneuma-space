@@ -3,7 +3,12 @@ import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { registered, replica, tempStore, until } from './lifecycle.fakes.ts';
 import { Unavailable } from './runtimes.ts';
-import { changeKey, DEFAULT_QUOTA, DEFAULT_TENANT, QuotaExceeded, type ReleaseNumber, type ReplicaId, type Store } from './model.ts';
+import { changeKey, DEFAULT_QUOTA, DEFAULT_TENANT, QuotaExceeded, type AppId, type Instance, type ReleaseNumber, type ReplicaId, type Store } from './model.ts';
+
+const instance = (app: AppId, state: Instance['state'], actor: string | null, handle: string | null = 'left', epoch = 3): Instance => ({
+  app, runtime: 'container', release: 1 as ReleaseNumber, specHash: 'h', epoch, state, actor: actor as ReplicaId | null, handle,
+  address: null, node: null, home: null, since: 0, awakeAt: null, cpuMillis: 0, memoryMb: 0,
+});
 
 /** Counts the calls made through it. */
 function counting(store: Store): { store: Store; calls: string[] } {
@@ -63,13 +68,54 @@ test('releasing every lease writes this replica\'s tally once, on the 0 edge', a
 test('the leader takes a waking row whose actor is a dead replica back to asleep and removes its handle', async () => {
   const store = tempStore();
   const { app, specFor } = await registered(store);
-  await store.insertInstance({
-    app, runtime: 'container', release: 1 as ReleaseNumber, specHash: 'h', epoch: 3, state: 'waking', actor: 'dead' as ReplicaId, handle: 'left',
-    address: null, node: null, home: null, since: 0, awakeAt: null, cpuMillis: 0, memoryMb: 0,
-  });
+  await store.insertInstance(instance(app, 'waking', 'dead'));
   const { driver, lifecycle } = replica(store, specFor);
   await lifecycle.reconcile();
   assert.deepEqual([(await store.instance(app))?.state, driver.removed], ['asleep', ['left']]);
+});
+
+for (const state of ['waking', 'stopping'] as const) {
+  test(`a follower restarting under the id a ${state} row names takes the row back to asleep and removes its handle`, async () => {
+    const store = tempStore();
+    const { app, specFor } = await registered(store);
+    await store.insertInstance(instance(app, state, 'replica-b'));
+    const { driver, lifecycle } = replica(store, specFor, 'replica-b', { leader: false });
+    await lifecycle.reconcile();
+    assert.deepEqual([(await store.instance(app))?.state, driver.removed], ['asleep', ['left']]);
+  });
+}
+
+test('a follower restarting under the id a draining row names drains it', async () => {
+  const store = tempStore();
+  const { app, specFor } = await registered(store);
+  await store.insertInstance(instance(app, 'draining', 'replica-b'));
+  const { driver, lifecycle } = replica(store, specFor, 'replica-b', { leader: false });
+  await lifecycle.reconcile();
+  await until('the drained row is asleep', async () => (await store.instance(app))?.state === 'asleep');
+  assert.deepEqual(driver.removed, ['left']);
+});
+
+test('a replica restarting under its id drops the lease tally its earlier process left, so no replica counts that lease', async () => {
+  const store = tempStore();
+  const { app, specFor } = await registered(store);
+  await store.insertInstance({ ...instance(app, 'awake', null), address: 'fake:1', awakeAt: Date.now() });
+  await store.putLeaseTally({ app, replica: 'replica-a' as ReplicaId, epoch: 3, request: 0, channel: 1, trigger: 0, releasedAt: null });
+  const a = replica(store, specFor, 'replica-a');
+  await a.instances.start();
+  const b = replica(store, specFor, 'replica-b', { leader: false });
+  await b.instances.ready();
+  await a.instances.close();
+  assert.notEqual(b.lifecycle.sleepsAt(app), null);
+});
+
+test('a row whose actor is another live replica is left alone at startup', async () => {
+  const store = tempStore();
+  const { app, specFor } = await registered(store);
+  await store.insertInstance(instance(app, 'waking', 'replica-b'));
+  await store.putReplica({ id: 'replica-b' as ReplicaId, startedAt: Date.now(), seenAt: Date.now() });
+  const { driver, lifecycle } = replica(store, specFor);
+  await lifecycle.reconcile();
+  assert.deepEqual([(await store.instance(app))?.state, driver.removed], ['waking', []]);
 });
 
 test('an instance end that two replicas both report records one Guard failure', async () => {
@@ -91,10 +137,7 @@ test('a wake over the tenant\'s quota throws QuotaExceeded and leaves the row as
   const store = tempStore();
   const { app, specFor } = await registered(store);
   await store.putTenant({ name: DEFAULT_TENANT, display: DEFAULT_TENANT, quota: { ...DEFAULT_QUOTA, awake: 0 }, createdAt: 0 });
-  await store.insertInstance({
-    app, runtime: 'container', release: 1 as ReleaseNumber, specHash: 'h', epoch: 1, state: 'asleep', actor: null, handle: null,
-    address: null, node: null, home: null, since: 0, awakeAt: null, cpuMillis: 0, memoryMb: 0,
-  });
+  await store.insertInstance(instance(app, 'asleep', null, null, 1));
   const { lifecycle } = replica(store, specFor);
   await assert.rejects(lifecycle.acquire(app, 'request'), QuotaExceeded);
   assert.deepEqual([(await store.instance(app))?.state, await store.guard(app)], ['asleep', null]);
