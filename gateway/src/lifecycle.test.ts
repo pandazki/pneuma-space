@@ -10,6 +10,21 @@ const instance = (app: AppId, state: Instance['state'], actor: string | null, ha
   address: null, node: null, home: null, since: 0, awakeAt: null, cpuMillis: 0, memoryMb: 0,
 });
 
+/** Grants the lead only once `grant` is called. */
+function withheld(store: Store): { store: Store; grant: () => void } {
+  let granted = false;
+  const proxy = new Proxy(store, {
+    get(target, key, receiver) {
+      if (key === 'leader') return async () => (granted ? target.leader() : null);
+      const value = Reflect.get(target, key, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return { store: proxy, grant: () => void (granted = true) };
+}
+
+const orphan = (app: AppId) => ({ app, handle: 'orphan', release: '1', spec: 'h', address: 'fake:9' });
+
 /** Counts the calls made through it. */
 function counting(store: Store): { store: Store; calls: string[] } {
   const calls: string[] = [];
@@ -116,6 +131,46 @@ test('a row whose actor is another live replica is left alone at startup', async
   const { driver, lifecycle } = replica(store, specFor);
   await lifecycle.reconcile();
   assert.deepEqual([(await store.instance(app))?.state, driver.removed], ['waking', []]);
+});
+
+test('a replica that gains the lead after it started discards an instance no row names', async () => {
+  const { store, grant } = withheld(tempStore());
+  const { app, specFor } = await registered(store as never);
+  const { driver, instances, lifecycle } = replica(store as never, specFor);
+  await lifecycle.reconcile();
+  driver.adopted = [orphan(app)];
+  grant();
+  await instances.start();
+  await until('the orphan is discarded', () => driver.discarded.includes('orphan'));
+  await instances.close();
+});
+
+test('the leader discards every 60 s an instance that appeared after the last sweep and no row names', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const store = tempStore();
+  const { app, specFor } = await registered(store);
+  const { driver, lifecycle } = replica(store, specFor);
+  await lifecycle.reconcile();
+  // Lets the sweep on gaining the lead finish, so the tick does not fold into it.
+  await sleep(10);
+  driver.adopted = [orphan(app)];
+  t.mock.timers.tick(60_000);
+  await until('the orphan is discarded', () => driver.discarded.includes('orphan'));
+});
+
+test('the sweep keeps an instance whose row is waking, as its waker may still be creating it', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const store = tempStore();
+  const [waking, gone] = [await registered(store), await registered(store)];
+  const specFor = (app: AppId) => waking.specFor(app) ?? gone.specFor(app);
+  const { driver, lifecycle } = replica(store, specFor);
+  await lifecycle.reconcile();
+  await store.insertInstance(instance(waking.app, 'waking', 'replica-b', null));
+  await store.putReplica({ id: 'replica-b' as ReplicaId, startedAt: Date.now(), seenAt: Date.now() });
+  driver.adopted = [{ ...orphan(waking.app), handle: 'creating' }, orphan(gone.app)];
+  t.mock.timers.tick(60_000);
+  await until('the orphan is discarded', () => driver.discarded.includes('orphan'));
+  assert.deepEqual(driver.discarded, ['orphan']);
 });
 
 test('an instance end that two replicas both report records one Guard failure', async () => {
