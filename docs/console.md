@@ -71,4 +71,4 @@ Both dictionaries carry every key. Chinese prose holds no English beyond identif
 
 ## Width
 
-The console is checked at 1440 px and 390 px. At 390 px nothing scrolls sideways: grids drop to one column, rows wrap their meta under the title, toolbars stack, the top bar keeps the tenant listbox and the avatar.
+The console is checked at 1440, 1280, 1024, 900, 768 and 390 px, in both languages. A toolbar wraps whole controls, never text squeezed between them: a view switch keeps the end of the first line, a field or note that does not fit beside the others on one line takes its own full line under them, and a wrapped toolbar keeps its gaps between lines and to the content below. At 390 px nothing scrolls sideways: grids drop to one column, rows wrap their meta under the title, the top bar keeps the tenant listbox and the avatar.

@@ -563,10 +563,12 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .topo-svg.picking .edge.lit:not(.fault) { stroke: var(--accent); stroke-width: 1.75; }
 .topo-svg.picking .pass.lit { stroke: var(--accent); }
 .topo-svg.picking [data-id="admin"], .topo-svg.picking [data-id="operator"] { opacity: .2; }
-.topo-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
-.topo-tools input { width: 220px; }
-.topo-tools .muted { flex: 1 1 200px; font-size: 12px; }
-@media (max-width: 560px) { .topo-tools input { flex: 1 1 100%; } }
+.topo-tools { container: tools / inline-size; margin-bottom: 16px; }
+.topo-tools > div { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr) auto; grid-template-areas: "q . view" "note note note"; align-items: center; gap: 8px 12px; }
+.topo-tools input { grid-area: q; width: 100%; }
+.topo-tools .muted { grid-area: note; font-size: 12px; }
+.topo-tools .seg { grid-area: view; }
+@container tools (min-width: 1040px) { .topo-tools > div { grid-template-areas: "q note view"; } }
 .pickbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; font-size: 12.5px; }
 .pickbar:empty { display: none; }
 .faults { display: grid; gap: 0; padding: 0; margin-bottom: 12px; box-shadow: 0 0 0 1px var(--red), var(--shadow-sm); }
@@ -723,7 +725,8 @@ button.pdots:hover .caret { color: var(--ink); }
 .ichip.orange { background: var(--orange-tint); }
 .ichip.stuck { background: var(--red-tint); box-shadow: 0 0 0 1px var(--red); }
 .ifilter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; }
-.ifilter input[type="search"] { margin-left: auto; width: 240px; }
+.ifilter > .fchips { flex: 100000 1 auto; }
+.ifilter input[type="search"] { flex: 1 0 240px; }
 .fchips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .fchip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: none; box-shadow: inset 0 0 0 1px var(--line); font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
 .fchip:hover { background: var(--hover); }
@@ -888,7 +891,7 @@ dialog .msg.err { margin: -8px 0 16px; }
   .topbar .lbtn { max-width: 150px; }
   .who .chip, .topbar .sep { display: none; }
   .split { grid-template-columns: minmax(0, 1fr); }
-  .ifilter input[type="search"] { width: 100%; margin-left: 0; }
+  .ifilter input[type="search"] { flex-basis: 100%; }
   .irow { display: flex; flex-wrap: wrap; gap: 6px 14px; }
   .iname { flex: 1 1 calc(100% - 40px); }
   .iwhere { flex-basis: 100%; padding-left: 23px; }
@@ -4756,13 +4759,13 @@ function topology() {
   const secHead = h('div');
   const renderChrome = () => {
     fill(secHead, sectionHead(1, `tp.sec.${topoView}`, `tp.sec.${topoView}Desc`));
-    fill(tools, filterInput, h('span', { class: 'muted' }, t(`tp.${topoView}Hint`, { n: topoView === 'graph' ? GRAPH_CAP : LANE_CAP })), segmented(TOPO_VIEWS.map((v) => [v, t(`tp.view.${v}`)]), topoView, (v) => {
+    fill(tools, h('div', {}, filterInput, h('span', { class: 'muted' }, t(`tp.${topoView}Hint`, { n: topoView === 'graph' ? GRAPH_CAP : LANE_CAP })), segmented(TOPO_VIEWS.map((v) => [v, t(`tp.view.${v}`)]), topoView, (v) => {
       topoView = v;
       store.set('pneuma-space-topology', v);
       selection = null;
       renderChrome();
       paint();
-    }, t('tp.view')));
+    }, t('tp.view'))));
   };
   renderChrome();
 
