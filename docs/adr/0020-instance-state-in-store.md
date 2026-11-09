@@ -24,7 +24,8 @@
    - 回收（领导者）：每 `min(idle_seconds, 10)` s 扫镜像里 `awake` 的行；候选行开事务 `FOR UPDATE`，确认当前 epoch 没有计数大于 0 的行且 `now - max(released_at, awake_at) >= idle_seconds`，CAS 到 `stopping`；锁外 `driver.sleep`，再 CAS 到 `asleep`。
    - 退役：由执行发布、改策略或 remove 的副本在提交后直接做。CAS `awake→draining` 并发通知；每个副本看到 `draining` 就对本地 channel 调 `onRetire` 并立即写计数；退役方等计数之和为 0 或 `drain_timeout_seconds`，然后 CAS `stopping`、`driver.remove`、回 `asleep`。新 Release 的 Pod 在旧 Pod DELETED 之后才创建，"两个进程不同时打开一个 `/data`"仍然成立。
    - 实例自己结束：每个副本都 watch Pod、轮询它看得到的 runner，观察到结束就 CAS `awake→asleep WHERE epoch AND handle`，只有赢家发 `crashed` 或 `hung` 事件，Guard 每次失败只记一次。
-   - 接管（领导者，每 5 s）：`actor` 的 `seen_at` 超过 10 s 的 `waking` 和 `stopping` 行，按确定的名字删 handle，CAS 到 `asleep`；`draining` 行由领导者接着排空。晚到的原唤醒者 CAS 失败，它创建的 Pod epoch 不匹配，由孤儿清理删掉。
+   - 接管：启动时每个副本先删自己旧的 `replica` 和 `lease_tally` 行（新进程不持有任何租约），再接管 `actor` 是自己的 `waking`、`stopping`、`draining` 行；领导者每 5 s 接管 `actor` 的 `seen_at` 超过 10 s 的行。接管按确定的名字删 handle，CAS 到 `asleep`；`draining` 行接着排空。晚到的原唤醒者 CAS 失败，它创建的 Pod epoch 不匹配，由孤儿清理删掉。副本 id 是 Pod 名，容器重启后不变，所以 actor 活着不等于那次转换还有人管，启动接管补这个缺口。
+   - 孤儿清理（领导者，取得领导权时和之后每 60 s）：驱动列出的实例，若列出后读到的行既不指向它的 handle 也不是 `waking`，就删掉；isolate 不参与，它的孤儿 worker 由 recovery poll 停掉。
    - 领导者：一个专用连接持有 advisory lock，会话设 `tcp_keepalives_idle=10`、`interval=5`、`count=3`，每 2 s `SELECT 1`，带 3 s 的客户端超时，超时或失败即卸任并停下领导者的循环，所以半开连接上的旧领导者在服务端释放锁之前就已经停手。领导者跑回收器、Scheduler、接管、孤儿 Pod 和 worker 清理、死副本行清理、Provider 收敛、ADR 0024 的采样和清扫。Scheduler 的认领是条件更新 `UPDATE delivery SET state='delivering', replica=$me WHERE id=$1 AND state='due'` 并检查行数；取得领导权时只把 `replica` 已死的 `delivering` 行放回 `due`，不是全部。
 5. **Guard 跨副本。** 状态从内存 Map 搬到 `guard` 行。失败只由 CAS 赢家或唤醒者记录，在 `FOR UPDATE` 事务里过滤时间窗、追加、判定隔离。`unquarantine` 删行并发通知。规则和 Policy 字段不变。
 6. **副本优雅退出。** readiness 先失败，`preStop` 等 5 s 让 Endpoints 收敛，再关连接、删自己的 `lease_tally` 和 `replica` 行。流经它的 WebSocket 断开，客户端经别的副本重连，和 M1 重启的后果相同。
