@@ -61,6 +61,9 @@ const memberA = caller('user:mia', { [A]: 'member' });
 const memberB = caller('user:bo', { [B]: 'member' });
 const adminA = caller('user:ana', { [A]: 'admin' });
 const tokenA = caller(`service:${A}.ci`, { [A]: 'member' }, { viaToken: true });
+const personalA = caller('user:mia', { [A]: 'member' }, { viaToken: true });
+const mia = 'user:mia' as Subject;
+const ana = 'user:ana' as Subject;
 const platform = caller('user:olga', {}, { platformAdmin: true });
 
 type Attempt = readonly [Caller, TenantName | null, Subject | null];
@@ -69,17 +72,18 @@ const CASES: Record<Action, { allowed: Attempt; refused: readonly [...Attempt, D
   'me': { allowed: [tokenA, null, null], refused: null },
   'health': { allowed: [nobody, null, null], refused: null },
   'apps.list': { allowed: [nobody, null, null], refused: null },
-  'app.read': { allowed: [tokenA, A, null], refused: [memberB, A, null, 404] },
+  'apps.create': { allowed: [memberA, A, mia], refused: [memberA, A, ana, 403] },
+  'app.read': { allowed: [personalA, A, mia], refused: [memberB, A, null, 404] },
   'platform.read': { allowed: [platform, null, null], refused: [adminA, null, null, 403] },
   'bundles.upload': { allowed: [tokenA, null, null], refused: [nobody, null, null, 403] },
-  'app.release': { allowed: [tokenA, A, null], refused: [memberB, A, null, 404] },
-  'app.policy': { allowed: [memberA, A, null], refused: [memberB, A, null, 404] },
-  'app.access': { allowed: [memberA, A, null], refused: [nobody, A, null, 404] },
-  'app.owner': { allowed: [memberA, A, 'user:mia' as Subject], refused: [memberA, A, 'user:ana' as Subject, 403] },
+  'app.release': { allowed: [tokenA, A, ana], refused: [memberA, A, ana, 404] },
+  'app.policy': { allowed: [memberA, A, mia], refused: [memberB, A, null, 404] },
+  'app.access': { allowed: [memberA, A, mia], refused: [nobody, A, null, 404] },
+  'app.owner': { allowed: [memberA, A, mia], refused: [tokenA, A, ana, 403] },
   'app.remove': { allowed: [tokenA, A, null], refused: [memberB, A, null, 404] },
-  'app.purge': { allowed: [adminA, A, null], refused: [memberA, A, null, 403] },
+  'app.purge': { allowed: [adminA, A, null], refused: [memberA, A, mia, 403] },
   'app.move': { allowed: [platform, null, null], refused: [adminA, null, null, 403] },
-  'app.stop': { allowed: [adminA, A, null], refused: [memberA, A, null, 403] },
+  'app.stop': { allowed: [memberA, A, mia], refused: [personalA, A, mia, 403] },
   'app.kill': { allowed: [platform, A, null], refused: [adminA, A, null, 403] },
   'cluster.read': { allowed: [platform, null, null], refused: [adminA, null, null, 403] },
   'cluster.scale': { allowed: [platform, null, null], refused: [adminA, null, null, 403] },
@@ -94,7 +98,7 @@ const CASES: Record<Action, { allowed: Attempt; refused: readonly [...Attempt, D
   'tokens.list': { allowed: [memberA, A, null], refused: [tokenA, A, null, 403] },
   'tokens.issue.service': { allowed: [adminA, A, null], refused: [memberA, A, null, 403] },
   'tokens.issue.personal': { allowed: [memberA, A, null], refused: [tokenA, A, null, 403] },
-  'tokens.revoke': { allowed: [memberA, A, 'user:mia' as Subject], refused: [memberA, A, 'user:ana' as Subject, 403] },
+  'tokens.revoke': { allowed: [memberA, A, mia], refused: [memberA, A, ana, 403] },
 };
 
 for (const action of Object.keys(ACTIONS) as Action[]) {

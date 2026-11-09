@@ -86,27 +86,32 @@ export class Authority {
 /** Single host: the admin API is unauthenticated and every write lands in `default` (ADR 0022 item 4). */
 export const LOCAL_CALLER: Caller = { actor: { via: 'local' }, platformAdmin: true, roles: new Map([[DEFAULT_TENANT, 'admin']]), viaToken: false };
 
-/** What a row asks of the caller in `T`; `holder` adds the app's owner or the token's issuer to `admin`. */
+/**
+ * What a row asks of the caller in `T`. `owner` is owner(T): `holder` itself, an admin of T or a service token of T; on an app row the
+ * holder is the app's owner, on `apps.create` the owner the new app will get. `holder` in `admin-or-holder` is the app's owner or the token's issuer.
+ * Every app row first needs owner(T), else 404.
+ */
 type Rule =
   | { readonly need: 'signed-in' | 'any-member' | 'platform'; readonly token: boolean }
-  | { readonly need: 'member' | 'admin' | 'admin-or-holder'; readonly of: 'app' | 'tenant'; readonly token: boolean };
+  | { readonly need: 'member' | 'owner' | 'admin' | 'admin-or-holder'; readonly of: 'app' | 'tenant'; readonly token: boolean };
 
 /** ADR 0022 item 5, one entry per endpoint row. A platform admin passes every level; no token is one, so every platform row is `token: false`. */
 export const ACTIONS = {
   'me': { need: 'signed-in', token: true },
   'health': { need: 'signed-in', token: true },
   'apps.list': { need: 'signed-in', token: true },
-  'app.read': { need: 'member', of: 'app', token: true },
+  'apps.create': { need: 'owner', of: 'tenant', token: true },
+  'app.read': { need: 'owner', of: 'app', token: true },
   'platform.read': { need: 'platform', token: false },
   'bundles.upload': { need: 'any-member', token: true },
-  'app.release': { need: 'member', of: 'app', token: true },
-  'app.policy': { need: 'member', of: 'app', token: true },
-  'app.access': { need: 'member', of: 'app', token: true },
+  'app.release': { need: 'owner', of: 'app', token: true },
+  'app.policy': { need: 'owner', of: 'app', token: true },
+  'app.access': { need: 'owner', of: 'app', token: true },
   'app.owner': { need: 'admin-or-holder', of: 'app', token: true },
-  'app.remove': { need: 'member', of: 'app', token: true },
+  'app.remove': { need: 'owner', of: 'app', token: true },
   'app.purge': { need: 'admin', of: 'app', token: false },
   'app.move': { need: 'platform', token: false },
-  'app.stop': { need: 'admin', of: 'app', token: false },
+  'app.stop': { need: 'owner', of: 'app', token: false },
   'app.kill': { need: 'platform', token: false },
   'cluster.read': { need: 'platform', token: false },
   'cluster.scale': { need: 'platform', token: false },
@@ -126,15 +131,25 @@ export const ACTIONS = {
 
 export type Action = keyof typeof ACTIONS;
 
-/** 403 names what is missing; 404 hides that an app exists in a tenant the caller is not in. */
+/** 403 names what is missing; 404 hides an app the caller cannot read. */
 export type Denial = { readonly status: 403; readonly reason: string } | { readonly status: 404 };
 
-/** `tenant` is the target app's or tenant's; null where the row has no target, and for `records` without `?tenant=`, which then needs a platform admin. */
+const subjectOf = (caller: Caller): Subject | null => ('subject' in caller.actor ? caller.actor.subject : null);
+
+/** Whose apps in `tenant` the caller reads and changes: all of them (a platform admin, an admin of it, its service token), only those it owns (a member, by JWT or personal token), or none. */
+export function reach(caller: Caller, tenant: TenantName): 'all' | Subject | null {
+  if (caller.platformAdmin) return 'all';
+  const role = caller.roles.get(tenant);
+  if (role === undefined) return null;
+  const subject = subjectOf(caller)!;
+  return role === 'admin' || subject.startsWith('service:') ? 'all' : subject;
+}
+
+/** `tenant` is the target app's or tenant's; null where the row has no target, for an app that does not exist, and for `records` without `?tenant=`, which then needs a platform admin. */
 export function can(caller: Caller, action: Action, tenant: TenantName | null, holder: Subject | 'local' | null = null): true | Denial {
   const rule: Rule = ACTIONS[action];
   if (caller.viaToken && !rule.token) return { status: 403, reason: `${action} accepts a signed-in user, not a token` };
   if (caller.platformAdmin) return true;
-  const role: Role | undefined = tenant === null ? undefined : caller.roles.get(tenant);
   switch (rule.need) {
     case 'signed-in':
       return true;
@@ -143,12 +158,24 @@ export function can(caller: Caller, action: Action, tenant: TenantName | null, h
     case 'platform':
       return { status: 403, reason: 'requires a platform admin' };
   }
-  if (role === undefined && rule.of === 'app') return { status: 404 };
-  const subjectOf = 'subject' in caller.actor ? caller.actor.subject : null;
-  if (rule.need === 'admin-or-holder' && holder !== null && subjectOf === holder && role !== undefined) return true;
-  if (rule.need === 'member' ? role !== undefined : role === 'admin') return true;
-  const named = tenant === null ? 'a platform admin' : `${rule.need === 'member' ? 'member' : 'admin'} of tenant "${tenant}"`;
-  return { status: 403, reason: `requires ${named}${rule.need === 'admin-or-holder' ? ` or ${rule.of === 'app' ? 'the owner' : 'the issuer'}` : ''}` };
+  const scope = tenant === null ? null : reach(caller, tenant);
+  const owns = scope !== null && (scope === 'all' || scope === holder);
+  if (rule.of === 'app' && !owns) return { status: 404 };
+  const admin = tenant !== null && caller.roles.get(tenant) === 'admin';
+  const passes = rule.need === 'member' ? scope !== null
+    : rule.need === 'owner' ? owns
+      : rule.need === 'admin' ? admin
+        : admin || (scope !== null && subjectOf(caller) === holder);
+  if (passes) return true;
+  if (tenant === null) return { status: 403, reason: 'requires a platform admin' };
+  if (scope === null || rule.need === 'member') return { status: 403, reason: `requires member of tenant "${tenant}"` };
+  const or = rule.need === 'owner' ? ' or a service token to name another owner' : rule.need === 'admin-or-holder' ? ` or ${rule.of === 'app' ? 'the owner' : 'the issuer'}` : '';
+  return { status: 403, reason: `requires admin of tenant "${tenant}"${or}` };
+}
+
+/** The app actions `can` grants the caller on one app, so the console offers only those (ADR 0022 item 5). */
+export function appActions(caller: Caller, app: { readonly tenant: TenantName; readonly owner: Subject }): Action[] {
+  return (Object.keys(ACTIONS) as Action[]).filter((action) => action.startsWith('app.') && can(caller, action, app.tenant, app.owner) === true);
 }
 
 /** ADR 0022 item 6; `caller` is null when the request carries no valid credential. */
