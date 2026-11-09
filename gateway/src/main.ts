@@ -98,10 +98,13 @@ const runtime = new Runtimes({ runtimes: [container, isolate], specFor, instance
 // A Kubernetes Service name resolves whether or not a Pod serves it, so the cluster probes by connecting.
 const SERVICE_PORTS = { postgres: config.postgres.port, coturn: 3478 } as const;
 const providerProbe = setup.pods ? (service: keyof typeof SERVICE_PORTS) => canConnect(service, SERVICE_PORTS[service]) : resolvesOnNetwork;
+// The runner is the pool's business on both planes: a ready runner, not a name that resolves.
+const runnerUp = async (): Promise<boolean> => pool.runners().some((r) => r.ready);
 const providers = Object.values(createProviders(runtime, config, providerProbe));
 const registry = await PlatformRegistry.open({
   store, runtime, guard, infra, bundles, providers, statsSource: async () => metrics.stats(),
   addressing: setup.addressing, volumeGb: config.volumeGb, nodeOf: (app) => nodes.nodeOf(app),
+  probe: (service) => (service === RUNTIMES.isolate.service && setup.pods ? runnerUp() : providerProbe(service as 'postgres' | 'coturn')),
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica, policy: () => registry.policy() });
 const authority = new Authority(store, setup.admins);
@@ -125,7 +128,7 @@ const metrics = new Metrics({
     object: httpProbe(`${config.object.endpoint}/health`),
     postgres: profileProbe('postgres', 5432),
     coturn: profileProbe('coturn', 3478),
-    runner: profileProbe('runner', RUNNER_PORT),
+    runner: setup.pods ? async () => ((await runnerUp()) ? 'up' : 'down') : profileProbe('runner', RUNNER_PORT),
   },
   host: () => hostSample(data),
   store,
