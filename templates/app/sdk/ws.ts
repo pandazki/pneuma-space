@@ -113,6 +113,9 @@ function accept(stream: Duplex, info: Inbound, head: Buffer): Socket {
     pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
     parse();
   });
+  // A peer gone without a close frame only half-closes (the gateway relays a client's FIN as one); ending our side too lets
+  // 'close' fire, which ends the connection and its channel lease instead of holding both until the idle limit.
+  stream.on('end', () => stream.end());
   stream.on('error', () => stream.destroy());
   stream.on('close', () => {
     state = 'closed';

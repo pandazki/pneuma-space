@@ -81,3 +81,26 @@ test('echoes a fragmented text message, a 70 kB binary message and a ping throug
   client.destroy();
   server.close();
 });
+
+test('a client that half-closes without a close frame is closed with 1006 and gets the end back', async () => {
+  const server = http.createServer();
+  const closed = new Promise<number>((resolve) => ws(server, (socket) => (socket.onclose = (code) => resolve(code))));
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const client = net.connect((server.address() as AddressInfo).port, '127.0.0.1');
+  client.write(
+    'GET /room HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+      'Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n',
+  );
+  await once(client, 'data');
+  const ended = once(client, 'end');
+  client.end();
+  const late = new Promise<string>((resolve) => setTimeout(resolve, 1000, 'still open after 1 s').unref());
+  try {
+    assert.equal(await Promise.race([closed, late]), 1006);
+    await ended;
+  } finally {
+    client.destroy();
+    server.close();
+  }
+});
