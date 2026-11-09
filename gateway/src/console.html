@@ -617,8 +617,8 @@ dialog .field { margin: 0 0 20px; }
 .who { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .who .av { width: 22px; height: 22px; border-radius: 50%; flex: none; background: var(--accent-tint); color: var(--accent-ink); font: 600 11px/22px var(--font); text-align: center; letter-spacing: 0; }
 .who b { font-weight: 500; color: var(--ink); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.btn.ghost { background: none; color: var(--ink-2); padding: 0 10px; }
-.btn.ghost:hover { background: var(--hover); color: var(--ink); }
+.btn.ghost { background: none; color: var(--ink-2); padding: 0 10px; box-shadow: inset 0 0 0 1px var(--line); }
+.btn.ghost:hover { background: var(--hover); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .btn.small { height: 24px; padding: 0 10px; font-size: 12px; }
 td select { height: 26px; }
 .rows { display: grid; gap: 16px; }
@@ -1059,7 +1059,7 @@ const I18N = {
     'cl.restartPodItem': '重启 Pod…', 'cl.restartPodNote': '删除它，控制器重建', 'cl.restartPodTitle': '重启 {pod}？', 'cl.restarted': '已删除 {pod}，控制器正在重建。',
     'cl.restartGateway': '删除这个 Pod，控制器重建它。它先排空连接；如果它是领导者，领导权在别的副本上重选。',
     'cl.restartRunner': '删除这个 Pod，控制器重建它。它上面的 isolate worker 随之结束，下次请求重新唤醒。',
-    'cl.att.act': '处理', 'cl.att.open': '打开应用', 'cl.att.pod': 'Pod 未就绪', 'cl.att.podWhy': '{phase} · 节点 {node} · 未就绪 {d}',
+    'cl.att.open': '打开应用', 'cl.att.pod': 'Pod 未就绪', 'cl.att.podWhy': '{phase} · 节点 {node} · 未就绪 {d}',
     'cl.att.node': '节点未就绪', 'cl.att.cordoned': '节点已 cordon', 'cl.att.nodeWhy': '节点和它的调度标记归 kubectl，不在平台的操作里；它上面的实例可以在节点框里排空。',
     'cl.att.stuck': '实例卡在{state}', 'cl.att.stuckWhy': '停了 {d}',
     'cl.att.gone.one': '{n} 个已不存在的对象', 'cl.att.gone.other': '{n} 个已不存在的对象',
@@ -1327,7 +1327,7 @@ const I18N = {
     'cl.restartPodItem': 'Restart Pod…', 'cl.restartPodNote': 'Deletes it; the controller recreates it', 'cl.restartPodTitle': 'Restart {pod}?', 'cl.restarted': '{pod} deleted; its controller is recreating it.',
     'cl.restartGateway': 'Deletes the Pod and its controller recreates it. It drains its connections first; if it leads, another replica takes the lead.',
     'cl.restartRunner': 'Deletes the Pod and its controller recreates it. Its isolate workers end with it; the next request wakes them again.',
-    'cl.att.act': 'Resolve', 'cl.att.open': 'Open app', 'cl.att.pod': 'Pod not ready', 'cl.att.podWhy': '{phase} on {node}, not ready for {d}',
+    'cl.att.open': 'Open app', 'cl.att.pod': 'Pod not ready', 'cl.att.podWhy': '{phase} on {node}, not ready for {d}',
     'cl.att.node': 'Node not ready', 'cl.att.cordoned': 'Node cordoned', 'cl.att.nodeWhy': 'The node and its scheduling flag belong to kubectl, not to the platform; drain its instances from the node frame.',
     'cl.att.stuck': 'Instance stuck {state}', 'cl.att.stuckWhy': 'for {d}',
     'cl.att.gone.one': '{n} object that no longer exists', 'cl.att.gone.other': '{n} objects that no longer exist',
@@ -1403,7 +1403,9 @@ function duration(span) {
   const s = Math.max(0, Math.floor(span / 1000));
   const parts = [['d', Math.floor(s / 86400)], ['h', Math.floor(s / 3600) % 24], ['m', Math.floor(s / 60) % 60], ['s', s % 60]];
   const first = parts.findIndex(([, n]) => n > 0);
-  return parts.slice(first < 0 ? 3 : first, (first < 0 ? 3 : first) + 2).map(([unit, n]) => t(`dur.${unit}`, { n })).join(' ');
+  // Seconds only under a minute: "10 min 35 s" reads as precision nobody asked for.
+  const shown = first < 0 ? [parts[3]] : first === 2 ? [parts[2]] : parts.slice(first, first + 2);
+  return shown.map(([unit, n]) => t(`dur.${unit}`, { n })).join(' ');
 }
 
 function ago(v) {
@@ -4538,7 +4540,7 @@ function cluster() {
         if (podState(p) !== 'down') continue;
         items.push({ tone: 'red', at: unready.get(p.name), what: [t('cl.att.pod'), h('span', { class: 'mono' }, podLabel(p.name))],
           why: t('cl.att.podWhy', { phase: p.phase || '-', node: p.node ?? '-', d: duration(now - unready.get(p.name)) }) + (RESTARTABLE.includes(p.role) ? '' : ` · ${t('cl.kubectl')}`),
-          act: isPlatformAdmin() ? restartMenu(p, t('cl.att.act')) : null });
+          act: isPlatformAdmin() ? restartMenu(p) : null });
       }
       for (const n of view.nodes) {
         if (!n.ready || !n.schedulable) items.push({ tone: n.ready ? 'orange' : 'red', at: null, what: [t(n.ready ? 'cl.att.cordoned' : 'cl.att.node'), h('span', { class: 'mono' }, n.name)], why: t(n.ready ? 'node.cordoned' : 'cl.att.nodeWhy') });
@@ -4551,7 +4553,7 @@ function cluster() {
     for (const i of rows.filter(stuck)) {
       items.push({ tone: 'red', at: i.since, what: [t('cl.att.stuck', { state: t(`st.${i.state}`) }), appLink(i.app)],
         why: [t('cl.att.stuckWhy', { d: duration(now - i.since) }), i.node, i.pod && handle(i.pod)].filter(Boolean).join(' · '),
-        act: isPlatformAdmin() ? killMenu(i, t('cl.att.act')) : null });
+        act: isPlatformAdmin() ? killMenu(i) : null });
     }
     const known = new Set([...pods().map((p) => p.name), ...view.nodes.map((n) => n.name), ...view.volumes.map((v) => v.name), ...rows.map((i) => i.pod).filter(Boolean)]);
     const groups = new Map();
@@ -4577,7 +4579,7 @@ function cluster() {
       items.push({ tone: 'orange', at: g.at, count: g.count,
         what: [reasons, h('span', { class: 'chip text' }, g.kind), inst ? appLink(inst.app) : null, h('span', { class: 'mono' }, podLabel(g.object))],
         why: g.message,
-        act: inst ? h('a', { class: 'btn ghost small', href: `#/apps/${encodeURIComponent(inst.app)}` }, t('cl.att.open')) : pod && isPlatformAdmin() ? restartMenu(pod, t('cl.att.act')) : null });
+        act: inst ? h('a', { class: 'btn ghost small', href: `#/apps/${encodeURIComponent(inst.app)}` }, t('cl.att.open')) : pod && isPlatformAdmin() ? restartMenu(pod) : null });
     }
     return items.sort((a, b) => (a.tone === b.tone ? (b.at ?? 1e15) - (a.at ?? 1e15) : a.tone === 'red' ? -1 : 1));
   };

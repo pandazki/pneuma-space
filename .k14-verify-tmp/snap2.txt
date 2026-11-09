@@ -1,0 +1,7 @@
+uid=8_0 RootWebArea "PneumaSpace" url="http://127.0.0.1:18081/#/cluster"
+  uid=11_0 dialog modal
+    uid=11_1 heading "Restart k12?" level="3"
+    uid=11_2 "Drains and deletes the instance, then wakes it at once in a new Pod or container."
+    uid=11_3 form
+      uid=11_4 button "Cancel" focusable focused
+      uid=11_5 button "Continue"
