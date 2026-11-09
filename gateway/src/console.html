@@ -660,7 +660,7 @@ dialog.approval .facts { margin: -8px 0 20px; padding: 10px 12px 10px 28px; max-
 .pdot.lead { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--accent); }
 .board { display: grid; grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 12px; align-items: start; }
 .comp.wide { grid-column: span 2; }
-@media (max-width: 560px) { .board { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; } .comp { padding: 12px; } .comp.wide { grid-column: 1 / -1; } }
+@media (max-width: 560px) { .board { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; } .comp { padding: 12px; } .comp .ch .muted { display: none; } .comp.wide { grid-column: 1 / -1; } }
 .comp { display: grid; gap: 8px; align-content: start; padding: 14px 16px; }
 .comp.warn { box-shadow: 0 0 0 1px var(--orange), var(--shadow-sm); }
 .comp.down { box-shadow: 0 0 0 1px var(--red), var(--shadow-sm); }
@@ -731,11 +731,11 @@ button.pdots:hover .caret { color: var(--ink); }
 .igh { display: flex; align-items: center; gap: 8px; padding: 0 4px 2px; }
 .igh .st { font-size: 12px; font-weight: 500; color: var(--ink); }
 .igh .num { font-size: 11px; }
-.irow { display: grid; grid-template-columns: 9px minmax(0, 1fr) minmax(0, 1.3fr) 76px auto minmax(0, 1.3fr) auto; align-items: center; gap: 6px 16px; min-height: 48px; padding: 8px 10px 8px 16px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-card); }
+.irow { display: grid; grid-template-columns: 9px minmax(0, 1.4fr) minmax(0, 1fr) 76px auto minmax(0, 1.3fr) auto; align-items: center; gap: 6px 16px; min-height: 48px; padding: 8px 10px 8px 16px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-card); }
 .irow.stuck { background: var(--red-tint); box-shadow: 0 0 0 1px var(--red); }
 .iname { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.iname a { font-weight: 600; font-size: 13px; }
-.iname .muted { font-size: 12px; }
+.iname a { font-weight: 600; font-size: 13px; white-space: nowrap; flex: none; }
+.iname .muted { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .iwhere { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; font-size: 11.5px; color: var(--ink-2); }
 .iwhere > span { white-space: nowrap; }
 .iwhere .muted { font-family: var(--font); }
@@ -4651,7 +4651,7 @@ function cluster() {
   const instanceRow = (i, volumes) => {
     const key = `app:${i.app}`;
     const tenantAdmin = mayAdmin(i.tenant);
-    const where = [k8s() ? i.node : null, i.pod ? handle(i.pod) : null].filter(Boolean);
+    const where = k8s() ? [i.node, i.pod && handle(i.pod)].filter(Boolean) : [i.runtime === 'isolate' ? t('svc.runner') : i.pod && handle(i.pod)].filter(Boolean);
     return h('div', { class: `irow${stuck(i) ? ' stuck' : ''}`, 'data-app': i.app },
       h('i', { class: `pdot ${stuck(i) ? 'down' : i.state === 'awake' ? 'ready' : 'starting'}`, title: t(`st.${i.state}`) }),
       h('div', { class: 'iname' }, appLink(i.app), i.runtime ? h('span', { class: 'chip runtime' }, i.runtime) : null, h('span', { class: 'muted' }, i.tenant)),
