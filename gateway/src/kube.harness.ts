@@ -11,7 +11,7 @@ export const context = process.env.PNEUMA_SPACE_TEST_KUBECONTEXT;
 export const skip = context ? false : 'PNEUMA_SPACE_TEST_KUBECONTEXT is unset; set it to a kubectl context to run the Kubernetes smoke';
 export const NAMESPACE = 'pneuma-space-apps';
 
-const kubectl = async (...args: string[]): Promise<string> =>
+export const kubectl = async (...args: string[]): Promise<string> =>
   (await promisify(execFile)('kubectl', ['--context', context!, ...args])).stdout;
 
 export async function smokeClient(): Promise<KubeClient> {
