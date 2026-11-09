@@ -173,7 +173,7 @@ function push(image: string, registry: string, name: string, tag: string): strin
     output = execFileSync('docker', ['push', `${repo}:${tag}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (error) {
     const { stderr, message } = error as Error & { stderr?: Buffer | string };
-    throw new Failure(EXIT.build, `docker push ${repo}:${tag} failed: ${String(stderr ?? '').trim() || message}`);
+    throw new Failure(EXIT.build, `pushing ${image} as ${repo}:${tag} failed: ${String(stderr ?? '').trim() || message}`);
   }
   const digest = /digest: (sha256:[0-9a-f]{64})/.exec(output)?.[1];
   if (!digest) throw new Failure(EXIT.build, `docker push ${repo}:${tag} printed no digest:\n${output}`);
