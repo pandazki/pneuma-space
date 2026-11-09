@@ -4163,6 +4163,7 @@ function viewOf(hash) {
   const [, view] = hash.split('?')[0].split('/');
   const key = NAV.some(([k]) => k === view) ? view : 'overview';
   return allowed(key) ? key : 'apps';
+}
 const QUOTA_RESOURCES = ['apps', 'awake', 'cpu_millis', 'memory_mb', 'storage_gb'];
 
 /** The tenant's quota as used over limit per resource; a platform admin edits a limit in place (PUT quota). */
@@ -4194,7 +4195,6 @@ async function quotaSection(tenant, platformAdmin) {
   }));
   paint(await api('GET', path));
   return h('section', {}, sectionHead(3, 'team.quota', 'team.quotaDesc'), grid);
-}
 }
 
 function shell() {
