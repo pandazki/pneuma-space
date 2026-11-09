@@ -13,12 +13,17 @@ const MANIFESTS = [
 type Reference = { readonly host: string; readonly repo: string; readonly ref: string };
 type DockerConfig = { readonly auths?: Readonly<Record<string, { readonly auth?: string; readonly username?: string; readonly password?: string }>> };
 
-const named = (first: string): boolean => first.includes('.') || first.includes(':') || first === 'localhost';
+/** Whether the first path segment of `reference` is a registry host, as Docker decides it. */
+export function namesRegistry(reference: string): boolean {
+  const slash = reference.indexOf('/');
+  const first = reference.slice(0, slash);
+  return slash > 0 && (first.includes('.') || first.includes(':') || first === 'localhost');
+}
 
 /** `host/repo:tag` or `host/repo@sha256:…`; a reference without a host is under `registry`. */
 export function parseReference(reference: string, registry: string | null): Reference {
   const slash = reference.indexOf('/');
-  if (slash < 0 || !named(reference.slice(0, slash))) {
+  if (!namesRegistry(reference)) {
     if (!registry) throw new Error(`image reference "${reference}" names no registry and PNEUMA_SPACE_REGISTRY is unset`);
     return parseReference(`${registry.replace(/\/$/, '')}/${reference}`, null);
   }
