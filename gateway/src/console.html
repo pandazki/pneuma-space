@@ -197,11 +197,10 @@ input:focus, textarea:focus, .lbtn:focus-visible { box-shadow: 0 0 0 2px var(--a
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 10px; font-size: 12.5px; color: var(--ink-2); }
 .split { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
-.picks { display: grid; gap: 2px; max-height: 520px; overflow: auto; margin: 8px -8px 0; }
-.picks a { display: flex; justify-content: space-between; gap: 8px; padding: 6px 8px; border-radius: 7px; font: 12px var(--mono); color: var(--ink-2); }
-.picks a:hover { background: var(--hover); text-decoration: none; }
+.picks { display: grid; gap: 4px; max-height: 520px; overflow: auto; margin-top: 8px; padding: 1px; }
+.picks a { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; border-radius: 8px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); font: 12px var(--mono); color: var(--ink); }
+.picks a:hover { box-shadow: 0 0 0 1px var(--line-strong); background: var(--hover); text-decoration: none; }
 pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); }
-.back { font-size: 12.5px; color: var(--ink-3); }
 .live { display: inline-flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-2); }
 .live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px var(--green-tint); flex: none; }
 .live[data-live="paused"] .dot { background: var(--ink-3); box-shadow: 0 0 0 3px var(--hover-2); }
@@ -323,7 +322,7 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 @keyframes slidein { from { transform: translateX(-12px); opacity: 0; background: var(--red-tint); } }
 .tailbox { position: relative; padding: 0; container: tail / inline-size; }
 .tailbox .rows { max-height: 520px; overflow-y: auto; overscroll-behavior: contain; }
-.ev { display: grid; grid-template-columns: 64px 150px 104px minmax(0, 1fr); gap: 12px; align-items: center; padding: 0 14px; height: 34px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.ev { display: grid; grid-template-columns: 64px 150px 104px minmax(0, 1fr); gap: 12px; align-items: center; padding: 0 14px; min-height: 34px; border-bottom: 1px solid var(--line); font-size: 12px; }
 .ev > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ev .mono { font-size: 11.5px; }
 .ev .f { font: 11px var(--mono); color: var(--ink-3); }
@@ -339,11 +338,11 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .ev.fold .caret { margin-left: auto; color: var(--ink-3); transition: transform .15s; }
 .evx.open .caret { transform: rotate(90deg); }
 .evs { background: var(--inset); box-shadow: inset 2px 0 0 var(--accent); border-bottom: 1px solid var(--line); }
-.evs .ev { height: 30px; border-bottom-color: var(--line-soft); }
+.evs .ev { min-height: 30px; border-bottom-color: var(--line-soft); }
 .evx.fresh { animation: fresh 2.4s ease-out; }
-.ev.mark { display: block; height: auto; padding: 7px 14px; font-size: 12px; color: var(--orange); background: var(--orange-tint); text-align: center; white-space: normal; }
+.ev.mark { display: block; padding: 7px 14px; font-size: 12px; color: var(--orange); background: var(--orange-tint); text-align: center; white-space: normal; }
 @container tail (max-width: 560px) {
-  .ev { grid-template-columns: 58px minmax(0, 1fr) minmax(0, 1fr); height: auto; padding: 7px 14px; gap: 2px 10px; }
+  .ev { grid-template-columns: 58px minmax(0, 1fr) minmax(0, max-content); padding: 7px 14px; gap: 2px 10px; }
   .ev .f { grid-column: 1 / -1; }
 }
 .beats { display: flex; align-items: center; gap: 2px; margin-top: 12px; }
@@ -564,9 +563,10 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .topo-svg.picking .edge.lit:not(.fault) { stroke: var(--accent); stroke-width: 1.75; }
 .topo-svg.picking .pass.lit { stroke: var(--accent); }
 .topo-svg.picking [data-id="admin"], .topo-svg.picking [data-id="operator"] { opacity: .2; }
-.topo-tools { align-items: center; font-size: 12.5px; }
-.topo-tools .muted { font-size: 12px; }
-.topo-view { justify-content: flex-end; }
+.topo-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
+.topo-tools input { width: 220px; }
+.topo-tools .muted { flex: 1 1 200px; font-size: 12px; }
+@media (max-width: 560px) { .topo-tools input { flex: 1 1 100%; } }
 .pickbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; font-size: 12.5px; }
 .pickbar:empty { display: none; }
 .faults { display: grid; gap: 0; padding: 0; margin-bottom: 12px; box-shadow: 0 0 0 1px var(--red), var(--shadow-sm); }
@@ -725,7 +725,7 @@ button.pdots:hover .caret { color: var(--ink); }
 .ifilter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; }
 .ifilter input[type="search"] { margin-left: auto; width: 240px; }
 .fchips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.fchip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: none; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+.fchip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: none; box-shadow: inset 0 0 0 1px var(--line); font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
 .fchip:hover { background: var(--hover); }
 .fchip[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-btn); }
 .fchip .n { font-size: 11px; color: var(--ink-3); }
@@ -923,7 +923,7 @@ dialog .msg.err { margin: -8px 0 16px; }
 <script>
 const I18N = {
   zh: {
-    'm.seen': '最近', 'm.roleOf': '{id} 的角色', 'm.group.admin': '管理员', 'm.group.member': '成员', 'm.removeItem': '移出租户…', 'm.removeNote': '他签发的个人令牌一并失效', 'tk.by': '签发人', 'tk.revokeItem': '吊销…', 'tk.revokeNote': '30 秒内在每个副本失效', 'tk.revokedN.one': '已吊销 {n} 个', 'tk.revokedN.other': '已吊销 {n} 个', 'q.used': '已用 {n}', 'q.edit': '修改上限…', 'q.editNote': '超出的部分不会被收回，只挡新的', 'q.editTitle': '修改 {tenant} 的配额', 'q.editBody': '留空表示不限。降到已用量以下不会停掉已有的应用或实例，只拒绝新的发布和唤醒。', 'q.save': '保存配额', 'team.youAdmin': '你是管理员', 'team.youMember': '你是成员', 'tn.open': '打开 {name} 的团队页', 'tn.adminsAre': '管理员', 'tn.createdAgo': '{ago}创建', 'tn.members.one': '{n} 名成员', 'tn.members.other': '{n} 名成员', 'tn.new': '新建租户', 'tn.q.apps': '应用', 'tn.q.awake': '醒着', 'tn.q.memory_mb': '内存 MiB', 'tn.q.storage_gb': '存储 GiB',
+    'm.seen': '最近', 'm.roleOf': '{id} 的角色', 'm.group.admin': '管理员', 'm.group.member': '成员', 'm.removeItem': '移出租户…', 'm.removeNote': '他签发的个人令牌一并失效', 'tk.by': '签发人', 'tk.revokeItem': '吊销…', 'tk.revokeNote': '30 秒内在每个副本失效', 'tk.revokedN.one': '已吊销 {n} 个', 'tk.revokedN.other': '已吊销 {n} 个', 'q.used': '已用 {n}', 'q.edit': '修改上限…', 'q.editNote': '超出的部分不会被收回，只挡新的', 'q.editTitle': '修改 {tenant} 的配额', 'q.editBody': '留空表示不限。降到已用量以下不会停掉已有的应用或实例，只拒绝新的发布和唤醒。', 'q.save': '保存配额', 'team.youAdmin': '你是管理员', 'team.youMember': '你是成员', 'tn.open': '打开 {name} 的团队页', 'tn.adminsAre': '管理员', 'tn.createdAgo': '{ago}创建', 'tn.members.one': '{n} 名成员', 'tn.members.other': '{n} 名成员', 'tn.new': '新建租户', 'tn.q.apps': '应用', 'tn.q.awake': '醒着', 'tn.q.cpu_millis': 'CPU 毫核', 'tn.q.memory_mb': '内存 MiB', 'tn.q.storage_gb': '存储 GiB',
     'd.liftTitle': '解除 {name} 的隔离？', 'd.olderDeliveries.one': '更早的 {n} 次', 'd.olderDeliveries.other': '更早的 {n} 次', 'd.liftBody': '失败计数清零，下一次请求重新唤醒它。原因没修好会再次被隔离。', 'ac.title': '谁能打开 {name}', 'ac.save': '保存访问范围', 'd.liftNote': '下一次请求重新唤醒', 'ac.change': '更改访问…', 'd.removeItem': '移除…', 'd.removeNote': '地址 404，数据保留', 'd.purgeItem': '清除数据…', 'd.purgeNote': '删除全部数据，无法撤销', 'd.att.failed.one': '{n} 次投递失败', 'd.att.failed.other': '{n} 次投递失败', 'd.att.toDeliveries': '看投递', 'd.att.errors': '24 小时错误率 {pct}', 'd.att.errorsWhy': '{requests} 次请求里 {errors} 次错误', 'd.toLogs': '跳到日志', 'd.att.slow': '最近一次唤醒用了 {ms}，超过 3 秒门槛', 'd.att.slowWhy': '{at} 唤醒；看启动日志，或调大就绪超时', 'd.att.removed': '已移除：地址返回 404', 'd.att.removedWhy': '卷、数据库、键前缀和 bucket 都还在。再次发布即恢复，只有清除才删除。', 'd.bundle': '静态包', 'empty.releases': '还没有发布。', 'd.olderReleases.one': '更早的 {n} 个版本', 'd.olderReleases.other': '更早的 {n} 个版本', 'd.scheduledFor': '计划 {at}', 'd.attempts.one': '尝试 {n} 次', 'd.attempts.other': '尝试 {n} 次', 'd.nextAttempt': '下次尝试 {ago}', 'sec.data': '数据', 'sec.dataDesc': '每种能力的数据由哪个提供方持有、放在哪里。移除不动它们，只有清除删除。',
     'ap.search': '搜索应用或租户', 'ap.req24': '24 小时请求', 'ap.staticLine': '静态站点，请求直接返回文件，不唤醒', 'apps.filter': '按名称筛选', 'ap.b.awake': '醒着', 'ap.b.asleep': '睡眠', 'ap.b.quarantined': '隔离', 'ap.b.removed': '已移除', 'ap.in.awake': '醒着', 'ap.in.asleep': '睡眠', 'ap.in.waking': '唤醒中', 'ap.in.draining': '排空中', 'ap.in.stopping': '停止中', 'ap.never': '还没唤醒过', 'ap.quarantined': '隔离中 · {reason}', 'ap.sparkTip': '{requests} 请求 · {errors} 错误', 'ap.sparkLabel': '24 小时 {requests} 次请求，{errors} 次错误', 'ap.errors.one': '{n} 次错误', 'ap.errors.other': '{n} 次错误', 'ap.lastAccess': '最近访问', 'ap.removedNote': '地址返回 404，数据保留', 'ap.awakeN': '醒着 {n}', 'ap.groupRequests': '24 小时 {n} 次请求',
     'tp.lane.container.sub.k8s': 'Kubernetes · 每应用一个 Pod', 'tp.engine.container.k8s': 'Kubernetes', 'tp.unprobed.k8s': '随集群，不探测',
@@ -931,7 +931,7 @@ const I18N = {
     'tp.x.container.request.k8s': '入口按应用地址{address}找到应用，经 Runtime.acquire 拿到实例，再转发到这个应用 Pod 的 8000 端口。',
     'tp.x.container.wake.k8s': '睡着的应用收到请求时，网关用当前版本的镜像建 Pod，把绑定变成挂载和 PNEUMA_SPACE_* 环境变量，等端口应答。没有 Lease 满 {idle} 秒后排空并删掉 Pod。',
     'tp.x.container.state.k8s': 'files 和 SQLite 在每应用的 PVC 里；kv、object 和 PostgreSQL 在平台服务里。Pod 的文件系统每次停止都丢掉。',
-    'tp.x.container.failure.k8s': 'Pod 状态报告退出，唤醒后 {ready} 秒内不应答算唤醒失败；醒着时卡死的 Pod 检测不到。Guard 按版本计失败：{window} 秒内 {max} 次即隔离，失败后 {backoff} 秒内不再唤醒，直到新版本或手动解除。',
+    'tp.x.container.failure.k8s': 'Pod 状态报告退出，唤醒后 {ready} 秒内不应答算唤醒失败；醒着时卡死的 Pod 检测不到。守卫按版本计失败：{window} 秒内 {max} 次即隔离，失败后 {backoff} 秒内不再唤醒，直到新版本或手动解除。',
     'tp.x.isolate.state.k8s': 'files 和 SQLite 在 runner PVC 的 /data/apps/<id>/ 下；kv、object 和 PostgreSQL 在平台服务里。worker 停下后内存里的东西都没了。',
     'fold.trigger': '触发 {name}', 'fold.wake': '唤醒后休眠', 'fold.leader': '领导权', 'fold.meanWake': '平均唤醒 {ms}', 'fold.meanDelivery': '平均投递 {ms}', 'fold.since': '自 {time} 起', 'fold.started': '已 {d}', 'fold.expand': '展开这些事件',
     'brand.sub': '控制台', 'nav.group': '平台', 'nav.overview': '总览', 'nav.apps': '项目', 'nav.publish': '发布',
@@ -994,7 +994,7 @@ const I18N = {
     'f.bundle': '静态包', 'f.bundleHint': '可选，static 目录打成的 tar。', 'f.submit': '发布', 'f.busy': '发布中…', 'f.badJson': '不是合法的 JSON：{msg}',
     'pub.existing': '已有应用', 'pub.existingDesc': '选一个来发布新版本。', 'pub.none': '还没有应用。',
     'err.load': '加载失败：{msg}',
-    'ov.sub': '醒睡周期，正在发生。', 'ago': '{d}前',
+    'ov.sub': '醒睡周期，正在发生。', 'ago': '{d}前', 'in': '{d}后',
     'live.on': '直播中', 'live.paused': '已暂停', 'live.offline': '网关无响应，重试中', 'live.pause': '暂停', 'live.resume': '继续',
     'live.last': '上一条事件 {ago}', 'live.none': '还没有事件', 'live.restarted': '网关在 {time} 重启，计数从零开始',
     'svc.probed': '{ago}探测',
@@ -1012,7 +1012,7 @@ const I18N = {
     'att.seen': '标为已读', 'att.allSeen': '全部已读', 'att.showSeen': '已读 {n} 条', 'att.hideSeen': '收起已读',
     'tail.gap': '两次轮询之间超过 100 条事件，有 {n} 条没有显示。', 'tail.new': '{n} 条新事件', 'tail.paused': '已暂停跟随', 'tail.dropped': '暂停期间丢弃 {n} 条',
     'd.recent': '最近的状态变化',
-    'dur.d': '{n} 天', 'dur.h': '{n} 小时', 'dur.m': '{n} 分', 'dur.s': '{n} 秒',
+    'dur.d': '{n} 天', 'dur.h': '{n} 小时', 'dur.m': '{n} 分钟', 'dur.s': '{n} 秒',
     'nav.realtime': '实时', 'ov.toRealtime': '实时页', 'tl.cut': '只画最近有变化的 {n} 个，共 {total} 个',
     'live.lastRequest': '上一条请求 {ago}', 'yes': '是', 'no': '否',
     'rt.title': '实时', 'rt.sub': '经过网关的每一次请求和每一条生命周期事件，最新在上。',
@@ -1084,7 +1084,7 @@ const I18N = {
     'tp.stage.admin': '管理口',
     'tp.stage.identity.note': '登录和会话',
     'tp.stage.static.note': '命中包，不唤醒',
-    'tp.stage.wake.note': 'Runtimes · Guard',
+    'tp.stage.wake.note': '运行时 · 守卫',
     'tp.stage.scheduler.note': 'cron 投递',
     'tp.visitor': '访客',
     'tp.operator': '运营者',
@@ -1110,11 +1110,11 @@ const I18N = {
     'tp.x.container.request': '入口按应用地址{address}找到应用，经 Runtime.acquire 拿到实例，再转发到平台网络上这个应用容器的 8000 端口。',
     'tp.x.container.wake': '睡着的应用收到请求时，网关用当前版本的镜像建容器，把绑定变成挂载和 PNEUMA_SPACE_* 环境变量，等端口应答。没有 Lease 满 {idle} 秒后排空并停掉容器。',
     'tp.x.container.state': 'files 和 SQLite 在每应用的具名卷里；kv、object 和 PostgreSQL 在平台服务里。容器文件系统每次停止都丢掉。',
-    'tp.x.container.failure': 'Docker 事件报告退出，唤醒后 {ready} 秒内不应答算唤醒失败；醒着时卡死的容器检测不到。Guard 按版本计失败：{window} 秒内 {max} 次即隔离，失败后 {backoff} 秒内不再唤醒，直到新版本或手动解除。',
+    'tp.x.container.failure': 'Docker 事件报告退出，唤醒后 {ready} 秒内不应答算唤醒失败；醒着时卡死的容器检测不到。守卫按版本计失败：{window} 秒内 {max} 次即隔离，失败后 {backoff} 秒内不再唤醒，直到新版本或手动解除。',
     'tp.x.isolate.request': '入口转发到 runner:<port>，那里是 runner 给这个应用分配的端口（PNEUMA_SPACE_PORT），应用的 worker 在上面监听；没有每应用的容器。',
     'tp.x.isolate.wake': '网关让 runner 起一个 worker_threads Worker：runner 用预签名地址下载 bundle 到自己的卷，经垫片加载入口，几十毫秒内应答。没有 Lease 满 {idle} 秒后结束它。',
     'tp.x.isolate.state': 'files 和 SQLite 在 runner 卷的 /data/apps/<id>/ 下；kv、object 和 PostgreSQL 在平台服务里。worker 停下后内存里的东西都没了。',
-    'tp.x.isolate.failure': 'runner 每秒给每个 worker 发心跳，3 秒无应答即结束；堆和堆外内存超限即结束；未捕获异常和退出都上报。一个 worker 出事不拖垮 runner。Guard 在 {window} 秒内 {max} 次失败后隔离应用。',
+    'tp.x.isolate.failure': 'runner 每秒给每个 worker 发心跳，3 秒无应答即结束；堆和堆外内存超限即结束；未捕获异常和退出都上报。一个 worker 出事不拖垮 runner。守卫在 {window} 秒内 {max} 次失败后隔离应用。',
     'tp.x.static.request': '入口在当前版本的 bundle 索引里找到文件，从包存储直接答；不唤醒任何东西，不跑应用代码。',
     'tp.x.static.wake': '没有实例。发布时把静态目录作为 bundle 上传，网关读它的索引，从对象存储流式返回文件。',
     'tp.x.static.state': '只有对象存储里的 bundle。新版本指向新的 bundle，旧的保留。',
@@ -1150,7 +1150,7 @@ const I18N = {
     'ac.tenant.desc': '只有 {tenant} 的成员和平台管理员能打开，静态文件也一样。',
     'ac.org.desc': '组织里任何登录的人或有效令牌都能打开。',
     'ac.public.desc': '不需要登录；应用声明了 identity 时，登录的访客仍带着身份。上游也要为它放行匿名访问。',
-    'd.tenant': '所属租户', 'd.move': '移到租户…', 'd.purgeAdmin': '需要 {tenant} 的管理员。',
+    'd.tenant': '所属租户', 'd.move': '移到租户…',
     'mv.title': '把 {name} 移到另一个租户', 'mv.body': '移动会先退役实例：配额占用、标签和旧租户令牌的访问一次切换，下一次请求在新租户下唤醒。数据全部保留。',
     'mv.to': '目标租户', 'mv.action': '移动并退役实例', 'mv.none': '没有别的租户。',
     'f.nameHintAt': '小写字母、数字和 -，地址是 {address}。', 'f.ownerHintSelf': '可选，默认是你（{subject}）。仅首次发布生效。',
@@ -1198,12 +1198,13 @@ const I18N = {
     'cl.restart': '重启', 'cl.restartFor': '重启 {name}',
     'cl.killItem': '强制释放…', 'cl.killNote': '不排空，立即删除', 'cl.killTitle': '强制释放 {app}？',
     'cl.killBody': '不排空：立即删除它的 Pod 或容器（宽限 0），实例行无条件置为休眠，所有副本上的租约计数和唤醒认领清零。进行中的请求和连接直接断开。只用于卡住的实例。',
+    'kf.app': '应用', 'kf.tenant': '租户', 'kf.pod': '容器', 'kf.pod.k8s': 'Pod', 'kf.worker': 'worker 所在', 'kf.node': '节点', 'kf.leases': '租约', 'kf.noLeases': '无',
     'cl.cpuFor': '{app} 的 CPU 上限', 'cl.memFor': '{app} 的内存上限',
     'cl.vols.one': '{n} 个卷', 'cl.vols.other': '{n} 个卷',
     'empty.cl.instances': '没有醒着的实例。', 'empty.cl.volumes': '没有应用卷。',
   },
   en: {
-    'm.seen': 'seen', 'm.roleOf': 'Role of {id}', 'm.group.admin': 'Admins', 'm.group.member': 'Members', 'm.removeItem': 'Remove from tenant…', 'm.removeNote': 'Their personal tokens stop working too', 'tk.by': 'by', 'tk.revokeItem': 'Revoke…', 'tk.revokeNote': 'Stops working on every replica within 30 s', 'tk.revokedN.one': '{n} revoked', 'tk.revokedN.other': '{n} revoked', 'q.used': '{n} used', 'q.edit': 'Change limits…', 'q.editNote': 'Usage above a new limit is not taken back', 'q.editTitle': 'Change the quota of {tenant}', 'q.editBody': 'Empty means unlimited. A limit below current use stops no app or instance; it refuses new publishes and wakes.', 'q.save': 'Save quota', 'team.youAdmin': 'You are an admin', 'team.youMember': 'You are a member', 'tn.open': 'Open the team page of {name}', 'tn.adminsAre': 'Admins', 'tn.createdAgo': 'created {ago}', 'tn.members.one': '{n} member', 'tn.members.other': '{n} members', 'tn.new': 'New tenant', 'tn.q.apps': 'Apps', 'tn.q.awake': 'Awake', 'tn.q.memory_mb': 'Memory MiB', 'tn.q.storage_gb': 'Storage GiB',
+    'm.seen': 'seen', 'm.roleOf': 'Role of {id}', 'm.group.admin': 'Admins', 'm.group.member': 'Members', 'm.removeItem': 'Remove from tenant…', 'm.removeNote': 'Their personal tokens stop working too', 'tk.by': 'by', 'tk.revokeItem': 'Revoke…', 'tk.revokeNote': 'Stops working on every replica within 30 s', 'tk.revokedN.one': '{n} revoked', 'tk.revokedN.other': '{n} revoked', 'q.used': '{n} used', 'q.edit': 'Change limits…', 'q.editNote': 'Usage above a new limit is not taken back', 'q.editTitle': 'Change the quota of {tenant}', 'q.editBody': 'Empty means unlimited. A limit below current use stops no app or instance; it refuses new publishes and wakes.', 'q.save': 'Save quota', 'team.youAdmin': 'You are an admin', 'team.youMember': 'You are a member', 'tn.open': 'Open the team page of {name}', 'tn.adminsAre': 'Admins', 'tn.createdAgo': 'created {ago}', 'tn.members.one': '{n} member', 'tn.members.other': '{n} members', 'tn.new': 'New tenant', 'tn.q.apps': 'Apps', 'tn.q.awake': 'Awake', 'tn.q.cpu_millis': 'CPU millicores', 'tn.q.memory_mb': 'Memory MiB', 'tn.q.storage_gb': 'Storage GiB',
     'd.liftTitle': 'Lift the quarantine of {name}?', 'd.olderDeliveries.one': '{n} earlier', 'd.olderDeliveries.other': '{n} earlier', 'd.liftBody': 'The failure count resets and the next request wakes it. If the cause remains, it is quarantined again.', 'ac.title': 'Who can open {name}', 'ac.save': 'Save access', 'd.liftNote': 'the next request wakes it', 'ac.change': 'Change access…', 'd.removeItem': 'Remove…', 'd.removeNote': 'address 404, data kept', 'd.purgeItem': 'Purge data…', 'd.purgeNote': 'deletes every byte, cannot be undone', 'd.att.failed.one': '{n} failed delivery', 'd.att.failed.other': '{n} failed deliveries', 'd.att.toDeliveries': 'See deliveries', 'd.att.errors': 'Error rate {pct} over 24 h', 'd.att.errorsWhy': '{errors} errors in {requests} requests', 'd.toLogs': 'Jump to logs', 'd.att.slow': 'The last wake took {ms}, over the 3 s gate', 'd.att.slowWhy': 'woke at {at}; check the start-up logs or raise the ready timeout', 'd.att.removed': 'Removed: the address answers 404', 'd.att.removedWhy': 'Volumes, databases, key prefixes and buckets are kept. Publishing again restores it; only purge deletes.', 'd.bundle': 'bundle', 'empty.releases': 'No release yet.', 'd.olderReleases.one': '{n} older release', 'd.olderReleases.other': '{n} older releases', 'd.scheduledFor': 'scheduled {at}', 'd.attempts.one': '{n} attempt', 'd.attempts.other': '{n} attempts', 'd.nextAttempt': 'next attempt {ago}', 'sec.data': 'Data', 'sec.dataDesc': 'Where each capability keeps its data and which provider holds it. Remove leaves it; only purge deletes it.',
     'ap.search': 'Search app or tenant', 'ap.req24': 'requests, 24 h', 'ap.staticLine': 'Static site: files answer without a wake', 'apps.filter': 'Filter by name', 'ap.b.awake': 'Awake', 'ap.b.asleep': 'Asleep', 'ap.b.quarantined': 'Quarantined', 'ap.b.removed': 'Removed', 'ap.in.awake': 'Awake for', 'ap.in.asleep': 'Asleep for', 'ap.in.waking': 'Waking for', 'ap.in.draining': 'Draining for', 'ap.in.stopping': 'Stopping for', 'ap.never': 'Never woken', 'ap.quarantined': 'Quarantined · {reason}', 'ap.sparkTip': '{requests} requests · {errors} errors', 'ap.sparkLabel': '{requests} requests and {errors} errors in 24 h', 'ap.errors.one': '{n} error', 'ap.errors.other': '{n} errors', 'ap.lastAccess': 'Last access', 'ap.removedNote': 'address answers 404, data kept', 'ap.awakeN': '{n} awake', 'ap.groupRequests': '{n} requests in 24 h',
     'tp.lane.container.sub.k8s': 'Kubernetes · one Pod per app', 'tp.engine.container.k8s': 'Kubernetes', 'tp.unprobed.k8s': 'with the cluster, not probed',
@@ -1274,7 +1275,7 @@ const I18N = {
     'f.bundle': 'Static bundle', 'f.bundleHint': 'Optional tar of the static directory.', 'f.submit': 'Publish', 'f.busy': 'Publishing…', 'f.badJson': 'Not valid JSON: {msg}',
     'pub.existing': 'Existing apps', 'pub.existingDesc': 'Pick one to publish a new release.', 'pub.none': 'No app yet.',
     'err.load': 'Could not load: {msg}',
-    'ov.sub': 'The wake cycle, as it happens.', 'ago': '{d} ago',
+    'ov.sub': 'The wake cycle, as it happens.', 'ago': '{d} ago', 'in': 'in {d}',
     'live.on': 'Live', 'live.paused': 'Paused', 'live.offline': 'Gateway not answering; retrying', 'live.pause': 'Pause', 'live.resume': 'Resume',
     'live.last': 'last event {ago}', 'live.none': 'no event yet', 'live.restarted': 'gateway restarted at {time}; counters start over',
     'svc.probed': 'probed {ago}',
@@ -1430,7 +1431,7 @@ const I18N = {
     'ac.tenant.desc': 'Only members of {tenant} and platform admins can open it, static files included.',
     'ac.org.desc': 'Anyone signed in to the organization, or any valid token, can open it.',
     'ac.public.desc': 'No sign-in needed; when the app declares identity, a signed-in visitor still carries it. The upstream must also let anonymous requests through.',
-    'd.tenant': 'Tenant', 'd.move': 'Move to tenant…', 'd.purgeAdmin': 'Requires an admin of {tenant}.',
+    'd.tenant': 'Tenant', 'd.move': 'Move to tenant…',
     'mv.title': 'Move {name} to another tenant', 'mv.body': 'The move retires the instance first: quota usage, labels and the old tenant’s token access switch at once, and the next request wakes it under the new tenant. All data is kept.',
     'mv.to': 'Destination', 'mv.action': 'Move and retire instance', 'mv.none': 'There is no other tenant.',
     'f.nameHintAt': 'Lowercase letters, digits and -; the address is {address}.', 'f.ownerHintSelf': 'Optional; defaults to you ({subject}). First publish only.',
@@ -1478,6 +1479,7 @@ const I18N = {
     'cl.restart': 'Restart', 'cl.restartFor': 'Restart {name}',
     'cl.killItem': 'Force release…', 'cl.killNote': 'No drain, deletes at once', 'cl.killTitle': 'Force release {app}?',
     'cl.killBody': 'No drain: deletes its Pod or container at once (grace 0), forces the instance row asleep and clears its lease tallies on every replica and its wake claim. Requests and connections in flight are cut. Only for a stuck instance.',
+    'kf.app': 'App', 'kf.tenant': 'tenant', 'kf.pod': 'Container', 'kf.pod.k8s': 'Pod', 'kf.worker': 'Worker in', 'kf.node': 'node', 'kf.leases': 'Leases', 'kf.noLeases': 'none',
     'cl.cpuFor': 'CPU limit of {app}', 'cl.memFor': 'Memory limit of {app}',
     'cl.vols.one': '{n} volume', 'cl.vols.other': '{n} volumes',
     'empty.cl.instances': 'No instance is awake.', 'empty.cl.volumes': 'No app volumes.',
@@ -1539,11 +1541,11 @@ function duration(span) {
   return shown.map(([unit, n]) => t(`dur.${unit}`, { n })).join(' ');
 }
 
-function ago(v) {
+/** A relative time in the console's own units, ticking each second; with `key`, the phrase whose {ago} it fills. */
+function ago(v, key = null) {
   if (v == null) return h('span', { class: 'muted' }, t('never'));
-  const s = Math.round((v - Date.now()) / 1000);
-  const [n, unit] = Math.abs(s) < 60 ? [s, 'second'] : Math.abs(s) < 3600 ? [Math.round(s / 60), 'minute'] : Math.abs(s) < 86400 ? [Math.round(s / 3600), 'hour'] : [Math.round(s / 86400), 'day'];
-  return h('time', { datetime: new Date(v).toISOString(), title: stamp(v) }, new Intl.RelativeTimeFormat(locale(), { numeric: 'auto' }).format(n, unit));
+  const text = () => (v > Date.now() ? t('in', { d: duration(v - Date.now()) }) : since(v));
+  return h('time', { datetime: new Date(v).toISOString(), title: stamp(v) }, ticking(() => (key ? t(key, { ago: text() }) : text())));
 }
 
 function h(tag, attrs = {}, ...children) {
@@ -1678,7 +1680,7 @@ function listbox({ label, options, value, onPick, placeholder = null, disabled =
         onPick(o.value);
       },
     }, h('span', {}, o.label), o.note ? h('small', {}, o.note) : null, o.value === value ? icon('check') : null));
-    const search = options.length > 8 ? h('input', { type: 'search', class: 'lfind', placeholder: t('lb.find'), 'aria-label': t('lb.find'),
+    const search = options.length > 8 ? h('input', { type: 'search', name: 'find', class: 'lfind', placeholder: t('lb.find'), 'aria-label': t('lb.find'),
       oninput: () => { const q = search.value.trim().toLowerCase(); for (const b of items) b.hidden = q !== '' && !b.dataset.text.includes(q); },
       onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); items.find((b) => !b.hidden)?.click(); } } }) : null;
     return h('div', { class: 'menu lmenu', role: 'listbox', 'aria-label': label }, search, items);
@@ -1693,7 +1695,7 @@ function listbox({ label, options, value, onPick, placeholder = null, disabled =
 /** A file chosen with a quiet button or dropped on the field; shows the name and size, and clears. */
 function fileField({ label, accept }) {
   let file = null;
-  const input = h('input', { type: 'file', accept, class: 'fhidden', tabindex: '-1', 'aria-hidden': 'true' });
+  const input = h('input', { type: 'file', name: 'file', accept, class: 'fhidden', tabindex: '-1', 'aria-hidden': 'true' });
   const name = h('span');
   const clear = h('button', { class: 'ibtn', type: 'button', 'aria-label': t('ff.clear'), title: t('ff.clear'), onclick: () => set(null) }, '×');
   const pick = h('button', { class: 'btn ghost small', type: 'button', 'aria-label': `${label}: ${t('ff.choose')}`, onclick: () => input.click() }, t('ff.choose'));
@@ -1854,8 +1856,10 @@ function topbar() {
 const main = () => document.getElementById('main');
 let generation = 0;
 
-function show(...nodes) {
-  main().replaceChildren(...nodes);
+/** A page's way onto the screen, bound to the route building it: a page whose route was superseded renders nothing. */
+function claim() {
+  const gen = generation;
+  return (...nodes) => { if (gen === generation) fill(main(), ...nodes); };
 }
 
 function tile(label, value, sub, ratio, extra = {}) {
@@ -2917,6 +2921,7 @@ function eventTail() {
 }
 
 async function overview() {
+  const show = claim();
   const model = liveModel();
   const header = liveHeader('live.last', () => refresh());
   const services = servicesLine();
@@ -2959,7 +2964,7 @@ async function overview() {
     h('section', {}, sectionHead(4, 'sec.heat', 'sec.heatDesc'), h('div', { class: 'inset chart', 'data-section': 'heat' }, h('header', {}, h('b', {}, t('heat.platform'))), heat.el)),
     h('div', { class: 'pair' },
       h('section', {}, sectionHead(5, 'sec.attention', 'sec.attentionDesc', inbox.action), inbox.el),
-      h('section', {}, sectionHead(6, 'sec.events', 'sec.eventsDesc', h('a', { href: '#/realtime', style: 'font-size:12px' }, `${t('ov.toRealtime')} →`)), tail.el)),
+      h('section', {}, sectionHead(6, 'sec.events', 'sec.eventsDesc', h('a', { class: 'btn ghost small', href: '#/realtime' }, `${t('ov.toRealtime')} →`)), tail.el)),
   );
 
   const pollMetrics = async () => {
@@ -3088,7 +3093,7 @@ function appRelative(r, apps) {
 
 function filterBar(state, onChange) {
   const input = h('input', {
-    type: 'search', value: state.text, placeholder: t('rt.placeholder'), 'aria-label': t('rt.filter'), spellcheck: 'false', autocomplete: 'off',
+    type: 'search', name: 'filter', value: state.text, placeholder: t('rt.placeholder'), 'aria-label': t('rt.filter'), spellcheck: 'false', autocomplete: 'off',
     oninput: () => { state.text = input.value; changed(); },
   });
   const clear = h('button', { class: 'btn', type: 'button', onclick: () => { input.value = state.text = ''; changed(); input.focus(); } }, t('rt.clear'));
@@ -3192,6 +3197,7 @@ function pulseStrip() {
 }
 
 function realtime() {
+  const show = claim();
   const filter = filterState();
   const model = liveModel();
   const page = { cursor: '', seeded: false, last: new Map(), missing: new Set(), records: [], parsed: parseFilter(filter.text) };
@@ -3410,10 +3416,11 @@ const appRank = (a) => (appBucket(a) === 'quarantined' ? 0 : a.errors > 0 ? 1 : 
 const byLiveliness = (a, b) => appRank(a) - appRank(b) || (b.lastAccessAt ?? 0) - (a.lastAccessAt ?? 0) || a.name.localeCompare(b.name);
 
 async function projects() {
+  const show = claim();
   const count = h('p', { class: 'sub' });
   const chips = h('div', { class: 'fchips' });
   const body = h('div', { class: 'alist' });
-  const search = h('input', { type: 'search', value: appsFilter.text, placeholder: t('ap.search'), 'aria-label': t('ap.search'), oninput: () => { appsFilter.text = search.value; paint(); } });
+  const search = h('input', { type: 'search', name: 'search', value: appsFilter.text, placeholder: t('ap.search'), 'aria-label': t('ap.search'), oninput: () => { appsFilter.text = search.value; paint(); } });
   let apps = [];
   let painted = '';
   const grouped = () => upstream() && session.scope === ALL;
@@ -3579,6 +3586,7 @@ const DONE_SHOWN = 5;
 const shortImage = (ref) => ref.split('/').at(-1).replace(/(sha256:[0-9a-f]{12})[0-9a-f]+/, '$1');
 
 async function detail(name) {
+  const show = claim();
   const usagePath = () => `/api/usage?app=${encodeURIComponent(name)}&from=${Math.floor(Date.now() / HOUR_MS) * HOUR_MS - APP_HEAT_DAYS * 24 * HOUR_MS}`;
   const events = async () => (isPlatformAdmin() ? (await api('GET', '/api/metrics')).events : []);
   const [d, apps, recent, health, usage, inventory] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), events(), api('GET', '/api/health'), api('GET', usagePath()), api('GET', `${appPath(name)}/state`)]);
@@ -3608,7 +3616,11 @@ async function detail(name) {
   };
   const stop = now('stop');
   const restart = now('restart');
-  const kill = () => op({ title: t('cl.killTitle', { app: app.name }), body: t('cl.killBody'), action: t('cl.killAction'), danger: true }, post('kill'));
+  /** The approval lists the Pod or container, which only the cluster sample knows; without it the listing row stands in. */
+  const kill = async (row) => {
+    const sampled = await api('GET', '/api/cluster').then((v) => v.instances.find((i) => i.app === app.name), () => undefined);
+    return op(killCard(sampled ?? { app: app.name, tenant: app.tenant, runtime: row.runtime, node: row.node, pod: null, leases: row.leases }), post('kill'));
+  };
   const remove = () => op({ title: t('d.removeTitle', { name: app.name }), body: t('d.removeBody'), action: t('d.remove') }, post('remove'));
   const purge = () => op({
     title: t('d.purgeTitle', { name: app.name }), body: t('d.purgeBody'), danger: true, action: t('d.purge'),
@@ -3647,8 +3659,8 @@ async function detail(name) {
     upstream() && { label: t('ac.change'), note: t(`ac.${app.access}`), onPick: access },
     upstream() && isPlatformAdmin() && { label: t('d.move'), note: others.length ? app.tenant : t('mv.none'), disabled: !others.length, onPick: move },
     app.status === 'registered' && { label: t('d.removeItem'), note: t('d.removeNote'), onPick: remove },
-    isPlatformAdmin() && row && ACTIVE.includes(row.instance) && { label: t('cl.killItem'), note: t('cl.killNote'), danger: true, onPick: kill },
-    app.status === 'removed' && { label: t('d.purgeItem'), note: tenantAdmin ? t('d.purgeNote') : t('d.purgeAdmin', { tenant: app.tenant }), danger: true, disabled: !tenantAdmin, onPick: purge },
+    isPlatformAdmin() && row && ACTIVE.includes(row.instance) && { label: t('cl.killItem'), note: t('cl.killNote'), danger: true, onPick: () => kill(row) },
+    app.status === 'removed' && tenantAdmin && { label: t('d.purgeItem'), note: t('d.purgeNote'), danger: true, onPick: purge },
   ]);
 
   const attentionItems = (row, fresh, events) => {
@@ -3677,13 +3689,13 @@ async function detail(name) {
   const render = (row, fresh, events) => {
     const instance = row?.instance ?? fresh.instance;
     repaint('head', [row && [row.instance, row.since, row.leases, row.release], lang], head, () => [
-      h('a', { class: 'back', href: '#/apps' }, `← ${t('d.back')}`),
+      h('a', { class: 'btn ghost small', href: '#/apps' }, `← ${t('d.back')}`),
       h('h1', { class: 'mono', style: 'margin-top:12px' }, app.name),
       h('div', { class: 'meta' },
         status(app.status),
         app.status === 'registered' ? h('a', { href: appUrl(address, health.ingressPort), target: '_blank', rel: 'noopener', class: 'mono', title: t('d.open', { address }) }, address) : h('span', { class: 'mono muted' }, address),
         row ? runtimeChip(row) : null,
-        h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(instance), row?.since != null ? h('span', { class: 'muted' }, t('d.since', { ago: ago(row.since).textContent })) : null, leaseChips(row?.leases)),
+        h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(instance), row?.since != null ? h('span', { class: 'muted' }, ago(row.since, 'd.since')) : null, leaseChips(row?.leases)),
         upstream() ? h('span', { class: 'chip text', title: t('d.tenant') }, app.tenant) : null,
         upstream() ? h('span', { class: 'chip text', title: t('ac.label') }, t(`ac.${app.access}`)) : null,
         h('span', { class: 'muted' }, t('d.owner', { owner: app.owner })))]);
@@ -3699,7 +3711,7 @@ async function detail(name) {
     tiles.replaceChildren(
       tile(t('d.requests'), nf(row?.requests ?? 0), ''),
       tile(t('d.errors'), nf(row?.errors ?? 0), row?.requests ? pct(row.errors / row.requests) : ''),
-      tile(t('d.lastAccess'), fresh.stats.lastAccessAt == null ? t('never') : ago(fresh.stats.lastAccessAt).textContent, fresh.stats.lastAccessAt == null ? '' : stamp(fresh.stats.lastAccessAt)),
+      tile(t('d.lastAccess'), ago(fresh.stats.lastAccessAt), fresh.stats.lastAccessAt == null ? '' : stamp(fresh.stats.lastAccessAt)),
       tile(t('d.release'), app.current == null ? '-' : `#${app.current}`, releases.length ? stamp(Math.max(...releases.map((r) => r.publishedAt))) : ''));
   };
 
@@ -3741,7 +3753,7 @@ async function detail(name) {
       h('span', { class: 'muted' }, x.scheduledFor == null ? t('d.onDemand') : t('d.scheduledFor', { at: stamp(x.scheduledFor) })),
       h('span', { class: 'num' }, plural('d.attempts', x.attempts)),
       h('span', { class: 'muted', title: stamp(x.createdAt) }, ago(x.createdAt)),
-      x.state === 'due' ? h('span', { class: 'muted' }, t('d.nextAttempt', { ago: ago(x.nextAttemptAt).textContent })) : null);
+      x.state === 'due' ? h('span', { class: 'muted' }, ago(x.nextAttemptAt, 'd.nextAttempt')) : null);
     return h('div', { class: 'ilist' }, DELIVERY_ORDER.filter((s) => groups.has(s)).map((s) => {
       const mine = groups.get(s);
       const shown = s === 'done' ? mine.slice(0, DONE_SHOWN) : mine;
@@ -3786,6 +3798,7 @@ const appUrl = (address, port) => new URL(address, `${location.protocol}//${loca
 const FIELD_OF = [[/^app name/, 'name'], [/^subject/, 'owner'], [/^image|image "/, 'image'], [/^bundle|static is declared/, 'bundle'], [/tenant/, 'tenant']];
 
 async function publish(prefill) {
+  const show = claim();
   const apps = await api('GET', '/api/apps');
   const existing = new Set(apps.map((a) => a.name));
   const pattern = addressPattern(apps);
@@ -3876,11 +3889,11 @@ const say = (el, text, ok = false) => { el.className = ok ? 'msg' : 'msg err'; e
 const teamHead = (sub) => h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('team.title')), h('p', { class: 'sub' }, sub)));
 const youChip = (subject) => (subject === session.me.subject ? h('span', { class: 'chip text you' }, t('m.you')) : null);
 
-/** The quota resources a tenant card draws, in the order an operator reads them; CPU follows memory in practice and stays on the tenant page. */
-const TENANT_BARS = ['apps', 'awake', 'memory_mb', 'storage_gb'];
+/** Every resource a quota limits, in the order an operator reads them; the tenant card and the tenant page draw all of them. */
+const QUOTA_RESOURCES = ['apps', 'awake', 'cpu_millis', 'memory_mb', 'storage_gb'];
 const usedText = (n) => (Number.isInteger(n) ? nf(n) : n.toFixed(2));
 /** How close the tenant is to its tightest limit; a limit of 0 counts as full, an unlimited resource as empty. */
-const quotaPressure = ({ quota, used }) => Math.max(0, ...TENANT_BARS.map((r) => (quota[r] == null ? 0 : quota[r] === 0 ? 1 : used[r] / quota[r])));
+const quotaPressure = ({ quota, used }) => Math.max(0, ...QUOTA_RESOURCES.map((r) => (quota[r] == null ? 0 : quota[r] === 0 ? 1 : used[r] / quota[r])));
 const initial = (text) => [...text][0]?.toUpperCase() ?? '?';
 
 function quotaBar(label, used, limit) {
@@ -3891,6 +3904,7 @@ function quotaBar(label, used, limit) {
 }
 
 async function team() {
+  const show = claim();
   const { scope } = session;
   if (scope === ALL) return tenantsPage();
   if (scope === null) return show(teamHead(''), h('section', {}, h('div', { class: 'card' }, h('div', { class: 'empty' }, t('team.none', { id: userId() })))));
@@ -3960,7 +3974,7 @@ async function team() {
     fill(quota, h('div', { class: 'card' }, h('div', { class: 'qbars' }, QUOTA_RESOURCES.map((r) => quotaBar(t(`q.${r}`), used[r], limits[r])))));
     if (!isPlatformAdmin()) return;
     const edit = async () => {
-      const inputs = Object.fromEntries(QUOTA_RESOURCES.map((r) => [r, h('input', { type: 'number', min: 0, step: 1, value: limits[r] ?? '', placeholder: t('team.unlimited'), 'aria-label': t(`q.${r}`) })]));
+      const inputs = Object.fromEntries(QUOTA_RESOURCES.map((r) => [r, h('input', { type: 'number', name: r, min: 0, step: 1, value: limits[r] ?? '', placeholder: t('team.unlimited'), 'aria-label': t(`q.${r}`) })]));
       const control = h('div', { class: 'form' }, h('div', { class: 'fields' }, QUOTA_RESOURCES.map((r) => h('label', { class: 'field' }, h('span', {}, t(`q.${r}`)), inputs[r], h('small', {}, t('q.used', { n: usedText(used[r]) }))))));
       const patch = () => Object.fromEntries(QUOTA_RESOURCES.map((r) => [r, inputs[r].value === '' ? null : Number(inputs[r].value)]).filter(([r, v]) => v !== limits[r]));
       if (await approve({ title: t('q.editTitle', { tenant: scope }), body: t('q.editBody'), control, action: t('q.save'), submit: () => api('PUT', `${base}/quota`, patch()) })) await loadQuota();
@@ -3968,7 +3982,7 @@ async function team() {
     fill(quotaMenu, moreMenu(t('cl.moreFor', { name: t('team.quota') }), [{ label: t('q.edit'), note: t('q.editNote'), onPick: edit }]));
   };
 
-  const id = h('input', { placeholder: t('m.id'), 'aria-label': t('m.id'), title: t('m.idHint'), autocomplete: 'off', spellcheck: 'false' });
+  const id = h('input', { name: 'member', placeholder: t('m.id'), 'aria-label': t('m.id'), title: t('m.idHint'), autocomplete: 'off', spellcheck: 'false' });
   let role = 'member';
   const rolePick = h('span');
   const paintRole = () => fill(rolePick, segmented([['member', t('role.member')], ['admin', t('role.admin')]], role, (r) => { role = r; paintRole(); }, t('col.role')));
@@ -3987,8 +4001,8 @@ async function team() {
 
   const kinds = admin ? ['service', 'personal'] : ['personal'];
   let kind = kinds[0];
-  const name = h('input', { placeholder: 'deploy', pattern: '[a-z][a-z0-9\\-]{0,22}', maxlength: 23, autocomplete: 'off', spellcheck: 'false' });
-  const label = h('input', { autocomplete: 'off' });
+  const name = h('input', { name: 'name', placeholder: 'deploy', pattern: '[a-z][a-z0-9\\-]{0,22}', maxlength: 23, autocomplete: 'off', spellcheck: 'false' });
+  const label = h('input', { name: 'label', autocomplete: 'off' });
   const kindPick = h('span');
   const nameField = h('label', { class: 'field' }, h('span', {}, t('tk.name')), name, h('small', { class: 'mono' }, t('tk.nameHint', { tenant: scope })));
   const personalNote = h('small', { class: 'muted' }, t('tk.personalHint', { subject: session.me.subject }));
@@ -4048,19 +4062,20 @@ function tenantCard(x, data, requests) {
   const title = x.display && x.display !== x.name ? x.display : null;
   return h('a', { class: `card tcard${data ? '' : ' loading'}`, href: '#/team', 'aria-label': t('tn.open', { name: title ?? x.name }), onclick: (e) => { e.preventDefault(); setScope(x.name); } },
     h('div', { class: 'th' }, h('b', {}, title ?? h('span', { class: 'mono' }, x.name)), title ? h('span', { class: 'mono muted' }, x.name) : null,
-      h('span', { class: 'muted when', title: stamp(x.createdAt) }, t('tn.createdAgo', { ago: since(x.createdAt) }))),
+      h('span', { class: 'muted when' }, ago(x.createdAt, 'tn.createdAgo'))),
     data ? [
       h('div', { class: 'tmeta' },
         h('span', {}, t('tn.adminsAre'), ' ', data.admins.length ? data.admins.map((id, i) => [i ? ', ' : '', h('span', { class: 'mono' }, id)]) : h('span', { class: 'muted' }, t('cl.none'))),
         h('span', { class: 'muted' }, plural('tn.members', data.members)),
         h('span', { class: 'muted' }, plural('apps.count', data.used.apps), ' · ', t('ap.awakeN', { n: nf(data.used.awake) })),
         h('span', { class: 'muted num' }, t('ap.groupRequests', { n: nf(requests) }))),
-      h('div', { class: 'tbars' }, TENANT_BARS.map((r) => quotaBar(t(`tn.q.${r}`), data.used[r], data.quota[r])))]
+      h('div', { class: 'tbars' }, QUOTA_RESOURCES.map((r) => quotaBar(t(`tn.q.${r}`), data.used[r], data.quota[r])))]
       : h('div', { class: 'tmeta' }, h('span', { class: 'spin', role: 'status', 'aria-label': t('cl.pending') })));
 }
 
 /** Every tenant as a card, the one nearest a limit first; a new tenant is created from the approval card. */
 async function tenantsPage() {
+  const show = claim();
   const grid = h('div', { class: 'tgrid' });
   const message = h('div', { class: 'msg', role: 'status' });
   const load = async () => {
@@ -4084,9 +4099,9 @@ async function tenantsPage() {
   };
   const create = async () => {
     const field = (key, control, hintKey) => h('label', { class: 'field' }, h('span', {}, t(key)), control, hintKey ? h('small', {}, t(hintKey)) : null);
-    const name = h('input', { required: true, pattern: '[a-z][a-z0-9\\-]{0,39}', placeholder: 'design', autocomplete: 'off', spellcheck: 'false' });
-    const display = h('input', { autocomplete: 'off' });
-    const admins = h('input', { placeholder: 'ana, bo', autocomplete: 'off', spellcheck: 'false' });
+    const name = h('input', { name: 'name', required: true, pattern: '[a-z][a-z0-9\\-]{0,39}', placeholder: 'design', autocomplete: 'off', spellcheck: 'false' });
+    const display = h('input', { name: 'display', autocomplete: 'off' });
+    const admins = h('input', { name: 'admins', placeholder: 'ana, bo', autocomplete: 'off', spellcheck: 'false' });
     const body = () => ({
       name: name.value.trim(),
       admins: admins.value.split(/[\s,]+/).filter(Boolean).map((x) => x.replace(/^user:/, '')),
@@ -4718,6 +4733,7 @@ const TOPO_VIEWS = ['lane', 'graph'];
 let topoView = TOPO_VIEWS.includes(store.get('pneuma-space-topology')) ? store.get('pneuma-space-topology') : 'lane';
 
 function topology() {
+  const show = claim();
   const model = topoModel();
   const header = liveHeader('live.lastRequest', () => refresh());
   const banner = h('div', { class: 'card faults', role: 'alert' });
@@ -4735,14 +4751,12 @@ function topology() {
   let painted = '';
   let faultsPainted = '';
   const live = () => ({ ...model, apps: model.apps.filter((a) => a.status === 'registered') });
-  const filterInput = h('input', { type: 'search', placeholder: t('apps.filter'), 'aria-label': t('apps.filter'), oninput: () => { filter = filterInput.value.trim().toLowerCase(); paint(); } });
-  const tools = h('div', { class: 'toolbar topo-tools' });
-  const viewRow = h('div', { class: 'toolbar topo-view' });
+  const filterInput = h('input', { type: 'search', name: 'filter', placeholder: t('apps.filter'), 'aria-label': t('apps.filter'), oninput: () => { filter = filterInput.value.trim().toLowerCase(); paint(); } });
+  const tools = h('div', { class: 'topo-tools' });
   const secHead = h('div');
   const renderChrome = () => {
     fill(secHead, sectionHead(1, `tp.sec.${topoView}`, `tp.sec.${topoView}Desc`));
-    fill(tools, [filterInput, h('span', { class: 'muted' }, t(`tp.${topoView}Hint`, { n: topoView === 'graph' ? GRAPH_CAP : LANE_CAP }))]);
-    fill(viewRow, segmented(TOPO_VIEWS.map((v) => [v, t(`tp.view.${v}`)]), topoView, (v) => {
+    fill(tools, filterInput, h('span', { class: 'muted' }, t(`tp.${topoView}Hint`, { n: topoView === 'graph' ? GRAPH_CAP : LANE_CAP })), segmented(TOPO_VIEWS.map((v) => [v, t(`tp.view.${v}`)]), topoView, (v) => {
       topoView = v;
       store.set('pneuma-space-topology', v);
       selection = null;
@@ -4852,7 +4866,7 @@ function topology() {
 
   show(
     h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('tp.title')), h('p', { class: 'sub' }, t('tp.sub'))), header.el),
-    h('section', { class: 'topo-sec' }, secHead, banner, tools, viewRow, pickBar, errBox, sceneBox, panel),
+    h('section', { class: 'topo-sec' }, secHead, banner, tools, pickBar, errBox, sceneBox, panel),
   );
 
   const loadApps = async () => {
@@ -4912,9 +4926,23 @@ const reasonText = (r) => (REASONS.includes(r) ? t(`cl.reason.${r}`) : r);
 
 const roleOf = (w) => (w.role === 'rustfs' ? 'object' : w.role);
 const podLabel = (name) => name.replace(/^pneuma-space-/, '');
-const agoTick = (v) => h('time', { datetime: new Date(v).toISOString(), title: stamp(v) }, ticking(() => since(v)));
 const forTick = (v) => h('time', { datetime: new Date(v).toISOString(), title: stamp(v) }, ticking(() => duration(Date.now() - v)));
 const handle = (id) => (id && /^[0-9a-f]{64}$/.test(id) ? id.slice(0, 12) : podLabel(id ?? '-'));
+
+/** The force-release approval card for an instance row of the cluster sample: the app, its tenant, where it runs when the sample places it, the leases cut. */
+function killCard(i) {
+  const fact = (label, ...value) => [h('b', {}, label), ' ', value];
+  const mono = (text) => h('span', { class: 'mono' }, text);
+  const leases = LEASE_KINDS.filter((k) => i.leases?.[k] > 0).map((k) => `${k} ${i.leases[k]}`);
+  return {
+    title: t('cl.killTitle', { app: i.app }), body: t('cl.killBody'), action: t('cl.killAction'), danger: true,
+    facts: [
+      fact(t('kf.app'), mono(i.app), ' · ', t('kf.tenant'), ' ', mono(i.tenant)),
+      i.pod ? fact(i.runtime === 'isolate' ? t('kf.worker') : planeT('kf.pod'), mono(/^[0-9a-f]{64}$/.test(i.pod) ? i.pod.slice(0, 12) : i.pod), i.node ? [' · ', t('kf.node'), ' ', mono(i.node)] : null) : null,
+      fact(t('kf.leases'), leases.length ? mono(leases.join(' · ')) : t('kf.noLeases')),
+    ].filter(Boolean),
+  };
+}
 
 function usage(label, text, used, total) {
   const ratio = total > 0 ? used / total : 0;
@@ -4923,6 +4951,7 @@ function usage(label, text, used, total) {
 }
 
 function cluster() {
+  const show = claim();
   const header = liveHeader('cl.sampled', () => refresh());
   const host = hostCard();
   let view = null;
@@ -4942,7 +4971,7 @@ function cluster() {
   const k8s = () => (view?.plane ?? session.plane) === 'kubernetes';
 
   const parts = { health: h('div', { class: 'board' }), attention: h('div'), placement: h('div'), filters: h('div', { class: 'fchips' }), instances: h('div', { class: 'ilist' }), storage: h('div') };
-  const search = h('input', { type: 'search', placeholder: t('cl.f.search'), 'aria-label': t('cl.f.search'), oninput: () => paint() });
+  const search = h('input', { type: 'search', name: 'search', placeholder: t('cl.f.search'), 'aria-label': t('cl.f.search'), oninput: () => paint() });
   const head = h('div', { class: 'head' });
   const sections = h('div', { class: 'cl' });
 
@@ -5039,7 +5068,7 @@ function cluster() {
   };
   /** Stop and restart are safe and frequent and act at once; force release goes through its approval card. */
   const lifecycle = async (i, op) => {
-    if (op === 'kill' && !(await approve({ title: t('cl.killTitle', { app: i.app }), body: t('cl.killBody'), action: t('cl.killAction'), danger: true }))) return;
+    if (op === 'kill' && !(await approve(killCard(i)))) return;
     run(`app:${i.app}`, () => api('POST', `${appPath(i.app)}/${op}`));
   };
   const restartMenu = (p, text = null) => (k8s() && RESTARTABLE.includes(p.role)
@@ -5057,7 +5086,7 @@ function cluster() {
     button.addEventListener('click', () => {
       let cancelled = false;
       const input = h('input', {
-        class: 'lim-in', type: 'number', min: 1, step: 1, value: next === undefined ? current ?? '' : next ?? '', placeholder: t('cl.platformValue'), 'aria-label': label,
+        class: 'lim-in', name: field, type: 'number', min: 1, step: 1, value: next === undefined ? current ?? '' : next ?? '', placeholder: t('cl.platformValue'), 'aria-label': label,
         onkeydown: (e) => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { cancelled = true; input.blur(); } },
         oninput: () => input.setCustomValidity(''),
         onblur: async () => {
@@ -5090,7 +5119,7 @@ function cluster() {
     h('span', { class: 'mono' }, owner ? p.name.slice(owner.name.length + 1) || p.name : podLabel(p.name)),
     p.leading ? h('span', { class: 'leadtag', title: t('cl.leadingTitle') }, t('cl.leading')) : null,
     owner && p.node ? h('span', { class: 'mono muted' }, p.node) : null,
-    p.startedAt ? h('span', { class: 'muted' }, agoTick(p.startedAt)) : null,
+    p.startedAt ? h('span', { class: 'muted' }, ago(p.startedAt)) : null,
     p.restarts ? h('span', { class: 'st orange' }, t('cl.restarts', { n: nf(p.restarts) })) : null,
     isPlatformAdmin() ? restartMenu(p) : null);
 
@@ -5190,7 +5219,7 @@ function cluster() {
   const attention = (items) => {
     const row = (i) => h('div', { class: `item ${i.tone}` },
       h('div', { class: 'what' }, i.what),
-      h('div', { class: 'side', style: 'grid-row: span 2' }, i.at ? agoTick(i.at) : null, i.act),
+      h('div', { class: 'side', style: 'grid-row: span 2' }, i.at ? ago(i.at) : null, i.act),
       h('div', { class: 'why', title: i.title }, i.why));
     const byObject = [...Map.groupBy(view.warnings, (w) => `${w.kind}/${w.object}`)].sort(([, a], [, b]) => Math.max(...b.map((w) => w.at)) - Math.max(...a.map((w) => w.at)));
     const raw = k8s() && view.warnings.length
@@ -5374,8 +5403,6 @@ function viewOf(hash) {
   const key = NAV.some(([k]) => k === view) ? view : 'overview';
   return allowed(key) ? key : 'apps';
 }
-const QUOTA_RESOURCES = ['apps', 'awake', 'cpu_millis', 'memory_mb', 'storage_gb'];
-
 function shell() {
   const current = viewOf(location.hash);
   topbar();
@@ -5453,8 +5480,9 @@ async function route() {
   try {
     session ??= await loadSession();
   } catch (error) {
+    if (gen !== generation) return;
     shell();
-    return show(h('div', { class: 'head' }, h('p', { class: 'msg err' }, t('err.load', { msg: error.message }))));
+    return fill(main(), h('div', { class: 'head' }, h('p', { class: 'msg err' }, t('err.load', { msg: error.message }))));
   }
   if (gen !== generation) return;
   shell();
@@ -5479,7 +5507,7 @@ async function route() {
       if (gen === generation) every(live.loops, gen);
     }
   } catch (error) {
-    show(h('div', { class: 'head' }, h('div', { class: 'grow' }, h('p', { class: 'msg err' }, t('err.load', { msg: error.message })), h('p', {}, h('a', { class: 'back', href: '#/apps' }, `← ${t('d.back')}`)))));
+    if (gen === generation) fill(main(), h('div', { class: 'head' }, h('div', { class: 'grow' }, h('p', { class: 'msg err' }, t('err.load', { msg: error.message })), h('p', {}, h('a', { class: 'btn ghost small', href: '#/apps' }, `← ${t('d.back')}`)))));
   }
 }
 
