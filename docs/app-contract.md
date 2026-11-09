@@ -148,11 +148,11 @@ GET    /api/cluster                    platform   {plane: docker|kubernetes, sam
 PUT    /api/cluster/workloads/<name>/scale  platform  {replicas}: 1 to PNEUMA_SPACE_SCALE_MAX (400 outside), only pneuma-space-gateway and pneuma-space-runner (409 for any other); audited as cluster.scale
 POST   /api/cluster/pods/<name>/restart     platform  deletes a gateway or runner Pod (409 for any other role); the controller recreates it; audited as cluster.restart
 POST   /api/cluster/nodes/<name>/drain      platform  stops every instance on the node, {stopped, failed}; the node itself is untouched; audited as cluster.drain
-GET    /api/apps/<name>                owner      releases, bindings, policy, state, stats, deliveries
+GET    /api/apps/<name>                owner      releases, bindings, policy, state, stats, deliveries, and may: the app actions this caller is allowed on it (app.release, app.stop, ...)
 GET    /api/apps/<name>/logs?tail=200  owner      text/plain: the app's recent stdout and stderr (current or last instance, from any replica; empty when none)
 GET    /api/apps/<name>/state          owner      where each binding's data lives, without credentials: [{kind, provider, state, location}] and the release's bundle id. Backups are the storage layer's job
 GET    /api/state?tenant=<t>           member     the same for every app of the tenant
-GET    /api/usage?app=<name>|tenant=<t>&from=&to=  owner|member  hourly buckets: requests, errors, wakes, wakeFailures, sleeps, deliveries, awake time
+GET    /api/usage?app=<name>|tenant=<t>&from=&to=  owner|member  app=* is platform only; hourly buckets: requests, errors, wakes, wakeFailures, sleeps, deliveries, awake time
 GET    /api/usage/apps?from=&to=&tenant=&limit=50  member  apps ranked by requests in the window; platform without tenant
 GET    /api/audit?tenant=&from=&to=&actor=&action=&target=&limit=  member  audit rows: at, actor, actor tenant, tenant, action, target kind, target, result (ok|refused|error), details without secrets; platform without tenant
 PUT    /api/apps/<name>/release        member     first publish; owner after it. {"image": reference|null, "manifest": {...}, "bundle": id|null, "owner": subject, "tenant": name} -> the release {"number": n, "image": id|null, "bundle": id|null, ...}; the gateway resolves the reference to a local image id (Docker) or a registry digest reference (Kubernetes); owner and tenant apply to the first publish only, owner defaults to the caller (required under local) and only a tenant admin or a service token may name another, tenant may be omitted by a caller in one tenant; a quota refusal answers 409 with a quota field {tenant, resource, used, limit, ask}
