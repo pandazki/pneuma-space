@@ -93,7 +93,7 @@ const TABLE: [row: string, method: string, path: string, body: unknown, allowed:
   ['apps', 'GET', '/api/apps', undefined, 'dan', null, 401],
   ['metrics', 'GET', '/api/metrics', undefined, 'root', 'ana', 403, true],
   ['requests', 'GET', '/api/requests', undefined, 'root', 'ana', 403, true],
-  ['nodes', 'GET', '/api/nodes', undefined, 'root', 'ana', 403, true],
+
   ['cluster', 'GET', '/api/cluster', undefined, 'root', 'ana', 403, true],
   ['scale', 'PUT', '/api/cluster/workloads/pneuma-space-runner/scale', { replicas: 2 }, 'root', 'ana', 403, true],
   ['restart a Pod', 'POST', '/api/cluster/pods/pneuma-space-gateway-0/restart', undefined, 'root', 'ana', 403, true],

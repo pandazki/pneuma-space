@@ -37,25 +37,12 @@ function view({ cluster = null as NodeSample[] | null, rows = [] as Instance[], 
     nameOf: (app) => NAMES.get(app) ?? null,
     instances: { row: (app) => byApp.get(app) ?? null, rows: () => byApp.values() },
     replicas: async () => replicas,
-    host: async () => ({ cpus: 8, load: [1, 1, 1], memory: { totalBytes: 2 ** 34, freeBytes: 2 ** 33 }, data: null }),
     runner: async () => ({ workers: 3, stuck: 0 }),
-    runnerOnHost: async () => true,
-    replica: 'gw-0' as ReplicaId,
-    hostname: 'box',
     now: () => 42,
   });
   return { nodes };
 }
 
-test('on a single host the answer is source host with one node holding what awake instances requested', async () => {
-  const { nodes } = view({ rows: [row(A, 'awake', null), row(B, 'asleep', null)], apps: [summary('survey', 'awake', null), summary('chess', 'asleep', null)] });
-  await nodes.sample();
-  const answer = nodes.nodes();
-  assert.equal(answer.source, 'host');
-  assert.deepEqual(answer.nodes.map((n) => [n.name, n.requested, n.instances.map((i) => i.app), n.runner?.workers]), [
-    ['box', { cpuMillis: 500, memoryBytes: 256 * 2 ** 20, pods: 1 }, ['survey'], 3],
-  ]);
-});
 
 test('an app\'s node is its instance row\'s node while it runs and null once it sleeps', () => {
   const { nodes } = view({ rows: [row(A, 'awake', 'n2'), row(B, 'asleep', 'n2')] });

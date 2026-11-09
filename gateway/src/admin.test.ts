@@ -33,20 +33,16 @@ async function admin(runtime?: Runtimes) {
     retries: () => 0,
     replica: 'r1' as ReplicaId,
   });
-  const nodeCalls = { n: 0 };
   const up = async () => 'up' as const;
   const off = async () => 'off' as const;
   const infra = new DockerInfra({ docker: new Docker('/nonexistent.sock'), probes: { redis: up, object: up, postgres: off, coturn: off, runner: off }, volumes: async () => [] });
   const nodes = new NodeView({
-    infra: { nodes: async () => (nodeCalls.n++, infra.nodes()), workloads: () => infra.workloads(), volumes: () => infra.volumes(), warnings: () => infra.warnings() },
+    infra,
     apps: () => registry.listing(),
     nameOf: (app) => registry.nameOf(app),
     instances: { row: () => null, rows: () => [][Symbol.iterator]() },
     replicas: async () => [],
-    host: async () => ({ cpus: 1, load: [0, 0, 0], memory: { totalBytes: 1, freeBytes: 1 }, data: null }),
     runner: async () => null,
-    runnerOnHost: async () => false,
-    replica: 'r1' as ReplicaId,
   });
   const requests = new RequestLog(() => {});
   const logs = { logs: (app: AppId, tail: number) => w.runtime.logs(app, tail), healthOf: () => [] };
@@ -60,7 +56,7 @@ async function admin(runtime?: Runtimes) {
     const response = await fetch(base + path, { method, body: raw });
     return { status: response.status, body: await response.json() };
   };
-  return { w, registry, store, server, call, base, metrics, nodes, nodeCalls, requests };
+  return { w, registry, store, server, call, base, metrics, nodes, requests };
 }
 
 const kvApp = { image: 'example:1', manifest: { contract: 1, capabilities: { kv: {} } }, owner: 'user:ann' };
@@ -95,13 +91,6 @@ test('every contract endpoint answers 200 on valid input', async (t) => {
   assert.equal((await call('GET', '/api/apps/survey')).status, 404);
 });
 
-test('GET /api/nodes answers the sampler\'s last sample without asking Infra', async (t) => {
-  const { call, server, nodes, nodeCalls } = await admin();
-  t.after(() => server.close());
-  await nodes.sample();
-  const [first, second] = [await call('GET', '/api/nodes'), await call('GET', '/api/nodes')];
-  assert.deepEqual([first.status, first.body.source, first.body.nodes.length, second.body.sampledAt, nodeCalls.n], [200, 'host', 1, first.body.sampledAt, 1]);
-});
 
 test('GET /api/cluster on the docker plane lists the compose services, none scalable, and no nodes or warnings (AC-OPS-11)', async (t) => {
   const { call, server, nodes } = await admin();
