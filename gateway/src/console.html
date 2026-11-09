@@ -970,7 +970,8 @@ const I18N = {
     'empty.attention': '没有需要关注的事项。', 'empty.events': '还没有事件。', 'empty.filtered': '没有匹配的记录。',
     'att.delivery': '投递失败', 'att.deliveryDetail': '{trigger} · 尝试 {attempts} 次',
     'apps.title': '项目', 'apps.count.one': '{n} 个应用', 'apps.count.other': '{n} 个应用',
-    'apps.empty': '还没有应用。发布一个即可获得地址。', 'apps.publish': '发布应用',
+    'apps.empty': '还没有应用。发布一个即可获得地址。', 'apps.emptyMine': '你还没有自己的应用。发布一个即可获得地址。', 'apps.publish': '发布应用',
+    'ap.mine': '这里是你作为所有者的应用；团队管理员看得到全队的应用。',
     'never': '从未', 'routeOnly': '仅路由',
     'st.registered': '已注册', 'st.removed': '已移除', 'st.purging': '清除中', 'st.none': '无实例', 'st.asleep': '休眠',
     'st.waking': '唤醒中', 'st.awake': '运行中', 'st.draining': '排空中', 'st.stopping': '停止中', 'st.active': '启用',
@@ -1251,7 +1252,8 @@ const I18N = {
     'empty.attention': 'Nothing needs attention.', 'empty.events': 'No events yet.', 'empty.filtered': 'Nothing matches.',
     'att.delivery': 'Delivery failed', 'att.deliveryDetail': '{trigger} · {attempts} attempts',
     'apps.title': 'Projects', 'apps.count.one': '{n} app', 'apps.count.other': '{n} apps',
-    'apps.empty': 'No apps yet. Publish one to give it an address.', 'apps.publish': 'Publish an app',
+    'apps.empty': 'No apps yet. Publish one to give it an address.', 'apps.emptyMine': 'You own no apps yet. Publish one to give it an address.', 'apps.publish': 'Publish an app',
+    'ap.mine': 'The apps you own; a tenant admin sees every app of the team.',
     'never': 'never', 'routeOnly': 'route only',
     'st.registered': 'registered', 'st.removed': 'removed', 'st.purging': 'purging', 'st.none': 'none', 'st.asleep': 'asleep',
     'st.waking': 'waking', 'st.awake': 'awake', 'st.draining': 'draining', 'st.stopping': 'stopping', 'st.active': 'active',
@@ -3427,6 +3429,8 @@ async function projects() {
   let apps = [];
   let painted = '';
   const grouped = () => upstream() && session.scope === ALL;
+  /** A member reads only the apps they own (ADR 0022 item 5), so the page says so rather than look like the whole team. */
+  const mine = upstream() && session.scope !== ALL && session.scope !== null && !mayAdmin(session.scope);
   const visible = new IntersectionObserver((entries) => {
     for (const { isIntersecting, target } of entries) {
       if (!isIntersecting) continue;
@@ -3485,7 +3489,7 @@ async function projects() {
       return el;
     };
     fill(body,
-      apps.length === 0 ? h('div', { class: 'card' }, h('div', { class: 'empty' }, t('apps.empty'), h('div', { style: 'margin-top:12px' }, h('a', { class: 'btn primary', href: '#/publish' }, t('apps.publish')))))
+      apps.length === 0 ? h('div', { class: 'card' }, h('div', { class: 'empty' }, t(mine ? 'apps.emptyMine' : 'apps.empty'), h('div', { style: 'margin-top:12px' }, h('a', { class: 'btn primary', href: '#/publish' }, t('apps.publish')))))
         : shown.length === 0 ? h('div', { class: 'card' }, h('div', { class: 'empty' }, t('empty.filtered'))) : null,
       live.length === 0 ? null : grouped() ? tenantGroups(live).map((g) => h('div', { class: 'agroup' },
         h('div', { class: 'tgh' }, h('b', { class: 'mono' }, g.tenant), h('span', { class: 'muted' }, plural('apps.count', g.mine.length), ' · ', t('ap.awakeN', { n: nf(g.awake) })),
@@ -3495,7 +3499,7 @@ async function projects() {
   };
 
   show(
-    h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('apps.title')), count), h('a', { class: 'btn primary', href: '#/publish' }, t('apps.publish'))),
+    h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('apps.title')), count, mine ? h('p', { class: 'sub' }, t('ap.mine')) : null), h('a', { class: 'btn primary', href: '#/publish' }, t('apps.publish'))),
     h('section', {}, h('div', { class: 'ifilter' }, chips, search), body),
   );
   return async function update() {
@@ -3599,7 +3603,8 @@ async function detail(name) {
   const { app, releases, bindings, policy } = d;
   const address = apps.find((a) => a.name === app.name)?.address ?? '';
   const reload = () => route();
-  const tenantAdmin = mayAdmin(app.tenant);
+  /** The app actions the server grants this caller (ADR 0022 item 5); the page offers only these. */
+  const may = (action) => d.may.includes(action);
   const others = upstream() ? session.tenants.filter((x) => x !== app.tenant) : [];
   const current = releases.find((r) => r.number === app.current) ?? null;
 
@@ -3658,18 +3663,18 @@ async function detail(name) {
   const quiet = (label, onclick) => h('button', { class: 'btn ghost', type: 'button', onclick }, label);
 
   const menu = (row) => moreMenu(t('cl.moreFor', { name: app.name }), [
-    row?.quarantine && { label: t('d.unquarantine'), note: t('d.liftNote'), onPick: lift },
-    upstream() && { label: t('ac.change'), note: t(`ac.${app.access}`), onPick: access },
-    upstream() && isPlatformAdmin() && { label: t('d.move'), note: others.length ? app.tenant : t('mv.none'), disabled: !others.length, onPick: move },
-    app.status === 'registered' && { label: t('d.removeItem'), note: t('d.removeNote'), onPick: remove },
-    isPlatformAdmin() && row && ACTIVE.includes(row.instance) && { label: t('cl.killItem'), note: t('cl.killNote'), danger: true, onPick: () => kill(row) },
-    app.status === 'removed' && tenantAdmin && { label: t('d.purgeItem'), note: t('d.purgeNote'), danger: true, onPick: purge },
+    row?.quarantine && may('app.remove') && { label: t('d.unquarantine'), note: t('d.liftNote'), onPick: lift },
+    upstream() && may('app.access') && { label: t('ac.change'), note: t(`ac.${app.access}`), onPick: access },
+    upstream() && may('app.move') && { label: t('d.move'), note: others.length ? app.tenant : t('mv.none'), disabled: !others.length, onPick: move },
+    app.status === 'registered' && may('app.remove') && { label: t('d.removeItem'), note: t('d.removeNote'), onPick: remove },
+    may('app.kill') && row && ACTIVE.includes(row.instance) && { label: t('cl.killItem'), note: t('cl.killNote'), danger: true, onPick: () => kill(row) },
+    app.status === 'removed' && may('app.purge') && { label: t('d.purgeItem'), note: t('d.purgeNote'), danger: true, onPick: purge },
   ]);
 
   const attentionItems = (row, fresh, events) => {
     const items = [];
     const q = row?.quarantine;
-    if (q) items.push({ key: ['q', q.since], tone: 'red', what: t('d.quarantined', { reason: q.reason }), why: ticking(() => t('d.quarantineMeta', { failures: nf(q.failures), ago: since(q.since) })), act: quiet(t('d.unquarantine'), lift) });
+    if (q) items.push({ key: ['q', q.since], tone: 'red', what: t('d.quarantined', { reason: q.reason }), why: ticking(() => t('d.quarantineMeta', { failures: nf(q.failures), ago: since(q.since) })), act: may('app.remove') ? quiet(t('d.unquarantine'), lift) : null });
     const failed = fresh.deliveries.filter((x) => x.state === 'failed');
     if (failed.length) items.push({ key: ['f', failed.length], tone: 'red', what: plural('d.att.failed', failed.length), why: [...new Set(failed.map((x) => x.trigger))].join(' · '), act: jump('deliveries', t('d.att.toDeliveries')) });
     if (row && row.requests >= ERROR_MIN && row.errors / row.requests > ERROR_RATE) {
@@ -3677,7 +3682,7 @@ async function detail(name) {
     }
     const slow = events.filter((e) => e.app === app.name && e.ev === 'awake' && typeof e.ms === 'number').at(-1);
     if (slow && slow.ms > COLD_START_GATE_MS) items.push({ key: ['w', slow.id], tone: 'orange', what: t('d.att.slow', { ms: ms(slow.ms) }), why: t('d.att.slowWhy', { at: clock(slow.t, true) }), act: jump('logs', t('d.toLogs')) });
-    if (app.status === 'removed') items.push({ key: ['r'], tone: 'orange', what: t('d.att.removed'), why: t('d.att.removedWhy'), act: h('a', { class: 'btn ghost small', href: `#/publish/${encodeURIComponent(app.name)}` }, t('d.publish')) });
+    if (app.status === 'removed') items.push({ key: ['r'], tone: 'orange', what: t('d.att.removed'), why: t('d.att.removedWhy'), act: may('app.release') ? h('a', { class: 'btn ghost small', href: `#/publish/${encodeURIComponent(app.name)}` }, t('d.publish')) : null });
     return items;
   };
 
@@ -3703,8 +3708,8 @@ async function detail(name) {
         upstream() ? h('span', { class: 'chip text', title: t('ac.label') }, t(`ac.${app.access}`)) : null,
         h('span', { class: 'muted' }, t('d.owner', { owner: app.owner })))]);
     repaint('actions', [instance, row?.quarantine?.since, lang], actions, () => [
-      tenantAdmin && ACTIVE.includes(instance) ? [quiet(t('cl.stop'), stop), quiet(t('cl.restart'), restart)] : null,
-      h('a', { class: 'btn primary', href: `#/publish/${encodeURIComponent(app.name)}` }, t('d.publish')),
+      may('app.stop') && ACTIVE.includes(instance) ? [quiet(t('cl.stop'), stop), quiet(t('cl.restart'), restart)] : null,
+      may('app.release') ? h('a', { class: 'btn primary', href: `#/publish/${encodeURIComponent(app.name)}` }, t('d.publish')) : null,
       menu(row)]);
     fill(strip, stateStrip(events, app.name));
     const items = attentionItems(row, fresh, events);
@@ -3829,7 +3834,9 @@ async function publish(prefill) {
     f[k].control.setAttribute('aria-invalid', 'true');
     f[k].control.focus();
   };
-  firstPublish.push(label('owner'));
+  /** Only a tenant admin or a platform admin may name another owner (ADR 0022 item 3); a member's apps are always their own. */
+  const ownerField = !upstream() || mayAdmin(tenant.value);
+  if (ownerField) firstPublish.push(label('owner'));
   if (tenantField) firstPublish.push(label('tenant'));
   const syncOwner = () => { for (const field of firstPublish) field.hidden = existing.has(f.name.control.value); };
   f.name.control.addEventListener('input', syncOwner);
@@ -3854,7 +3861,7 @@ async function publish(prefill) {
       const bundle = file ? (await api('POST', '/api/bundles', file, 'application/x-tar')).bundle : null;
       const body = { image: f.image.control.value.trim() || null, manifest, bundle };
       if (!existing.has(name)) {
-        const owner = f.owner.control.value.trim();
+        const owner = ownerField ? f.owner.control.value.trim() : '';
         if (owner || !upstream()) body.owner = owner;
         if (tenantField) body.tenant = tenant.value;
       }
