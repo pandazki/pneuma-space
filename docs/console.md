@@ -52,7 +52,7 @@ There is one of each. No native `<select>`, no OS-styled file input, no checkbox
 - **Filter chips** (`.fchip`): dot, label, count, a ring at rest; one pressed per field. **Toggle chips** (`.tog`): independent on/off filters.
 - **Chips** (`.chip`): identifiers and kinds, mono; `.chip.text` for a word.
 - **Inputs**: one style for text, number, search and textarea. A file is chosen with `fileField`: a quiet button plus the chosen name and size, and the whole field accepts a drop.
-- **⋯ menu** (`moreMenu`): every destructive or capacity action (remove, purge, force release, drain, scale, Pod restart, revoke, remove member, move tenant). Destructive items come last, red only inside the menu, each with a one-line note. A menu lists only what the caller's role may do (`/api/me` roles against ADR 0022's table); a missing role is never a disabled item.
+- **⋯ menu** (`moreMenu`): every destructive or capacity action (remove, purge, force release, drain, scale, Pod restart, revoke, remove member, move tenant). Destructive items come last, red only inside the menu, each with a one-line note. A menu lists only what the caller may do: on an app page the detail response's `may`, elsewhere the `/api/me` roles against ADR 0022's table; a missing right is never a disabled item.
 - **Approval card** (`approve`): after a ⋯ item. Title names the object, the body says in plain words what will happen and what stays, facts list the objects affected, then Cancel and Continue. It is the only confirmation dialog.
 - **Empty state** (`.empty`): one sentence of what is absent and, when there is one, the action that fills it.
 - **Live indicator** (`liveHeader`): dot and word (live, paused, offline), the age of the latest arrival, and Pause or Resume.

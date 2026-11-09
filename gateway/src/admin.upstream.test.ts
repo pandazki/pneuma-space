@@ -11,7 +11,7 @@ import { UpstreamIdentity, type UpstreamConfig } from './identity.ts';
 import { Ingress } from './ingress.ts';
 import { Series } from './metrics.ts';
 import { JwtVerifier } from './jwt.ts';
-import { appName, parseManifest, subject, type AppId, type AuditRecord, type DeliveryId, type ReplicaId, type TenantName } from './model.ts';
+import { appName, parseManifest, subject, USAGE_COUNTERS, type AppId, type AuditRecord, type DeliveryId, type ReplicaId, type TenantName } from './model.ts';
 import { world } from './registry.fakes.ts';
 import type { PlatformRegistry } from './registry.ts';
 import type { SqliteStore } from './store.ts';
@@ -48,8 +48,10 @@ before(async () => {
   const authority = new Authority(store, { users: new Set(['root']), groups: new Set() });
   await registry.createTenant(A, 'Team A', ['ana']);
   await registry.setMember(A, 'bob', 'member', false);
+  await registry.setMember(A, 'dee', 'member', false);
   await registry.createTenant(B, 'Team B', ['cid']);
-  for (const [name, tenant, owner] of [['alpha', A, 'user:eve'], ['beta', A, 'user:eve'], ['omega', A, 'user:eve'], ['gamma', B, 'user:cid']] as const) {
+  const apps = [['alpha', A, 'user:bob'], ['beta', A, 'user:eve'], ['omega', A, 'user:eve'], ['gamma', B, 'user:cid'], ['bobs', A, 'user:bob'], ['dees', A, 'user:dee']] as const;
+  for (const [name, tenant, owner] of apps) {
     await registry.publish({ name: appName(name), image: 'example:1', manifest: kv, bundle: null, owner: subject(owner), tenant });
   }
   for (const [key, who, by] of [['bob', 'user:bob', 'user:bob'], ['ci', `service:${A}.ci`, 'user:ana'], ['old', `service:${A}.old`, 'user:ana']] as const) {
@@ -110,7 +112,7 @@ const TABLE: [row: string, method: string, path: string, body: unknown, allowed:
   ['global policy', 'PUT', '/api/policy', { idle_seconds: 300 }, 'root', 'ana', 403, true],
   ['app policy', 'PUT', '/api/apps/alpha/policy', { idle_seconds: 5 }, 'bob', 'cid', 404],
   ['access', 'PUT', '/api/apps/alpha/access', { access: 'tenant' }, 'bob', 'cid', 404],
-  ['owner', 'PUT', '/api/apps/alpha/owner', { owner: 'user:eve' }, 'ana', 'bob', 403],
+  ['owner', 'PUT', '/api/apps/alpha/owner', { owner: 'user:bob' }, 'ana', 'token:ci', 403],
   ['move', 'PUT', '/api/apps/beta/tenant', { tenant: B }, 'root', 'ana', 403, true],
   ['tenants', 'GET', '/api/tenants', undefined, 'root', 'ana', 403, true],
   ['create tenant', 'POST', '/api/tenants', { name: 'team-c', display: 'Team C', admins: ['fay'] }, 'root', 'ana', 403, true],
@@ -125,9 +127,9 @@ const TABLE: [row: string, method: string, path: string, body: unknown, allowed:
   ['revoke token', 'DELETE', `/api/tenants/${A}/tokens/<old>`, undefined, 'ana', 'bob', 403, true],
   ['state', 'GET', '/api/apps/gamma/state', undefined, 'cid', 'token:bob', 404],
   ['tenant state', 'GET', `/api/state?tenant=${B}`, undefined, 'cid', 'token:bob', 403],
-  ['stop', 'POST', '/api/apps/alpha/stop', undefined, 'ana', 'bob', 403, true],
+  ['stop', 'POST', '/api/apps/alpha/stop', undefined, 'bob', 'dee', 404, true],
   ['stop another tenant\'s app', 'POST', '/api/apps/alpha/stop', undefined, 'ana', 'cid', 404],
-  ['restart', 'POST', '/api/apps/alpha/restart', undefined, 'ana', 'bob', 403, true],
+  ['restart', 'POST', '/api/apps/alpha/restart', undefined, 'ana', 'dee', 404, true],
   ['kill', 'POST', '/api/apps/alpha/kill', undefined, 'root', 'ana', 403, true],
   ['remove', 'POST', '/api/apps/alpha/remove', undefined, 'bob', 'cid', 404],
   ['unquarantine', 'POST', '/api/apps/alpha/unquarantine', undefined, 'bob', 'cid', 404],
@@ -156,7 +158,7 @@ test('every endpoint row admits a caller with the role and refuses one without i
 });
 
 test('a signed-in write without Sec-Fetch-Site: same-origin gets 403; a token\'s does not need it (AC-ID-7)', async () => {
-  const policy = (as: string, crossSite = false) => call(as, 'PUT', '/api/apps/omega/policy', { idle_seconds: 9 }, { crossSite });
+  const policy = (as: string, crossSite = false) => call(as, 'PUT', '/api/apps/bobs/policy', { idle_seconds: 9 }, { crossSite });
   assert.equal((await policy('bob', true)).status, 403);
   assert.equal((await policy('bob')).status, 200);
   assert.equal((await policy('token:ci', true)).status, 200);
@@ -253,4 +255,75 @@ test('a personal token publishes into its tenant with the issuer as owner, and t
     }).on('error', reject);
   });
   assert.equal(headers['x-pneuma-space-owner'], '1');
+});
+
+const names = async (as: string, path: string, pick: (body: never) => { name?: string; app?: string }[]) =>
+  pick((await call(as, 'GET', path)).body as never).map((a) => a.name ?? a.app!).sort();
+const ownedBy = (owner: string, list: readonly string[]) => list.filter((name) => registry.view(appName(name))?.owner === owner);
+
+test('AC-ID-13: the app list and the state inventory hold a member\'s own apps, and every app of the tenant for its admin and its service token', async () => {
+  const listed = (as: string) => names(as, '/api/apps', (body: { name: string; tenant: string }[]) => body.filter((a) => a.tenant === A));
+  const inventory = (as: string) => names(as, `/api/state?tenant=${A}`, (body: { apps: { app: string }[] }) => body.apps);
+  const all = await listed('root');
+  assert.ok(all.includes('bobs') && all.includes('dees'));
+  for (const [as, expected] of [['bob', ownedBy('user:bob', all)], ['dee', ownedBy('user:dee', all)], ['ana', all], ['token:ci', all]] as const) {
+    assert.deepEqual([await listed(as), await inventory(as)], [expected, expected], as);
+  }
+});
+
+test('AC-ID-13: a member\'s audit holds only rows whose target is an app they own', async () => {
+  for (const name of ['bobs', 'dees']) assert.equal((await call('ana', 'PUT', `/api/apps/${name}/policy`, { idle_seconds: 30 })).status, 200);
+  const targets = async (as: string) => (await call(as, 'GET', `/api/audit?tenant=${A}`)).body.map((r: AuditRecord) => `${r.targetKind}:${r.target}`);
+  const bob = await targets('bob');
+  assert.ok(bob.includes('app:bobs'));
+  assert.deepEqual(bob.filter((t: string) => !t.startsWith('app:') || registry.view(appName(t.slice(4)))?.owner !== 'user:bob'), []);
+  assert.ok((await targets('ana')).includes('app:dees'));
+});
+
+test('AC-ID-13: usage by tenant and the usage ranking count only the apps the caller reads', async () => {
+  const zero = Object.fromEntries(USAGE_COUNTERS.map((c) => [c, 0])) as Record<(typeof USAGE_COUNTERS)[number], number>;
+  const start = Math.floor(Date.now() / 3_600_000) * 3_600_000;
+  await store.putUsage(([['bobs', 3], ['dees', 5]] as const).map(([name, requests]) =>
+    ({ ...zero, app: registry.view(appName(name))!.app, tenant: A, step: 3600, start, replica: 'r1' as ReplicaId, requests })));
+  const total = async (as: string) => (await call(as, 'GET', `/api/usage?tenant=${A}`)).body.buckets.reduce((n: number, b: { requests: number }) => n + b.requests, 0);
+  const ranked = (as: string) => names(as, `/api/usage/apps?tenant=${A}`, (body: { app: string }[]) => body);
+  assert.deepEqual([await total('bob'), await total('dee'), await total('ana'), await total('token:ci')], [3, 5, 8, 8]);
+  assert.deepEqual([await ranked('bob'), await ranked('ana')], [['bobs'], ['bobs', 'dees']]);
+});
+
+test('AC-ID-13: reading or changing another member\'s app answers 404', async () => {
+  const got = [
+    await call('bob', 'GET', '/api/apps/dees'),
+    await call('bob', 'GET', '/api/apps/dees/logs'),
+    await call('bob', 'PUT', '/api/apps/dees/policy', { idle_seconds: 7 }),
+    await call('bob', 'POST', '/api/apps/dees/remove'),
+  ];
+  assert.deepEqual(got.map((r) => [r.status, r.body.error]), Array(4).fill([404, 'no app named "dees"']));
+});
+
+test('AC-ID-13: a member\'s first publish naming another owner answers 403', async () => {
+  const got = await call('bob', 'PUT', '/api/apps/for-dee/release', { ...release, owner: 'user:dee' });
+  assert.deepEqual([got.status, registry.view(appName('for-dee'))], [403, null]);
+  assert.match(got.body.error, /^requires admin of tenant "team-a" or a service token/);
+});
+
+test('AC-ID-13: the tenant admin and its service token change both members\' apps', async () => {
+  for (const as of ['ana', 'token:ci']) {
+    for (const name of ['bobs', 'dees']) assert.equal((await call(as, 'PUT', `/api/apps/${name}/access`, { access: 'tenant' })).status, 200, `${as} ${name}`);
+  }
+});
+
+test('AC-ID-13: a personal token reads what its issuer owns and nothing else', async () => {
+  assert.deepEqual([(await call('token:bob', 'GET', '/api/apps/bobs')).status, (await call('token:bob', 'GET', '/api/apps/dees')).status], [200, 404]);
+});
+
+test('AC-ID-13: the owner stops and restarts their app by JWT, not by token', async () => {
+  const run = async (as: string, kind: string) => (await call(as, 'POST', `/api/apps/bobs/${kind}`)).status;
+  assert.deepEqual([await run('bob', 'stop'), await run('bob', 'restart'), await run('token:bob', 'stop'), await run('token:bob', 'restart')], [200, 200, 403, 403]);
+});
+
+test('the app detail names the app actions the caller may take', async () => {
+  const may = async (as: string) => (await call(as, 'GET', '/api/apps/bobs')).body.may;
+  assert.deepEqual(await may('bob'), ['app.read', 'app.release', 'app.policy', 'app.access', 'app.owner', 'app.remove', 'app.stop']);
+  assert.deepEqual(await may('ana'), ['app.read', 'app.release', 'app.policy', 'app.access', 'app.owner', 'app.remove', 'app.purge', 'app.stop']);
 });

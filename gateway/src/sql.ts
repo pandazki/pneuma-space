@@ -573,7 +573,8 @@ export class SqlOps implements StoreOps {
   }
 
   async usage(filter: UsageFilter) {
-    const w = where([['step = ?', filter.step], ['start >= ?', filter.from], ['start < ?', filter.to], ['app = ?', filter.app], ['tenant = ?', filter.tenant]]);
+    const w = where([['step = ?', filter.step], ['start >= ?', filter.from], ['start < ?', filter.to], ['app = ?', filter.app], ['tenant = ?', filter.tenant],
+      ['app IN (SELECT id FROM app WHERE owner = ?)', filter.owner]]);
     const sums = USAGE_COLUMNS.map(([, c]) => `sum(${c}) AS ${c}`).join(', ');
     const rows = await this.#s.all(`SELECT app, max(tenant) AS tenant, step, start, ${sums} FROM usage ${w.sql} GROUP BY app, step, start ORDER BY app, start`, w.params);
     return rows.map((r): UsageBucket => ({
@@ -623,6 +624,7 @@ export class SqlOps implements StoreOps {
     const w = where([
       ['tenant = ?', filter.tenant], ['at >= ?', filter.from], ['at < ?', filter.to], ['actor = ?', filter.actor],
       ['action = ?', filter.action], ['target = ?', filter.target],
+      ["target_kind = 'app' AND target IN (SELECT name FROM app WHERE owner = ?)", filter.owner],
     ]);
     return (await this.#s.all(`SELECT * FROM audit ${w.sql} ORDER BY id DESC${limit(filter.limit)}`, w.params)).map(toAudit);
   }

@@ -242,6 +242,15 @@ export function storeContract(name: string, open: OpenStore): void {
       ]);
     });
 
+    test('usage with an owner reads only the apps that subject owns', async () => {
+      const zero = Object.fromEntries(USAGE_COUNTERS.map((c) => [c, 0])) as Record<(typeof USAGE_COUNTERS)[number], number>;
+      const tenant = 'umber' as TenantName;
+      await store.putApp(app('u-bob', { tenant, owner: 'user:bob' as Subject }));
+      await store.putApp(app('u-dee', { tenant, owner: 'user:dee' as Subject }));
+      await store.putUsage(['u-bob', 'u-dee'].map((name) => ({ ...zero, app: appId(name), tenant, step: 3600, start: 0, replica, requests: 1 })));
+      assert.deepEqual((await store.usage({ step: 3600, tenant, owner: 'user:bob' as Subject, from: 0, to: 1 })).map((b) => b.app), [appId('u-bob')]);
+    });
+
     test('events get increasing ids and the library clock', async () => {
       const before = Date.now() - 1000;
       await store.insertEvents([1, 2].map((n) => ({ replica, ev: 'round-trip', app: null, tenant: null, body: { n } })));
@@ -263,6 +272,16 @@ export function storeContract(name: string, open: OpenStore): void {
       const first = await store.insertAudit(row);
       const second = await store.insertAudit({ ...row, at: 2, action: 'app.remove' });
       assert.deepEqual(await store.audit({ target: 'audited' }), [{ ...row, id: second, at: 2, action: 'app.remove' }, { ...row, id: first }]);
+    });
+
+    test('audit with an owner reads only rows whose target is an app that subject owns', async () => {
+      const tenant = 'amber' as TenantName;
+      await store.putApp(app('a-bob', { tenant, owner: 'user:bob' as Subject }));
+      await store.putApp(app('a-dee', { tenant, owner: 'user:dee' as Subject }));
+      const row = { at: 1, actor: 'user:ann' as Subject, actorTenant: tenant, tenant, action: 'app.publish', targetKind: 'app', result: 'ok', details: {} } as const;
+      for (const target of ['a-bob', 'a-dee']) await store.insertAudit({ ...row, target });
+      await store.insertAudit({ ...row, action: 'member.add', targetKind: 'member', target: 'a-bob' });
+      assert.deepEqual((await store.audit({ tenant, owner: 'user:bob' as Subject })).map((a) => a.target), ['a-bob']);
     });
 
     test('quotaUsed counts each files and SQLite binding of the tenant at the provisioned volume size', async () => {

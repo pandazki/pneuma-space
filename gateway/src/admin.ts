@@ -6,7 +6,7 @@ import type { Metrics } from './metrics.ts';
 import type { NodeView } from './nodes.ts';
 import type { Runtimes } from './runtimes.ts';
 import { gather, peerSources, RING, seqIn, type RequestLog, type Source } from './requests.ts';
-import { can, LOCAL_CALLER, type Action, type Authority } from './authz.ts';
+import { appActions, can, LOCAL_CALLER, reach, type Action, type Authority } from './authz.ts';
 import type { Answer, Identity } from './identity.ts';
 import {
   ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, LOGOUT_PATH, NotFound, QuotaExceeded, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
@@ -49,7 +49,7 @@ class Forbidden extends Error {}
 
 type Body = Readonly<Record<string, unknown>>;
 type Ctx = { readonly request: IncomingMessage; readonly query: URLSearchParams; readonly params: readonly string[]; readonly body: Body; readonly caller: Caller };
-/** What `can` checks against: the target's tenant, the app's owner or the token's issuer, and the 404 text for a target hidden from the caller. */
+/** What `can` checks against: the target's tenant, the app's owner (on a first publish the owner it will get) or the token's issuer, and the 404 text for an app hidden from the caller. */
 type Scope = { readonly tenant: TenantName | null; readonly holder?: Subject | 'local' | null; readonly hidden?: string };
 /** A string result is sent as text/plain, anything else as JSON. */
 type Handler = (ctx: Ctx, scope: Scope) => Promise<unknown> | unknown;
@@ -151,6 +151,16 @@ function userId(raw: unknown): string {
 
 const subjectOf = (actor: Actor): Subject | null => ('subject' in actor ? actor.subject : null);
 
+/** The owner a first publish gives the app: the named one, or the caller (ADR 0022 item 3). */
+const firstOwner = ({ body, caller }: Ctx): Subject | null => optional(body.owner, 'owner', subject) ?? subjectOf(caller.actor);
+
+/** What a records row reads in `tenant`: every app's rows, or a member's own apps' (ADR 0022 item 5); `can` already let the caller in. */
+function readable(caller: Caller, tenant: TenantName | null): { readonly owner?: Subject } {
+  const scope = tenant === null ? 'all' : reach(caller, tenant);
+  if (scope === null) throw new Forbidden(`requires member of tenant "${tenant}"`);
+  return scope === 'all' ? {} : { owner: scope };
+}
+
 /** A first publish lands in the named tenant, or in the caller's only one (ADR 0022 item 3). */
 function firstTenant({ body, caller }: Ctx): TenantName {
   const named = optional(body.tenant, 'tenant', tenantName);
@@ -221,7 +231,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
     {
       method: 'GET', path: at(ADMIN_PATHS.apps), action: 'apps.list', handle: async ({ caller, query }) => {
         const all = await registry.listing();
-        if (!caller.platformAdmin) return all.filter((a) => caller.roles.has(a.tenant));
+        if (!caller.platformAdmin) return all.filter((a) => can(caller, 'app.read', a.tenant, registry.view(a.name)?.owner ?? null) === true);
         const tenant = query.get('tenant');
         return tenant ? all.filter((a) => a.tenant === tenantName(tenant)) : all;
       },
@@ -255,9 +265,12 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
     },
     {
       method: 'GET', path: at(ADMIN_PATHS.usage),
-      action: ({ query }) => (query.get('app') ?? '*') === '*' ? 'records' : 'app.read',
+      action: ({ query }) => {
+        const name = query.get('app');
+        return name === null ? 'records' : name === '*' ? 'platform.read' : 'app.read';
+      },
       scope: (ctx) => (ctx.query.get('app') ?? '*') === '*' ? onQuery(ctx) : onApp(ctx.query.get('app')!),
-      handle: async ({ query }) => {
+      handle: async ({ query, caller }) => {
         const window = usageWindow(query);
         const name = query.get('app');
         const tenant = query.get('tenant');
@@ -265,14 +278,16 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
           const app = name === '*' ? '*' : found(registry.view(appName(name)), name).app;
           return { app: name, step: 3600, ...window, buckets: byStart(await store.usage({ step: 3600, app, ...window })) };
         }
-        if (tenant !== null) return { tenant, step: 3600, ...window, buckets: byStart(await store.usage({ step: 3600, tenant: tenantName(tenant), ...window })) };
+        if (tenant !== null) {
+          const t = tenantName(tenant);
+          return { tenant, step: 3600, ...window, buckets: byStart(await store.usage({ step: 3600, tenant: t, ...readable(caller, t), ...window })) };
+        }
         throw new InputError('app or tenant is required');
       },
     },
     {
-      method: 'GET', path: at(ADMIN_PATHS.usageApps), action: 'records', scope: onQuery, handle: async ({ query }) => {
-        const tenant = query.get('tenant');
-        const rows = await store.usage({ step: 3600, ...usageWindow(query), ...(tenant !== null && { tenant: tenantName(tenant) }) });
+      method: 'GET', path: at(ADMIN_PATHS.usageApps), action: 'records', scope: onQuery, handle: async ({ query, caller }, scope) => {
+        const rows = await store.usage({ step: 3600, ...usageWindow(query), ...(scope.tenant !== null && { tenant: scope.tenant }), ...readable(caller, scope.tenant) });
         const apps = new Map<AppId, { tenant: string | null; counts: Record<string, number> }>();
         for (const b of rows) {
           if (b.app === '*') continue;
@@ -285,7 +300,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
           .slice(0, wholeParam(query, 'limit', 50, 1, 1000));
       },
     },
-    { method: 'GET', path: at(ADMIN_PATHS.audit), action: 'records', scope: onQuery, handle: ({ query }) => store.audit(auditFilter(query)) },
+    { method: 'GET', path: at(ADMIN_PATHS.audit), action: 'records', scope: onQuery, handle: ({ query, caller }, scope) => store.audit({ ...auditFilter(query), ...readable(caller, scope.tenant) }) },
     {
       method: 'GET', path: at(ADMIN_PATHS.requests), action: 'platform.read', handle: async ({ query, request }) => {
         const cursor = query.get('after') ?? '';
@@ -294,40 +309,42 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
         return gather(cursor, limit, peers ? await peerSources(peers.host, ADMIN_PORT, forwarded(request), peerNames) : [local]);
       },
     },
-    appRoute('GET', ADMIN_PATHS.app('<name>'), 'app.read', async ({ params: [name] }) => found(await registry.detail(app(name)), name)),
+    appRoute('GET', ADMIN_PATHS.app('<name>'), 'app.read', async ({ params: [name], caller }) => {
+      const detail = found(await registry.detail(app(name)), name);
+      return { ...detail, may: appActions(caller, detail.app) };
+    }),
     appRoute('GET', ADMIN_PATHS.state('<name>'), 'app.read', async ({ params: [name] }) => {
       const row = found(await store.app(app(name)), name);
       return inventory(row, row.current === null ? null : await store.release(row.id, row.current), await store.bindings(row.id));
     }),
     {
-      method: 'GET', path: at(ADMIN_PATHS.states), action: 'records', scope: onQuery, handle: async (_, scope) => {
+      method: 'GET', path: at(ADMIN_PATHS.states), action: 'records', scope: onQuery, handle: async ({ caller }, scope) => {
         const [rows, bindings] = await Promise.all([store.appsWithCurrent(), store.bindings()]);
         const byApp = Map.groupBy(bindings, (b) => b.app);
         return {
-          apps: rows.filter(({ app: row }) => scope.tenant === null || row.tenant === scope.tenant)
+          apps: rows.filter(({ app: row }) => (scope.tenant === null || row.tenant === scope.tenant) && can(caller, 'app.read', row.tenant, row.owner) === true)
             .map(({ app: row, release }) => inventory(row, release, byApp.get(row.id) ?? [])),
         };
       },
     },
     appRoute('GET', ADMIN_PATHS.logs('<name>'), 'app.read', ({ query, params: [name] }) => runtime.logs(found(registry.view(app(name)), name).app, wholeParam(query, 'tail', 200, 1, MAX_TAIL))),
     {
-      method: 'PUT', path: at(ADMIN_PATHS.release('<name>')), json: true, action: 'app.release',
+      method: 'PUT', path: at(ADMIN_PATHS.release('<name>')), json: true,
+      action: ({ params: [name] }) => (registry.view(app(name)) ? 'app.release' : 'apps.create'),
       scope: (ctx) => {
         const [name] = ctx.params;
-        if (registry.view(app(name))) return onApp(name);
-        const tenant = firstTenant(ctx);
-        return { tenant, hidden: `no tenant named "${tenant}"` };
+        return registry.view(app(name)) ? onApp(name) : { tenant: firstTenant(ctx), holder: firstOwner(ctx) };
       },
       audit: onAppAudit('app.publish', (_, result) => {
         const release = result as Release | undefined;
         return release ? { release: release.number, releaseKey: release.releaseKey } : {};
       }),
-      handle: ({ params: [name], body, caller }, scope) => registry.publish({
-        name: app(name),
-        manifest: parseManifest(body.manifest),
-        image: optional(body.image, 'image', (raw) => raw),
-        bundle: optional(body.bundle, 'bundle', bundleId),
-        owner: optional(body.owner, 'owner', subject) ?? subjectOf(caller.actor),
+      handle: (ctx, scope) => registry.publish({
+        name: app(ctx.params[0]),
+        manifest: parseManifest(ctx.body.manifest),
+        image: optional(ctx.body.image, 'image', (raw) => raw),
+        bundle: optional(ctx.body.bundle, 'bundle', bundleId),
+        owner: firstOwner(ctx),
         tenant: scope.tenant ?? DEFAULT_TENANT,
       }),
     },
@@ -532,7 +549,7 @@ async function audited(store: AdminDeps['store'], audit: Audit, ctx: Ctx, scope:
   }
 }
 
-/** 403 names what is missing, 404 hides an app in another tenant (ADR 0022 item 5); a signed-in write must come from the console's own origin (ADR 0021 item 7). */
+/** 403 names what is missing, 404 hides an app the caller cannot read (ADR 0022 item 5); a signed-in write must come from the console's own origin (ADR 0021 item 7). */
 function authorize(route: Route, ctx: Ctx, scope: Scope): void {
   const { caller, request } = ctx;
   if (caller.actor.via === 'upstream' && !READS.has(request.method ?? '') && request.headers['sec-fetch-site'] !== 'same-origin') {

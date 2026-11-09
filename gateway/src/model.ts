@@ -710,6 +710,8 @@ export type UsageFilter = {
   readonly step: UsageStep;
   readonly app?: AppId | '*';
   readonly tenant?: TenantName;
+  /** Only the apps this subject owns now (ADR 0022 item 5). */
+  readonly owner?: Subject;
   /** start >= from and start < to */
   readonly from: number;
   readonly to: number;
@@ -762,6 +764,8 @@ export type AuditRecord = {
 };
 export type AuditFilter = {
   readonly tenant?: TenantName;
+  /** Only rows whose target is an app this subject owns now (ADR 0022 item 5). */
+  readonly owner?: Subject;
   readonly from?: number;
   readonly to?: number;
   readonly actor?: string;

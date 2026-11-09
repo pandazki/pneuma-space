@@ -13,7 +13,7 @@
 3. **操作**，都审计（ADR 0024 第 6 项，`target_kind` 加 `workload | pod | node`），都要 `Sec-Fetch-Site: same-origin`，都幂等：
    - `PUT /api/cluster/workloads/<name>/scale {replicas}`（`cluster.scale`，平台管理员）：只对 `scalable` 的两项，网关 Deployment 和 runner StatefulSet；`replicas` 在 1 到 `PNEUMA_SPACE_SCALE_MAX`（默认 10）之间，越界 400；不可伸缩的名字 409。缩 runner 时 RunnerPool 按既有规则改派 home（ADR 0019 第 8 项），被缩掉副本的 PVC 保留。
    - `POST /api/cluster/pods/<name>/restart`（`cluster.restart`，平台管理员）：删除平台命名空间里 `pneuma-space.role` 为 `gateway` 或 `runner` 的 Pod，带 uid 前置条件，控制器重建；其他角色 409。删网关副本就是一次正常滚动：SIGTERM 排空（ADR 0020），领导权重选。
-   - `POST /api/apps/<name>/stop`（`app.stop`，租户管理员或平台管理员）：`Runtime.retire`，排空后删实例，下次请求唤醒。`POST /api/apps/<name>/restart`（`app.stop`）：`retire` 后 `acquire('trigger')` 再立即 `release`。
+   - `POST /api/apps/<name>/stop`（`app.stop`，应用的 owner、租户管理员或平台管理员，只接受 JWT，ADR 0022 第 5 项）：`Runtime.retire`，排空后删实例，下次请求唤醒。`POST /api/apps/<name>/restart`（`app.stop`）：`retire` 后 `acquire('trigger')` 再立即 `release`。
    - `POST /api/apps/<name>/kill`（`app.kill`，平台管理员），强制释放：新的 `Runtime.kill(app)`，不排空，直接删 Pod 或容器（宽限 0），实例行无条件置 `asleep`（不看 actor 是否存活），删该 app 在所有副本名下的租约计数，释放唤醒认领。ADR 0020 第 4 项的接管只认死 actor；这是运营者对「卡住」的兜底，所以它不进应用的命令锁（卡在排空或唤醒里的命令正握着锁），其他命令在下一次条件更新失败时放弃。
    - `POST /api/cluster/nodes/<name>/drain`（`cluster.drain`，平台管理员）：对采样里跑在该节点上的每个实例执行 `stop`；节点本身不改。
    - 每实例的 CPU 和内存上限在实例表里就地编辑，走已有的 `PUT /api/apps/<name>/policy`。
