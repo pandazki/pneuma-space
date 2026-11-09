@@ -45,3 +45,6 @@ examples/.build/
 # scratch of verifiers and workers, never content
 /.*-tmp/
 /.screens/
+
+# Developer cluster identity (deploy/dev-cluster/identity.mjs keys)
+/deploy/dev-cluster/keys.json
