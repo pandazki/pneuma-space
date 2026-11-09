@@ -31,7 +31,7 @@ PneumaSpace deploys stateful web apps on one trusted host (M1) or an organizatio
 
 | Change | Run |
 | --- | --- |
-| Anything under `gateway/src` or `cli/` | `npm run test:unit`: in-process, seconds. `console.html` has no test beyond it; look at the page on a running stack |
+| Anything under `gateway/src` or `cli/` | `npm run test:unit`: in-process, seconds. `console.html` has no test beyond it; look at the page on a running stack, and follow `docs/console.md` (method, controls, where tables are allowed, destructive actions, both languages, 1440 and 390 px) |
 | `runner.ts`, `isolate-shim.ts`, `isolate.ts`, `lifecycle.ts` | also `npm run test:runner`: spawns runner processes, timing-sensitive, needs a quiet host |
 | `runtime.ts`, `infra.ts`, `docker.ts`, `providers.ts`, `pg.ts`, `store-pg.ts`, `compose.yaml` | also `npm run test:docker`: real containers and compose services, minutes |
 | `kube.ts`, `pods.ts`, `deploy/kubernetes/`, anything the `kubernetes` plane runs differently | also `npm run test:k8s` against the operator's cluster named by `PNEUMA_SPACE_TEST_KUBECONTEXT`; never creates or deletes clusters; cluster-only acceptance rows live here |
