@@ -713,6 +713,7 @@ button.pdots:hover .caret { color: var(--ink); }
 .att .item .side .btn { height: 22px; font-size: 11.5px; padding: 0 8px; }
 .att .clear { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 16px; }
 .att .clear .st { font-size: 13px; color: var(--ink); }
+.att .item .why { font: 12px/18px var(--font); color: var(--ink-2); }
 .att .item.raw { display: block; padding: 10px 14px; }
 .att .item.raw::before { display: none; }
 .cl details > summary { cursor: pointer; list-style: none; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12.5px; color: var(--ink-2); }
@@ -720,6 +721,10 @@ button.pdots:hover .caret { color: var(--ink); }
 .cl details > summary::before { content: "›"; color: var(--ink-3); transition: transform .15s; }
 .cl details[open] > summary::before { transform: rotate(90deg); }
 .wlist { display: grid; gap: 2px; margin-top: 10px; max-height: 360px; overflow: auto; }
+.wobj { padding: 8px 0; border-top: 1px solid var(--line-soft); }
+.wobj:first-child { border-top: 0; }
+.wohead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 12.5px; }
+.wobj .wline { border-top: 0; padding: 3px 0 3px 12px; }
 .wline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 5px 0; border-top: 1px solid var(--line-soft); font-size: 12px; }
 .wline .msgline { flex: 1 1 320px; min-width: 0; font: 11.5px/17px var(--mono); color: var(--ink-3); overflow-wrap: anywhere; }
 .nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); gap: 12px; }
@@ -1091,12 +1096,13 @@ const I18N = {
     'cl.restartPodItem': '重启 Pod…', 'cl.restartPodNote': '删除它，控制器重建', 'cl.restartPodTitle': '重启 {pod}？', 'cl.restarted': '已删除 {pod}，控制器正在重建。',
     'cl.restartGateway': '删除这个 Pod，控制器重建它。它先排空连接；如果它是领导者，领导权在别的副本上重选。',
     'cl.restartRunner': '删除这个 Pod，控制器重建它。它上面的 isolate worker 随之结束，下次请求重新唤醒。',
-    'cl.att.open': '打开应用', 'cl.att.pod': 'Pod 未就绪', 'cl.att.podWhy': '{phase} · 节点 {node} · 未就绪 {d}',
-    'cl.att.node': '节点未就绪', 'cl.att.cordoned': '节点已 cordon', 'cl.att.nodeWhy': '节点和它的调度标记归 kubectl，不在平台的操作里；它上面的实例可以在节点框里排空。',
-    'cl.att.stuck': '实例卡在{state}', 'cl.att.stuckWhy': '停了 {d}',
-    'cl.att.gone.one': '{n} 个已不存在的对象', 'cl.att.gone.other': '{n} 个已不存在的对象',
+    'cl.att.open': '打开应用', 'cl.att.podWhy': '在节点 {node} 上未就绪 {d}', 'cl.att.instance': '实例', 'cl.att.stuckWhy': '卡在{state} {d}',
+    'cl.att.nodeWhy': '节点未就绪；节点归 kubectl，它上面的实例可以在节点框里排空。', 'cl.att.cordonedWhy': '节点不可调度；调度标记归 kubectl。',
+    'cl.warnings.one': '{n} 次', 'cl.warnings.other': '{n} 次', 'cl.placing': '正在调度', 'cl.cpuNone': 'CPU –', 'cl.memNone': '内存 –', 'cl.unplaced': '未放置', 'cl.killAction': '强制释放',
+    'cl.reason.Unhealthy': '健康检查未通过', 'cl.reason.FailedScheduling': '无法调度', 'cl.reason.BackOff': '反复重启', 'cl.reason.FailedMount': '卷挂载失败',
+    'cl.reason.FailedCreate': '创建失败', 'cl.reason.Evicted': '被驱逐', 'cl.reason.OOMKilled': '内存超限被终止', 'cl.reason.ImagePullBackOff': '拉不到镜像', 'cl.reason.ErrImagePull': '拉不到镜像',
     'cl.allClear': '一切正常', 'cl.allClearSub': '服务都可达，没有卡住的实例。', 'cl.allClearSub.k8s': '组件都到位，节点就绪，没有卡住的实例，最近没有新告警。',
-    'cl.raw': '全部告警：最近一小时 {n} 条',
+    'cl.raw': 'Kubernetes 原始告警：最近一小时 {n} 条，按对象分 {objects} 组',
     'cl.pods': '平台 Pod', 'cl.gateways': '网关', 'cl.runners': 'runner', 'cl.services': '其他', 'cl.appPods': '实例',
     'cl.others.one': '{n} 个平台 Pod', 'cl.others.other': '{n} 个平台 Pod', 'cl.workers.one': '{n} 个 worker', 'cl.workers.other': '{n} 个 worker',
     'cl.instancesN.one': '{n} 个实例将被停止', 'cl.instancesN.other': '{n} 个实例将被停止',
@@ -1367,12 +1373,13 @@ const I18N = {
     'cl.restartPodItem': 'Restart Pod…', 'cl.restartPodNote': 'Deletes it; the controller recreates it', 'cl.restartPodTitle': 'Restart {pod}?', 'cl.restarted': '{pod} deleted; its controller is recreating it.',
     'cl.restartGateway': 'Deletes the Pod and its controller recreates it. It drains its connections first; if it leads, another replica takes the lead.',
     'cl.restartRunner': 'Deletes the Pod and its controller recreates it. Its isolate workers end with it; the next request wakes them again.',
-    'cl.att.open': 'Open app', 'cl.att.pod': 'Pod not ready', 'cl.att.podWhy': '{phase} on {node}, not ready for {d}',
-    'cl.att.node': 'Node not ready', 'cl.att.cordoned': 'Node cordoned', 'cl.att.nodeWhy': 'The node and its scheduling flag belong to kubectl, not to the platform; drain its instances from the node frame.',
-    'cl.att.stuck': 'Instance stuck {state}', 'cl.att.stuckWhy': 'for {d}',
-    'cl.att.gone.one': '{n} object that no longer exists', 'cl.att.gone.other': '{n} objects that no longer exist',
+    'cl.att.open': 'Open app', 'cl.att.podWhy': 'not ready on {node} for {d}', 'cl.att.instance': 'Instance', 'cl.att.stuckWhy': '{state} for {d}',
+    'cl.att.nodeWhy': 'Node not ready; the node belongs to kubectl, its instances can be drained from the node frame.', 'cl.att.cordonedWhy': 'Node not schedulable; the flag belongs to kubectl.',
+    'cl.warnings.one': '{n} time', 'cl.warnings.other': '{n} times', 'cl.placing': 'being placed', 'cl.cpuNone': 'CPU –', 'cl.memNone': 'Mem –', 'cl.unplaced': 'not placed', 'cl.killAction': 'Force release',
+    'cl.reason.Unhealthy': 'failing health checks', 'cl.reason.FailedScheduling': 'cannot be scheduled', 'cl.reason.BackOff': 'restarting in a loop', 'cl.reason.FailedMount': 'volume mount failed',
+    'cl.reason.FailedCreate': 'could not be created', 'cl.reason.Evicted': 'evicted', 'cl.reason.OOMKilled': 'killed for exceeding memory', 'cl.reason.ImagePullBackOff': 'cannot pull its image', 'cl.reason.ErrImagePull': 'cannot pull its image',
     'cl.allClear': 'All clear', 'cl.allClearSub': 'Every service answers and no instance is stuck.', 'cl.allClearSub.k8s': 'Every component at desired, nodes ready, nothing stuck, no fresh warnings.',
-    'cl.raw': 'All warnings: {n} in the last hour',
+    'cl.raw': 'Raw Kubernetes warnings: {n} in the last hour, {objects} objects',
     'cl.pods': 'Platform Pods', 'cl.gateways': 'Gateways', 'cl.runners': 'Runner', 'cl.services': 'Others', 'cl.appPods': 'Instances',
     'cl.others.one': '{n} platform Pod', 'cl.others.other': '{n} platform Pods', 'cl.workers.one': '{n} worker', 'cl.workers.other': '{n} workers',
     'cl.instancesN.one': 'Stops {n} instance', 'cl.instancesN.other': 'Stops {n} instances',
@@ -4560,8 +4567,11 @@ const BUCKETS = ['stuck', 'waking', 'awake', 'draining', 'stopping'];
 const TRANSIT = ['waking', 'draining', 'stopping'];
 /** Past the default wake and drain timeouts (15 s, 30 s) with room to spare; an app that raised its own timeouts can show here early. */
 const STUCK_MS = 60_000;
-/** A warning about an object the sample no longer has still needs attention this long. */
-const FRESH_MS = 10 * 60_000;
+/** A warning on an object that is ready again stays this long after its last occurrence; on a gone object, never. */
+const WARNING_MS = 5 * 60_000;
+/** Kubernetes reasons the console says in words; any other shows as its code. */
+const REASONS = ['Unhealthy', 'FailedScheduling', 'BackOff', 'FailedMount', 'FailedCreate', 'Evicted', 'OOMKilled', 'ImagePullBackOff', 'ErrImagePull'];
+const reasonText = (r) => (REASONS.includes(r) ? t(`cl.reason.${r}`) : r);
 
 const roleOf = (w) => (w.role === 'rustfs' ? 'object' : w.role);
 const podLabel = (name) => name.replace(/^pneuma-space-/, '');
@@ -4643,6 +4653,7 @@ function cluster() {
     return el;
   };
 
+  /** An outcome's `until` says when the state it reports is gone; the note then clears itself. */
   const run = async (key, call, outcome = null) => {
     ops.set(key, { busy: true });
     paint();
@@ -4669,21 +4680,29 @@ function cluster() {
     if (!(await approve({ title: t('cl.drainTitle', { node }), body: t('cl.drainBody'), facts: on.map((i) => h('span', { class: 'mono' }, i.app)), danger: true }))) return;
     run(`node:${node}`, () => api('POST', `/api/cluster/nodes/${encodeURIComponent(node)}/drain`), ({ stopped, failed }) => (failed.length
       ? { error: t('cl.drainFailed', { stopped: stopped.join(', ') || '-', failed: failed.map((f) => `${f.app} (${f.error})`).join(', ') }) }
-      : { note: t('cl.drained', { stopped: stopped.join(', ') || '-' }) }));
+      : { note: t('cl.drained', { stopped: stopped.join(', ') || '-' }), until: () => !instances().some((i) => i.node === node && stopped.includes(i.app)) }));
   };
   const restartPod = async (pod) => {
     if (!(await approve({ title: t('cl.restartPodTitle', { pod: pod.name }), body: t(pod.role === 'gateway' ? 'cl.restartGateway' : 'cl.restartRunner'), danger: true }))) return;
-    run(`workload:${workloadOf(pod)?.name}`, () => api('POST', `/api/cluster/pods/${encodeURIComponent(pod.name)}/restart`), () => ({ note: t('cl.restarted', { pod: pod.name }) }));
+    const owner = workloadOf(pod)?.name;
+    run(`workload:${owner}`, () => api('POST', `/api/cluster/pods/${encodeURIComponent(pod.name)}/restart`), () => ({
+      note: t('cl.restarted', { pod: pod.name }),
+      until: () => { const w = view.workloads.find((x) => x.name === owner); return !w || (!w.pods.some((p) => p.name === pod.name) && w.ready >= w.desired); },
+    }));
   };
   const scale = async (w) => {
     let n = w.desired;
     const body = h('span');
     const control = stepper(w.desired, 1, view.scaleMax, t('cl.replicas', { name: w.name }), (v) => { n = v; body.textContent = t('cl.scaleBody', { from: nf(w.desired), n: nf(v) }); });
     if (!(await approve({ title: t('cl.scaleTitle', { name: roleLabel(w) }), body, control })) || n === w.desired) return;
-    run(`workload:${w.name}`, () => api('PUT', `/api/cluster/workloads/${encodeURIComponent(w.name)}/scale`, { replicas: n }), () => ({ note: t('cl.scaled', { n: nf(n) }) }));
+    run(`workload:${w.name}`, () => api('PUT', `/api/cluster/workloads/${encodeURIComponent(w.name)}/scale`, { replicas: n }), () => ({
+      note: t('cl.scaled', { n: nf(n) }),
+      until: () => { const x = view.workloads.find((y) => y.name === w.name); return !x || (x.desired === n && x.ready === n && x.pods.length === n); },
+    }));
   };
+  /** Stop and restart are safe and frequent and act at once; force release goes through its approval card. */
   const lifecycle = async (i, op) => {
-    if (!(await approve({ title: t(`cl.${op}Title`, { app: i.app }), body: t(`cl.${op}Body`), danger: op === 'kill' }))) return;
+    if (op === 'kill' && !(await approve({ title: t('cl.killTitle', { app: i.app }), body: t('cl.killBody'), action: t('cl.killAction'), danger: true }))) return;
     run(`app:${i.app}`, () => api('POST', `${appPath(i.app)}/${op}`));
   };
   const restartMenu = (p, text = null) => (k8s() && RESTARTABLE.includes(p.role)
@@ -4694,7 +4713,7 @@ function cluster() {
     const current = field === 'cpu_millis' ? i.cpuMillis : i.memoryMb;
     const next = nextWake.get(i.app)?.[field];
     const unit = field === 'cpu_millis' ? 'cl.cpu' : 'cl.mem';
-    const text = [t(unit, { v: current ?? '…' }), next === undefined ? null : h('b', {}, ` → ${next ?? t('cl.platformValue')}`)];
+    const text = [current == null ? t(`${unit}None`) : t(unit, { v: current }), next === undefined ? null : h('b', {}, ` → ${next ?? t('cl.platformValue')}`)];
     if (!mayAdmin(i.tenant)) return h('span', { class: 'chip lim' }, text);
     const label = t(field === 'cpu_millis' ? 'cl.cpuFor' : 'cl.memFor', { app: i.app });
     const button = h('button', { type: 'button', class: 'chip lim edit', title: t('cl.limitTitle'), 'aria-label': label }, text);
@@ -4773,69 +4792,78 @@ function cluster() {
     return rank(a) - rank(b) || a.name.localeCompare(b.name);
   });
 
+  /**
+   * Each item is one object whose trouble is current: a Pod not ready, a node down or cordoned, a stuck instance, and a
+   * warning while its object exists and is not ready, or for WARNING_MS after its last occurrence once it is ready again.
+   */
   const attentionItems = (rows) => {
     const now = Date.now();
-    const items = [];
+    const byObject = new Map();
+    const item = (key, init) => byObject.get(key) ?? byObject.set(key, { reasons: new Map(), facts: [], messages: [], count: 0, ...init }).get(key);
+    const appPods = new Map(rows.filter((i) => i.pod).map((i) => [i.pod, i]));
+    /** null when the object is gone from the sample; else whether it is ready. */
+    const readiness = (w) => {
+      if (w.kind === 'Node') { const n = view.nodes.find((x) => x.name === w.object); return n ? n.ready : null; }
+      if (w.kind === 'PersistentVolumeClaim') { const v = view.volumes.find((x) => x.name === w.object); return v ? v.phase === 'Bound' : null; }
+      const p = pods().find((x) => x.name === w.object);
+      if (p) return p.ready;
+      const i = appPods.get(w.object);
+      return i ? i.state === 'awake' : null;
+    };
     if (k8s()) {
       for (const p of pods()) {
         if (podState(p) !== 'down') continue;
-        items.push({ tone: 'red', at: unready.get(p.name), what: [t('cl.att.pod'), h('span', { class: 'mono' }, podLabel(p.name))],
-          why: t('cl.att.podWhy', { phase: p.phase || '-', node: p.node ?? '-', d: duration(now - unready.get(p.name)) }) + (RESTARTABLE.includes(p.role) ? '' : ` · ${t('cl.kubectl')}`),
-          act: isPlatformAdmin() ? restartMenu(p) : null });
+        const x = item(`Pod:${p.name}`, { tone: 'red', kind: 'Pod', object: p.name, pod: p, at: unready.get(p.name) });
+        x.facts.push(t('cl.att.podWhy', { node: p.node ?? '-', d: duration(now - unready.get(p.name)) }));
       }
       for (const n of view.nodes) {
-        if (!n.ready || !n.schedulable) items.push({ tone: n.ready ? 'orange' : 'red', at: null, what: [t(n.ready ? 'cl.att.cordoned' : 'cl.att.node'), h('span', { class: 'mono' }, n.name)], why: t(n.ready ? 'node.cordoned' : 'cl.att.nodeWhy') });
+        if (n.ready && n.schedulable) continue;
+        item(`Node:${n.name}`, { tone: n.ready ? 'orange' : 'red', kind: 'Node', object: n.name, at: null }).facts.push(t(n.ready ? 'cl.att.cordonedWhy' : 'cl.att.nodeWhy'));
+      }
+      for (const w of view.warnings) {
+        const ready = readiness(w);
+        if (ready === null || (ready && now - w.at > WARNING_MS)) continue;
+        const x = item(`${w.kind}:${w.object}`, { tone: 'orange', kind: w.kind, object: w.object, pod: pods().find((p) => p.name === w.object), inst: appPods.get(w.object), at: w.at });
+        x.reasons.set(w.reason, (x.reasons.get(w.reason) ?? 0) + w.count);
+        x.count += w.count;
+        x.at = Math.max(x.at ?? 0, w.at);
+        x.messages.push(`${w.reason}: ${w.message}`);
       }
     } else {
       for (const w of view.workloads) {
-        if (w.desired > w.ready) items.push({ tone: 'red', at: null, what: t('att.service', { name: roleLabel(w) }), why: t('att.serviceDetail') });
+        if (w.desired > w.ready) item(`svc:${w.name}`, { tone: 'red', kind: 'service', object: roleLabel(w), at: null }).facts.push(t('att.serviceDetail'));
       }
     }
     for (const i of rows.filter(stuck)) {
-      items.push({ tone: 'red', at: i.since, what: [t('cl.att.stuck', { state: t(`st.${i.state}`) }), appLink(i.app)],
-        why: [t('cl.att.stuckWhy', { d: duration(now - i.since) }), i.node, i.pod && handle(i.pod)].filter(Boolean).join(' · '),
-        act: isPlatformAdmin() ? killMenu(i) : null });
+      const x = item(`app:${i.app}`, { tone: 'red', kind: 'app', object: i.app, inst: i, at: i.since });
+      x.facts.push(t('cl.att.stuckWhy', { state: t(`st.${i.state}`), d: duration(now - i.since) }));
     }
-    const known = new Set([...pods().map((p) => p.name), ...view.nodes.map((n) => n.name), ...view.volumes.map((v) => v.name), ...rows.map((i) => i.pod).filter(Boolean)]);
-    const groups = new Map();
-    for (const w of view.warnings) {
-      const present = known.has(w.object);
-      if (!present && now - w.at > FRESH_MS) continue;
-      const key = present ? `o:${w.kind}:${w.object}` : `r:${w.reason}`;
-      const g = groups.get(key) ?? { present, kind: w.kind, object: w.object, reasons: new Set(), objects: new Set(), count: 0, at: 0, message: '' };
-      g.reasons.add(w.reason);
-      g.objects.add(w.object);
-      g.count += w.count;
-      if (w.at > g.at) { g.at = w.at; g.message = w.message; }
-      groups.set(key, g);
-    }
-    for (const g of groups.values()) {
-      const reasons = [...g.reasons].map((r) => h('span', { class: 'st orange' }, r));
-      if (!g.present) {
-        items.push({ tone: 'orange', at: g.at, count: g.count, what: [reasons, h('span', { class: 'muted', title: [...g.objects].join('\n') }, plural('cl.att.gone', g.objects.size))], why: g.message });
-        continue;
-      }
-      const pod = pods().find((p) => p.name === g.object);
-      const inst = rows.find((i) => i.pod === g.object);
-      items.push({ tone: 'orange', at: g.at, count: g.count,
-        what: [reasons, h('span', { class: 'chip text' }, g.kind), inst ? appLink(inst.app) : null, h('span', { class: 'mono' }, podLabel(g.object))],
-        why: g.message,
-        act: inst ? h('a', { class: 'btn ghost small', href: `#/apps/${encodeURIComponent(inst.app)}` }, t('cl.att.open')) : pod && isPlatformAdmin() ? restartMenu(pod) : null });
-    }
-    return items.sort((a, b) => (a.tone === b.tone ? (b.at ?? 1e15) - (a.at ?? 1e15) : a.tone === 'red' ? -1 : 1));
+    return [...byObject.values()].map((x) => ({
+      ...x,
+      what: x.kind === 'app' ? [t('cl.att.instance'), appLink(x.object)]
+        : x.kind === 'service' ? [t('att.service', { name: x.object })]
+          : [h('span', { class: 'chip text' }, x.kind === 'PersistentVolumeClaim' ? 'PVC' : x.kind), h('span', { class: 'mono' }, podLabel(x.object)), x.inst ? appLink(x.inst.app) : null],
+      why: [...x.facts, ...[...x.reasons].map(([r, n]) => (n > 1 ? `${reasonText(r)} ×${nf(n)}` : reasonText(r)))].join(' · '),
+      title: x.messages.join('\n') || null,
+      act: x.kind === 'app' ? (isPlatformAdmin() ? killMenu(x.inst) : null)
+        : x.inst ? h('a', { class: 'btn ghost small', href: `#/apps/${encodeURIComponent(x.inst.app)}` }, t('cl.att.open'))
+          : x.pod && isPlatformAdmin() ? restartMenu(x.pod) : null,
+    })).sort((a, b) => (a.tone === b.tone ? (b.at ?? 1e15) - (a.at ?? 1e15) : a.tone === 'red' ? -1 : 1));
   };
   const attention = (items) => {
     const row = (i) => h('div', { class: `item ${i.tone}` },
-      h('div', { class: 'what' }, i.what, i.count > 1 ? h('span', { class: 'chip' }, `×${nf(i.count)}`) : null),
+      h('div', { class: 'what' }, i.what),
       h('div', { class: 'side', style: 'grid-row: span 2' }, i.at ? agoTick(i.at) : null, i.act),
-      h('div', { class: 'why' }, i.why));
+      h('div', { class: 'why', title: i.title }, i.why));
+    const byObject = [...Map.groupBy(view.warnings, (w) => `${w.kind}/${w.object}`)].sort(([, a], [, b]) => Math.max(...b.map((w) => w.at)) - Math.max(...a.map((w) => w.at)));
     const raw = k8s() && view.warnings.length
-      ? disclosure('raw', t('cl.raw', { n: nf(view.warnings.length) }), h('div', { class: 'wlist' }, [...view.warnings].sort((a, b) => b.at - a.at).map((w) => h('div', { class: 'wline' },
-        h('span', { class: 'mono muted', title: stamp(w.at) }, clock(w.at, true)),
-        h('span', { class: 'st orange' }, w.reason),
-        h('span', { class: 'mono' }, `${w.kind}/${podLabel(w.object)}`),
-        w.count > 1 ? h('span', { class: 'chip' }, `×${nf(w.count)}`) : null,
-        h('span', { class: 'msgline' }, w.message)))))
+      ? disclosure('raw', t('cl.raw', { n: nf(view.warnings.length), objects: nf(byObject.length) }), h('div', { class: 'wlist' }, byObject.map(([object, list]) => h('div', { class: 'wobj' },
+        h('div', { class: 'wohead' }, h('span', { class: 'mono' }, podLabel(object)), h('span', { class: 'muted' }, plural('cl.warnings', list.reduce((n, w) => n + w.count, 0)))),
+        [...list].sort((a, b) => b.at - a.at).map((w) => h('div', { class: 'wline' },
+          h('span', { class: 'mono muted', title: stamp(w.at) }, clock(w.at, true)),
+          h('span', { class: 'chip' }, w.reason),
+          w.count > 1 ? h('span', { class: 'num muted' }, `×${nf(w.count)}`) : null,
+          h('span', { class: 'msgline' }, w.message)))))))
       : null;
     return h('div', { class: 'card inbox att' },
       items.length ? items.map(row) : h('div', { class: 'clear' }, h('span', { class: 'st green' }, h('b', {}, t('cl.allClear'))), h('span', { class: 'muted' }, t(planeKey('cl.allClearSub')))),
@@ -4895,14 +4923,15 @@ function cluster() {
     const key = `app:${i.app}`;
     const tenantAdmin = mayAdmin(i.tenant);
     const where = k8s() ? [i.node, i.pod && handle(i.pod)].filter(Boolean) : [i.runtime === 'isolate' ? t('svc.runner') : i.pod && handle(i.pod)].filter(Boolean);
+    const placing = where.length === 0 && i.state === 'waking';
     return h('div', { class: `irow${stuck(i) ? ' stuck' : ''}`, 'data-app': i.app },
       h('i', { class: `pdot ${stuck(i) ? 'down' : i.state === 'awake' ? 'ready' : 'starting'}`, title: t(`st.${i.state}`) }),
       h('div', { class: 'iname' }, appLink(i.app), i.runtime ? h('span', { class: 'chip runtime' }, i.runtime) : null, h('span', { class: 'muted' }, i.tenant)),
-      h('div', { class: 'iwhere mono', title: [i.node, i.pod].filter(Boolean).join(' → ') }, where.length ? where.flatMap((w, n) => [n ? h('span', { class: 'muted' }, '→') : null, h('span', {}, w)]) : '-',
+      h('div', { class: 'iwhere mono', title: [i.node, i.pod].filter(Boolean).join(' → ') }, where.length ? where.flatMap((w, n) => [n ? h('span', { class: 'muted' }, '→') : null, h('span', {}, w)]) : h('span', { class: 'muted' }, t(placing ? 'cl.placing' : 'cl.unplaced')),
         i.restarts ? h('span', { class: 'st orange' }, t('cl.restarts', { n: nf(i.restarts) })) : null),
       h('div', { class: 'isince num', title: t('cl.sinceTitle', { state: t(`st.${i.state}`), at: stamp(i.since) }) }, ticking(() => duration(Date.now() - i.since))),
       h('div', { class: 'leases', title: t('cl.leasesTitle') }, LEASE_KINDS.map((k) => h('span', { class: (i.leases?.[k] ?? 0) > 0 ? 'on' : null }, t(`cl.lease.${k}`), h('b', { class: 'num' }, nf(i.leases?.[k] ?? 0))))),
-      h('div', { class: 'ilim' }, i.runtime === 'isolate' ? null : limitChip(i, 'cpu_millis'), limitChip(i, 'memory_mb'),
+      h('div', { class: 'ilim' }, placing ? null : [i.runtime === 'isolate' ? null : limitChip(i, 'cpu_millis'), limitChip(i, 'memory_mb')],
         volumes.map((v) => h('span', { class: 'chip vol', title: [v.name, v.storageClass, v.phase].filter(Boolean).join(' · ') }, t('cl.vol', { size: v.sizeGb == null ? '-' : t('cl.gib', { n: nf(v.sizeGb) }) })))),
       h('div', { class: 'iact' }, spin(key),
         tenantAdmin ? quiet(t('cl.stop'), () => lifecycle(i, 'stop'), t('cl.stopFor', { app: i.app }), busy(key)) : null,
@@ -4954,12 +4983,13 @@ function cluster() {
 
   const paint = () => {
     if (!view) return;
+    for (const [key, op] of ops) if (op.until?.()) ops.delete(key);
     const rows = instances();
     paintLayout();
     const podStates = pods().map((p) => [p.name, podState(p)]);
     repaint('health', [view.workloads, podStates, [...ops], [...opened], view.scaleMax], () => ordered().map(card));
     const items = attentionItems(rows);
-    repaint('attention', [items.map((i) => [i.tone, i.at, i.why, i.count]), opened.has('raw'), view.warnings.length], () => attention(items));
+    repaint('attention', [items.map((i) => [i.tone, i.at, i.why, i.object]), opened.has('raw'), view.warnings.length], () => attention(items));
     if (k8s()) {
       repaint('placement', [view.nodes, view.workloads, rows.map((i) => [i.app, i.state, i.node, i.since, stuck(i)]), podStates, [...ops], [...opened]], () => h('div', { class: 'nodes' }, view.nodes.length ? view.nodes.map((n) => frame(n, rows)) : h('div', { class: 'card' }, h('div', { class: 'empty' }, t('ov.waiting')))));
     } else {
