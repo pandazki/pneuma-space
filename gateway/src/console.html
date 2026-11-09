@@ -824,6 +824,36 @@ input.lim-in { width: 96px; height: 22px; padding: 0 6px; border-radius: 6px; te
 .adisc[open] > summary::before { transform: rotate(90deg); }
 .adisc > summary .n { font: 11px var(--mono); color: var(--ink-3); }
 .adisc > summary .muted { font-weight: 400; font-size: 12px; }
+.dside { display: grid; gap: 10px; justify-items: end; }
+.dact { justify-content: flex-end; }
+.dwatch { padding-top: 0; border-top: 0; }
+.dlist { display: grid; padding: 4px 16px; }
+.dline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.dline:last-child { border-bottom: 0; }
+.dline .prov { font-size: 12px; color: var(--ink-2); }
+.dline .loc { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; flex: 1 1 200px; min-width: 0; }
+.dline > .st { margin-left: auto; }
+.kvp { display: inline-flex; gap: 6px; align-items: baseline; min-width: 0; }
+.kvp .mono { font-size: 12px; overflow-wrap: anywhere; }
+.rtl { list-style: none; margin: 0; padding: 0; }
+.rtl li { position: relative; display: grid; gap: 4px; padding: 0 0 16px 22px; }
+.rtl li::before { content: ""; position: absolute; left: 4px; top: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--ink-3); }
+.rtl li::after { content: ""; position: absolute; left: 8px; top: 18px; bottom: 0; width: 1px; background: var(--line-strong); }
+.rtl li:last-child { padding-bottom: 0; }
+.rtl li:last-child::after { display: none; }
+.rtl li.cur::before { background: var(--green); box-shadow: 0 0 0 3px var(--green-tint); }
+.rh { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12.5px; }
+.rm { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 12px; color: var(--ink-2); }
+.rm > .mono { font-size: 11.5px; }
+.more-rel { margin-top: 16px; }
+.more-rel > summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2); margin-bottom: 12px; }
+.tlist { display: grid; padding: 2px 16px; }
+.trow { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) 90px 110px minmax(0, 1fr); gap: 4px 16px; align-items: center; min-height: 40px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.trow:last-child { border-bottom: 0; }
+.trow .mono { font-size: 12px; }
+.dout:empty { display: none; }
+.dout { display: flex; justify-content: flex-end; }
+@media (max-width: 900px) { .dside { justify-items: start; width: 100%; } .dact { justify-content: flex-start; } .trow { grid-template-columns: minmax(0, 1fr) auto; } }
 @media (max-width: 900px) {
   .frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; box-shadow: none; }
   aside { position: relative; width: auto; height: auto; padding: 16px 20px; border-right: 0; border-bottom: 1px dashed var(--line); }
@@ -879,6 +909,7 @@ input.lim-in { width: 96px; height: 22px; padding: 0 6px; border-radius: 6px; te
 <script>
 const I18N = {
   zh: {
+    'd.liftTitle': '解除 {name} 的隔离？', 'd.olderDeliveries.one': '更早的 {n} 次', 'd.olderDeliveries.other': '更早的 {n} 次', 'd.liftBody': '失败计数清零，下一次请求重新唤醒它。原因没修好会再次被隔离。', 'ac.title': '谁能打开 {name}', 'ac.save': '保存访问范围', 'd.liftNote': '下一次请求重新唤醒', 'ac.change': '更改访问…', 'd.removeItem': '移除…', 'd.removeNote': '地址 404，数据保留', 'd.purgeItem': '清除数据…', 'd.purgeNote': '删除全部数据，无法撤销', 'd.att.failed.one': '{n} 次投递失败', 'd.att.failed.other': '{n} 次投递失败', 'd.att.toDeliveries': '看投递', 'd.att.errors': '24 小时错误率 {pct}', 'd.att.errorsWhy': '{requests} 次请求里 {errors} 次错误', 'd.toLogs': '跳到日志', 'd.att.slow': '最近一次唤醒用了 {ms}，超过 3 秒门槛', 'd.att.slowWhy': '{at} 唤醒；看启动日志，或调大就绪超时', 'd.att.removed': '已移除：地址返回 404', 'd.att.removedWhy': '卷、数据库、键前缀和 bucket 都还在。再次发布即恢复，只有清除才删除。', 'd.bundle': '静态包', 'empty.releases': '还没有发布。', 'd.olderReleases.one': '更早的 {n} 个版本', 'd.olderReleases.other': '更早的 {n} 个版本', 'd.scheduledFor': '计划 {at}', 'd.attempts.one': '尝试 {n} 次', 'd.attempts.other': '尝试 {n} 次', 'd.nextAttempt': '下次尝试 {ago}', 'sec.data': '数据', 'sec.dataDesc': '每种能力的数据由哪个提供方持有、放在哪里。移除不动它们，只有清除删除。',
     'ap.search': '搜索应用或租户', 'ap.req24': '24 小时请求', 'ap.staticLine': '静态站点，请求直接返回文件，不唤醒', 'apps.filter': '按名称筛选', 'ap.b.awake': '醒着', 'ap.b.asleep': '睡眠', 'ap.b.quarantined': '隔离', 'ap.b.removed': '已移除', 'ap.in.awake': '醒着', 'ap.in.asleep': '睡眠', 'ap.in.waking': '唤醒中', 'ap.in.draining': '排空中', 'ap.in.stopping': '停止中', 'ap.never': '还没唤醒过', 'ap.quarantined': '隔离中 · {reason}', 'ap.sparkTip': '{requests} 请求 · {errors} 错误', 'ap.sparkLabel': '24 小时 {requests} 次请求，{errors} 次错误', 'ap.errors.one': '{n} 次错误', 'ap.errors.other': '{n} 次错误', 'ap.lastAccess': '最近访问', 'ap.removedNote': '地址返回 404，数据保留', 'ap.awakeN': '醒着 {n}', 'ap.groupRequests': '24 小时 {n} 次请求',
     'tp.lane.container.sub.k8s': 'Kubernetes · 每应用一个 Pod', 'tp.engine.container.k8s': 'Kubernetes', 'tp.unprobed.k8s': '随集群，不探测',
     'tp.keep.container.k8s': '每应用的 PVC', 'tp.keep.isolate.k8s': 'runner 的 PVC', 'tp.fixDown.k8s': '到集群页看 {service} 的 Pod', 'tp.fixOff.k8s': '部署里没有 {profile}',
@@ -1157,6 +1188,7 @@ const I18N = {
     'empty.cl.instances': '没有醒着的实例。', 'empty.cl.volumes': '没有应用卷。',
   },
   en: {
+    'd.liftTitle': 'Lift the quarantine of {name}?', 'd.olderDeliveries.one': '{n} earlier', 'd.olderDeliveries.other': '{n} earlier', 'd.liftBody': 'The failure count resets and the next request wakes it. If the cause remains, it is quarantined again.', 'ac.title': 'Who can open {name}', 'ac.save': 'Save access', 'd.liftNote': 'the next request wakes it', 'ac.change': 'Change access…', 'd.removeItem': 'Remove…', 'd.removeNote': 'address 404, data kept', 'd.purgeItem': 'Purge data…', 'd.purgeNote': 'deletes every byte, cannot be undone', 'd.att.failed.one': '{n} failed delivery', 'd.att.failed.other': '{n} failed deliveries', 'd.att.toDeliveries': 'See deliveries', 'd.att.errors': 'Error rate {pct} over 24 h', 'd.att.errorsWhy': '{errors} errors in {requests} requests', 'd.toLogs': 'Jump to logs', 'd.att.slow': 'The last wake took {ms}, over the 3 s gate', 'd.att.slowWhy': 'woke at {at}; check the start-up logs or raise the ready timeout', 'd.att.removed': 'Removed: the address answers 404', 'd.att.removedWhy': 'Volumes, databases, key prefixes and buckets are kept. Publishing again restores it; only purge deletes.', 'd.bundle': 'bundle', 'empty.releases': 'No release yet.', 'd.olderReleases.one': '{n} older release', 'd.olderReleases.other': '{n} older releases', 'd.scheduledFor': 'scheduled {at}', 'd.attempts.one': '{n} attempt', 'd.attempts.other': '{n} attempts', 'd.nextAttempt': 'next attempt {ago}', 'sec.data': 'Data', 'sec.dataDesc': 'Where each capability keeps its data and which provider holds it. Remove leaves it; only purge deletes it.',
     'ap.search': 'Search app or tenant', 'ap.req24': 'requests, 24 h', 'ap.staticLine': 'Static site: files answer without a wake', 'apps.filter': 'Filter by name', 'ap.b.awake': 'Awake', 'ap.b.asleep': 'Asleep', 'ap.b.quarantined': 'Quarantined', 'ap.b.removed': 'Removed', 'ap.in.awake': 'Awake for', 'ap.in.asleep': 'Asleep for', 'ap.in.waking': 'Waking for', 'ap.in.draining': 'Draining for', 'ap.in.stopping': 'Stopping for', 'ap.never': 'Never woken', 'ap.quarantined': 'Quarantined · {reason}', 'ap.sparkTip': '{requests} requests · {errors} errors', 'ap.sparkLabel': '{requests} requests and {errors} errors in 24 h', 'ap.errors.one': '{n} error', 'ap.errors.other': '{n} errors', 'ap.lastAccess': 'Last access', 'ap.removedNote': 'address answers 404, data kept', 'ap.awakeN': '{n} awake', 'ap.groupRequests': '{n} requests in 24 h',
     'tp.lane.container.sub.k8s': 'Kubernetes · one Pod per app', 'tp.engine.container.k8s': 'Kubernetes', 'tp.unprobed.k8s': 'with the cluster, not probed',
     'tp.keep.container.k8s': 'per-app PVCs', 'tp.keep.isolate.k8s': 'runner PVC', 'tp.fixDown.k8s': 'see the {service} Pods on the cluster page', 'tp.fixOff.k8s': 'not deployed: {profile}',
@@ -1653,16 +1685,35 @@ function listbox({ label, options, value, onPick, placeholder = null, disabled =
   return wrap;
 }
 
-/** The approval card and the console's only confirmation: what will happen, in the reader's words, then Cancel and the action. */
-function approve({ title, body, facts = [], control = null, danger = false, action = null }) {
+/**
+ * The approval card and the console's only confirmation: what will happen, in the reader's words, then Cancel and the
+ * action. With `submit`, the card stays open on a refusal and shows it in place.
+ */
+function approve({ title, body, facts = [], control = null, danger = false, action = null, submit = null }) {
   return new Promise((resolve) => {
+    const refusal = h('p', { class: 'msg err', role: 'alert', hidden: true });
+    const ok = h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, value: 'ok' }, action ?? t('cl.continue'));
     const dialog = h('dialog', { class: 'approval' },
       h('h3', {}, title), h('p', {}, body),
       facts.length ? h('ul', { class: 'facts' }, facts.map((f) => h('li', {}, f))) : null,
       control,
-      h('form', { method: 'dialog', class: 'actions' },
+      refusal,
+      h('form', { method: 'dialog', class: 'actions', onsubmit: submit && (async (e) => {
+        if (e.submitter?.value !== 'ok') return;
+        e.preventDefault();
+        ok.disabled = true;
+        refusal.hidden = true;
+        try {
+          await submit();
+          dialog.close('ok');
+        } catch (error) {
+          refusal.textContent = failText(error);
+          refusal.hidden = false;
+          ok.disabled = false;
+        }
+      }) },
         h('button', { class: 'btn', value: 'cancel', autofocus: true }, t('cancel')),
-        h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, value: 'ok' }, action ?? t('cl.continue'))));
+        ok));
     dialog.addEventListener('close', () => { resolve(dialog.returnValue === 'ok'); dialog.remove(); });
     document.body.append(dialog);
     dialog.showModal();
@@ -3419,11 +3470,13 @@ function policyForm(app, effective, reload) {
   const override = app.policyOverride;
   const message = h('div', { class: 'msg', role: 'status' });
   const inputs = Object.fromEntries(POLICY_FIELDS.map((f) => [f, h('input', { type: 'number', min: 1, step: 1, name: f, value: override[f] ?? '', placeholder: String(effective[f]) })]));
-  inputs.db_backend = h('select', { name: 'db_backend' },
-    h('option', { value: '' }, t('p.default', { v: effective.db_backend })),
-    DB_BACKENDS.map((b) => h('option', { value: b, selected: override.db_backend === b }, b)));
-  const field = (f) => h('label', { class: 'field' },
-    h('span', {}, t(`p.${f}`)), inputs[f],
+  const engine = h('span');
+  const db = { value: override.db_backend ?? '' };
+  const paintEngine = () => fill(engine, segmented([['', t('p.default', { v: effective.db_backend })], ...DB_BACKENDS.map((b) => [b, b])], db.value, (v) => { db.value = v; paintEngine(); }, t('p.db_backend')));
+  paintEngine();
+  inputs.db_backend = db;
+  const field = (f) => h(f === 'db_backend' ? 'div' : 'label', { class: 'field' },
+    h('span', {}, t(`p.${f}`)), f === 'db_backend' ? engine : inputs[f],
     h('small', {}, h('span', { class: 'mono' }, f), ' · ', t('p.effective', { v: String(effective[f]) })));
   return h('form', { class: 'card form', onsubmit: async (event) => {
     event.preventDefault();
@@ -3487,110 +3540,208 @@ function stateStrip(events, name) {
     h('span', { class: 'muted' }, t('d.recent')));
 }
 
+const DELIVERY_ORDER = ['failed', 'due', 'delivering', 'done', 'cancelled'];
+/** The attention strip flags an error rate above ERROR_RATE once the day has ERROR_MIN requests, so one failed probe does not. */
+const ERROR_RATE = 0.05;
+const ERROR_MIN = 20;
+const RELEASES_SHOWN = 8;
+const DONE_SHOWN = 5;
+/** An image reference with its digest cut to 12 hex digits and the registry host dropped; the full reference goes in the title. */
+const shortImage = (ref) => ref.split('/').at(-1).replace(/(sha256:[0-9a-f]{12})[0-9a-f]+/, '$1');
+
 async function detail(name) {
   const usagePath = () => `/api/usage?app=${encodeURIComponent(name)}&from=${Math.floor(Date.now() / HOUR_MS) * HOUR_MS - APP_HEAT_DAYS * 24 * HOUR_MS}`;
   const events = async () => (isPlatformAdmin() ? (await api('GET', '/api/metrics')).events : []);
-  const [d, apps, recent, health, usage] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), events(), api('GET', '/api/health'), api('GET', usagePath())]);
+  const [d, apps, recent, health, usage, inventory] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), events(), api('GET', '/api/health'), api('GET', usagePath()), api('GET', `${appPath(name)}/state`)]);
   const heat = heatGrid('heat.app');
   heat.set(dayRows(usage.buckets, APP_HEAT_DAYS));
   let heatAt = Date.now();
-  const { app, releases, bindings, policy, stats, deliveries } = d;
-  d.address = apps.find((a) => a.name === app.name)?.address ?? '';
+  const { app, releases, bindings, policy } = d;
+  const address = apps.find((a) => a.name === app.name)?.address ?? '';
   const reload = () => route();
-  const lift = async () => {
+  const tenantAdmin = mayAdmin(app.tenant);
+  const others = upstream() ? session.tenants.filter((x) => x !== app.tenant) : [];
+  const current = releases.find((r) => r.number === app.current) ?? null;
+
+  /** Every operation confirms through the approval card, which shows the server's refusal in place; the page reloads after. */
+  const op = async (card, call, after = reload) => { if (await approve({ ...card, submit: call })) await after(); };
+  const post = (kind) => () => api('POST', `${appPath(app.name)}/${kind}`);
+  const lift = () => op({ title: t('d.liftTitle', { name: app.name }), body: t('d.liftBody') }, post('unquarantine'));
+  /** Stop and restart are safe and frequent: they act at once and report under the actions. */
+  const now = (kind) => async () => {
+    fill(outcome, h('span', { class: 'spin', role: 'status', 'aria-label': t('cl.pending') }));
     try {
-      await api('POST', `${appPath(app.name)}/unquarantine`);
+      await post(kind)();
       await reload();
     } catch (error) {
-      actionMessage.textContent = failText(error);
+      fill(outcome, h('span', { class: 'msg err' }, failText(error)));
     }
   };
-  const top = h('div');
-  const qbar = h('div');
+  const stop = now('stop');
+  const restart = now('restart');
+  const kill = () => op({ title: t('cl.killTitle', { app: app.name }), body: t('cl.killBody'), action: t('cl.killAction'), danger: true }, post('kill'));
+  const remove = () => op({ title: t('d.removeTitle', { name: app.name }), body: t('d.removeBody'), action: t('d.remove') }, post('remove'));
+  const purge = () => op({
+    title: t('d.purgeTitle', { name: app.name }), body: t('d.purgeBody'), danger: true, action: t('d.purge'),
+    facts: inventory.bindings.map((b) => [h('b', {}, b.kind), ' ', h('span', { class: 'mono' }, Object.values(b.location).join(' · ') || b.provider)]),
+  }, post('purge'), () => { location.hash = '#/apps'; });
+  const access = () => {
+    let pick = app.access;
+    const note = h('span', {}, t(`ac.${pick}.desc`, { tenant: app.tenant }));
+    const control = h('div', { class: 'field' });
+    const paint = () => fill(control, segmented(ACCESS_LEVELS.map((x) => [x, t(`ac.${x}`)]), pick, (x) => {
+      pick = x;
+      note.textContent = t(`ac.${x}.desc`, { tenant: app.tenant });
+      paint();
+    }, t('ac.label')));
+    paint();
+    return op({ title: t('ac.title', { name: app.name }), body: note, control, action: t('ac.save') }, async () => { if (pick !== app.access) await api('PUT', `${appPath(app.name)}/access`, { access: pick }); });
+  };
+  const move = () => {
+    let to = others[0];
+    const control = h('div', { class: 'field' }, h('span', {}, t('mv.to')), listbox({ label: t('mv.to'), options: others.map((x) => ({ value: x, label: x })), value: to, onPick: (v) => { to = v; }, wide: true }));
+    return op({ title: t('mv.title', { name: app.name }), body: t('mv.body'), control, action: t('mv.action') }, () => api('PUT', `${appPath(app.name)}/tenant`, { tenant: to }));
+  };
+
+  const head = h('div', { class: 'grow' });
+  const actions = h('div', { class: 'actions dact' });
+  const outcome = h('div', { class: 'dout', role: 'status' });
+  const attention = h('div');
   const strip = h('div');
-  const head = h('div', { class: 'grow' }, top, qbar, strip);
   const tiles = h('div', { class: 'tiles four' });
-  let quarantined = '';
-  const renderHead = (row, detailStats, events) => {
-    const s = row ?? { instance: d.instance, since: null, leases: null };
-    const q = row?.quarantine ?? null;
-    if (JSON.stringify(q) !== quarantined) {
-      quarantined = JSON.stringify(q);
-      fill(qbar, q ? h('div', { class: 'qbar' },
-        h('b', { role: 'alert' }, t('d.quarantined', { reason: q.reason })),
-        h('span', { class: 'mono', title: stamp(q.since) }, ticking(() => t('d.quarantineMeta', { failures: nf(q.failures), ago: ago(q.since).textContent }))),
-        h('button', { class: 'btn danger', type: 'button', onclick: lift }, t('d.unquarantine'))) : null);
+  const sections = {};
+  const jump = (key, label) => h('button', { class: 'btn ghost small', type: 'button', onclick: () => sections[key].scrollIntoView({ behavior: 'smooth', block: 'start' }) }, label);
+  const quiet = (label, onclick) => h('button', { class: 'btn ghost', type: 'button', onclick }, label);
+
+  const menu = (row) => moreMenu(t('cl.moreFor', { name: app.name }), [
+    row?.quarantine && { label: t('d.unquarantine'), note: t('d.liftNote'), onPick: lift },
+    upstream() && { label: t('ac.change'), note: t(`ac.${app.access}`), onPick: access },
+    upstream() && isPlatformAdmin() && { label: t('d.move'), note: others.length ? app.tenant : t('mv.none'), disabled: !others.length, onPick: move },
+    app.status === 'registered' && { label: t('d.removeItem'), note: t('d.removeNote'), onPick: remove },
+    isPlatformAdmin() && row && ACTIVE.includes(row.instance) && { label: t('cl.killItem'), note: t('cl.killNote'), danger: true, onPick: kill },
+    app.status === 'removed' && { label: t('d.purgeItem'), note: tenantAdmin ? t('d.purgeNote') : t('d.purgeAdmin', { tenant: app.tenant }), danger: true, disabled: !tenantAdmin, onPick: purge },
+  ]);
+
+  const attentionItems = (row, fresh, events) => {
+    const items = [];
+    const q = row?.quarantine;
+    if (q) items.push({ key: ['q', q.since], tone: 'red', what: t('d.quarantined', { reason: q.reason }), why: ticking(() => t('d.quarantineMeta', { failures: nf(q.failures), ago: since(q.since) })), act: quiet(t('d.unquarantine'), lift) });
+    const failed = fresh.deliveries.filter((x) => x.state === 'failed');
+    if (failed.length) items.push({ key: ['f', failed.length], tone: 'red', what: plural('d.att.failed', failed.length), why: [...new Set(failed.map((x) => x.trigger))].join(' · '), act: jump('deliveries', t('d.att.toDeliveries')) });
+    if (row && row.requests >= ERROR_MIN && row.errors / row.requests > ERROR_RATE) {
+      items.push({ key: ['e', Math.round(row.errors / row.requests * 100)], tone: 'orange', what: t('d.att.errors', { pct: pct(row.errors / row.requests) }), why: t('d.att.errorsWhy', { errors: nf(row.errors), requests: nf(row.requests) }), act: jump('logs', t('d.toLogs')) });
     }
-    fill(strip, stateStrip(events, app.name));
-    top.replaceChildren(
+    const slow = events.filter((e) => e.app === app.name && e.ev === 'awake' && typeof e.ms === 'number').at(-1);
+    if (slow && slow.ms > COLD_START_GATE_MS) items.push({ key: ['w', slow.id], tone: 'orange', what: t('d.att.slow', { ms: ms(slow.ms) }), why: t('d.att.slowWhy', { at: clock(slow.t, true) }), act: jump('logs', t('d.toLogs')) });
+    if (app.status === 'removed') items.push({ key: ['r'], tone: 'orange', what: t('d.att.removed'), why: t('d.att.removedWhy'), act: h('a', { class: 'btn ghost small', href: `#/publish/${encodeURIComponent(app.name)}` }, t('d.publish')) });
+    return items;
+  };
+
+  const painted = {};
+  /** A part is rebuilt only when what it shows changed and no menu of the page is open, so the poll keeps focus and an open menu. */
+  const repaint = (part, shown, el, build) => {
+    const signature = JSON.stringify(shown);
+    if (painted[part] === signature || main().querySelector('.menu')) return;
+    painted[part] = signature;
+    fill(el, build());
+  };
+  const render = (row, fresh, events) => {
+    const instance = row?.instance ?? fresh.instance;
+    repaint('head', [row && [row.instance, row.since, row.leases, row.release], lang], head, () => [
       h('a', { class: 'back', href: '#/apps' }, `← ${t('d.back')}`),
       h('h1', { class: 'mono', style: 'margin-top:12px' }, app.name),
       h('div', { class: 'meta' },
         status(app.status),
-        app.status === 'registered' ? h('a', { href: appUrl(d.address, health.ingressPort), target: '_blank', rel: 'noopener', class: 'mono', title: t('d.open', { address: d.address }) }, d.address) : h('span', { class: 'mono muted' }, d.address),
+        app.status === 'registered' ? h('a', { href: appUrl(address, health.ingressPort), target: '_blank', rel: 'noopener', class: 'mono', title: t('d.open', { address }) }, address) : h('span', { class: 'mono muted' }, address),
         row ? runtimeChip(row) : null,
-        h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(s.instance), s.since != null ? h('span', { class: 'muted' }, t('d.since', { ago: ago(s.since).textContent })) : null, leaseChips(s.leases)),
-        h('span', { class: 'muted' }, t('d.owner', { owner: app.owner }))));
+        h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(instance), row?.since != null ? h('span', { class: 'muted' }, t('d.since', { ago: ago(row.since).textContent })) : null, leaseChips(row?.leases)),
+        upstream() ? h('span', { class: 'chip text', title: t('d.tenant') }, app.tenant) : null,
+        upstream() ? h('span', { class: 'chip text', title: t('ac.label') }, t(`ac.${app.access}`)) : null,
+        h('span', { class: 'muted' }, t('d.owner', { owner: app.owner })))]);
+    repaint('actions', [instance, row?.quarantine?.since, lang], actions, () => [
+      tenantAdmin && ACTIVE.includes(instance) ? [quiet(t('cl.stop'), stop), quiet(t('cl.restart'), restart)] : null,
+      h('a', { class: 'btn primary', href: `#/publish/${encodeURIComponent(app.name)}` }, t('d.publish')),
+      menu(row)]);
+    fill(strip, stateStrip(events, app.name));
+    const items = attentionItems(row, fresh, events);
+    repaint('attention', [items.map((i) => i.key), lang], attention, () => (items.length ? h('section', { class: 'dwatch' },
+      h('div', { class: 'card inbox att' }, items.map((i) => h('div', { class: `item ${i.tone}` },
+        h('div', { class: 'what' }, i.what), h('div', { class: 'side', style: 'grid-row: span 2' }, i.act), h('div', { class: 'why' }, i.why))))) : null));
     tiles.replaceChildren(
       tile(t('d.requests'), nf(row?.requests ?? 0), ''),
       tile(t('d.errors'), nf(row?.errors ?? 0), row?.requests ? pct(row.errors / row.requests) : ''),
-      tile(t('d.lastAccess'), detailStats.lastAccessAt == null ? t('never') : ago(detailStats.lastAccessAt).textContent, detailStats.lastAccessAt == null ? '' : stamp(detailStats.lastAccessAt)),
+      tile(t('d.lastAccess'), fresh.stats.lastAccessAt == null ? t('never') : ago(fresh.stats.lastAccessAt).textContent, fresh.stats.lastAccessAt == null ? '' : stamp(fresh.stats.lastAccessAt)),
       tile(t('d.release'), app.current == null ? '-' : `#${app.current}`, releases.length ? stamp(Math.max(...releases.map((r) => r.publishedAt))) : ''));
   };
-  renderHead(apps.find((a) => a.name === app.name), stats, recent);
 
-  const act = (kind) => async () => {
-    if (!(await approve({ title: t(`d.${kind}Title`, { name: app.name }), body: t(`d.${kind}Body`), action: t(`d.${kind}`), danger: true }))) return;
-    try {
-      await api('POST', `${appPath(app.name)}/${kind}`);
-      if (kind === 'purge') location.hash = '#/apps';
-      else await reload();
-    } catch (error) {
-      actionMessage.textContent = failText(error);
-    }
+  const dataRows = () => {
+    const rows = inventory.bindings;
+    const bundle = () => (inventory.bundle ? h('span', { class: 'kvp' }, h('span', { class: 'muted' }, t('d.bundle')), h('span', { class: 'mono', title: inventory.bundle }, inventory.bundle.slice(0, 12))) : null);
+    if (rows.length === 0 && !inventory.bundle) return h('div', { class: 'card' }, h('div', { class: 'empty' }, t('empty.bindings')));
+    const arrow = () => h('span', { class: 'muted', 'aria-hidden': 'true' }, '→');
+    return h('div', { class: 'card dlist' },
+      rows.map((b) => h('div', { class: 'dline' },
+        chip(b.kind), arrow(), h('span', { class: 'mono prov' }, b.provider), arrow(),
+        h('span', { class: 'loc' }, Object.entries(b.location).map(([k, v]) => h('span', { class: 'kvp' }, h('span', { class: 'muted' }, k), h('span', { class: 'mono' }, v))),
+          b.kind === 'static' ? bundle() : null),
+        status(b.state))),
+      inventory.bundle && !rows.some((b) => b.kind === 'static') ? h('div', { class: 'dline' }, chip('static'), arrow(), h('span', { class: 'loc' }, bundle())) : null);
   };
-  const actionMessage = h('div', { class: 'msg err', role: 'alert' });
+
+  const releaseItem = (r) => h('li', { class: r.number === app.current ? 'cur' : null },
+    h('div', { class: 'rh' }, h('b', { class: 'num' }, `#${r.number}`), r.number === app.current ? h('span', { class: 'leadtag' }, t('r.current')) : null,
+      h('span', { class: 'muted', title: stamp(r.publishedAt) }, ago(r.publishedAt))),
+    h('div', { class: 'rm' },
+      r.image ? h('span', { class: 'mono', title: r.image }, shortImage(r.image)) : null,
+      r.bundle ? h('span', { class: 'kvp' }, h('span', { class: 'muted' }, t('d.bundle')), h('span', { class: 'mono', title: r.bundle }, r.bundle.slice(0, 12))) : null,
+      Object.keys(r.manifest.capabilities).length ? h('span', { class: 'chips' }, Object.keys(r.manifest.capabilities).map(chip)) : h('span', { class: 'muted' }, t('routeOnly'))));
+  const releaseList = () => {
+    if (releases.length === 0) return h('div', { class: 'card' }, h('div', { class: 'empty' }, t('empty.releases')));
+    const sorted = [...releases].sort((a, b) => b.number - a.number);
+    const older = sorted.slice(RELEASES_SHOWN);
+    return h('div', { class: 'card' }, h('ol', { class: 'rtl' }, sorted.slice(0, RELEASES_SHOWN).map(releaseItem)),
+      older.length ? h('details', { class: 'more-rel' }, h('summary', {}, plural('d.olderReleases', older.length)), h('ol', { class: 'rtl' }, older.map(releaseItem))) : null);
+  };
+
+  /** Failed and pending deliveries in full; finished ones are the routine, so only the latest show until expanded. */
+  const deliveryList = (list) => {
+    if (list.length === 0) return h('div', { class: 'card' }, h('div', { class: 'empty' }, t('empty.deliveries')));
+    const groups = Map.groupBy(list, (x) => x.state);
+    const row = (x) => h('div', { class: 'trow' },
+      h('span', { class: 'mono' }, x.trigger),
+      h('span', { class: 'muted' }, x.scheduledFor == null ? t('d.onDemand') : t('d.scheduledFor', { at: stamp(x.scheduledFor) })),
+      h('span', { class: 'num' }, plural('d.attempts', x.attempts)),
+      h('span', { class: 'muted', title: stamp(x.createdAt) }, ago(x.createdAt)),
+      x.state === 'due' ? h('span', { class: 'muted' }, t('d.nextAttempt', { ago: ago(x.nextAttemptAt).textContent })) : null);
+    return h('div', { class: 'ilist' }, DELIVERY_ORDER.filter((s) => groups.has(s)).map((s) => {
+      const mine = groups.get(s);
+      const shown = s === 'done' ? mine.slice(0, DONE_SHOWN) : mine;
+      const rest = mine.slice(shown.length);
+      return h('div', { class: 'igroup', 'data-state': s },
+        h('div', { class: 'igh' }, status(s), h('span', { class: 'num muted' }, nf(mine.length))),
+        h('div', { class: 'card tlist' }, shown.map(row),
+          rest.length ? h('details', { class: 'more-rel' }, h('summary', {}, plural('d.olderDeliveries', rest.length)), rest.map(row)) : null));
+    }));
+  };
+
   const logs = logsPanel(app.name);
-  const current = (r) => r.number === app.current;
-  const purgeBlock = app.status !== 'removed' ? t('d.purgeHint') : mayAdmin(app.tenant) ? null : t('d.purgeAdmin', { tenant: app.tenant });
   let index = 0;
-  const sectionAt = (...args) => sectionHead(++index, ...args);
+  const section = (key, title, desc, body, ...end) => (sections[key] = h('section', { 'data-section': key }, sectionHead(++index, title, desc, ...end), body));
+  render(apps.find((a) => a.name === app.name), d, recent);
   show(
-    h('div', { class: 'head' }, head,
-      h('div', { style: 'display:grid;gap:8px;justify-items:end' },
-        h('div', { class: 'actions' },
-          h('a', { class: 'btn', href: `#/publish/${encodeURIComponent(app.name)}` }, t('d.publish')),
-          h('button', { class: 'btn danger', type: 'button', disabled: app.status !== 'registered', onclick: act('remove') }, t('d.remove')),
-          h('button', { class: 'btn danger', type: 'button', disabled: purgeBlock !== null, title: purgeBlock, onclick: act('purge') }, t('d.purge'))),
-        actionMessage)),
+    h('div', { class: 'head' }, h('div', { class: 'grow' }, head, strip), h('div', { class: 'dside' }, actions, outcome)),
     h('section', { style: 'padding-top:0;border-top:0' }, tiles),
-    h('section', {}, sectionAt('sec.usage', 'sec.usageDesc'), h('div', { class: 'inset chart', 'data-section': 'usage' }, h('header', {}, h('b', {}, t('heat.app'))), heat.el)),
-    upstream() ? h('section', {}, sectionAt('sec.access', 'sec.accessDesc'), accessCard(app, reload)) : null,
-    h('section', {}, sectionAt('sec.policy', 'sec.policyDesc'), policyForm(app, policy, reload)),
-    h('section', {}, sectionAt('sec.releases', 'sec.releasesDesc'), table(
-      [['col.release', 'r'], ['col.image'], ['col.capabilities'], ['col.bundle'], ['col.published']],
-      [...releases].sort((a, b) => b.number - a.number).map((r) => ({ cells: [
-        h('span', { class: 'num' }, `#${r.number}`, current(r) ? h('span', { class: 'chip', style: 'margin-left:6px' }, t('r.current')) : null),
-        h('span', { class: 'mono', title: r.image ?? '' }, r.image ? r.image.slice(0, 19) : '-'),
-        Object.keys(r.manifest.capabilities).length ? h('span', { class: 'chips' }, Object.keys(r.manifest.capabilities).map(chip)) : h('span', { class: 'muted' }, t('routeOnly')),
-        h('span', { class: 'mono', title: r.bundle ?? '' }, r.bundle ? r.bundle.slice(0, 12) : '-'),
-        h('span', { title: stamp(r.publishedAt) }, ago(r.publishedAt)),
-      ] })), 'empty.filtered')),
-    h('section', {}, sectionAt('sec.bindings', 'sec.bindingsDesc'), table(
-      [['col.kind'], ['col.provider'], ['col.state']],
-      bindings.map((b) => ({ cells: [chip(b.kind), h('span', { class: 'mono' }, b.provider), status(b.state)] })), 'empty.bindings')),
-    h('section', {}, sectionAt('sec.deliveries', 'sec.deliveriesDesc'), table(
-      [['col.state'], ['col.trigger'], ['col.attempts', 'r'], ['col.scheduledFor'], ['col.created'], ['col.nextAttempt']],
-      deliveries.map((x) => ({ cells: [
-        status(x.state), h('span', { class: 'mono' }, x.trigger), h('span', { class: 'num' }, nf(x.attempts)),
-        x.scheduledFor == null ? h('span', { class: 'muted' }, t('d.onDemand')) : h('span', { class: 'mono' }, stamp(x.scheduledFor)),
-        ago(x.createdAt), x.state === 'due' ? ago(x.nextAttemptAt) : h('span', { class: 'muted' }, '-'),
-      ] })), 'empty.deliveries')),
-    h('section', {}, sectionAt('sec.logs', 'sec.logsDesc', ...logs.controls), logs.box),
+    attention,
+    section('usage', 'sec.usage', 'sec.usageDesc', h('div', { class: 'inset chart' }, h('header', {}, h('b', {}, t('heat.app'))), heat.el)),
+    section('data', 'sec.data', 'sec.dataDesc', dataRows()),
+    section('policy', 'sec.policy', 'sec.policyDesc', policyForm(app, policy, reload)),
+    section('releases', 'sec.releases', 'sec.releasesDesc', releaseList()),
+    current?.manifest.capabilities.cron !== undefined || d.deliveries.length ? section('deliveries', 'sec.deliveries', 'sec.deliveriesDesc', deliveryList(d.deliveries)) : null,
+    section('logs', 'sec.logs', 'sec.logsDesc', logs.box, ...logs.controls),
   );
   return async function update() {
     const [fresh, list, now] = await Promise.all([api('GET', appPath(name)), api('GET', '/api/apps'), events()]);
-    renderHead(list.find((a) => a.name === app.name), fresh.stats, now);
+    render(list.find((a) => a.name === app.name), fresh, now);
     if (Date.now() - heatAt >= HEAT_MS) {
       heatAt = Date.now();
       heat.set(dayRows((await api('GET', usagePath())).buckets, APP_HEAT_DAYS));
@@ -3599,35 +3750,6 @@ async function detail(name) {
 }
 
 const ACCESS_LEVELS = ['tenant', 'org', 'public'];
-
-function accessCard(app, reload) {
-  const message = h('div', { class: 'msg err', role: 'alert' });
-  const failed = (error) => { message.textContent = failText(error); };
-  const pick = async (access) => {
-    if (access === app.access) return;
-    try {
-      await api('PUT', `${appPath(app.name)}/access`, { access });
-      await reload();
-    } catch (error) { failed(error); }
-  };
-  const others = session.tenants.filter((x) => x !== app.tenant);
-  const move = async () => {
-    let to = others[0];
-    const control = h('div', { class: 'field' }, h('span', {}, t('mv.to')), listbox({ label: t('mv.to'), options: others.map((x) => ({ value: x, label: x })), value: to, onPick: (v) => { to = v; }, wide: true }));
-    if (!(await approve({ title: t('mv.title', { name: app.name }), body: t('mv.body'), action: t('mv.action'), control }))) return;
-    try {
-      await api('PUT', `${appPath(app.name)}/tenant`, { tenant: to });
-      await reload();
-    } catch (error) { failed(error); }
-  };
-  return h('div', { class: 'card kvrows' },
-    h('div', { class: 'rowkv' }, h('span', { class: 'k' }, t('ac.label')),
-      segmented(ACCESS_LEVELS.map((a) => [a, t(`ac.${a}`)]), app.access, pick, t('ac.label')),
-      h('p', {}, t(`ac.${app.access}.desc`, { tenant: app.tenant }))),
-    h('div', { class: 'rowkv' }, h('span', { class: 'k' }, t('d.tenant')), h('span', { class: 'chip' }, app.tenant),
-      isPlatformAdmin() ? h('button', { class: 'btn small', type: 'button', disabled: !others.length, title: others.length ? null : t('mv.none'), onclick: move }, t('d.move')) : null),
-    message);
-}
 
 // A path-mode address is relative to the ingress, which listens on its own port; a subdomain address is absolute.
 const appUrl = (address, port) => new URL(address, `${location.protocol}//${location.hostname}:${port}`).href;
