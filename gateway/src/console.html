@@ -545,15 +545,7 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .topo-svg [data-state="unpublished"] { opacity: .6; }
 .topo-svg [data-state="unpublished"] .chipr { fill: none; stroke-dasharray: 3 3; }
 .topo-svg .unpub { fill: none; stroke: var(--line-strong); stroke-dasharray: 4 4; }
-.topo-svg [data-state="down"] .chipr { fill: var(--red-tint); stroke: var(--red); }
-.topo-svg [data-state="down"] .sdot { fill: var(--red); }
-.topo-svg [data-state="down"] .chipt { fill: var(--red); }
-.topo-svg [data-state="cordoned"] .chipr { fill: var(--orange-tint); stroke: var(--orange); }
-.topo-svg [data-state="cordoned"] .sdot { fill: var(--orange); }
-.topo-svg [data-state="cordoned"] .chipt { fill: var(--ink); }
-.topo-svg .trk { fill: var(--hover-2); }
-.topo-svg .fil { fill: var(--accent); transition: width .6s cubic-bezier(.16,1,.3,1); }
-.topo-svg .fil.hot { fill: var(--orange); }
+
 .topo-svg .lanet.fault .grp { fill: var(--red); }
 .topo-svg .chipg.hit .chipr { stroke: var(--accent); stroke-width: 2; }
 .topo-svg .chipg.hit { animation: chiphit 1.6s ease-out; opacity: 1; }
@@ -640,6 +632,35 @@ td select { height: 26px; }
 .stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .you { margin-left: 6px; }
 .chip.text { font-family: var(--font); font-size: 11.5px; }
+.cl-strip { margin: 0 32px 32px; }
+.strip .l { font-size: 12px; color: var(--ink-2); }
+.cl .sh h2 .cnt { margin-left: 4px; font-size: 12px; font-weight: 400; color: var(--ink-3); }
+.cl .sh .end input[type="search"] { width: 200px; }
+.cl .sh .end select { height: 30px; }
+.picks-row { display: contents; }
+.wname { display: inline-flex; gap: 8px; align-items: baseline; }
+.wname .muted { font-size: 12px; }
+.ubar { min-width: 150px; }
+.ubar .num { font-size: 11.5px; color: var(--ink-2); }
+.ubar .bar { margin-top: 5px; }
+.acts { display: inline-flex; gap: 4px; align-items: center; justify-content: flex-end; }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--accent); animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
+.cl th, .cl td { padding-left: 8px; padding-right: 8px; }
+.cl tr.group td { border-top: 1px solid var(--line-strong); }
+.cl tr.sub td { height: 36px; background: var(--inset); font-size: 12px; }
+.cl tr.sub .podn { padding-left: 14px; display: inline-flex; gap: 8px; align-items: center; }
+.cl tr.outcome td { height: auto; padding: 8px 12px; white-space: normal; background: var(--inset); }
+.expander { border: 0; background: none; padding: 0; font: 600 13px var(--mono); color: var(--ink); cursor: pointer; display: inline-flex; gap: 8px; align-items: center; }
+.expander .caret { display: inline-block; width: 8px; color: var(--ink-3); transition: transform .15s; }
+.expander[aria-expanded="true"] .caret { transform: rotate(90deg); }
+.pods { display: grid; gap: 8px; padding: 8px 0 8px 16px; white-space: normal; }
+.podg { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.podg > .l { width: 132px; flex: none; color: var(--ink-3); }
+.podg .chips { flex: 1 1 0; min-width: 0; gap: 6px 16px; flex-wrap: wrap; }
+input.limit { width: 64px; height: 26px; text-align: right; font: 12px var(--mono); }
+.cl-list { margin: 0 0 20px; padding-left: 18px; font-size: 12.5px; max-height: 200px; overflow: auto; }
 @media (max-width: 900px) {
   .frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; box-shadow: none; }
   aside { position: relative; width: auto; height: auto; padding: 16px 20px; border-right: 0; border-bottom: 1px dashed var(--line); }
@@ -648,7 +669,7 @@ td select { height: 26px; }
   .brand { padding: 0; }
   .aside-foot { display: contents; }
   .controls { order: 2; margin-left: auto; }
-  nav { order: 3; width: 100%; display: flex; gap: 4px; }
+  nav { order: 3; width: 100%; display: flex; flex-wrap: wrap; gap: 4px; }
   nav a { width: auto; }
   nav .group, nav .ico, .collapse, .expand, .rail-controls { display: none; }
   .head { padding: 32px 20px 24px; }
@@ -658,6 +679,9 @@ td select { height: 26px; }
   .topbar select { max-width: 140px; }
   .who .chip, .topbar .sep { display: none; }
   .rowkv > p { margin-left: 0; }
+  .cl-strip { margin: 0 20px 24px; }
+  .cl .sh .end { width: 100%; margin-left: 0; flex-wrap: wrap; }
+  .cl .sh .end input[type="search"] { flex: 1 1 160px; width: auto; }
   .split { grid-template-columns: minmax(0, 1fr); }
   .toolbar input { width: 100%; }
 }
@@ -700,11 +724,8 @@ const I18N = {
     'k.host': '主机负载', 'k.cores': '/ {n} 核',
     'k.cluster': '集群', 'k.nodesReady': '/ {n} 个节点就绪', 'k.requestedNote': '平台 Pod 的请求之和，不含节点上的其他 Pod',
     'node.cpu': 'CPU 已请求', 'node.mem': '内存已请求', 'node.cores': '{used} / {total} 核',
-    'node.ready': '就绪', 'node.notReady': '未就绪', 'node.schedulable': '可调度', 'node.unschedulable': '不可调度', 'node.host': '单机',
+    'node.ready': '就绪', 'node.notReady': '未就绪', 'node.schedulable': '可调度', 'node.unschedulable': '不可调度',
     'node.cordoned': '已 cordon：新实例不会调度到这里，这里的实例下次唤醒时换到别的节点',
-    'node.gateways': '网关', 'node.runner': 'runner', 'node.apps': '应用', 'node.none': '无', 'node.load': '负载 {load} · {n} 核',
-    'node.workers.one': '{n} 个 worker', 'node.workers.other': '{n} 个 worker', 'node.stuck': '{n} 个卡死', 'node.restarts': '重启 {n} 次',
-    'node.waiting': '等待第一次节点采样',
     'sec.activity': '活动', 'sec.activityDesc': '每分钟计数，当前分钟画成未完成；上方标记是事件。',
     'win.60': '1 小时', 'win.360': '6 小时', 'win.1440': '24 小时',
     'ch.traffic': '流量', 'ch.wakes': '唤醒', 'ch.deliveries': '投递',
@@ -755,7 +776,7 @@ const I18N = {
     'live.on': '直播中', 'live.paused': '已暂停', 'live.offline': '网关无响应，重试中', 'live.pause': '暂停', 'live.resume': '继续',
     'live.last': '上一条事件 {ago}', 'live.none': '还没有事件', 'live.restarted': '网关在 {time} 重启，计数从零开始',
     'svc.probed': '{ago}探测',
-    'seats.title': '并发席位', 'seats.gate': 'M1 门槛 {n}', 'seats.free': '空闲席位', 'seats.over': '超出门槛 {n} 个',
+    'seats.title': '并发席位', 'seats.gate': '醒着门槛 {n}', 'seats.free': '空闲席位', 'seats.over': '超出门槛 {n} 个',
     'seats.fleet': '已注册 {registered} · 24 小时内访问 {active} · 已移除 {removed}',
     'gate.sub': 'p50 {p50} · p95 {p95} · 失败 {failures}', 'gate.line': '3 秒门槛', 'gate.latest': '最近一次 {ms}', 'gate.failed': '最近一次失败', 'gate.none': '这一小时还没有唤醒。',
     'host.mem': '内存', 'host.disk': '数据盘', 'host.diskFree': '剩余 {free}',
@@ -791,7 +812,7 @@ const I18N = {
     'nav.topology': '拓扑',
     'team.quota': '配额', 'team.quotaDesc': '已用对上限；留空表示不限', 'team.unlimited': '不限', 'team.limit': '上限',
     'q.apps': '应用', 'q.awake': '醒着的实例', 'q.cpu_millis': 'CPU（千分之一核）', 'q.memory_mb': '内存（MiB）', 'q.storage_gb': '已供应存储（GiB）',
-    'svc.volumes': 'Docker 卷',
+    'svc.volumes': 'Docker 卷', 'svc.volumes.k8s': '应用 PVC',
     'col.runtime': '运行时',
     'st.quarantined': '已隔离',
     'att.crashed': '实例崩溃',
@@ -804,11 +825,6 @@ const I18N = {
     'tp.view': '视图',
     'tp.view.lane': '泳道',
     'tp.view.graph': '连线',
-    'tp.view.nodes': '节点',
-    'tp.sec.nodes': '按节点',
-    'tp.sec.nodesDesc': '每个节点一个框：网关副本、runner 和跑在它上面的应用；条是平台 Pod 的请求对 allocatable。',
-    'tp.nodesHint': '每个节点最多画 {n} 个应用，每 15 秒采样一次。点应用打开详情。',
-    'tp.nodes.label': '节点视图：每个节点一个框，框里是它的网关、runner 和应用。',
     'tp.sec.lane': '按运行时的泳道',
     'tp.sec.laneDesc': '每个已注册应用在它的运行时泳道里；泳道到服务的边标出声明该能力的应用数。',
     'tp.sec.graph': '每个应用的连线',
@@ -823,10 +839,10 @@ const I18N = {
     'tp.col.capabilities': '能力',
     'tp.lane.label': '泳道视图：访客经网关进入三条运行时泳道，泳道连到平台服务。',
     'tp.graph.label': '连线视图：每个应用从访客经网关阶段到它的能力和服务。',
-    'tp.lane.container.sub': 'Docker 引擎 · 每应用一个容器',
+    'tp.lane.container.sub': 'Docker 引擎 · 每应用一个容器', 'tp.lane.container.sub.k8s': 'Kubernetes · 每应用一个 Pod',
     'tp.lane.isolate.sub': 'runner 服务 · 每应用一个 worker',
     'tp.lane.static.sub': '只有包存储',
-    'tp.engine.container': 'Docker 引擎',
+    'tp.engine.container': 'Docker 引擎', 'tp.engine.container.k8s': 'Kubernetes',
     'tp.engine.isolate': 'runner 服务',
     'tp.engine.static': '包存储',
     'tp.keep.container': '/data 卷',
@@ -852,7 +868,7 @@ const I18N = {
     'tp.operator': '运营者',
     'tp.caller': '服务调用方',
     'tp.apps.one': '{n} 个应用', 'tp.apps.other': '{n} 个应用',
-    'tp.unprobed': '随 Docker 引擎，不探测',
+    'tp.unprobed': '随 Docker 引擎，不探测', 'tp.unprobed.k8s': '随 Kubernetes，不探测',
     'tp.unused': '没有应用需要它',
     'tp.waiting': '等待第一次采样',
     'tp.noRelease': '无发布', 'tp.unpublished': '未发布', 'tp.unpublishedSub': '首次发布未完成',
@@ -918,6 +934,41 @@ const I18N = {
     'f.nameHintAt': '小写字母、数字和 -，地址是 {address}。', 'f.ownerHintSelf': '可选，默认是你（{subject}）。仅首次发布生效。',
     'f.tenant': '租户', 'f.tenantHint': '跟随顶栏的租户切换器；仅首次发布生效。', 'f.tenantPick': '首次发布进入的租户。',
     'tp.x.addr': '（{p}）',
+    'nav.cluster': '主机', 'nav.cluster.k8s': '集群',
+    'cl.sub': '这台主机上的平台服务、实例和应用卷，每 15 秒采样一次。', 'cl.sub.k8s': '平台在集群里的节点、组件、实例、存储和告警，每 15 秒采样一次。',
+    'cl.sampled': '采样于 {ago}', 'cl.pending': '进行中', 'cl.restarts': '重启 {n} 次', 'cl.dismiss': '关闭', 'cl.none': '无', 'cl.gib': '{n} GiB',
+    'cl.k.sampled': '上次采样', 'cl.k.nodes': '节点就绪', 'cl.k.gateway': '网关就绪', 'cl.k.runner': 'runner 就绪', 'cl.k.awake': '醒着的实例', 'cl.k.warnings': '告警（1 小时）',
+    'cl.sec.nodes': '节点', 'cl.sec.nodesDesc': '条是平台 Pod 的请求对 allocatable，不含节点上的其他 Pod。点节点名展开它上面的 Pod。排空只停这个节点上的实例，不动节点本身。',
+    'cl.sec.workloads': '平台组件', 'cl.sec.workloadsDesc': 'Compose 服务和网关对它们的探测；这个平面上只读。',
+    'cl.sec.workloadsDesc.k8s': '网关和 runner 可以伸缩副本、重启 Pod；有状态服务只展示，归运营者的 kubectl。',
+    'cl.sec.instances': '实例', 'cl.sec.instancesDesc': '每个没睡着的实例。CPU 和内存上限就地改，写进应用策略，下次唤醒生效；留空沿用平台值。',
+    'cl.sec.volumes': '存储', 'cl.sec.volumesDesc': '应用的 Docker 卷。', 'cl.sec.volumesDesc.k8s': '应用命名空间里带应用标签的 PVC。',
+    'cl.sec.warnings': '告警', 'cl.sec.warningsDesc': '两个平台命名空间里最近一小时的 Warning 事件。',
+    'cl.filter.nodes': '筛选节点', 'cl.filter.instances': '筛选应用、Pod 或节点', 'cl.filter.volumes': '筛选卷', 'cl.filter.warnings': '筛选告警',
+    'cl.allTenants': '全部租户', 'cl.allStates': '全部状态', 'cl.allNodes': '全部节点',
+    'cl.c.node': '节点', 'cl.c.zone': '区域 · 机型', 'cl.c.taints': '污点', 'cl.c.pods': '平台 Pod', 'cl.c.instances': '实例',
+    'cl.c.name': '名称', 'cl.c.ready': '就绪 / 期望', 'cl.c.image': '镜像', 'cl.c.started': '启动', 'cl.c.restarts': '重启',
+    'cl.c.app': '应用', 'cl.c.pod': 'Pod', 'cl.c.container': '容器', 'cl.c.leases': '租约', 'cl.c.leasesTitle': '请求·通道·触发', 'cl.c.cpuLimit': 'CPU 毫核', 'cl.c.cpuLimitTitle': 'CPU 上限，千分之一核',
+    'cl.c.memLimit': '内存 MiB', 'cl.c.memLimitTitle': '内存上限，MiB',
+    'cl.c.volume': '卷', 'cl.c.size': '大小', 'cl.c.class': '存储类', 'cl.c.phase': '阶段',
+    'cl.c.time': '时间', 'cl.c.object': '对象', 'cl.c.reason': '原因', 'cl.c.message': '消息', 'cl.c.count': '次数',
+    'cl.expand': '展开 {node} 上的 Pod', 'cl.collapse': '收起 {node} 上的 Pod',
+    'cl.gateways': '网关', 'cl.runners': 'runner', 'cl.services': '其他平台 Pod', 'cl.appPods': '实例',
+    'cl.leading': '领导者', 'cl.leadingTitle': '持有领导权的网关副本',
+    'cl.drain': '排空实例', 'cl.drainFor': '排空 {node} 上的实例', 'cl.drainNone': '这个节点上没有实例',
+    'cl.drainTitle': '排空 {node} 上的实例？', 'cl.drainBody': '下面每个实例排空后停止，下次请求重新唤醒，可能落到别的节点。节点本身不改：不 cordon，可调度标记不变。',
+    'cl.drained': '已停止：{stopped}', 'cl.drainFailed': '已停止：{stopped}；失败：{failed}',
+    'cl.restart': '重启', 'cl.restartFor': '重启 {name}', 'cl.restartPodTitle': '重启 {pod}？',
+    'cl.restartGateway': '删除这个 Pod，控制器重建它。它先排空连接；如果它是领导者，领导权在别的副本上重选。',
+    'cl.restartRunner': '删除这个 Pod，控制器重建它。它上面的 isolate worker 随之结束，下次请求重新唤醒。',
+    'cl.scale': '调整', 'cl.scaleFor': '调整 {name} 的副本数', 'cl.replicas': '{name} 的副本数',
+    'cl.scaleTitle': '把 {name} 调到 {n} 个副本？', 'cl.scaleBody': '现在期望 {from} 个。缩掉的副本先排空；runner 缩掉的副本保留它的 PVC。', 'cl.scaled': '已提交 {n} 个副本，就绪数随采样更新。',
+    'cl.stop': '停止', 'cl.stopFor': '停止 {app}', 'cl.stopTitle': '停止 {app}？', 'cl.stopBody': '排空后删除实例，下次请求重新唤醒。数据不受影响。',
+    'cl.restartTitle': '重启 {app}？', 'cl.restartBody': '排空并删除实例，然后立即在新的 Pod 或容器里唤醒它。',
+    'cl.kill': '强制释放', 'cl.killFor': '强制释放 {app}', 'cl.killTitle': '强制释放 {app}？',
+    'cl.killBody': '不排空：立即删除它的 Pod 或容器（宽限 0），实例行无条件置为休眠，所有副本上的租约计数和唤醒认领清零。进行中的请求和连接直接断开。只用于卡住的实例。',
+    'cl.cpuFor': '{app} 的 CPU 上限', 'cl.memFor': '{app} 的内存上限',
+    'empty.cl.nodes': '还没有节点采样。', 'empty.cl.workloads': '还没有采样。', 'empty.cl.instances': '没有醒着的实例。', 'empty.cl.volumes': '没有应用卷。', 'empty.cl.warnings': '最近一小时没有告警',
   },
   en: {
     'brand.sub': 'Console', 'nav.group': 'Platform', 'nav.overview': 'Overview', 'nav.apps': 'Projects', 'nav.publish': 'Publish',
@@ -932,11 +983,8 @@ const I18N = {
     'k.host': 'Host load', 'k.cores': '/ {n} cores',
     'k.cluster': 'Cluster', 'k.nodesReady': '/ {n} nodes ready', 'k.requestedNote': 'Summed over the platform’s Pods, not every Pod on the nodes',
     'node.cpu': 'CPU requested', 'node.mem': 'Memory requested', 'node.cores': '{used} / {total} cores',
-    'node.ready': 'Ready', 'node.notReady': 'NotReady', 'node.schedulable': 'schedulable', 'node.unschedulable': 'unschedulable', 'node.host': 'single host',
+    'node.ready': 'Ready', 'node.notReady': 'NotReady', 'node.schedulable': 'schedulable', 'node.unschedulable': 'unschedulable',
     'node.cordoned': 'Cordoned: no new instance is scheduled here; instances here move when they next wake',
-    'node.gateways': 'gateways', 'node.runner': 'runner', 'node.apps': 'apps', 'node.none': 'none', 'node.load': 'load {load} · {n} cores',
-    'node.workers.one': '{n} worker', 'node.workers.other': '{n} workers', 'node.stuck': '{n} stuck', 'node.restarts': '{n} restarts',
-    'node.waiting': 'Waiting for the first node sample',
     'sec.activity': 'Activity', 'sec.activityDesc': 'Per-minute counts, the current minute drawn as unfinished; marks above are events.',
     'win.60': '1 h', 'win.360': '6 h', 'win.1440': '24 h',
     'ch.traffic': 'Traffic', 'ch.wakes': 'Wakes', 'ch.deliveries': 'Deliveries',
@@ -987,7 +1035,7 @@ const I18N = {
     'live.on': 'Live', 'live.paused': 'Paused', 'live.offline': 'Gateway not answering; retrying', 'live.pause': 'Pause', 'live.resume': 'Resume',
     'live.last': 'last event {ago}', 'live.none': 'no event yet', 'live.restarted': 'gateway restarted at {time}; counters start over',
     'svc.probed': 'probed {ago}',
-    'seats.title': 'Seats', 'seats.gate': 'M1 gate {n}', 'seats.free': 'free seat', 'seats.over': '{n} over the gate',
+    'seats.title': 'Seats', 'seats.gate': 'awake gate {n}', 'seats.free': 'free seat', 'seats.over': '{n} over the gate',
     'seats.fleet': 'registered {registered} · accessed in 24 h {active} · removed {removed}',
     'gate.sub': 'p50 {p50} · p95 {p95} · failed {failures}', 'gate.line': '3 s gate', 'gate.latest': 'latest {ms}', 'gate.failed': 'latest failed', 'gate.none': 'No wake in the last hour.',
     'host.mem': 'Memory', 'host.disk': 'Data disk', 'host.diskFree': '{free} free',
@@ -1023,7 +1071,7 @@ const I18N = {
     'nav.topology': 'Topology',
     'team.quota': 'Quota', 'team.quotaDesc': 'Used over limit; empty means unlimited', 'team.unlimited': 'unlimited', 'team.limit': 'Limit',
     'q.apps': 'Apps', 'q.awake': 'Awake instances', 'q.cpu_millis': 'CPU (millicores)', 'q.memory_mb': 'Memory (MiB)', 'q.storage_gb': 'Provisioned storage (GiB)',
-    'svc.volumes': 'Docker volumes',
+    'svc.volumes': 'Docker volumes', 'svc.volumes.k8s': 'App PVCs',
     'col.runtime': 'Runtime',
     'st.quarantined': 'quarantined',
     'att.crashed': 'Instance crashed',
@@ -1036,11 +1084,6 @@ const I18N = {
     'tp.view': 'View',
     'tp.view.lane': 'Lanes',
     'tp.view.graph': 'Graph',
-    'tp.view.nodes': 'Nodes',
-    'tp.sec.nodes': 'By node',
-    'tp.sec.nodesDesc': 'One frame per node: the gateway replicas, the runner and the apps running on it; bars are the platform Pods’ requests over allocatable.',
-    'tp.nodesHint': 'Each node draws at most {n} apps; sampled every 15 s. Click an app to open it.',
-    'tp.nodes.label': 'Node view: one frame per node holding its gateways, runner and apps.',
     'tp.sec.lane': 'Lanes by runtime',
     'tp.sec.laneDesc': 'Every registered app sits in the lane of its runtime; an edge to a service counts the apps declaring that capability.',
     'tp.sec.graph': 'Every app’s edges',
@@ -1055,10 +1098,10 @@ const I18N = {
     'tp.col.capabilities': 'capabilities',
     'tp.lane.label': 'Lane view: visitors enter through the gateway into three runtime lanes, which connect to the platform services.',
     'tp.graph.label': 'Graph view: each app from the visitor through the gateway stages to its capabilities and services.',
-    'tp.lane.container.sub': 'Docker engine · one container per app',
+    'tp.lane.container.sub': 'Docker engine · one container per app', 'tp.lane.container.sub.k8s': 'Kubernetes · one Pod per app',
     'tp.lane.isolate.sub': 'runner service · one worker per app',
     'tp.lane.static.sub': 'bundle store only',
-    'tp.engine.container': 'Docker engine',
+    'tp.engine.container': 'Docker engine', 'tp.engine.container.k8s': 'Kubernetes',
     'tp.engine.isolate': 'runner service',
     'tp.engine.static': 'bundle store',
     'tp.keep.container': '/data volumes',
@@ -1084,7 +1127,7 @@ const I18N = {
     'tp.operator': 'operator',
     'tp.caller': 'service caller',
     'tp.apps.one': '{n} app', 'tp.apps.other': '{n} apps',
-    'tp.unprobed': 'with the Docker engine, not probed',
+    'tp.unprobed': 'with the Docker engine, not probed', 'tp.unprobed.k8s': 'with Kubernetes, not probed',
     'tp.unused': 'no app needs it',
     'tp.waiting': 'waiting for the first sample',
     'tp.noRelease': 'no release', 'tp.unpublished': 'unpublished', 'tp.unpublishedSub': 'first publish not finished',
@@ -1150,6 +1193,41 @@ const I18N = {
     'f.nameHintAt': 'Lowercase letters, digits and -; the address is {address}.', 'f.ownerHintSelf': 'Optional; defaults to you ({subject}). First publish only.',
     'f.tenant': 'Tenant', 'f.tenantHint': 'Follows the tenant switcher; first publish only.', 'f.tenantPick': 'The tenant of the first publish.',
     'tp.x.addr': ' ({p})',
+    'nav.cluster': 'Host', 'nav.cluster.k8s': 'Cluster',
+    'cl.sub': 'The platform’s services, instances and app volumes on this host, sampled every 15 s.', 'cl.sub.k8s': 'The platform’s nodes, workloads, instances, storage and warnings in the cluster, sampled every 15 s.',
+    'cl.sampled': 'sampled {ago}', 'cl.pending': 'In progress', 'cl.restarts': '{n} restarts', 'cl.dismiss': 'Dismiss', 'cl.none': 'none', 'cl.gib': '{n} GiB',
+    'cl.k.sampled': 'Last sample', 'cl.k.nodes': 'Nodes ready', 'cl.k.gateway': 'Gateway ready', 'cl.k.runner': 'Runner ready', 'cl.k.awake': 'Awake instances', 'cl.k.warnings': 'Warnings (1 h)',
+    'cl.sec.nodes': 'Nodes', 'cl.sec.nodesDesc': 'Bars are the platform Pods’ requests over allocatable, not every Pod on the node. Click a node to list its Pods. Drain stops the instances on it and leaves the node alone.',
+    'cl.sec.workloads': 'Platform workloads', 'cl.sec.workloadsDesc': 'The compose services as the gateway probes them; read-only on this plane.',
+    'cl.sec.workloadsDesc.k8s': 'Scale the gateway and the runner and restart their Pods; the stateful services are shown only and belong to the operator’s kubectl.',
+    'cl.sec.instances': 'Instances', 'cl.sec.instancesDesc': 'Every instance not asleep. Edit the CPU and memory limits in place: they go into the app’s policy and apply from the next wake; empty keeps the platform value.',
+    'cl.sec.volumes': 'Storage', 'cl.sec.volumesDesc': 'The apps’ Docker volumes.', 'cl.sec.volumesDesc.k8s': 'The PVCs carrying an app label in the apps namespace.',
+    'cl.sec.warnings': 'Warnings', 'cl.sec.warningsDesc': 'Warning events of the last hour in the two platform namespaces.',
+    'cl.filter.nodes': 'Filter nodes', 'cl.filter.instances': 'Filter by app, Pod or node', 'cl.filter.volumes': 'Filter volumes', 'cl.filter.warnings': 'Filter warnings',
+    'cl.allTenants': 'All tenants', 'cl.allStates': 'All states', 'cl.allNodes': 'All nodes',
+    'cl.c.node': 'Node', 'cl.c.zone': 'Zone · type', 'cl.c.taints': 'Taints', 'cl.c.pods': 'Platform Pods', 'cl.c.instances': 'Instances',
+    'cl.c.name': 'Name', 'cl.c.ready': 'Ready / desired', 'cl.c.image': 'Image', 'cl.c.started': 'Started', 'cl.c.restarts': 'Restarts',
+    'cl.c.app': 'App', 'cl.c.pod': 'Pod', 'cl.c.container': 'Container', 'cl.c.leases': 'Leases', 'cl.c.leasesTitle': 'request · channel · trigger', 'cl.c.cpuLimit': 'CPU m', 'cl.c.cpuLimitTitle': 'CPU limit in millicores',
+    'cl.c.memLimit': 'Memory MiB', 'cl.c.memLimitTitle': 'Memory limit in MiB',
+    'cl.c.volume': 'Volume', 'cl.c.size': 'Size', 'cl.c.class': 'Storage class', 'cl.c.phase': 'Phase',
+    'cl.c.time': 'Time', 'cl.c.object': 'Object', 'cl.c.reason': 'Reason', 'cl.c.message': 'Message', 'cl.c.count': 'Count',
+    'cl.expand': 'Show the Pods on {node}', 'cl.collapse': 'Hide the Pods on {node}',
+    'cl.gateways': 'gateways', 'cl.runners': 'runner', 'cl.services': 'other platform Pods', 'cl.appPods': 'instances',
+    'cl.leading': 'leader', 'cl.leadingTitle': 'The gateway replica that holds the lead',
+    'cl.drain': 'Drain instances', 'cl.drainFor': 'Drain the instances on {node}', 'cl.drainNone': 'No instance runs on this node',
+    'cl.drainTitle': 'Drain the instances on {node}?', 'cl.drainBody': 'Each instance below drains and stops; the next request wakes it, possibly on another node. The node itself is untouched: no cordon, its schedulable flag stays.',
+    'cl.drained': 'Stopped: {stopped}', 'cl.drainFailed': 'Stopped: {stopped}; failed: {failed}',
+    'cl.restart': 'Restart', 'cl.restartFor': 'Restart {name}', 'cl.restartPodTitle': 'Restart {pod}?',
+    'cl.restartGateway': 'Deletes the Pod and its controller recreates it. It drains its connections first; if it leads, another replica takes the lead.',
+    'cl.restartRunner': 'Deletes the Pod and its controller recreates it. Its isolate workers end with it; the next request wakes them again.',
+    'cl.scale': 'Apply', 'cl.scaleFor': 'Apply the replica count of {name}', 'cl.replicas': 'Replicas of {name}',
+    'cl.scaleTitle': 'Scale {name} to {n} replicas?', 'cl.scaleBody': '{from} desired now. A removed replica drains first; a removed runner replica keeps its PVC.', 'cl.scaled': '{n} replicas requested; the ready count follows the next samples.',
+    'cl.stop': 'Stop', 'cl.stopFor': 'Stop {app}', 'cl.stopTitle': 'Stop {app}?', 'cl.stopBody': 'Drains the instance and deletes it; the next request wakes it. Data is untouched.',
+    'cl.restartTitle': 'Restart {app}?', 'cl.restartBody': 'Drains and deletes the instance, then wakes it at once in a new Pod or container.',
+    'cl.kill': 'Force release', 'cl.killFor': 'Force release {app}', 'cl.killTitle': 'Force release {app}?',
+    'cl.killBody': 'No drain: deletes its Pod or container at once (grace 0), forces the instance row asleep and clears its lease tallies on every replica and its wake claim. Requests and connections in flight are cut. Only for a stuck instance.',
+    'cl.cpuFor': 'CPU limit of {app}', 'cl.memFor': 'Memory limit of {app}',
+    'empty.cl.nodes': 'No node sampled yet.', 'empty.cl.workloads': 'Nothing sampled yet.', 'empty.cl.instances': 'No instance is awake.', 'empty.cl.volumes': 'No app volumes.', 'empty.cl.warnings': 'No warnings in the last hour',
   },
 };
 
@@ -1298,6 +1376,7 @@ const ICON = {
   'nav-overview': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.25" y="2.25" width="13.5" height="13.5" rx="3.5"/><path d="M5 9.5h1.75l1.5-3.25 1.75 5.5 1.5-2.25H13"/></svg>',
   'nav-realtime': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="1.25" fill="currentColor" stroke="none"/><path d="M6.2 5.7a4.4 4.4 0 0 0 0 6.6M11.8 5.7a4.4 4.4 0 0 1 0 6.6M3.9 3.4a7.6 7.6 0 0 0 0 11.2M14.1 3.4a7.6 7.6 0 0 1 0 11.2"/></svg>',
   'nav-topology': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="9" r="2"/><circle cx="13.5" cy="4.5" r="2"/><circle cx="13.5" cy="13.5" r="2"/><path d="m6.3 8.1 5.4-2.7M6.3 9.9l5.4 2.7"/></svg>',
+  'nav-cluster': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.75" y="2.75" width="12.5" height="5" rx="1.75"/><rect x="2.75" y="10.25" width="12.5" height="5" rx="1.75"/><path d="M5.5 5.25h.01M5.5 12.75h.01M8.5 5.25h4M8.5 12.75h4"/></svg>',
   'nav-apps': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.5"/><rect x="2.5" y="10" width="5.5" height="5.5" rx="1.5"/><rect x="10" y="10" width="5.5" height="5.5" rx="1.5"/></svg>',
   'nav-team': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="6" r="2.5"/><circle cx="12.5" cy="7" r="2"/><path d="M2.25 15c0-2.5 1.9-4.25 4.25-4.25S10.75 12.5 10.75 15"/><path d="M11 11.1c.45-.2.95-.35 1.5-.35 1.9 0 3.25 1.45 3.25 3.5"/></svg>',
   'nav-publish': '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.75v8.5M5.75 6 9 2.75 12.25 6"/><path d="M2.75 11.25v1.75a2 2 0 0 0 2 2h8.5a2 2 0 0 0 2-2v-1.75"/></svg>',
@@ -1318,14 +1397,22 @@ const offeredOf = ({ me, tenants }) => (me.platformAdmin ? [ALL, ...tenants] : t
 
 async function loadSession() {
   const me = await api('GET', '/api/me');
-  const tenants = me.local ? [] : me.platformAdmin ? (await api('GET', '/api/tenants')).map((x) => x.name) : Object.keys(me.roles).sort();
+  const [tenants, plane] = await Promise.all([
+    me.local ? [] : me.platformAdmin ? api('GET', '/api/tenants').then((list) => list.map((x) => x.name)) : Object.keys(me.roles).sort(),
+    me.platformAdmin ? api('GET', '/api/cluster').then((c) => c.plane) : null,
+  ]);
   const offered = offeredOf({ me, tenants });
   const stored = store.get(TENANT_KEY);
-  return { me, tenants, scope: me.local ? ALL : offered.includes(stored) ? stored : offered[0] ?? null };
+  return { me, tenants, plane, scope: me.local ? ALL : offered.includes(stored) ? stored : offered[0] ?? null };
 }
 
 const upstream = () => session !== null && !session.me.local;
 const isPlatformAdmin = () => session?.me.platformAdmin === true;
+/** Known to a platform admin only; null otherwise. */
+const onCluster = () => session?.plane === 'kubernetes';
+/** The key's `.k8s` wording on the kubernetes plane where the docker one names Docker or the host (ADR 0026 item 6). */
+const planeKey = (key) => (onCluster() && `${key}.k8s` in I18N[lang] ? `${key}.k8s` : key);
+const planeT = (key, vars) => t(planeKey(key), vars);
 const mayAdmin = (tenant) => isPlatformAdmin() || session.me.roles?.[tenant] === 'admin';
 const userId = () => session.me.subject.slice('user:'.length);
 const scoped = (apps) => (session.scope === ALL ? apps : apps.filter((a) => a.tenant === session.scope));
@@ -1406,7 +1493,7 @@ const MARKS = {
 
 /** Everything the overview knows, folded from snapshots: the event history by id and each app's state transitions. */
 function liveModel() {
-  return { startedAt: null, lastId: 0, horizon: 0, events: [], transitions: new Map(), wakeFailures: new WeakSet(), metrics: null, nodes: null, apps: [], appsAt: 0, rates: new Map() };
+  return { startedAt: null, lastId: 0, horizon: 0, events: [], transitions: new Map(), wakeFailures: new WeakSet(), metrics: null, cluster: null, apps: [], appsAt: 0, rates: new Map() };
 }
 
 function absorbMetrics(model, m) {
@@ -1675,7 +1762,7 @@ function gateCard() {
   };
 }
 
-const NODES_MS = 15_000;
+const CLUSTER_MS = 15_000;
 const cores = (millis) => new Intl.NumberFormat(locale(), { maximumFractionDigits: 2 }).format(millis / 1000);
 
 /** The host card; under Kubernetes the cluster card: ready nodes, and the platform's requests over allocatable (ADR 0024 item 8). */
@@ -1691,12 +1778,12 @@ function hostCard() {
   ];
   return {
     el,
-    render(m, nodes) {
-      if (nodes?.source === 'k8s') {
-        const sum = (side, key) => nodes.nodes.reduce((n, x) => n + x[side][key], 0);
+    render(m, cluster) {
+      if (cluster?.plane === 'kubernetes') {
+        const sum = (side, key) => cluster.nodes.reduce((n, x) => n + x[side][key], 0);
         el.dataset.section = 'cluster';
         fill(label, t('k.cluster'));
-        fill(value, nf(nodes.nodes.filter((n) => n.ready).length), h('small', {}, t('k.nodesReady', { n: nf(nodes.nodes.length) })));
+        fill(value, nf(cluster.nodes.filter((n) => n.ready).length), h('small', {}, t('k.nodesReady', { n: nf(cluster.nodes.length) })));
         fill(meter,
           ...row(t('node.cpu'), t('node.cores', { used: cores(sum('requested', 'cpuMillis')), total: cores(sum('allocatable', 'cpuMillis')) }), sum('requested', 'cpuMillis') / sum('allocatable', 'cpuMillis')),
           ...row(t('node.mem'), `${bytes(sum('requested', 'memoryBytes'))} / ${bytes(sum('allocatable', 'memoryBytes'))}`, sum('requested', 'memoryBytes') / sum('allocatable', 'memoryBytes')));
@@ -2339,7 +2426,7 @@ async function overview() {
     services.render(model.metrics);
     seats.render(model, animate);
     gate.render(model, animate);
-    host.render(model.metrics, model.nodes);
+    host.render(model.metrics, model.cluster);
     const awake = [...model.transitions.keys()].some((n) => ACTIVE.includes(stateOf(model, n)));
     if (moved || awake || Date.now() - paintedAt > 60_000) {
       lane.render(model, animate);
@@ -2352,12 +2439,12 @@ async function overview() {
     const usage = await api('GET', '/api/usage?app=*');
     heat.set(weekRows(usage.buckets), h('span', { class: 'muted' }, t('heat.span', { from: new Intl.DateTimeFormat(locale(), { dateStyle: 'medium' }).format(usage.from) })));
   });
-  const pollNodes = header.guarded(async () => {
-    model.nodes = await api('GET', '/api/nodes');
-    if (model.metrics) host.render(model.metrics, model.nodes);
+  const pollCluster = header.guarded(async () => {
+    model.cluster = await api('GET', '/api/cluster');
+    if (model.metrics) host.render(model.metrics, model.cluster);
   });
   const refresh = header.guarded(pollMetrics);
-  return { loops: [[METRICS_MS, refresh], [APPS_MS, header.guarded(pollApps)], [HEAT_MS, pollHeat], [NODES_MS, pollNodes]], first: () => Promise.all([pollNodes(), refresh(), pollHeat()]) };
+  return { loops: [[METRICS_MS, refresh], [APPS_MS, header.guarded(pollApps)], [HEAT_MS, pollHeat], [CLUSTER_MS, pollCluster]], first: () => Promise.all([pollCluster(), refresh(), pollHeat()]) };
 }
 
 // Realtime (ADR 0016): the request ring and the event ring, read by cursor, under one filter.
@@ -3289,7 +3376,7 @@ function servicesOf(a) {
 }
 
 function topoModel() {
-  return { apps: [], health: null, services: {}, nodes: null, cursor: null, startedAt: null, last: null };
+  return { apps: [], health: null, services: {}, cursor: null, startedAt: null, last: null };
 }
 
 /** up, down or off from the last probe sample; unknown before the gateway's first sample, which is no fault. */
@@ -3348,7 +3435,7 @@ function stripeDefs() {
 /** The small text at a chip's right: no release yet, or, with `withNode` under Kubernetes, the node the app runs on. */
 function chipNote(model, a, withNode) {
   if (laneOf(a) === null) return { text: t('tp.noRelease'), mono: false };
-  return withNode && model.nodes?.source === 'k8s' && a.node ? { text: a.node, mono: true } : null;
+  return withNode && onCluster() && a.node ? { text: a.node, mono: true } : null;
 }
 const noteWidth = (note) => (note ? textWidth(note.text, 11.5, note.mono) + 8 : 0);
 
@@ -3401,7 +3488,7 @@ function flowChips(model, apps, x0, rowW, y0, withNode = false) {
   return wrapChips(apps.map((a) => ({ a, w: Math.max(84, textWidth(a.name, 11.5, true) + 30 + noteWidth(chipNote(model, a, withNode))) })), x0, rowW, y0);
 }
 
-function serviceNode(model, name, x, y, w, hgt, label = t(`svc.${name}`)) {
+function serviceNode(model, name, x, y, w, hgt, label = planeT(`svc.${name}`)) {
   const s = model.services[name];
   const status = svcStatus(model, name);
   const fault = svcFault(model, name);
@@ -3409,7 +3496,7 @@ function serviceNode(model, name, x, y, w, hgt, label = t(`svc.${name}`)) {
     svg('rect', { x, y, width: w, height: hgt, rx: 10, class: 'svcbox' }),
     tx(x + 12, y + 20, fit(label, 12.5, false, w - (name === 'volumes' ? 24 : 80), 600), 'svct'));
   if (name === 'volumes') {
-    g.append(tx(x + 12, y + 36, fit(t('tp.unprobed'), 11, false, w - 24), 't3 small'));
+    g.append(tx(x + 12, y + 36, fit(planeT('tp.unprobed'), 11, false, w - 24), 't3 small'));
     return g;
   }
   const st = t(`st.${status}`);
@@ -3480,7 +3567,7 @@ function laneScene(model, width, shown, on) {
     g.append(svg('g', { class: 'lanet' },
       tx(lx + 14, y + 24, lane, 'lanen'),
       infoButton(lx + 14 + nameW + 6, y + 20, lane, () => on.explain(lane), `lane:${lane}`),
-      textWidth(t(`tp.lane.${lane}.sub`), 11.5) <= lx + lw - 14 - countW - 16 - subX ? tx(subX, y + 24, t(`tp.lane.${lane}.sub`), 't3 small') : null),
+      textWidth(planeT(`tp.lane.${lane}.sub`), 11.5) <= lx + lw - 14 - countW - 16 - subX ? tx(subX, y + 24, planeT(`tp.lane.${lane}.sub`), 't3 small') : null),
       tx(lx + lw - 14, y + 24, countText, down ? 'bad small' : 't3 small m', { 'text-anchor': 'end' }));
     if (!apps.length && !more) g.append(tx(inner, y + 59, t('tp.noApps'), 't3 small'));
     for (const p of placed) g.append(chip(p));
@@ -3507,7 +3594,7 @@ function laneScene(model, width, shown, on) {
       const n = all.filter((a) => needs(a).some((x) => x.cap === cap)).length;
       return n ? `${cap === 'files' ? 'files' : 'sqlite'} ${n}` : null;
     })].filter(Boolean).join(' · ');
-    const engine = t(`tp.engine.${lane}`);
+    const engine = planeT(`tp.engine.${lane}`);
     const engineW = textWidth(engine, 11.5, false, 500) + 20;
     g.append(svg('rect', { x: inner, y: stripY, width: innerW, height: 30, rx: 8, class: 'strip' }),
       tx(inner + 10, stripY + 19, engine, 't2 small strong'),
@@ -3779,134 +3866,6 @@ function graphScene(model, width, shown, hidden, on) {
   };
 }
 
-// Node view (ADR 0024 item 8): one frame per node holding its gateways, its runner and the apps running on it.
-
-/** The apps a node frame holds: every running app on the single host, else the apps whose instance runs on that node. */
-const appsOn = (answer, node, apps) => (answer.source === 'host' ? apps.filter((a) => ACTIVE_STATES.has(a.instance)) : apps.filter((a) => a.node === node.name));
-
-/** A non-app chip in the app chip's shape: state dot, mono label, optional note. */
-function plainChip(x, y, w, label, state, note = '', title = label) {
-  const noteW = note ? textWidth(note, 11.5) + 8 : 0;
-  return titled(svg('g', { class: 'chipg', 'data-state': state },
-    svg('rect', { x, y, width: w, height: 22, rx: 6, class: 'chipr' }),
-    svg('circle', { cx: x + 10, cy: y + 11, r: 3, class: 'sdot' }),
-    tx(x + 19, y + 15, fit(label, 11.5, true, w - 26 - noteW), 'm chipt'),
-    note ? tx(x + w - 8, y + 15, note, 't3 small', { 'text-anchor': 'end' }) : null), title);
-}
-const plainWidth = (label, note = '') => Math.max(64, textWidth(label, 11.5, true) + 30 + (note ? textWidth(note, 11.5) + 8 : 0));
-
-function nodeFrame(model, answer, node, w, shown, on, chips) {
-  const g = svg('g', { 'data-id': `node:${node.name}` });
-  const inner = 14, innerW = w - 28;
-  const host = answer.source === 'host';
-  const pills = [
-    node.ready ? ['awake', t('node.ready')] : ['down', t('node.notReady')],
-    host ? ['plain', t('node.host')] : node.schedulable ? ['plain', t('node.schedulable')] : ['cordoned', t('node.unschedulable')],
-  ];
-  let px = w - inner;
-  const pillEls = pills.reverse().map(([state, label]) => {
-    const pw = textWidth(label, 11.5) + 26;
-    px -= pw;
-    const el = svg('g', { class: 'chipg', 'data-state': state },
-      svg('rect', { x: px, y: 10, width: pw, height: 22, rx: 6, class: 'chipr' }),
-      svg('circle', { cx: px + 10, cy: 21, r: 3, class: 'sdot' }),
-      tx(px + 18, 25, label, 'chipt'));
-    px -= 6;
-    return state === 'cordoned' ? titled(el, t('node.cordoned')) : el;
-  });
-  const sub = host && node.used ? t('node.load', { load: new Intl.NumberFormat(locale(), { maximumFractionDigits: 2 }).format(node.used.load[0]), n: node.used.cpus })
-    : ['topology.kubernetes.io/zone', 'node.kubernetes.io/instance-type'].map((k) => node.labels[k]).filter(Boolean).join(' · ');
-  const taints = node.taints.filter((x) => x.key !== 'node.kubernetes.io/unschedulable').map((x) => `${x.key}${x.value ? `=${x.value}` : ''}:${x.effect}`);
-  g.append(titled(tx(inner, 26, fit(node.name, 13, true, px - inner - 4, 600), 'm lanen'), node.name), ...pillEls);
-  let y = 42;
-  if (sub || taints.length) {
-    const line = [sub, ...taints].filter(Boolean).join(' · ');
-    g.append(titled(tx(inner, y + 8, fit(line, 11.5, true, innerW), 'm t3 small'), line));
-    y += 20;
-  }
-  const bar = (label, text, used, total) => {
-    const ratio = total > 0 ? Math.min(1, used / total) : 0;
-    g.append(tx(inner, y + 12, label, 't2 small'), tx(inner + innerW, y + 12, text, 'm t3 small', { 'text-anchor': 'end' }),
-      svg('rect', { x: inner, y: y + 19, width: innerW, height: 4, rx: 2, class: 'trk' }),
-      svg('rect', { x: inner, y: y + 19, width: Math.max(ratio > 0 ? 2 : 0, ratio * innerW), height: 4, rx: 2, class: `fil${ratio > 0.85 ? ' hot' : ''}` }));
-    y += 32;
-  };
-  bar(t('node.cpu'), t('node.cores', { used: cores(node.requested.cpuMillis), total: cores(node.allocatable.cpuMillis) }), node.requested.cpuMillis, node.allocatable.cpuMillis);
-  bar(t('node.mem'), `${bytes(node.requested.memoryBytes)} / ${bytes(node.allocatable.memoryBytes)}`, node.requested.memoryBytes, node.allocatable.memoryBytes);
-  const group = (label, items, empty) => {
-    y += 6;
-    g.append(tx(inner, y + 10, label, 't3 small'));
-    y += 18;
-    if (!items.length) {
-      g.append(tx(inner, y + 15, empty, 't3 small'));
-      y += 22;
-      return;
-    }
-    const placed = wrapChips(items, inner, innerW, y);
-    for (const p of placed) g.append(p.draw(p));
-    y = placed.at(-1).y + 22;
-  };
-  group(t('node.gateways'), node.gateways.map((gw) => ({ w: plainWidth(gw.pod), draw: (p) => plainChip(p.x, p.y, p.w, gw.pod, gw.ready ? 'awake' : 'down', '', `${gw.pod} · ${t(gw.ready ? 'node.ready' : 'node.notReady')}`) })), t('node.none'));
-  const r = node.runner;
-  const runnerNote = r && r.workers != null ? plural('node.workers', r.workers) : '';
-  const runnerTitle = r && [r.pod, t(r.ready ? 'node.ready' : 'node.notReady'), runnerNote, r.stuck ? t('node.stuck', { n: r.stuck }) : '', r.restarts ? t('node.restarts', { n: r.restarts }) : ''].filter(Boolean).join(' · ');
-  group(t('node.runner'), r ? [{ w: plainWidth(r.pod, runnerNote), draw: (p) => plainChip(p.x, p.y, p.w, r.pod, !r.ready ? 'down' : r.stuck ? 'cordoned' : 'awake', runnerNote, runnerTitle) }] : [], t('node.none'));
-  const all = appsOn(answer, node, model.apps);
-  const drawn = laneShown(appsOn(answer, node, shown));
-  const hidden = all.length - drawn.length;
-  const items = drawn.map((a) => ({ a, w: Math.max(84, textWidth(a.name, 11.5, true) + 30), draw: (p) => {
-    const el = act(appChip(model, a, p.x, p.y, p.w), a.name, () => on.open(a.name), `app:${a.name}`);
-    chips.set(a.name, el);
-    return el;
-  } }));
-  if (hidden) {
-    const label = t('tp.more', { n: nf(hidden) });
-    const title = t('tp.moreTitle', { n: nf(hidden), cap: nf(LANE_CAP) });
-    items.push({ w: textWidth(label, 11.5, true) + 20, draw: (p) => act(titled(svg('g', { class: 'chipg', 'data-state': 'more' },
-      svg('rect', { x: p.x, y: p.y, width: p.w, height: 22, rx: 6, class: 'chipr' }),
-      tx(p.x + p.w / 2, p.y + 15, label, 'm chipt', { 'text-anchor': 'middle' })), title), title, () => { location.hash = '#/apps'; }, `more:${node.name}`) });
-  }
-  group(`${t('node.apps')} · ${nf(all.length)}`, items, t('tp.noApps'));
-  const fh = y + 14;
-  g.prepend(svg('rect', { x: 0, y: 0, width: w, height: fh, rx: 14, class: 'box' }), ...(node.ready ? [] : [svg('rect', { x: 0, y: 0, width: w, height: fh, rx: 14, class: 'downwash' })]));
-  return { g, h: fh };
-}
-
-function nodeScene(model, width, shown, on) {
-  const W = Math.max(300, width);
-  const el = svg('svg', { class: 'topo-svg', width: W, role: 'group', 'aria-label': t('tp.nodes.label') });
-  const chips = new Map();
-  const answer = model.nodes;
-  if (!answer?.nodes.length) {
-    el.append(tx(W / 2, 40, t('node.waiting'), 't3 small', { 'text-anchor': 'middle' }));
-    el.setAttribute('height', 72);
-    el.setAttribute('viewBox', `0 0 ${W} 72`);
-    return { el, flow() {} };
-  }
-  const gap = 16;
-  const cols = Math.max(1, Math.min(answer.nodes.length, Math.floor((W + gap) / (340 + gap))));
-  const fw = (W - gap * (cols - 1)) / cols;
-  let y = 0;
-  for (let i = 0; i < answer.nodes.length; i += cols) {
-    const row = answer.nodes.slice(i, i + cols).map((node) => nodeFrame(model, answer, node, fw, shown, on, chips));
-    row.forEach(({ g }, j) => {
-      g.setAttribute('transform', `translate(${j * (fw + gap)},${y})`);
-      el.append(g);
-    });
-    y += Math.max(...row.map((f) => f.h)) + gap;
-  }
-  const H = y - gap;
-  el.setAttribute('height', H);
-  el.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  return {
-    el,
-    flow(name) {
-      const chip = chips.get(name);
-      if (chip) glow(chip, 'hit');
-    },
-  };
-}
-
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** flash() for SVG, which has no offsetWidth to restart an animation with. */
@@ -3955,7 +3914,7 @@ function explainPanel(model, kind) {
   const vars = { max: p.max_failures, window: p.failure_window_seconds, backoff: p.restart_backoff_seconds, idle: p.idle_seconds, ready: p.ready_timeout_seconds, address: pattern ? t('tp.x.addr', { p: pattern }) : '' };
   const block = (key) => h('div', { class: 'xb' }, h('h3', {}, t(`tp.x.${key}`)), h('p', {}, t(`tp.x.${kind}.${key}`, vars)));
   return h('div', { class: 'card explain', 'data-section': 'explain' },
-    h('div', { class: 'xh' }, h('b', { class: 'mono' }, kind), h('span', { class: 'muted' }, t(`tp.lane.${kind}.sub`))),
+    h('div', { class: 'xh' }, h('b', { class: 'mono' }, kind), h('span', { class: 'muted' }, planeT(`tp.lane.${kind}.sub`))),
     h('div', { class: 'xg' }, ['request', 'wake', 'state', 'failure'].map(block),
       h('div', { class: 'xb checks' }, h('h3', {}, t('tp.x.checks')),
         checks.length ? h('ul', {}, checks.map((c) => h('li', {}, h('span', { class: 'chip' }, c), h('span', {}, t(`tp.check.${c}`)))))
@@ -3972,7 +3931,7 @@ function faultItems(model, faults) {
     h('span', { class: 'mono fix' }, fixFor(model, s))));
 }
 
-const TOPO_VIEWS = ['lane', 'graph', 'nodes'];
+const TOPO_VIEWS = ['lane', 'graph'];
 let topoView = TOPO_VIEWS.includes(store.get('pneuma-space-topology')) ? store.get('pneuma-space-topology') : 'lane';
 
 function topology() {
@@ -4086,14 +4045,13 @@ function topology() {
       shown = [...matching].sort((a, b) => (b.lastAccessAt ?? 0) - (a.lastAccessAt ?? 0) || a.name.localeCompare(b.name)).slice(0, GRAPH_CAP).sort((a, b) => a.name.localeCompare(b.name));
       for (const a of registered) if (!shown.includes(a)) hidden[groupOf(a)] = (hidden[groupOf(a)] ?? 0) + 1;
     }
-    const nodesSig = model.nodes && { ...model.nodes, sampledAt: null };
-    const signature = JSON.stringify([topoView, width, filter, hidden, model.health, SERVICES.map((s) => svcStatus(model, s)), topoView === 'nodes' ? nodesSig : model.nodes?.source,
+    const signature = JSON.stringify([topoView, width, filter, hidden, model.health, SERVICES.map((s) => svcStatus(model, s)),
       shown.map((a) => [a.name, a.release, a.runtime, a.instance, a.quarantine, a.capabilities, a.dbBackend, a.node])]);
     if (signature !== painted) {
       painted = signature;
       const focused = sceneBox.contains(document.activeElement) ? document.activeElement.dataset.key : null;
       const old = scene?.el;
-      scene = topoView === 'graph' ? graphScene(local, width, shown, hidden, on) : topoView === 'nodes' ? nodeScene(local, width, shown, on) : laneScene(local, width, shown, on);
+      scene = topoView === 'graph' ? graphScene(local, width, shown, hidden, on) : laneScene(local, width, shown, on);
       sceneBox.prepend(scene.el);
       if (old) retire(old);
       if (focused) {
@@ -4125,9 +4083,7 @@ function topology() {
     model.startedAt = Math.max(model.startedAt ?? 0, m.gateway.startedAt);
     model.services = m.services;
   };
-  const loadNodes = async () => {
-    model.nodes = await api('GET', '/api/nodes');
-  };
+
   const pollRequests = header.guarded(async () => {
     if (!scene) return;
     const seeding = model.cursor === null;
@@ -4144,18 +4100,401 @@ function topology() {
     }
   });
   const refresh = header.guarded(async () => {
-    await Promise.all([loadApps(), loadMetrics(), loadNodes()]);
+    await Promise.all([loadApps(), loadMetrics()]);
     paint();
     await pollRequests();
   });
   return {
-    loops: [[APPS_MS, header.guarded(async () => { await loadApps(); paint(); })], [METRICS_MS, header.guarded(async () => { await loadMetrics(); paint(); })], [NODES_MS, header.guarded(async () => { await loadNodes(); paint(); })], [REQUESTS_MS, pollRequests]],
+    loops: [[APPS_MS, header.guarded(async () => { await loadApps(); paint(); })], [METRICS_MS, header.guarded(async () => { await loadMetrics(); paint(); })], [REQUESTS_MS, pollRequests]],
     first: refresh,
   };
 }
 
-const NAV = [['overview', '#/'], ['realtime', '#/realtime'], ['topology', '#/topology'], ['team', '#/team'], ['apps', '#/apps'], ['publish', '#/publish']];
-const PLATFORM_VIEWS = ['overview', 'realtime', 'topology'];
+// Cluster (ADR 0026): one sample of the platform's nodes, workloads, instances, volumes and warnings, and the operations on them.
+
+const ZONE_LABELS = ['topology.kubernetes.io/zone', 'node.kubernetes.io/instance-type'];
+const RESTARTABLE = ['gateway', 'runner'];
+
+/** The last path segment, with a digest cut to 12 hex; the title carries the whole reference. */
+function shortImage(ref) {
+  if (!ref) return '-';
+  const name = ref.slice(ref.lastIndexOf('/') + 1);
+  const at = name.indexOf('@sha256:');
+  return h('span', { class: 'mono', title: ref }, at < 0 ? name : name.slice(0, at + 20));
+}
+const agoTick = (v) => h('time', { datetime: new Date(v).toISOString(), title: stamp(v) }, ticking(() => since(v)));
+const shortId = (id) => (id && /^[0-9a-f]{64}$/.test(id) ? h('span', { class: 'mono', title: id }, id.slice(0, 12)) : h('span', { class: 'mono' }, id ?? '-'));
+
+function usage(text, used, total) {
+  const ratio = total > 0 ? used / total : 0;
+  return h('div', { class: 'ubar', title: pct(ratio) }, h('span', { class: 'num' }, text),
+    h('div', { class: 'bar' }, h('i', { class: ratio > 0.85 ? 'hot' : null, style: `width:${Math.min(100, ratio * 100).toFixed(1)}%` })));
+}
+
+function readyChip(ready, desired) {
+  if (desired === 0) return h('span', { class: 'st' }, t('st.off'));
+  return h('span', { class: `st ${ready >= desired ? 'green' : ready > 0 ? 'orange' : 'red'}` }, `${nf(ready)} / ${nf(desired)}`);
+}
+
+/** A table built from finished rows, so a row can bring its Pods, its expansion and its operation's outcome below it. */
+function rowsTable(columns, rows, emptyKey, scroll = true) {
+  if (rows.length === 0) return table(columns, [], emptyKey);
+  return h('div', { class: scroll ? 'card table scroll' : 'card table' }, h('table', {},
+    h('thead', {}, h('tr', {}, columns.map(([label, align, title]) => h('th', { class: align, title: title && t(title) }, t(label))))),
+    h('tbody', {}, rows)));
+}
+const cellsRow = (columns, cells, attrs = {}) => h('tr', attrs, cells.map((cell, i) => h('td', { class: columns[i][1] }, cell)));
+
+function cluster() {
+  const header = liveHeader('cl.sampled', () => refresh());
+  let view = null;
+  /** App name to its listing, fresher than the 15 s sample: the state shown after an operation comes from here. */
+  let live = new Map();
+  /** App name to { policy, override } from its detail, for the limits edited in place. */
+  const limits = new Map();
+  /** Row key ('node:', 'workload:', 'pod:', 'app:') to { busy } or the outcome { error } / { note }. */
+  const ops = new Map();
+  const open = new Set();
+  const k8s = () => (view?.plane ?? session.plane) === 'kubernetes';
+
+  const search = (key) => h('input', { type: 'search', placeholder: t(key), 'aria-label': t(key), oninput: () => paint() });
+  const nodeFilter = search('cl.filter.nodes');
+  const instFilter = search('cl.filter.instances');
+  const volFilter = search('cl.filter.volumes');
+  const warnFilter = search('cl.filter.warnings');
+  const picks = { tenant: '', state: '', node: '' };
+  const selects = h('span', { class: 'picks-row' });
+  let picksShown = '';
+  const matches = (input, ...fields) => { const needle = input.value.trim().toLowerCase(); return !needle || fields.some((f) => f && String(f).toLowerCase().includes(needle)); };
+
+  const strip = h('div', { class: 'card strip cl-strip', 'data-section': 'summary' });
+  const bodies = { nodes: h('div'), workloads: h('div'), instances: h('div'), volumes: h('div'), warnings: h('div') };
+  const counts = Object.fromEntries(Object.keys(bodies).map((k) => [k, h('span', { class: 'cnt num' })]));
+  const head = h('div', { class: 'head' });
+  const sections = h('div', { class: 'cl' });
+
+  const instances = () => {
+    const rows = new Map(view.instances.map((r) => [r.app, r]));
+    for (const a of live.values()) {
+      if (ACTIVE.includes(a.instance) && !rows.has(a.name)) rows.set(a.name, { app: a.name, tenant: a.tenant, runtime: a.runtime, node: null, pod: null, restarts: null });
+    }
+    return [...rows.values()].map((r) => {
+      const a = live.get(r.app);
+      return a ? { ...r, tenant: a.tenant, state: ACTIVE.includes(a.instance) ? a.instance : 'asleep', since: a.since ?? r.since, leases: a.leases } : r;
+    }).sort((a, b) => a.app.localeCompare(b.app));
+  };
+  const pods = () => view.workloads.flatMap((w) => w.pods);
+
+  const painted = new Map();
+  /**
+   * A table is rebuilt only when what it shows changed, so the 5 s poll keeps hover and focus; a rebuild refocuses the control
+   * with the same label, and none happens while an input inside has focus, so a poll never eats a limit being typed.
+   */
+  const repaint = (name, shown, build) => {
+    const body = bodies[name];
+    const active = body.contains(document.activeElement) ? document.activeElement : null;
+    const signature = JSON.stringify(shown);
+    if (painted.get(name) === signature || active?.tagName === 'INPUT') return;
+    painted.set(name, signature);
+    fill(body, build());
+    const label = active?.getAttribute('aria-label');
+    if (label) [...body.querySelectorAll('[aria-label]')].find((el) => el.getAttribute('aria-label') === label)?.focus({ preventScroll: true });
+  };
+
+  const run = async (key, call, outcome = null) => {
+    ops.set(key, { busy: true });
+    paint();
+    try {
+      const result = await call();
+      if (outcome) ops.set(key, outcome(result)); else ops.delete(key);
+    } catch (error) {
+      ops.set(key, { error: failText(error) });
+    }
+    await load().catch(() => {});
+    paint();
+  };
+  const busy = (key) => ops.get(key)?.busy === true;
+  const actions = (key, ...buttons) => h('span', { class: 'acts' }, busy(key) ? h('span', { class: 'spin', role: 'status', 'aria-label': t('cl.pending') }) : null,
+    buttons.filter(Boolean).map((b) => { if (busy(key)) b.disabled = true; return b; }));
+  const button = (label, onclick, { danger = false, aria = label, disabled = false, title = null } = {}) =>
+    h('button', { class: `btn small${danger ? ' danger' : ''}`, type: 'button', 'aria-label': aria, title, disabled, onclick }, label);
+  const outcomeRow = (columns, key) => {
+    const op = ops.get(key);
+    if (!op || op.busy) return null;
+    return h('tr', { class: 'outcome' }, h('td', { colspan: columns.length },
+      h('span', { class: op.error ? 'msg err' : 'msg' }, op.error ?? op.note), ' ',
+      h('button', { class: 'linkish', type: 'button', onclick: () => { ops.delete(key); paint(); } }, t('cl.dismiss'))));
+  };
+
+  const drain = async (node, on) => {
+    const list = h('ul', { class: 'mono cl-list' }, on.map((i) => h('li', {}, i.app)));
+    if (!(await confirmDialog(t('cl.drainTitle', { node }), t('cl.drainBody'), t('cl.drain'), list))) return;
+    run(`node:${node}`, () => api('POST', `/api/cluster/nodes/${encodeURIComponent(node)}/drain`), ({ stopped, failed }) => (failed.length
+      ? { error: t('cl.drainFailed', { stopped: stopped.join(', ') || '-', failed: failed.map((f) => `${f.app} (${f.error})`).join(', ') }) }
+      : { note: t('cl.drained', { stopped: stopped.join(', ') || '-' }) }));
+  };
+  const restartPod = async (pod) => {
+    if (!(await confirmDialog(t('cl.restartPodTitle', { pod: pod.name }), t(pod.role === 'gateway' ? 'cl.restartGateway' : 'cl.restartRunner'), t('cl.restart')))) return;
+    run(`pod:${pod.name}`, () => api('POST', `/api/cluster/pods/${encodeURIComponent(pod.name)}/restart`));
+  };
+  const scale = async (w, input) => {
+    const n = Number(input.value);
+    if (!(await confirmDialog(t('cl.scaleTitle', { name: w.name, n: nf(n) }), t('cl.scaleBody', { from: nf(w.desired) }), t('cl.scale')))) return;
+    run(`workload:${w.name}`, () => api('PUT', `/api/cluster/workloads/${encodeURIComponent(w.name)}/scale`, { replicas: n }), () => ({ note: t('cl.scaled', { n: nf(n) }) }));
+  };
+  const lifecycle = async (i, op) => {
+    if (!(await confirmDialog(t(`cl.${op}Title`, { app: i.app }), t(`cl.${op}Body`), t(`cl.${op}`)))) return;
+    run(`app:${i.app}`, () => api('POST', `${appPath(i.app)}/${op}`));
+  };
+
+  const asked = new Set();
+  const loadLimits = async (name) => {
+    asked.add(name);
+    const d = await api('GET', appPath(name));
+    limits.set(name, { policy: d.policy, override: d.app.policyOverride });
+  };
+  const limitInput = (i, field) => {
+    const known = limits.get(i.app);
+    const override = known?.override[field] ?? null;
+    const label = t(field === 'cpu_millis' ? 'cl.cpuFor' : 'cl.memFor', { app: i.app });
+    return h('input', {
+      class: 'limit', type: 'number', min: 1, step: 1, value: override ?? '', placeholder: known ? String(known.policy[field]) : '…',
+      title: known ? t('p.effective', { v: String(known.policy[field]) }) : null, 'aria-label': label, disabled: !known || busy(`app:${i.app}`),
+      onkeydown: (e) => { if (e.key === 'Enter') e.target.blur(); },
+      oninput: (e) => e.target.setCustomValidity(''),
+      onblur: async (e) => {
+        const next = e.target.value === '' ? null : Number(e.target.value);
+        if (next === override) return;
+        e.target.disabled = true;
+        try {
+          await api('PUT', `${appPath(i.app)}/policy`, { [field]: next });
+          await loadLimits(i.app);
+          await load();
+          paint();
+        } catch (error) {
+          e.target.disabled = false;
+          e.target.setCustomValidity(failText(error));
+          e.target.reportValidity();
+        }
+      },
+    });
+  };
+
+  const paintHead = () => fill(head,
+    h('div', { class: 'grow' }, h('h1', {}, planeT('nav.cluster')), h('p', { class: 'sub' }, planeT('cl.sub'))), header.el);
+
+  const paintStrip = (rows) => {
+    const stat = (label, value) => h('div', {}, h('div', { class: 'l' }, t(label)), h('div', { class: 'v' }, value));
+    const role = (r) => view.workloads.find((w) => w.role === r);
+    const workload = (r) => { const w = role(r); return w ? readyChip(w.ready, w.desired) : '-'; };
+    fill(strip,
+      stat('cl.k.sampled', view.sampledAt ? ticking(() => since(view.sampledAt)) : t('ov.waiting')),
+      k8s() ? stat('cl.k.nodes', readyChip(view.nodes.filter((n) => n.ready).length, view.nodes.length)) : null,
+      stat('cl.k.gateway', workload('gateway')),
+      stat('cl.k.runner', workload('runner')),
+      stat('cl.k.awake', nf(rows.filter((i) => i.state === 'awake').length)),
+      k8s() ? stat('cl.k.warnings', h('span', { class: view.warnings.length ? 'st orange' : 'st' }, nf(view.warnings.length))) : null);
+  };
+
+  const paintNodes = (rows) => {
+    const columns = [['cl.c.node'], ['col.state'], ['cl.c.zone'], ['cl.c.taints'], ['node.cpu'], ['node.mem'], ['cl.c.pods', 'r'], ['cl.c.instances', 'r'], ['col.actions', 'r']];
+    const all = pods();
+    const shown = view.nodes.filter((n) => matches(nodeFilter, n.name, ...ZONE_LABELS.map((k) => n.labels[k])));
+    fill(counts.nodes, nf(view.nodes.length));
+    repaint('nodes', [shown, rows, all, [...open], [...ops]], () => rowsTable(columns, shown.flatMap((n) => {
+      const key = `node:${n.name}`;
+      const on = rows.filter((i) => i.node === n.name && i.state !== 'asleep');
+      const mine = all.filter((p) => p.node === n.name);
+      const expanded = open.has(n.name);
+      const toggle = h('button', {
+        class: 'expander mono', type: 'button', 'aria-expanded': String(expanded), 'aria-label': t(expanded ? 'cl.collapse' : 'cl.expand', { node: n.name }),
+        onclick: () => { if (expanded) open.delete(n.name); else open.add(n.name); paint(); },
+      }, h('span', { class: 'caret', 'aria-hidden': 'true' }, '›'), n.name);
+      const taints = n.taints.filter((x) => x.key !== 'node.kubernetes.io/unschedulable').map((x) => `${x.key}${x.value ? `=${x.value}` : ''}:${x.effect}`);
+      const zone = ZONE_LABELS.map((k) => n.labels[k]).filter(Boolean).join(' · ');
+      const group = (label, items) => h('div', { class: 'podg' }, h('span', { class: 'l' }, label), items.length ? h('span', { class: 'chips' }, items) : h('span', { class: 'muted' }, t('cl.none')));
+      const podChip = (p) => h('span', { class: `st ${p.ready ? 'green' : 'red'}`, title: [p.name, p.phase, p.ip].filter(Boolean).join(' · ') }, h('span', { class: 'mono' }, p.name), p.leading ? h('span', { class: 'chip text' }, t('cl.leading')) : null);
+      return [
+        cellsRow(columns, [
+          toggle,
+          h('span', { class: 'chips' }, h('span', { class: `st ${n.ready ? 'green' : 'red'}` }, t(n.ready ? 'node.ready' : 'node.notReady')),
+            n.schedulable ? h('span', { class: 'chip text' }, t('node.schedulable')) : h('span', { class: 'st orange', title: t('node.cordoned') }, t('node.unschedulable'))),
+          zone ? h('span', { class: 'mono' }, zone) : h('span', { class: 'muted' }, '-'),
+          taints.length ? h('span', { class: 'chips' }, taints.map(chip)) : h('span', { class: 'muted' }, '-'),
+          usage(t('node.cores', { used: cores(n.requested.cpuMillis), total: cores(n.allocatable.cpuMillis) }), n.requested.cpuMillis, n.allocatable.cpuMillis),
+          usage(`${bytes(n.requested.memoryBytes)} / ${bytes(n.allocatable.memoryBytes)}`, n.requested.memoryBytes, n.allocatable.memoryBytes),
+          nf(mine.length),
+          nf(on.length),
+          isPlatformAdmin() ? actions(key, button(t('cl.drain'), () => drain(n.name, on), { danger: true, aria: t('cl.drainFor', { node: n.name }), disabled: on.length === 0, title: on.length ? null : t('cl.drainNone') })) : null,
+        ], { 'data-node': n.name }),
+        expanded ? h('tr', { class: 'sub' }, h('td', { colspan: columns.length }, h('div', { class: 'pods' },
+          group(t('cl.gateways'), mine.filter((p) => p.role === 'gateway').map(podChip)),
+          group(t('cl.runners'), mine.filter((p) => p.role === 'runner').map(podChip)),
+          group(t('cl.services'), mine.filter((p) => !RESTARTABLE.includes(p.role) && p.role !== 'instance').map(podChip)),
+          group(t('cl.appPods'), on.map((i) => h('span', { class: `st ${tone(i.state)}`, title: t(`st.${i.state}`) }, appLink(i.app), i.pod ? h('span', { class: 'mono muted' }, i.pod) : null)))))) : null,
+        outcomeRow(columns, key),
+      ];
+    }).filter(Boolean), 'empty.cl.nodes'));
+  };
+
+  const paintWorkloads = () => {
+    const columns = k8s()
+      ? [['cl.c.name'], ['cl.c.ready'], ['cl.c.image'], ['cl.c.node'], ['cl.c.started'], ['cl.c.restarts', 'r'], ['col.actions', 'r']]
+      : [['cl.c.name'], ['cl.c.ready']];
+    const edit = k8s() && isPlatformAdmin();
+    fill(counts.workloads, nf(view.workloads.length));
+    repaint('workloads', [view.workloads, [...ops]], () => rowsTable(columns, view.workloads.flatMap((w) => {
+      const key = `workload:${w.name}`;
+      let stepper = null;
+      if (edit && w.scalable) {
+        const apply = button(t('cl.scale'), () => scale(w, input), { aria: t('cl.scaleFor', { name: w.name }), disabled: true });
+        const input = h('input', { class: 'limit', type: 'number', min: 1, step: 1, value: w.desired, 'aria-label': t('cl.replicas', { name: w.name }),
+          oninput: () => { apply.disabled = busy(key) || !(Number(input.value) >= 1) || Number(input.value) === w.desired; },
+          onkeydown: (e) => { if (e.key === 'Enter' && !apply.disabled) apply.click(); } });
+        stepper = [input, apply];
+      }
+      const main = cellsRow(columns, [
+        h('span', { class: 'wname' }, h('span', { class: 'chip text' }, w.role), h('b', { class: 'mono' }, w.name), h('span', { class: 'muted' }, w.kind)),
+        readyChip(w.ready, w.desired),
+        ...(k8s() ? [shortImage(w.image), '', '', '', stepper ? actions(key, ...stepper) : null] : []),
+      ], { class: 'group' });
+      if (!k8s()) return [main];
+      return [main, outcomeRow(columns, key), ...w.pods.flatMap((p) => [
+        cellsRow(columns, [
+          h('span', { class: 'mono podn', title: [p.name, p.ip].filter(Boolean).join(' · ') }, p.name, p.leading ? h('span', { class: 'chip text', title: t('cl.leadingTitle') }, t('cl.leading')) : null),
+          h('span', { class: `st ${p.ready ? 'green' : 'red'}`, title: p.phase }, p.ready ? t('node.ready') : p.phase || t('node.notReady')),
+          '',
+          h('span', { class: 'mono' }, p.node ?? '-'),
+          p.startedAt ? agoTick(p.startedAt) : '-',
+          nf(p.restarts),
+          edit && RESTARTABLE.includes(p.role) ? actions(`pod:${p.name}`, button(t('cl.restart'), () => restartPod(p), { aria: t('cl.restartFor', { name: p.name }) })) : null,
+        ], { class: 'sub' }),
+        outcomeRow(columns, `pod:${p.name}`),
+      ])];
+    }).filter(Boolean), 'empty.cl.workloads', false));
+  };
+
+  const paintPicks = (rows) => {
+    const options = (field, allKey, values, label) => h('select', { 'aria-label': t(label), onchange: (e) => { picks[field] = e.target.value; paint(); } },
+      h('option', { value: '' }, t(allKey)), values.map((v) => h('option', { value: v, selected: v === picks[field] }, field === 'state' ? t(`st.${v}`) : v)));
+    const distinct = (f) => [...new Set(rows.map(f).filter(Boolean))].sort();
+    const values = { tenant: distinct((i) => i.tenant), state: distinct((i) => i.state), node: k8s() ? distinct((i) => i.node) : null };
+    const signature = JSON.stringify([values, picks]);
+    if (signature === picksShown) return;
+    picksShown = signature;
+    fill(selects,
+      options('tenant', 'cl.allTenants', values.tenant, 'col.tenant'),
+      options('state', 'cl.allStates', values.state, 'col.state'),
+      values.node && options('node', 'cl.allNodes', values.node, 'cl.c.node'));
+  };
+
+  const paintInstances = (rows) => {
+    const columns = [['cl.c.app'], ['col.tenant'], ['col.state'], ...(k8s() ? [['cl.c.node']] : []), [k8s() ? 'cl.c.pod' : 'cl.c.container'],
+      ['cl.c.leases', 'r', 'cl.c.leasesTitle'], ['cl.c.cpuLimit', 'r', 'cl.c.cpuLimitTitle'], ['cl.c.memLimit', 'r', 'cl.c.memLimitTitle'], ['col.actions', 'r']];
+    const shown = rows.filter((i) => (!picks.tenant || i.tenant === picks.tenant) && (!picks.state || i.state === picks.state) && (!picks.node || i.node === picks.node)
+      && matches(instFilter, i.app, i.pod, i.node, i.tenant));
+    for (const i of shown) if (!asked.has(i.app)) loadLimits(i.app).then(() => paint(), () => asked.delete(i.app));
+    fill(counts.instances, nf(rows.length));
+    repaint('instances', [shown, [...limits], [...ops]], () => rowsTable(columns, shown.flatMap((i) => {
+      const key = `app:${i.app}`;
+      const tenantAdmin = mayAdmin(i.tenant);
+      return [cellsRow(columns, [
+        h('span', { class: 'chips' }, appLink(i.app), i.runtime ? h('span', { class: 'chip runtime' }, i.runtime) : null),
+        h('span', { class: 'mono' }, i.tenant),
+        h('span', { class: 'chips' }, status(i.state), i.since ? h('span', { class: 'muted' }, agoTick(i.since)) : null),
+        ...(k8s() ? [i.node ? h('span', { class: 'mono' }, i.node) : h('span', { class: 'muted' }, '-')] : []),
+        h('span', { class: 'chips' }, shortId(i.pod), i.restarts ? h('span', { class: 'st orange' }, t('cl.restarts', { n: nf(i.restarts) })) : null),
+        h('span', { class: 'num', title: LEASE_KINDS.map((k) => `${k} ${i.leases?.[k] ?? 0}`).join(' · ') }, LEASE_KINDS.map((k) => nf(i.leases?.[k] ?? 0)).join('·')),
+        tenantAdmin ? limitInput(i, 'cpu_millis') : limits.get(i.app)?.policy.cpu_millis ?? '-',
+        tenantAdmin ? limitInput(i, 'memory_mb') : limits.get(i.app)?.policy.memory_mb ?? '-',
+
+        actions(key,
+          tenantAdmin && button(t('cl.stop'), () => lifecycle(i, 'stop'), { aria: t('cl.stopFor', { app: i.app }), disabled: i.state === 'asleep' }),
+          tenantAdmin && button(t('cl.restart'), () => lifecycle(i, 'restart'), { aria: t('cl.restartFor', { name: i.app }) }),
+          isPlatformAdmin() && button(t('cl.kill'), () => lifecycle(i, 'kill'), { danger: true, aria: t('cl.killFor', { app: i.app }), disabled: i.state === 'asleep' })),
+      ], { 'data-app': i.app }), outcomeRow(columns, key)];
+    }).filter(Boolean), rows.length ? 'empty.filtered' : 'empty.cl.instances'));
+  };
+
+  const paintVolumes = () => {
+    const columns = [['cl.c.app'], ['cl.c.volume'], ['cl.c.size', 'r'], ...(k8s() ? [['cl.c.class'], ['cl.c.phase'], ['cl.c.node']] : [])];
+    const shown = view.volumes.filter((v) => matches(volFilter, v.app, v.name, v.storageClass, v.node)).sort((a, b) => a.app.localeCompare(b.app));
+    fill(counts.volumes, nf(view.volumes.length));
+    const dash = (v) => (v == null ? h('span', { class: 'muted' }, '-') : h('span', { class: 'mono' }, v));
+    repaint('volumes', shown, () => rowsTable(columns, shown.map((v) => cellsRow(columns, [
+      appLink(v.app), h('span', { class: 'mono' }, v.name), v.sizeGb == null ? '-' : t('cl.gib', { n: nf(v.sizeGb) }),
+      ...(k8s() ? [dash(v.storageClass), v.phase ? h('span', { class: `st ${v.phase === 'Bound' ? 'green' : 'orange'}` }, v.phase) : dash(null), dash(v.node)] : []),
+    ])), view.volumes.length ? 'empty.filtered' : 'empty.cl.volumes'));
+  };
+
+  const paintWarnings = () => {
+    const columns = [['cl.c.time'], ['cl.c.object'], ['cl.c.reason'], ['cl.c.message', 'wrap'], ['cl.c.count', 'r']];
+    const shown = [...view.warnings].sort((a, b) => b.at - a.at).filter((w) => matches(warnFilter, w.object, w.reason, w.message, w.kind));
+    fill(counts.warnings, nf(view.warnings.length));
+    repaint('warnings', shown, () => rowsTable(columns, shown.map((w) => cellsRow(columns, [
+      agoTick(w.at), h('span', { class: 'chips' }, h('span', { class: 'chip text' }, w.kind), h('span', { class: 'mono' }, w.object)),
+      h('span', { class: 'st orange' }, w.reason), w.message, nf(w.count)])), view.warnings.length ? 'empty.filtered' : 'empty.cl.warnings'));
+  };
+
+  const section = (n, key, desc, body, count, ...end) => {
+    const s = sectionHead(n, key, desc, ...end);
+    s.querySelector('h2').append(' ', count);
+    return h('section', { 'data-section': key.split('.').pop() }, s, body);
+  };
+  let layout = '';
+  const paintLayout = () => {
+    const shape = `${k8s()}`;
+    if (shape === layout) return;
+    layout = shape;
+    paintHead();
+    const shown = [
+      k8s() && ['cl.sec.nodes', 'cl.sec.nodesDesc', bodies.nodes, counts.nodes, nodeFilter],
+      ['cl.sec.workloads', planeKey('cl.sec.workloadsDesc'), bodies.workloads, counts.workloads],
+      ['cl.sec.instances', 'cl.sec.instancesDesc', bodies.instances, counts.instances, selects, instFilter],
+      ['cl.sec.volumes', planeKey('cl.sec.volumesDesc'), bodies.volumes, counts.volumes, volFilter],
+      k8s() && ['cl.sec.warnings', 'cl.sec.warningsDesc', bodies.warnings, counts.warnings, warnFilter],
+    ].filter(Boolean);
+    fill(sections, shown.map(([key, desc, body, count, ...end], i) => section(i + 1, key, desc, body, count, ...end)));
+  };
+
+  const paint = () => {
+    if (!view) return;
+    const rows = instances();
+    paintLayout();
+    paintStrip(rows);
+    if (k8s()) { paintNodes(rows); paintWarnings(); }
+    paintWorkloads();
+    paintInstances(rows);
+    paintPicks(rows);
+    paintVolumes();
+  };
+
+  const loadApps = async () => {
+    const apps = await api('GET', '/api/apps');
+    const before = JSON.stringify([...live.values()].map((a) => [a.name, a.instance]));
+    live = new Map(apps.map((a) => [a.name, a]));
+    return before !== JSON.stringify(apps.map((a) => [a.name, a.instance]));
+  };
+  const loadCluster = async () => {
+    view = await api('GET', '/api/cluster');
+    header.seen(view.sampledAt);
+  };
+  const load = () => Promise.all([loadCluster(), loadApps()]);
+  const refresh = header.guarded(async () => { await load(); paint(); });
+  /** A lifecycle change seen in the listing fetches the sample again, for the node and Pod it moved to. */
+  const pollApps = header.guarded(async () => {
+    if (!view) return;
+    if (await loadApps()) { header.beat(); await loadCluster(); }
+    paint();
+  });
+
+  paintHead();
+  show(head, strip, sections);
+  return { loops: [[CLUSTER_MS, refresh], [APPS_MS, pollApps]], first: refresh };
+}
+
+const NAV = [['overview', '#/'], ['realtime', '#/realtime'], ['topology', '#/topology'], ['cluster', '#/cluster'], ['team', '#/team'], ['apps', '#/apps'], ['publish', '#/publish']];
+const PLATFORM_VIEWS = ['overview', 'realtime', 'topology', 'cluster'];
 const allowed = (key) => (PLATFORM_VIEWS.includes(key) ? isPlatformAdmin() : key === 'team' ? upstream() : session !== null);
 
 /** The page a hash shows: an unknown view is the overview, and a page the caller may not see is the project list. */
@@ -4201,8 +4540,10 @@ function shell() {
   const current = viewOf(location.hash);
   topbar();
   document.querySelector('nav').replaceChildren(h('div', { class: 'group' }, t('nav.group')),
-    ...NAV.filter(([key]) => allowed(key)).map(([key, href]) => h('a', { href, 'aria-current': key === current ? 'page' : null, 'aria-label': t(`nav.${key}`) },
-      icon(`nav-${key}`), h('span', { class: 'label' }, t(`nav.${key}`)))));
+    ...NAV.filter(([key]) => allowed(key)).map(([key, href]) => {
+      const label = planeT(`nav.${key}`);
+      return h('a', { href, 'aria-current': key === current ? 'page' : null, 'aria-label': label }, icon(`nav-${key}`), h('span', { class: 'label' }, label));
+    }));
   document.getElementById('brand-sub').textContent = t('brand.sub');
   const theme = root.dataset.theme;
   const setTheme = (value) => {
@@ -4287,6 +4628,7 @@ async function route() {
           : view === 'team' ? (await team(), null)
             : view === 'realtime' ? realtime()
               : view === 'topology' ? topology()
+                : view === 'cluster' ? cluster()
                 : await overview();
     if (gen !== generation) return;
     if (typeof live === 'function') {
