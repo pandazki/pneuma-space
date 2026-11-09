@@ -1,7 +1,7 @@
 // The node view (ADR 0024 item 8) and the cluster view (ADR 0026): sampled every 15 s on every replica, answered from memory.
 import { DEAD_MS, type Instances } from './instances.ts';
 import type {
-  AppId, AppName, AppSummary, ClusterView, Infra, Instance, InstanceRow, InstanceState, NodeEntry, PlatformPod, Replica, VolumeRow,
+  AppId, AppName, AppSummary, ClusterSample, Infra, Instance, InstanceRow, InstanceState, NodeEntry, PlatformPod, Replica, VolumeRow,
 } from './model.ts';
 
 /** The runner's own `GET /health` answer, the fields the node view shows. */
@@ -25,7 +25,7 @@ const instancesOf = (apps: readonly AppSummary[]) => apps.flatMap((a) => (runnin
 export class NodeView {
   readonly #deps: NodeViewDeps;
   readonly #now: () => number;
-  #cluster: ClusterView = { plane: 'docker', sampledAt: null, nodes: [], workloads: [], instances: [], volumes: [], warnings: [] };
+  #cluster: ClusterSample = { plane: 'docker', sampledAt: null, nodes: [], workloads: [], instances: [], volumes: [], warnings: [] };
   #pods: readonly PlatformPod[] = [];
 
   constructor(deps: NodeViewDeps) {
@@ -34,7 +34,7 @@ export class NodeView {
   }
 
   /** Memory only: the last sample. */
-  snapshot(): ClusterView {
+  snapshot(): ClusterSample {
     return this.#cluster;
   }
 
@@ -66,7 +66,7 @@ export class NodeView {
       const health = runner?.ready && runner.ip ? await this.#deps.runner(runner.ip) : null;
       return {
         name: n.name, ready: n.ready, schedulable: n.schedulable, labels: n.labels, taints: n.taints,
-        allocatable: n.allocatable, requested: n.requested, used: null,
+        allocatable: n.allocatable, requested: n.requested,
         gateways: n.pods.filter((p) => p.role === 'gateway').map((p) => ({ pod: p.name, ready: p.ready })),
         runner: runner && { pod: runner.name, ready: runner.ready, restarts: runner.restarts, workers: health?.workers ?? null, stuck: health?.stuck ?? null },
         instances: instancesOf(apps).filter((i) => i.node === n.name).map(({ node: _, ...i }) => i),
@@ -101,6 +101,7 @@ export class NodeView {
         pod: onCluster ? (pod?.name ?? null) : row.handle,
         leases: summary.leases, requests: summary.requests,
         restarts: pod?.role === 'instance' ? pod.restarts : null,
+        cpuMillis: row.cpuMillis, memoryMb: row.memoryMb,
       }];
     }).sort((a, b) => (a.app < b.app ? -1 : 1));
   }

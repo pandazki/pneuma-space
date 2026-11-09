@@ -75,6 +75,6 @@ test('the cluster view joins an awake instance to its Pod and node and marks the
   });
   await nodes.sample();
   const cluster = nodes.snapshot();
-  assert.deepEqual(cluster.instances.map((i) => [i.app, i.tenant, i.state, i.node, i.pod, i.restarts]), [['survey', DEFAULT_TENANT, 'awake', 'n1', 'pneuma-space-a1', 1]]);
+  assert.deepEqual(cluster.instances.map((i) => [i.app, i.tenant, i.state, i.node, i.pod, i.restarts, i.cpuMillis, i.memoryMb]), [['survey', DEFAULT_TENANT, 'awake', 'n1', 'pneuma-space-a1', 1, 500, 256]]);
   assert.deepEqual(cluster.workloads[0]!.pods.map((p) => [p.name, p.leading]), [['gw-0', false], ['gw-1', true]]);
 });

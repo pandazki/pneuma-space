@@ -1011,6 +1011,9 @@ export type InstanceRow = {
   readonly leases: Readonly<Record<LeaseKind, number>>;
   readonly requests: number;
   readonly restarts: number | null;
+  /** What this wake took (the instance row's cpu_millis and memory_mb); a policy change applies from the next wake. */
+  readonly cpuMillis: number;
+  readonly memoryMb: number;
 };
 export type VolumeRow = {
   readonly app: AppName;
@@ -1048,7 +1051,6 @@ export type NodeEntry = {
   readonly taints: NodeSample['taints'];
   readonly allocatable: Amounts;
   readonly requested: Amounts;
-  readonly used: HostSample | null;
   readonly gateways: readonly { readonly pod: string; readonly ready: boolean }[];
   readonly runner: { readonly pod: string; readonly ready: boolean; readonly restarts: number | null; readonly workers: number | null; readonly stuck: number | null } | null;
   readonly instances: readonly { readonly app: AppName; readonly runtime: RuntimeKind | null; readonly state: InstanceState }[];
@@ -1062,7 +1064,11 @@ export type ClusterView = {
   readonly instances: readonly InstanceRow[];
   readonly volumes: readonly VolumeRow[];
   readonly warnings: readonly Warning[];
+  /** PNEUMA_SPACE_SCALE_MAX: the highest replica count `cluster.scale` accepts. */
+  readonly scaleMax: number;
 };
+/** What the sampler holds; the admin API adds `scaleMax` from configuration. */
+export type ClusterSample = Omit<ClusterView, 'scaleMax'>;
 
 /** What the plane answers for publish, the nodes view and the cluster page, whatever runtime an app uses. */
 export interface Infra {

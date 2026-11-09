@@ -228,7 +228,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
     },
     { method: 'GET', path: at(ADMIN_PATHS.metrics), action: 'platform.read', handle: async () => ({ ...metrics.snapshot(), events: await metrics.events() }) },
 
-    { method: 'GET', path: at(ADMIN_PATHS.cluster), action: 'cluster.read', handle: () => nodes.snapshot() },
+    { method: 'GET', path: at(ADMIN_PATHS.cluster), action: 'cluster.read', handle: () => ({ ...nodes.snapshot(), scaleMax }) },
     {
       method: 'PUT', path: at(ADMIN_PATHS.scale('<name>')), json: true, action: 'cluster.scale',
       audit: { action: 'cluster.scale', target: ({ params: [name] }) => ({ kind: 'workload', id: name ?? '', tenant: null }), details: (body) => ({ replicas: body.replicas }) },
