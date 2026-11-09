@@ -160,7 +160,6 @@ section { padding: 40px 32px; border-top: 1px dashed var(--line); }
 .btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
 input, textarea { background: var(--field); border: 0; border-radius: 8px; box-shadow: 0 0 0 1px var(--line-strong); font-size: 13px; height: 30px; padding: 0 10px; outline: none; min-width: 0; }
 textarea { height: auto; padding: 8px 10px; font: 12px/18px var(--mono); resize: vertical; }
-input[type="file"] { padding: 4px 6px; font-size: 12.5px; }
 input:focus, textarea:focus, .lbtn:focus-visible { box-shadow: 0 0 0 2px var(--accent-tint), 0 0 0 1px var(--accent); }
 [aria-invalid="true"] { box-shadow: 0 0 0 1px var(--red); }
 .chip { display: inline-flex; align-items: center; height: 22px; padding: 0 7px; border-radius: 6px; background: var(--inset); box-shadow: 0 0 0 1px var(--line); font: 11.5px var(--mono); color: var(--ink-2); white-space: nowrap; }
@@ -884,6 +883,12 @@ dialog .form .fields { grid-template-columns: repeat(auto-fill, minmax(180px, 1f
 dialog .form .field { margin: 0; }
 dialog .msg.err { margin: -8px 0 16px; }
 @media (max-width: 560px) { .prow { grid-template-columns: auto minmax(0, 1fr) auto; } .prow .pmeta { grid-column: 2 / -1; grid-row: 2; white-space: normal; } .tbars { grid-template-columns: minmax(0, 1fr); } }
+.ffield { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-height: 40px; padding: 5px 6px 5px 6px; border-radius: 8px; background: var(--field); box-shadow: 0 0 0 1px var(--line-strong); font-size: 12.5px; }
+.ffield.over { box-shadow: 0 0 0 2px var(--accent-tint), 0 0 0 1px var(--accent); }
+.ffield .mono { font-size: 12px; overflow-wrap: anywhere; }
+.ffield .ibtn { width: 26px; height: 24px; margin-left: auto; }
+.fhidden { display: none; }
+[aria-invalid="true"].ffield, [aria-invalid="true"] .lbtn { box-shadow: 0 0 0 1px var(--red); }
 @media (max-width: 900px) {
   .frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; box-shadow: none; }
   aside { position: relative; width: auto; height: auto; padding: 16px 20px; border-right: 0; border-bottom: 1px dashed var(--line); }
@@ -1139,7 +1144,7 @@ const I18N = {
     'tp.check.ready': '唤醒后 ready_timeout_seconds 内没有应答。',
     'tp.check.hang': '醒着时不再应答心跳，被结束。',
     'tp.check.memory': '超过内存上限被结束。',
-    'nav.team': '团队', 'col.actions': '操作', 'top.tenant': '租户', 'lb.find': '查找', 'tn.all': '全部租户', 'top.signOut': '退出', 'top.platformAdmin': '平台管理员',
+    'nav.team': '团队', 'col.actions': '操作', 'top.tenant': '租户', 'lb.find': '查找', 'ff.choose': '选择文件…', 'ff.none': '未选择，也可以拖到这里', 'ff.clear': '清除所选文件', 'tn.all': '全部租户', 'top.signOut': '退出', 'top.platformAdmin': '平台管理员',
     'col.tenant': '租户', 'col.member': '成员', 'col.role': '角色', 'col.lastSeen': '最近登录', 'col.label': '标签', 'col.subject': '主体',
     'col.createdBy': '签发人', 'col.display': '显示名', 'col.apps': '应用', 'role.admin': '管理员', 'role.member': '成员',
     'team.title': '团队', 'team.sub': '{tenant} 的成员和令牌。', 'team.subAll': '平台上的每个租户：谁快到配额、谁闲着、谁在管。',
@@ -1419,7 +1424,7 @@ const I18N = {
     'tp.check.ready': 'No answer within ready_timeout_seconds of a wake.',
     'tp.check.hang': 'Stopped answering the heartbeat while awake and was terminated.',
     'tp.check.memory': 'Went over its memory limit and was ended.',
-    'nav.team': 'Team', 'col.actions': 'Actions', 'top.tenant': 'Tenant', 'lb.find': 'Find', 'tn.all': 'All tenants', 'top.signOut': 'Sign out', 'top.platformAdmin': 'Platform admin',
+    'nav.team': 'Team', 'col.actions': 'Actions', 'top.tenant': 'Tenant', 'lb.find': 'Find', 'ff.choose': 'Choose file…', 'ff.none': 'None chosen; you can drop one here', 'ff.clear': 'Clear the chosen file', 'tn.all': 'All tenants', 'top.signOut': 'Sign out', 'top.platformAdmin': 'Platform admin',
     'col.tenant': 'Tenant', 'col.member': 'Member', 'col.role': 'Role', 'col.lastSeen': 'Last seen', 'col.label': 'Label', 'col.subject': 'Subject',
     'col.createdBy': 'Issued by', 'col.display': 'Display name', 'col.apps': 'Apps', 'role.admin': 'admin', 'role.member': 'member',
     'team.title': 'Team', 'team.sub': 'Members and tokens of {tenant}.', 'team.subAll': 'Every tenant on the platform: who is near a quota, who is idle, who administers it.',
@@ -1715,6 +1720,30 @@ function listbox({ label, options, value, onPick, placeholder = null, disabled =
   });
   wrap.append(button);
   return wrap;
+}
+
+/** A file chosen with a quiet button or dropped on the field; shows the name and size, and clears. */
+function fileField({ label, accept }) {
+  let file = null;
+  const input = h('input', { type: 'file', accept, class: 'fhidden', tabindex: '-1', 'aria-hidden': 'true' });
+  const name = h('span');
+  const clear = h('button', { class: 'ibtn', type: 'button', 'aria-label': t('ff.clear'), title: t('ff.clear'), onclick: () => set(null) }, '×');
+  const pick = h('button', { class: 'btn ghost small', type: 'button', 'aria-label': `${label}: ${t('ff.choose')}`, onclick: () => input.click() }, t('ff.choose'));
+  const set = (f) => {
+    file = f;
+    input.value = '';
+    name.className = f ? 'mono' : 'muted';
+    name.textContent = f ? `${f.name} · ${bytes(f.size)}` : t('ff.none');
+    clear.hidden = !f;
+  };
+  input.addEventListener('change', () => set(input.files[0] ?? null));
+  const el = h('div', { class: 'ffield',
+    ondragover: (e) => { e.preventDefault(); el.classList.add('over'); },
+    ondragleave: () => el.classList.remove('over'),
+    ondrop: (e) => { e.preventDefault(); el.classList.remove('over'); set(e.dataTransfer.files[0] ?? null); } }, pick, name, clear, input);
+  el.focus = () => pick.focus();
+  set(null);
+  return { el, get file() { return file; } };
 }
 
 /**
@@ -3798,17 +3827,18 @@ async function publish(prefill) {
   const hint = (key) => h('small', {}, typeof key === 'string' ? t(key) : t(...key));
   const err = () => h('small', { class: 'err', hidden: true });
   const make = (key, control, hintKey) => ({ control, error: err(), label: key, hintKey });
+  const tenant = { value: session.scope === ALL ? session.tenants?.[0] : session.scope };
+  const bundleField = fileField({ label: t('f.bundle'), accept: '.tar,application/x-tar' });
   const f = {
     name: make('f.name', h('input', { name: 'name', required: true, pattern: '[a-z][a-z0-9\\-]{0,39}', value: prefill ?? '', placeholder: 'survey', autocomplete: 'off', spellcheck: 'false' }), pattern ? ['f.nameHintAt', { address: pattern }] : 'f.nameHint'),
     image: make('f.image', h('input', { name: 'image', placeholder: 'survey:latest', autocomplete: 'off', spellcheck: 'false' })),
     owner: make('f.owner', h('input', { name: 'owner', placeholder: upstream() ? session.me.subject : 'user:ana', autocomplete: 'off', spellcheck: 'false' }), upstream() ? ['f.ownerHintSelf', { subject: session.me.subject }] : 'f.ownerHint'),
-    tenant: make('f.tenant', h('select', { name: 'tenant', disabled: session.scope !== ALL },
-      (session.scope === ALL ? session.tenants : [session.scope]).map((x) => h('option', { value: x }, x))), session.scope === ALL ? 'f.tenantPick' : 'f.tenantHint'),
+    tenant: make('f.tenant', listbox({ label: t('f.tenant'), options: (session.scope === ALL ? session.tenants : [session.scope]).map((x) => ({ value: x, label: x })), value: tenant.value, onPick: (v) => { tenant.value = v; }, disabled: session.scope !== ALL, wide: true }), session.scope === ALL ? 'f.tenantPick' : 'f.tenantHint'),
     manifest: make('f.manifest', h('textarea', { name: 'manifest', rows: 14, spellcheck: 'false' })),
-    bundle: make('f.bundle', h('input', { name: 'bundle', type: 'file', accept: '.tar,application/x-tar' }), 'f.bundleHint'),
+    bundle: make('f.bundle', bundleField.el, 'f.bundleHint'),
   };
   f.manifest.control.value = JSON.stringify(MANIFEST_EXAMPLE, null, 2);
-  const label = (k) => h('label', { class: 'field', id: `field-${k}` }, h('span', {}, t(f[k].label)), f[k].control, f[k].hintKey ? hint(f[k].hintKey) : null, f[k].error);
+  const label = (k) => h(k === 'tenant' || k === 'bundle' ? 'div' : 'label', { class: 'field', id: `field-${k}` }, h('span', {}, t(f[k].label)), f[k].control, f[k].hintKey ? hint(f[k].hintKey) : null, f[k].error);
   const fail = (k, text) => {
     f[k].error.textContent = text;
     f[k].error.hidden = false;
@@ -3836,13 +3866,13 @@ async function publish(prefill) {
     submit.disabled = true;
     submit.textContent = t('f.busy');
     try {
-      const file = f.bundle.control.files[0];
+      const file = bundleField.file;
       const bundle = file ? (await api('POST', '/api/bundles', file, 'application/x-tar')).bundle : null;
       const body = { image: f.image.control.value.trim() || null, manifest, bundle };
       if (!existing.has(name)) {
         const owner = f.owner.control.value.trim();
         if (owner || !upstream()) body.owner = owner;
-        if (tenantField) body.tenant = f.tenant.control.value;
+        if (tenantField) body.tenant = tenant.value;
       }
       await api('PUT', `${appPath(name)}/release`, body);
       location.hash = `#/apps/${encodeURIComponent(name)}`;
