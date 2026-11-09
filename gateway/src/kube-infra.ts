@@ -13,12 +13,17 @@ const MANIFESTS = [
 type Reference = { readonly host: string; readonly repo: string; readonly ref: string };
 type DockerConfig = { readonly auths?: Readonly<Record<string, { readonly auth?: string; readonly username?: string; readonly password?: string }>> };
 
-const named = (first: string): boolean => first.includes('.') || first.includes(':') || first === 'localhost';
+/** Whether the first path segment of `reference` is a registry host, as Docker decides it. */
+export function namesRegistry(reference: string): boolean {
+  const slash = reference.indexOf('/');
+  const first = reference.slice(0, slash);
+  return slash > 0 && (first.includes('.') || first.includes(':') || first === 'localhost');
+}
 
 /** `host/repo:tag` or `host/repo@sha256:…`; a reference without a host is under `registry`. */
 export function parseReference(reference: string, registry: string | null): Reference {
   const slash = reference.indexOf('/');
-  if (slash < 0 || !named(reference.slice(0, slash))) {
+  if (!namesRegistry(reference)) {
     if (!registry) throw new Error(`image reference "${reference}" names no registry and PNEUMA_SPACE_REGISTRY is unset`);
     return parseReference(`${registry.replace(/\/$/, '')}/${reference}`, null);
   }
@@ -87,6 +92,8 @@ export type KubeInfraOptions = {
   readonly namespaces: readonly [KubeClient, ...KubeClient[]];
   /** PNEUMA_SPACE_REGISTRY. */
   readonly registry: string | null;
+  /** PNEUMA_SPACE_REGISTRY_API: where the gateway reaches the registry's host when that differs from where nodes pull. */
+  readonly registryApi: string | null;
   /** PNEUMA_SPACE_REGISTRY_AUTH: a dockerconfigjson file, read per call so a rotated Secret applies. */
   readonly authFile: string | null;
 };
@@ -95,11 +102,17 @@ export class KubeInfra implements Infra {
   readonly #namespaces: KubeInfraOptions['namespaces'];
   readonly #registry: string | null;
   readonly #authFile: string | null;
+  readonly #api: { readonly host: string; readonly origin: string } | null;
 
   constructor(options: KubeInfraOptions) {
     this.#namespaces = options.namespaces;
     this.#registry = options.registry;
     this.#authFile = options.authFile;
+    this.#api = options.registry && options.registryApi ? { host: hostOf(options.registry), origin: new URL(options.registryApi).origin } : null;
+  }
+
+  #origin(host: string): string {
+    return host === this.#api?.host ? this.#api.origin : `${scheme(host)}://${host}`;
   }
 
   /** One list of nodes and one list of role-labelled Pods per namespace; never `metrics.k8s.io`. */
@@ -115,7 +128,7 @@ export class KubeInfra implements Infra {
   /** `HEAD /v2/<repo>/manifests/<ref>`; a 401 is answered once, with Basic credentials or a Bearer token exchanged for them. Null when the registry has no such image. */
   async resolveImage(reference: string): Promise<ImageId | null> {
     const { host, repo, ref } = parseReference(reference, this.#registry);
-    const url = `${scheme(host)}://${host}/v2/${repo}/manifests/${ref}`;
+    const url = `${this.#origin(host)}/v2/${repo}/manifests/${ref}`;
     const head = (authorization: string | null) => fetch(url, { method: 'HEAD', headers: { accept: MANIFESTS, ...(authorization ? { authorization } : {}) } });
     let res = await head(null);
     if (res.status === 401) {
@@ -142,7 +155,8 @@ export class KubeInfra implements Infra {
   async #token(challenge: string, repo: string, basic: string | null): Promise<string> {
     const params = Object.fromEntries([...challenge.matchAll(/(\w+)="([^"]*)"/g)].map(([, key, value]) => [key, value]));
     if (!params.realm) throw new Error(`registry challenge has no realm: ${challenge}`);
-    const url = new URL(params.realm);
+    const realm = new URL(params.realm);
+    const url = new URL(realm.pathname + realm.search, realm.host === this.#api?.host ? this.#api.origin : realm.origin);
     if (params.service) url.searchParams.set('service', params.service);
     url.searchParams.set('scope', params.scope ?? `repository:${repo}:pull`);
     const res = await fetch(url, { headers: basic ? { authorization: basic } : {} });

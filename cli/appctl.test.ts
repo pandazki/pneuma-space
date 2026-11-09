@@ -69,10 +69,13 @@ function stub(tools: Record<string, string>): string {
 const stubDocker = (script: string) => stub({ docker: script });
 const dockerMustNotRun = stubDocker('echo "docker must not be invoked: $*" >&2; exit 99');
 
-function appctl(args: string[], { bin = dockerMustNotRun, cli = join(repo, 'cli/appctl.ts'), token = '' } = {}) {
+function appctl(args: string[], { bin = dockerMustNotRun, cli = join(repo, 'cli/appctl.ts'), token = '', registry = '' } = {}) {
   return new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
-    const { PNEUMA_SPACE_OWNER: _, PNEUMA_SPACE_TOKEN: __, ...inherited } = process.env;
-    const env = { ...inherited, PNEUMA_SPACE_ADMIN: admin, PATH: `${bin}:${process.env.PATH}`, ...(token && { PNEUMA_SPACE_TOKEN: token }) };
+    const { PNEUMA_SPACE_OWNER: _, PNEUMA_SPACE_TOKEN: __, PNEUMA_SPACE_REGISTRY: ___, ...inherited } = process.env;
+    const env = {
+      ...inherited, PNEUMA_SPACE_ADMIN: admin, PATH: `${bin}:${process.env.PATH}`,
+      ...(token && { PNEUMA_SPACE_TOKEN: token }), ...(registry && { PNEUMA_SPACE_REGISTRY: registry }),
+    };
     execFile(process.execPath, [cli, ...args], { env }, (error, stdout, stderr) =>
       resolve({ code: error ? Number(error.code) : 0, stdout, stderr }));
   });
@@ -126,6 +129,52 @@ test('publish of a dir that declares db builds the image and releases the built 
   assert.match(result.stdout, /board\s+https:\/\/board\.apps\.test\/\s+release 1/);
 });
 
+describe('publish with a registry', () => {
+  const PUSHED = `sha256:${'cd'.repeat(32)}`;
+  const pushingDocker = (log: string) => stubDocker(`echo "$*" >> ${log}; case "$1" in build) echo ${FAKE_IMAGE};; push) echo "v1: digest: ${PUSHED} size: 527";; esac`);
+  const manifest = { contract: 1, runtime: 'container', capabilities: {} };
+
+  test('a local image is tagged into PNEUMA_SPACE_REGISTRY, pushed, and released by digest', async () => {
+    const dir = source(manifest);
+    const log = join(dir, 'docker-args');
+    const result = await appctl(['publish', 'board', 'board:dev', '--manifest', join(dir, 'pneuma-space.json'), '--tag', 'v1'], { bin: pushingDocker(log), registry: 'reg.example:5000/team' });
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n'), [
+      'tag board:dev reg.example:5000/team/pneuma-space-app/board:v1',
+      'push reg.example:5000/team/pneuma-space-app/board:v1',
+    ]);
+    assert.equal(json(requests[0]).image, `reg.example:5000/team/pneuma-space-app/board@${PUSHED}`);
+  });
+
+  test('a built dir is pushed under --registry with the build tag', async () => {
+    const dir = source(manifest, { Dockerfile: 'FROM scratch' });
+    const log = join(dir, 'docker-args');
+    const result = await appctl(['publish', 'board', dir, '--tag', 'v1', '--registry', 'localhost:5999'], { bin: pushingDocker(log) });
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n').slice(1), [
+      `tag ${FAKE_IMAGE} localhost:5999/pneuma-space-app/board:v1`,
+      'push localhost:5999/pneuma-space-app/board:v1',
+    ]);
+    assert.equal(json(requests[0]).image, `localhost:5999/pneuma-space-app/board@${PUSHED}`);
+  });
+
+  test('an image that names a registry host is sent as is, without docker', async () => {
+    const dir = source(manifest);
+    const result = await appctl(['publish', 'board', 'other.example/team/board:1', '--manifest', join(dir, 'pneuma-space.json')], { registry: 'localhost:5999' });
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(json(requests[0]).image, 'other.example/team/board:1');
+  });
+
+  test('a failed push exits 4 with docker\'s stderr and releases nothing', async () => {
+    const dir = source(manifest);
+    const bin = stubDocker('[ "$1" = push ] && { echo "denied: requested access to the resource is denied" >&2; exit 1; }; exit 0');
+    const result = await appctl(['publish', 'board', 'board:dev', '--manifest', join(dir, 'pneuma-space.json')], { bin, registry: 'localhost:5999' });
+    assert.equal(result.code, 4);
+    assert.match(result.stderr, /denied: requested access to the resource is denied/);
+    assert.deepEqual(requests, []);
+  });
+});
+
 test('a bad manifest exits 2 with the gateway message before any request', async () => {
   const dir = source({ contract: 1, capabilities: { route: {} } });
   const result = await appctl(['publish', 'bad', dir]);
@@ -162,6 +211,7 @@ test('init copies the template next to the CLI into a new dir and refuses a non-
   cpSync(join(repo, 'cli/appctl.ts'), join(root, 'cli/appctl.ts'));
   cpSync(join(repo, 'cli/scaffold.ts'), join(root, 'cli/scaffold.ts'));
   cpSync(join(repo, 'gateway/src/model.ts'), join(root, 'gateway/src/model.ts'));
+  cpSync(join(repo, 'gateway/src/kube-infra.ts'), join(root, 'gateway/src/kube-infra.ts'));
   mkdirSync(join(root, 'templates/static'), { recursive: true });
   writeFileSync(join(root, 'templates/static/pneuma-space.json'), '{"contract":1}');
   const target = join(root, 'out', 'site');

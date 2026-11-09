@@ -10,6 +10,7 @@ import {
   ADMIN_PATHS, ADMIN_PORT, CAPABILITIES, InputError, ManifestError, appName, declaredKinds, parseManifest, subject,
   type Manifest, type RuntimeKind, type StateInventory,
 } from '../gateway/src/model.ts';
+import { namesRegistry } from '../gateway/src/kube-infra.ts';
 import { assemble } from './scaffold.ts';
 
 const EXIT = { usage: 1, manifest: 2, api: 3, build: 4 } as const;
@@ -26,7 +27,7 @@ class Failure extends Error {
 }
 
 const USAGE = `usage:
-  appctl publish <name> <dir|image> [--owner <subject>] [--tenant <t>] [--tag <tag>] [--manifest <file>]
+  appctl publish <name> <dir|image> [--owner <subject>] [--tenant <t>] [--tag <tag>] [--manifest <file>] [--registry <host[/prefix]>]
   appctl init <dir> [--container|--static]
   appctl list
   appctl show <name>
@@ -46,14 +47,15 @@ const USAGE = `usage:
   appctl token revoke <id> --tenant <t>
   appctl quota <tenant> [key=value ...]
   appctl audit [--tenant <t>] [--since 7d|24h|2026-11-01] [--action <action>] [--actor <subject>] [--json]
-admin API: PNEUMA_SPACE_ADMIN (default http://127.0.0.1:${ADMIN_PORT}), PNEUMA_SPACE_TOKEN sent as Authorization: Bearer`;
+admin API: PNEUMA_SPACE_ADMIN (default http://127.0.0.1:${ADMIN_PORT}), PNEUMA_SPACE_TOKEN sent as Authorization: Bearer
+registry: --registry or PNEUMA_SPACE_REGISTRY; publish pushes a local image there and sends its digest`;
 
 const usage = (why: string) => new Failure(EXIT.usage, `${why}\n${USAGE}`);
 const admin = (process.env.PNEUMA_SPACE_ADMIN ?? `http://127.0.0.1:${ADMIN_PORT}`).replace(/\/$/, '');
 const bearer: Record<string, string> = process.env.PNEUMA_SPACE_TOKEN ? { authorization: `Bearer ${process.env.PNEUMA_SPACE_TOKEN}` } : {};
 
 type Options = {
-  owner?: string; tag?: string; manifest?: string; container?: boolean; static?: boolean; yes?: boolean; tail?: string;
+  owner?: string; tag?: string; manifest?: string; registry?: string; container?: boolean; static?: boolean; yes?: boolean; tail?: string;
   tenant?: string; since?: string; action?: string; actor?: string; json?: boolean; kind?: string; label?: string; display?: string;
 };
 
@@ -154,13 +156,28 @@ function codeBundle(dir: string, out: string): void {
   }
 }
 
-function build(name: string, dir: string, tag: string | undefined): string {
-  const ref = `pneuma-space-app/${name}:${tag ?? new Date().toISOString().replace(/\D/g, '').slice(0, 14)}`;
+function build(name: string, dir: string, tag: string): string {
   try {
-    return execFileSync('docker', ['build', '-q', '-t', ref, dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim();
+    return execFileSync('docker', ['build', '-q', '-t', `pneuma-space-app/${name}:${tag}`, dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim();
   } catch (error) {
     throw new Failure(EXIT.build, `docker build ${dir} failed: ${(error as Error).message}`);
   }
+}
+
+/** Tags `image` into `registry`, pushes it, and returns the pushed reference by digest. */
+function push(image: string, registry: string, name: string, tag: string): string {
+  const repo = `${registry.replace(/\/$/, '')}/pneuma-space-app/${name}`;
+  let output: string;
+  try {
+    execFileSync('docker', ['tag', image, `${repo}:${tag}`], { stdio: ['ignore', 'ignore', 'pipe'] });
+    output = execFileSync('docker', ['push', `${repo}:${tag}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (error) {
+    const { stderr, message } = error as Error & { stderr?: Buffer | string };
+    throw new Failure(EXIT.build, `pushing ${image} as ${repo}:${tag} failed: ${String(stderr ?? '').trim() || message}`);
+  }
+  const digest = /digest: (sha256:[0-9a-f]{64})/.exec(output)?.[1];
+  if (!digest) throw new Failure(EXIT.build, `docker push ${repo}:${tag} printed no digest:\n${output}`);
+  return `${repo}@${digest}`;
 }
 
 // ustar, regular files only. Sorted paths, mode 0644, uid/gid 0 and mtime 0 so the same tree always gives the same bytes and bundle id.
@@ -237,7 +254,10 @@ async function publish([rawName, target, ...extra]: string[], options: Options):
   const runtime = fromDir ? runtimeOf(manifest, target) : 'container';
   const staticRoot = manifest.capabilities.static ? join(root, manifest.capabilities.static.dir) : null;
   const files = staticRoot && runtime !== 'isolate' ? bundleFiles(staticRoot) : null;
-  const image = runtime !== 'container' ? null : fromDir ? build(name, target, options.tag) : target;
+  const tag = options.tag ?? new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+  const registry = options.registry ?? (process.env.PNEUMA_SPACE_REGISTRY || undefined);
+  const local = runtime !== 'container' ? null : fromDir ? build(name, target, tag) : target;
+  const image = local && registry && !namesRegistry(local) ? push(local, registry, name, tag) : local;
 
   const code = runtime === 'isolate' ? mkdtempSync(join(tmpdir(), 'appctl-bundle-')) : null;
   try {
@@ -465,6 +485,7 @@ async function main(argv: string[]): Promise<void> {
       options: {
         owner: { type: 'string' },
         tag: { type: 'string' },
+        registry: { type: 'string' },
         manifest: { type: 'string' },
         container: { type: 'boolean' },
         static: { type: 'boolean' },
