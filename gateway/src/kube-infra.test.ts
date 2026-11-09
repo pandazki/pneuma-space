@@ -13,8 +13,11 @@ const nowhere = new KubeClient({ server: 'http://127.0.0.1:9', token: async () =
 const BASIC = `Basic ${Buffer.from('ann:secret').toString('base64')}`;
 const DIGEST = 'sha256:4f1c0e2a';
 
-/** A registry for `team/notes:1` answering 401 with `challenge` until a request carries `accepted`. */
-async function registry(t: TestContext, challenge: (host: string) => string, accepted: string, extra?: (req: http.IncomingMessage, res: http.ServerResponse) => boolean) {
+/** A registry for `team/notes:1` answering 401 with `challenge` until a request carries `accepted`; with `pull`, nodes pull it as `pull` and the gateway reaches it through PNEUMA_SPACE_REGISTRY_API. */
+async function registry(
+  t: TestContext, challenge: (host: string) => string, accepted: string,
+  extra?: (req: http.IncomingMessage, res: http.ServerResponse) => boolean, pull?: string,
+) {
   const seen: http.IncomingMessage[] = [];
   const server = http.createServer((req, res) => {
     seen.push(req);
@@ -31,8 +34,8 @@ async function registry(t: TestContext, challenge: (host: string) => string, acc
   });
   const host = `127.0.0.1:${(server.address() as AddressInfo).port}`;
   const authFile = join(await mkdtemp(join(tmpdir(), 'registry-')), '.dockerconfigjson');
-  await writeFile(authFile, JSON.stringify({ auths: { [host]: { auth: BASIC.slice('Basic '.length) } } }));
-  return { host, seen, infra: new KubeInfra({ namespaces: [nowhere], registry: host, authFile }) };
+  await writeFile(authFile, JSON.stringify({ auths: { [pull ?? host]: { auth: BASIC.slice('Basic '.length) } } }));
+  return { host, seen, infra: new KubeInfra({ namespaces: [nowhere], registry: pull ?? host, registryApi: pull ? `http://${host}` : null, authFile }) };
 }
 
 test('resolveImage answers a Basic challenge with the dockerconfigjson credentials and returns the digest reference', async (t) => {
@@ -51,6 +54,18 @@ test('resolveImage exchanges the credentials for a Bearer token at the challenge
   });
   assert.equal(await infra.resolveImage('team/notes:1'), `${host}/team/notes@${DIGEST}`);
   assert.equal(scope, 'repository:team/notes:pull');
+});
+
+test('resolveImage reaches the configured registry through PNEUMA_SPACE_REGISTRY_API and names the pull host', async (t) => {
+  const pull = 'registry.invalid:30500';
+  const { infra, seen } = await registry(t, () => `Bearer realm="https://${pull}/token",service="registry"`, 'Bearer tk', (req, res) => {
+    if (!req.url!.startsWith('/token')) return false;
+    if (req.headers.authorization !== BASIC) res.writeHead(401).end();
+    else res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ token: 'tk' }));
+    return true;
+  }, pull);
+  assert.equal(await infra.resolveImage(`${pull}/team/notes:1`), `${pull}/team/notes@${DIGEST}`);
+  assert.deepEqual(seen.map((req) => req.url!.split('?')[0]), ['/v2/team/notes/manifests/1', '/token', '/v2/team/notes/manifests/1']);
 });
 
 const node = (name: string, unschedulable = false): Node => ({
@@ -78,7 +93,7 @@ test('nodes sums the requests of the platform Pods on each node across both name
   await once(server, 'listening');
   t.after(() => server.close());
   const at = (namespace: string) => new KubeClient({ server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, token: async () => 't', namespace });
-  const nodes = await new KubeInfra({ namespaces: [at('pneuma-space'), at('pneuma-space-apps')], registry: null, authFile: null }).nodes();
+  const nodes = await new KubeInfra({ namespaces: [at('pneuma-space'), at('pneuma-space-apps')], registry: null, registryApi: null, authFile: null }).nodes();
   assert.deepEqual(nodes.map((n) => [n.name, n.schedulable, n.requested, n.allocatable]), [
     ['n1', true, { cpuMillis: 350, memoryBytes: 384 * 2 ** 20, pods: 2 }, { cpuMillis: 3500, memoryBytes: 8 * 2 ** 30, pods: 110 }],
     ['n2', false, { cpuMillis: 1000, memoryBytes: 2 ** 30, pods: 1 }, { cpuMillis: 3500, memoryBytes: 8 * 2 ** 30, pods: 110 }],

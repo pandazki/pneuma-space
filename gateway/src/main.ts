@@ -73,7 +73,10 @@ const { infra, container, pool } = setup.pods
     const platform = await inClusterClient();
     return {
       infra: new KubeInfra({
-        namespaces: [platform, apps], registry: process.env.PNEUMA_SPACE_REGISTRY?.trim() || null, authFile: process.env.PNEUMA_SPACE_REGISTRY_AUTH?.trim() || null,
+        namespaces: [platform, apps],
+        registry: process.env.PNEUMA_SPACE_REGISTRY?.trim() || null,
+        registryApi: process.env.PNEUMA_SPACE_REGISTRY_API?.trim() || null,
+        authFile: process.env.PNEUMA_SPACE_REGISTRY_AUTH?.trim() || null,
       }),
       container: new PodRuntime({ kube: apps, config: pods, specFor, instances, guard }),
       pool: new StatefulSetPool(platform),
