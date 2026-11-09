@@ -84,6 +84,8 @@ export const MIGRATIONS = [
    UPDATE tenant SET quota = '${UNLIMITED}' WHERE name = '${DEFAULT_TENANT}';`,
   // ADR 0023 item 4: storage counts provisioned capacity, never a measurement.
   'DROP TABLE storage_usage',
+  // ADR 0026 item 2: the cluster view marks the leading gateway from its heartbeat.
+  'ALTER TABLE replica ADD COLUMN leads INTEGER NOT NULL DEFAULT 0',
 ];
 
 /** `$n` placeholders become `?n`, which node:sqlite binds by position. */

@@ -7,7 +7,7 @@ import { PlatformRegistry } from './registry.ts';
 import { SqliteStore } from './store.ts';
 import {
   CAPABILITIES, Conflict, NotFound,
-  type AppId, type BundleId, type BundleIndex, type BundleStore, type CapabilityProvider, type Guard, type ImageId, type Infra,
+  type AppId, type BundleId, type BundleIndex, type BundleStore, type CapabilityProvider, type Guard, type ImageId, type Infra, type Lease,
   type ProviderName, type Quarantine, type Resource, type ResourceKind, type Runtime,
 } from './model.ts';
 
@@ -71,13 +71,17 @@ export class FakeRuntime implements Runtime, Infra, Guard {
   readonly calls: string[] = [];
   readonly containers = new Set<AppId>();
   reconciled = true;
-  async acquire(): Promise<never> { throw new Error('not used'); }
+  async acquire(app: AppId): Promise<Lease> {
+    this.calls.push(`acquire ${app}`);
+    return { app, address: 'fake:8000' };
+  }
   release(): void {}
   channel(): void {}
   async retire(app: AppId): Promise<void> {
     this.calls.push(`retire ${app}`);
     if (this.reconciled) this.containers.delete(app);
   }
+  async kill(app: AppId): Promise<void> { this.calls.push(`kill ${app}`); }
   async reconcile(): Promise<void> { this.reconciled = true; }
   async logs(app: AppId, tail: number): Promise<string> { return `last ${tail} lines of ${app}\n`; }
   state(): 'none' { return 'none'; }
@@ -89,6 +93,11 @@ export class FakeRuntime implements Runtime, Infra, Guard {
   quarantine(app: AppId): Quarantine | null { return this.quarantined.get(app) ?? null; }
   unquarantine(app: AppId): void { this.quarantined.delete(app); }
   async nodes(): Promise<null> { return null; }
+  async workloads() { return []; }
+  async volumes() { return []; }
+  async warnings() { return []; }
+  async scale(name: string, replicas: number): Promise<void> { this.calls.push(`scale ${name} ${replicas}`); }
+  async deletePod(name: string): Promise<void> { this.calls.push(`deletePod ${name}`); }
   async resolveImage(reference: string): Promise<ImageId | null> {
     this.calls.push(`resolveImage ${reference}`);
     return this.images.get(reference) ?? null;

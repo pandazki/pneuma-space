@@ -457,14 +457,15 @@ export class SqlOps implements StoreOps {
 
   async replicas() {
     return (await this.#s.all('SELECT * FROM replica ORDER BY id')).map((r): Replica => ({
-      id: r.id as ReplicaId, startedAt: num(r.started_at), seenAt: num(r.seen_at),
+      id: r.id as ReplicaId, startedAt: num(r.started_at), seenAt: num(r.seen_at), leading: num(r.leads) === 1,
     }));
   }
 
   async putReplica(r: Replica) {
     await this.#s.run(
-      'INSERT INTO replica (id, started_at, seen_at) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET seen_at = excluded.seen_at',
-      [r.id, r.startedAt, r.seenAt],
+      `INSERT INTO replica (id, started_at, seen_at, leads) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (id) DO UPDATE SET seen_at = excluded.seen_at, leads = excluded.leads`,
+      [r.id, r.startedAt, r.seenAt, r.leading ? 1 : 0],
     );
   }
 
@@ -518,6 +519,10 @@ export class SqlOps implements StoreOps {
       await this.#s.run('DELETE FROM lease_tally WHERE app = $1', [app]);
       if (changes > 0) this.#touch({ kind: 'instance', app });
     });
+  }
+
+  async deleteLeaseTallies(app: AppId) {
+    await this.#s.run('DELETE FROM lease_tally WHERE app = $1', [app]);
   }
 
   async leaseTallies(app?: AppId) {

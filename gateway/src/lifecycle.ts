@@ -46,6 +46,8 @@ export interface Driver<S extends RunSpec, H extends string> {
   /** Idle stop; the driver may keep the handle for the next start. */
   sleep(app: AppId, slot: Slot<H>): Promise<void>;
   remove(app: AppId, handle: H): Promise<void>;
+  /** Removes whatever runs for the app with no grace period, `handle` or one a waker has not recorded yet (ADR 0026 item 3). */
+  kill(app: AppId, handle: H | null): Promise<void>;
   /** Removes an instance reconcile found stale; false when the driver deferred it to its own retry instead of failing the gateway's start. */
   discard(app: AppId, handle: H): Promise<boolean>;
   /** Null when the runtime's service could not be asked, so nothing it holds is known to be gone. */
@@ -228,6 +230,32 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
         }
       }
     }
+  }
+
+  /**
+   * The operator's kill: no drain and no expected state, so it also ends a transition whose actor is alive (ADR 0026 item 3). A waker or drainer
+   * then loses its next CAS and stops; an unreachable runtime holds nothing to kill, so the row goes asleep regardless.
+   */
+  async kill(app: AppId): Promise<void> {
+    await this.#instances.ready();
+    const row = await this.#store.instance(app);
+    if (row?.runtime !== this.kind) return;
+    await this.#driver.kill(app, row.handle as H | null).catch((error: unknown) => {
+      if (!(error instanceof Unavailable)) throw error;
+    });
+    const asleep = await this.#store.transaction(async (tx) => {
+      const current = await tx.instance(app, 'update');
+      if (current?.runtime !== this.kind) return null;
+      const next: Instance = { ...current, state: 'asleep', actor: null, handle: null, address: null, since: Date.now() };
+      if (!(await tx.casInstance(current, next))) return null;
+      await tx.deleteLeaseTallies(app);
+      return next;
+    });
+    if (!asleep) return;
+    this.#localOf(app).ended = asleep.epoch;
+    this.#instances.dropTallies(app);
+    this.#instances.putRow(asleep);
+    this.#emit('asleep', app, { reason: 'kill', runtime: this.kind });
   }
 
   /** Startup: load the mirror, compare it with what the driver reports, take over stale transitions, then follow the driver. */

@@ -30,6 +30,7 @@ class FakeRuntime implements Runtime {
     this.#held = false;
     this.calls.push(`${this.kind} retired`);
   }
+  async kill(): Promise<void> {}
   async reconcile(): Promise<void> {}
   state(): 'awake' | 'none' { return this.#held ? 'awake' : 'none'; }
   since(): null { return null; }

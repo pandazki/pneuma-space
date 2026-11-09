@@ -19,6 +19,7 @@ Plain manifests for the `kubernetes` plane ([ADR 0019](../../docs/adr/0019-kuber
 | `REPLACE_ME_REGISTRY`, `REPLACE_ME_TAG` | Where you pushed the gateway image; `PNEUMA_SPACE_REGISTRY` also receives app images |
 | `REPLACE_ME_REGISTRY_HOST`, `REPLACE_ME_REGISTRY_BASIC_AUTH` | The registry host and `base64(user:password)`, in both `pneuma-space-registry` Secrets |
 | `PNEUMA_SPACE_REGISTRY_API` (ConfigMap, optional) | A URL with scheme where the gateway reaches the `PNEUMA_SPACE_REGISTRY` host for digest lookups and token requests, when that differs from the pull address (a local cluster whose nodes pull from `localhost:<nodePort>`). Empty means the pull host itself; releases still name the pull host |
+| `PNEUMA_SPACE_SCALE_MAX` (ConfigMap, optional) | The most replicas the cluster page sets on the gateway Deployment or the runner StatefulSet; default 10 ([ADR 0026](../../docs/adr/0026-cluster-page-and-operations.md)) |
 | `REPLACE_ME_APPS_DOMAIN` | The apps domain, e.g. `apps.example.com` |
 | `REPLACE_ME_OBJECTS_HOST` | The host browsers use for presigned object URLs, routed to Service `rustfs` |
 | `REPLACE_ME_RTC_PUBLIC_HOST` | The host browsers reach TURN on |

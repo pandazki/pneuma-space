@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
 import { startAdmin } from './admin.ts';
+import { Docker } from './docker.ts';
 import { EventLog } from './events.ts';
+import { DockerInfra } from './infra.ts';
 import { Metrics, Series } from './metrics.ts';
 import { NodeView } from './nodes.ts';
 import {
@@ -32,10 +34,15 @@ async function admin(runtime?: Runtimes) {
     replica: 'r1' as ReplicaId,
   });
   const nodeCalls = { n: 0 };
+  const up = async () => 'up' as const;
+  const off = async () => 'off' as const;
+  const infra = new DockerInfra({ docker: new Docker('/nonexistent.sock'), probes: { redis: up, object: up, postgres: off, coturn: off, runner: off }, volumes: async () => [] });
   const nodes = new NodeView({
-    infra: { nodes: async () => (nodeCalls.n++, null) },
+    infra: { nodes: async () => (nodeCalls.n++, infra.nodes()), workloads: () => infra.workloads(), volumes: () => infra.volumes(), warnings: () => infra.warnings() },
     apps: () => registry.listing(),
+    nameOf: (app) => registry.nameOf(app),
     instances: { row: () => null, rows: () => [][Symbol.iterator]() },
+    replicas: async () => [],
     host: async () => ({ cpus: 1, load: [0, 0, 0], memory: { totalBytes: 1, freeBytes: 1 }, data: null }),
     runner: async () => null,
     runnerOnHost: async () => false,
@@ -43,7 +50,10 @@ async function admin(runtime?: Runtimes) {
   });
   const requests = new RequestLog(() => {});
   const logs = { logs: (app: AppId, tail: number) => w.runtime.logs(app, tail), healthOf: () => [] };
-  const server = await startAdmin({ registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, nodes, requests, replica: 'r1' as ReplicaId, store, ingressPort: 18080, providers: [...w.providers.values()] }, { port: 0 });
+  const server = await startAdmin({
+    registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, nodes, infra, scaleMax: 10, requests, replica: 'r1' as ReplicaId, store, ingressPort: 18080,
+    providers: [...w.providers.values()],
+  }, { port: 0 });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
     const raw = typeof body === 'string' ? body : body === undefined ? undefined : JSON.stringify(body);
@@ -91,6 +101,32 @@ test('GET /api/nodes answers the sampler\'s last sample without asking Infra', a
   await nodes.sample();
   const [first, second] = [await call('GET', '/api/nodes'), await call('GET', '/api/nodes')];
   assert.deepEqual([first.status, first.body.source, first.body.nodes.length, second.body.sampledAt, nodeCalls.n], [200, 'host', 1, first.body.sampledAt, 1]);
+});
+
+test('GET /api/cluster on the docker plane lists the compose services, none scalable, and no nodes or warnings (AC-OPS-11)', async (t) => {
+  const { call, server, nodes } = await admin();
+  t.after(() => server.close());
+  await nodes.sample();
+  const { body } = await call('GET', '/api/cluster');
+  assert.deepEqual([body.plane, body.nodes, body.warnings], ['docker', [], []]);
+  assert.deepEqual(body.workloads.map((w: { name: string; ready: number; scalable: boolean }) => [w.name, w.ready, w.scalable]), [
+    ['gateway', 1, false], ['redis', 1, false], ['rustfs', 1, false], ['postgres', 0, false], ['coturn', 0, false], ['runner', 0, false],
+  ]);
+});
+
+test('scaling to 0 replicas or above PNEUMA_SPACE_SCALE_MAX answers 400 (AC-OPS-12)', async (t) => {
+  const { call, server } = await admin();
+  t.after(() => server.close());
+  const [none, many] = [await call('PUT', '/api/cluster/workloads/pneuma-space-runner/scale', { replicas: 0 }), await call('PUT', '/api/cluster/workloads/pneuma-space-runner/scale', { replicas: 11 })];
+  assert.deepEqual([none.status, many.status], [400, 400]);
+});
+
+test('scaling on the docker plane answers 409 and the audit lists cluster.scale with the replica count', async (t) => {
+  const { call, server, store } = await admin();
+  t.after(() => server.close());
+  assert.equal((await call('PUT', '/api/cluster/workloads/pneuma-space-runner/scale', { replicas: 2 })).status, 409);
+  const rows = await audit(store, 'pneuma-space-runner');
+  assert.deepEqual(rows.map((r) => [r.action, r.targetKind, r.result, r.details.replicas]).sort(), [['cluster.scale', 'workload', 'refused', 2], ['cluster.scale', 'workload', 'started', 2]]);
 });
 
 test('input errors answer 400, unknown apps and images 404, conflicts 409', async (t) => {

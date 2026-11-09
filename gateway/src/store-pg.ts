@@ -99,6 +99,8 @@ export const PG_MIGRATIONS = [
      RETURN NULL;
    END $$;
    ${['app', 'release', 'trigger', 'binding', 'policy', 'instance', 'guard', 'tenant', 'membership', 'token'].map(changed).join('\n   ')}`,
+  // ADR 0026 item 2: the cluster view marks the leading gateway from its heartbeat.
+  'ALTER TABLE replica ADD COLUMN leads INTEGER NOT NULL DEFAULT 0',
 ];
 
 /** Runs every step not yet recorded, each in its own transaction, under a lock so replicas that start together migrate once. */

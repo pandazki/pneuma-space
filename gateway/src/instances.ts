@@ -104,6 +104,12 @@ export class Instances {
     this.#announce(tally.app);
   }
 
+  /** What this replica just deleted for every replica (ADR 0026 item 3). */
+  dropTallies(app: AppId): void {
+    this.#bump(app);
+    this.#tallies.delete(app);
+  }
+
   async refresh(app: AppId): Promise<void> {
     const read = (this.#reads.get(app) ?? 0) + 1;
     this.#reads.set(app, read);
@@ -173,8 +179,8 @@ export class Instances {
     const startedAt = Date.now();
     const beat = async () => {
       const now = Date.now();
-      await this.store.putReplica({ id: this.replica, startedAt, seenAt: now });
       await this.#lead();
+      await this.store.putReplica({ id: this.replica, startedAt, seenAt: now, leading: this.leading });
       if (this.leading) await this.store.sweepReplicas(now - DEAD_MS);
     };
     await beat();
