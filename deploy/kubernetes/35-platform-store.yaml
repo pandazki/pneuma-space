@@ -19,6 +19,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: pneuma-space
     pneuma-space.service: store
+    pneuma-space.role: store
 spec:
   serviceName: pneuma-space-store
   replicas: 1
@@ -30,6 +31,7 @@ spec:
       labels:
         app.kubernetes.io/part-of: pneuma-space
         pneuma-space.service: store
+        pneuma-space.role: store
     spec:
       automountServiceAccountToken: false
       containers:
