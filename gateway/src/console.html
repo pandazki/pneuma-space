@@ -790,6 +790,40 @@ input.lim-in { width: 96px; height: 22px; padding: 0 6px; border-radius: 6px; te
 .vlist { display: grid; gap: 2px; margin: 8px 0 0 16px; }
 .vline { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 5px 0; font-size: 12.5px; border-top: 1px solid var(--line-soft); }
 .vline .mono.muted { font-size: 11.5px; }
+.agroup + .agroup, .agrid + .adisc, .agroup + .adisc { margin-top: 28px; }
+.tgh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 0 4px 10px; font-size: 12.5px; }
+.tgh b { font-size: 13px; }
+.tgh .num { margin-left: auto; font-size: 11.5px; }
+.agrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; }
+.acard { display: grid; gap: 10px; align-content: start; padding: 14px 16px; cursor: pointer; transition: box-shadow .15s; }
+.acard:hover { box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-sm); }
+.acard.quarantined { box-shadow: 0 0 0 1px var(--red), var(--shadow-sm); }
+.acard.removed { background: var(--inset); cursor: default; }
+.ah { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ah a { font-weight: 600; font-size: 13.5px; overflow-wrap: anywhere; }
+.ah .rel { margin-left: auto; font-size: 11.5px; color: var(--ink-3); }
+.aline { font-size: 12.5px; color: var(--ink-2); }
+.aline.green { color: var(--green); }
+.aline.orange { color: var(--orange); }
+.aline.red { color: var(--red); }
+.aline .muted.mono { font-size: 11.5px; }
+.aspark { display: flex; align-items: flex-end; gap: 14px; }
+.spark { flex: 1; min-width: 0; display: flex; align-items: stretch; gap: 2px; height: 30px; border-bottom: 1px solid var(--line-strong); }
+.spark i { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; }
+.spark b { display: block; background: var(--accent); opacity: .75; }
+.spark b:last-child { border-radius: 1.5px 1.5px 0 0; }
+.spark b.bad { background: var(--red); opacity: 1; border-radius: 1.5px 1.5px 0 0; }
+.spark i:hover b { opacity: 1; }
+.acount { display: grid; justify-items: end; font-size: 11.5px; line-height: 16px; white-space: nowrap; }
+.acount b { font: 600 15px/20px var(--mono); }
+.acount .bad { color: var(--red); }
+.afoot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; font-size: 12px; }
+.adisc > summary { cursor: pointer; list-style: none; display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 12px; font-size: 12.5px; font-weight: 500; color: var(--ink-2); }
+.adisc > summary::-webkit-details-marker { display: none; }
+.adisc > summary::before { content: "›"; color: var(--ink-3); transition: transform .15s; }
+.adisc[open] > summary::before { transform: rotate(90deg); }
+.adisc > summary .n { font: 11px var(--mono); color: var(--ink-3); }
+.adisc > summary .muted { font-weight: 400; font-size: 12px; }
 @media (max-width: 900px) {
   .frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; box-shadow: none; }
   aside { position: relative; width: auto; height: auto; padding: 16px 20px; border-right: 0; border-bottom: 1px dashed var(--line); }
@@ -845,6 +879,7 @@ input.lim-in { width: 96px; height: 22px; padding: 0 6px; border-radius: 6px; te
 <script>
 const I18N = {
   zh: {
+    'ap.search': '搜索应用或租户', 'ap.req24': '24 小时请求', 'ap.staticLine': '静态站点，请求直接返回文件，不唤醒', 'apps.filter': '按名称筛选', 'ap.b.awake': '醒着', 'ap.b.asleep': '睡眠', 'ap.b.quarantined': '隔离', 'ap.b.removed': '已移除', 'ap.in.awake': '醒着', 'ap.in.asleep': '睡眠', 'ap.in.waking': '唤醒中', 'ap.in.draining': '排空中', 'ap.in.stopping': '停止中', 'ap.never': '还没唤醒过', 'ap.quarantined': '隔离中 · {reason}', 'ap.sparkTip': '{requests} 请求 · {errors} 错误', 'ap.sparkLabel': '24 小时 {requests} 次请求，{errors} 次错误', 'ap.errors.one': '{n} 次错误', 'ap.errors.other': '{n} 次错误', 'ap.lastAccess': '最近访问', 'ap.removedNote': '地址返回 404，数据保留', 'ap.awakeN': '醒着 {n}', 'ap.groupRequests': '24 小时 {n} 次请求',
     'tp.lane.container.sub.k8s': 'Kubernetes · 每应用一个 Pod', 'tp.engine.container.k8s': 'Kubernetes', 'tp.unprobed.k8s': '随集群，不探测',
     'tp.keep.container.k8s': '每应用的 PVC', 'tp.keep.isolate.k8s': 'runner 的 PVC', 'tp.fixDown.k8s': '到集群页看 {service} 的 Pod', 'tp.fixOff.k8s': '部署里没有 {profile}',
     'tp.x.container.request.k8s': '入口按应用地址{address}找到应用，经 Runtime.acquire 拿到实例，再转发到这个应用 Pod 的 8000 端口。',
@@ -881,11 +916,11 @@ const I18N = {
     'col.name': '名称', 'col.state': '状态', 'col.since': '进入时间', 'col.requests': '请求（24 小时）', 'col.errors': '错误（24 小时）',
     'col.status': '状态',
     'col.instance': '实例', 'col.release': '版本', 'col.capabilities': '能力', 'col.lastAccess': '最近访问', 'col.image': '镜像',
-    'col.bundle': '静态包', 'col.published': '发布时间', 'col.kind': '能力', 'col.provider': 'Provider', 'col.trigger': '触发器',
+    'col.bundle': '静态包', 'col.published': '发布时间', 'col.kind': '能力', 'col.provider': '提供方', 'col.trigger': '触发器',
     'col.attempts': '尝试次数', 'col.scheduledFor': '计划时间', 'col.created': '创建时间', 'col.nextAttempt': '下次尝试',
     'empty.attention': '没有需要关注的事项。', 'empty.events': '还没有事件。', 'empty.filtered': '没有匹配的记录。',
     'att.delivery': '投递失败', 'att.deliveryDetail': '{trigger} · 尝试 {attempts} 次',
-    'apps.title': '项目', 'apps.count.one': '{n} 个应用', 'apps.count.other': '{n} 个应用', 'apps.filter': '按名称筛选', 'apps.allStates': '全部状态',
+    'apps.title': '项目', 'apps.count.one': '{n} 个应用', 'apps.count.other': '{n} 个应用',
     'apps.empty': '还没有应用。发布一个即可获得地址。', 'apps.publish': '发布应用',
     'never': '从未', 'routeOnly': '仅路由',
     'st.registered': '已注册', 'st.removed': '已移除', 'st.purging': '清除中', 'st.none': '无实例', 'st.asleep': '休眠',
@@ -936,7 +971,7 @@ const I18N = {
     'live.lastRequest': '上一条请求 {ago}', 'yes': '是', 'no': '否',
     'rt.title': '实时', 'rt.sub': '经过网关的每一次请求和每一条生命周期事件，最新在上。',
     'rt.rate': '每秒请求', 'rt.rateSub': '最近 10 秒', 'rt.errors': '错误（1 分钟）', 'rt.errorsSub': '5xx 或没有应答',
-    'rt.sockets': '打开的连接', 'rt.socketsSub': 'WebSocket 和 SSE 的 channel Lease', 'rt.matching': '匹配过滤条件',
+    'rt.sockets': '打开的连接', 'rt.socketsSub': 'WebSocket 和 SSE 通道的 Lease', 'rt.matching': '匹配过滤条件',
     'rt.hist': '最近 60 秒每秒请求', 'rt.peak': '峰值 {n}', 'rt.ago': '-{n} 秒', 'rt.histTip': '{time} · {n} 个请求 · {e} 个错误',
     'rt.filter': '过滤请求和事件', 'rt.placeholder': 'app:survey status:5xx path:/api cold:true', 'rt.clear': '清除',
     'rt.errorsOnly': '只看错误', 'rt.hideStatic': '隐藏静态', 'rt.keys': '条件',
@@ -1031,16 +1066,16 @@ const I18N = {
     'tp.x.container.state': 'files 和 SQLite 在每应用的具名卷里；kv、object 和 PostgreSQL 在平台服务里。容器文件系统每次停止都丢掉。',
     'tp.x.container.failure': 'Docker 事件报告退出，唤醒后 {ready} 秒内不应答算唤醒失败；醒着时卡死的容器检测不到。Guard 按版本计失败：{window} 秒内 {max} 次即隔离，失败后 {backoff} 秒内不再唤醒，直到新版本或手动解除。',
     'tp.x.isolate.request': '入口转发到 runner:<port>，那里是 runner 给这个应用分配的端口（PNEUMA_SPACE_PORT），应用的 worker 在上面监听；没有每应用的容器。',
-    'tp.x.isolate.wake': '网关让 runner 起一个 worker_threads Worker：runner 用预签名地址下载 bundle 到自己的卷，经垫片加载入口，几十毫秒内应答。没有 Lease 满 {idle} 秒后 terminate。',
+    'tp.x.isolate.wake': '网关让 runner 起一个 worker_threads Worker：runner 用预签名地址下载 bundle 到自己的卷，经垫片加载入口，几十毫秒内应答。没有 Lease 满 {idle} 秒后结束它。',
     'tp.x.isolate.state': 'files 和 SQLite 在 runner 卷的 /data/apps/<id>/ 下；kv、object 和 PostgreSQL 在平台服务里。worker 停下后内存里的东西都没了。',
-    'tp.x.isolate.failure': 'runner 每秒给每个 worker 发心跳，3 秒无应答即 terminate；堆和堆外内存超限即结束；未捕获异常和退出都上报。一个 worker 出事不拖垮 runner。Guard 在 {window} 秒内 {max} 次失败后隔离应用。',
+    'tp.x.isolate.failure': 'runner 每秒给每个 worker 发心跳，3 秒无应答即结束；堆和堆外内存超限即结束；未捕获异常和退出都上报。一个 worker 出事不拖垮 runner。Guard 在 {window} 秒内 {max} 次失败后隔离应用。',
     'tp.x.static.request': '入口在当前版本的 bundle 索引里找到文件，从包存储直接答；不唤醒任何东西，不跑应用代码。',
     'tp.x.static.wake': '没有实例。发布时把静态目录作为 bundle 上传，网关读它的索引，从对象存储流式返回文件。',
     'tp.x.static.state': '只有对象存储里的 bundle。新版本指向新的 bundle，旧的保留。',
     'tp.x.static.failure': '没有会卡死或崩溃的进程。对象存储不可达时静态请求失败，拓扑会把对象存储和所有声明 static 的应用标红。',
     'tp.check.exit': '实例自己结束了：崩溃、未捕获异常、非零退出。',
     'tp.check.ready': '唤醒后 ready_timeout_seconds 内没有应答。',
-    'tp.check.hang': '醒着时不再应答心跳，被 terminate。',
+    'tp.check.hang': '醒着时不再应答心跳，被结束。',
     'tp.check.memory': '超过内存上限被结束。',
     'nav.team': '团队', 'col.actions': '操作', 'top.tenant': '租户', 'lb.find': '查找', 'tn.all': '全部租户', 'top.signOut': '退出', 'top.platformAdmin': '平台管理员',
     'col.tenant': '租户', 'col.member': '成员', 'col.role': '角色', 'col.lastSeen': '最近登录', 'col.label': '标签', 'col.subject': '主体',
@@ -1084,7 +1119,7 @@ const I18N = {
     'cl.sec.attention': '需要关注', 'cl.sec.attentionDesc': '不可达的服务和在过渡状态停了一分钟以上的实例，每条带着处理它的操作。',
     'cl.sec.attentionDesc.k8s': '未就绪一分钟以上的 Pod、在过渡状态停了一分钟以上的实例、未就绪或已 cordon 的节点、最近的告警（按对象合并），每条带着处理它的操作。',
     'cl.sec.placement': '主机', 'cl.sec.placement.k8s': '节点', 'cl.sec.placementDesc': '这台主机的负载、内存和数据盘。',
-    'cl.sec.placementDesc.k8s': '每个节点一个框：平台 Pod 的请求对 allocatable（不含节点上的其他 Pod），以及放在上面的网关、runner 和实例。',
+    'cl.sec.placementDesc.k8s': '每个节点一个框：平台 Pod 的请求量对可分配量（不含节点上的其他 Pod），以及放在上面的网关、runner 和实例。',
     'cl.sec.instances': '实例', 'cl.sec.instancesDesc': '每个没睡着的实例，按生命周期分组，卡住的在最前。CPU 和内存是这次唤醒拿到的上限（isolate 实例共用 runner 的 CPU，只有内存）；点它改应用策略，下次唤醒生效，留空恢复平台值。',
     'cl.sec.storage': '存储', 'cl.sec.storageDesc': '应用的 Docker 卷，按存储类合计；展开看每个应用。卷也挂在实例行上。',
     'cl.sec.storageDesc.k8s': '应用命名空间里带应用标签的 PVC，按存储类合计；展开看每个应用。卷也挂在实例行上。',
@@ -1122,6 +1157,7 @@ const I18N = {
     'empty.cl.instances': '没有醒着的实例。', 'empty.cl.volumes': '没有应用卷。',
   },
   en: {
+    'ap.search': 'Search app or tenant', 'ap.req24': 'requests, 24 h', 'ap.staticLine': 'Static site: files answer without a wake', 'apps.filter': 'Filter by name', 'ap.b.awake': 'Awake', 'ap.b.asleep': 'Asleep', 'ap.b.quarantined': 'Quarantined', 'ap.b.removed': 'Removed', 'ap.in.awake': 'Awake for', 'ap.in.asleep': 'Asleep for', 'ap.in.waking': 'Waking for', 'ap.in.draining': 'Draining for', 'ap.in.stopping': 'Stopping for', 'ap.never': 'Never woken', 'ap.quarantined': 'Quarantined · {reason}', 'ap.sparkTip': '{requests} requests · {errors} errors', 'ap.sparkLabel': '{requests} requests and {errors} errors in 24 h', 'ap.errors.one': '{n} error', 'ap.errors.other': '{n} errors', 'ap.lastAccess': 'Last access', 'ap.removedNote': 'address answers 404, data kept', 'ap.awakeN': '{n} awake', 'ap.groupRequests': '{n} requests in 24 h',
     'tp.lane.container.sub.k8s': 'Kubernetes · one Pod per app', 'tp.engine.container.k8s': 'Kubernetes', 'tp.unprobed.k8s': 'with the cluster, not probed',
     'tp.keep.container.k8s': 'per-app PVCs', 'tp.keep.isolate.k8s': 'runner PVC', 'tp.fixDown.k8s': 'see the {service} Pods on the cluster page', 'tp.fixOff.k8s': 'not deployed: {profile}',
     'tp.x.container.request.k8s': 'The ingress matches the app’s address{address}, takes an instance through Runtime.acquire and proxies to port 8000 of the app’s Pod.',
@@ -1158,11 +1194,11 @@ const I18N = {
     'col.name': 'Name', 'col.state': 'State', 'col.since': 'Since', 'col.requests': 'Requests, 24 h', 'col.errors': 'Errors, 24 h',
     'col.status': 'Status',
     'col.instance': 'Instance', 'col.release': 'Release', 'col.capabilities': 'Capabilities', 'col.lastAccess': 'Last access', 'col.image': 'Image',
-    'col.bundle': 'Bundle', 'col.published': 'Published', 'col.kind': 'Kind', 'col.provider': 'Provider', 'col.trigger': 'Trigger',
+    'col.bundle': 'Bundle', 'col.published': 'Published', 'col.kind': 'Kind', 'col.provider': '提供方', 'col.trigger': 'Trigger',
     'col.attempts': 'Attempts', 'col.scheduledFor': 'Scheduled for', 'col.created': 'Created', 'col.nextAttempt': 'Next attempt',
     'empty.attention': 'Nothing needs attention.', 'empty.events': 'No events yet.', 'empty.filtered': 'Nothing matches.',
     'att.delivery': 'Delivery failed', 'att.deliveryDetail': '{trigger} · {attempts} attempts',
-    'apps.title': 'Projects', 'apps.count.one': '{n} app', 'apps.count.other': '{n} apps', 'apps.filter': 'Filter by name', 'apps.allStates': 'All states',
+    'apps.title': 'Projects', 'apps.count.one': '{n} app', 'apps.count.other': '{n} apps',
     'apps.empty': 'No apps yet. Publish one to give it an address.', 'apps.publish': 'Publish an app',
     'never': 'never', 'routeOnly': 'route only',
     'st.registered': 'registered', 'st.removed': 'removed', 'st.purging': 'purging', 'st.none': 'none', 'st.asleep': 'asleep',
@@ -3242,43 +3278,140 @@ function realtime() {
   return { loops: [[METRICS_MS, polls[0]], [REQUESTS_MS, polls[1]], [APPS_MS, polls[2]]], first };
 }
 
-const STATE_FILTERS = ['awake', 'waking', 'asleep', 'none', 'registered', 'removed', 'purging'];
-let appsFilter = { text: '', state: '' };
+/** Filter-chip order; a removed or purging app is 'removed' whatever its instance, and a quarantine outranks the instance state. */
+const APP_BUCKETS = ['awake', 'asleep', 'quarantined', 'removed'];
+const appBucket = (a) => (a.status !== 'registered' ? 'removed' : a.quarantine ? 'quarantined' : ACTIVE.includes(a.instance) ? 'awake' : 'asleep');
+const appDot = (a) => (a.status !== 'registered' ? 'off' : a.quarantine ? 'down' : a.instance === 'awake' ? 'ready' : ACTIVE.includes(a.instance) ? 'starting' : 'off');
+const BUCKET_DOT = { awake: 'ready', asleep: 'off', quarantined: 'down', removed: 'off' };
+let appsFilter = { text: '', bucket: '', tenant: '' };
+let removedOpen = false;
+/** App name to its last SPARK_HOURS hourly request and error counts, fetched only for cards on screen. */
+const SPARKS = new Map();
+const SPARK_MS = 5 * 60_000;
+const SPARK_HOURS = 24;
+
+async function sparkOf(name) {
+  const hit = SPARKS.get(name);
+  if (hit && Date.now() - hit.at < SPARK_MS) return hit;
+  const first = Math.floor(Date.now() / HOUR_MS) * HOUR_MS - (SPARK_HOURS - 1) * HOUR_MS;
+  const { buckets } = await api('GET', `/api/usage?app=${encodeURIComponent(name)}&from=${first}`);
+  const at = new Map(buckets.map((b) => [b.start, b]));
+  const entry = { at: Date.now(), hours: Array.from({ length: SPARK_HOURS }, (_, i) => {
+    const start = first + i * HOUR_MS;
+    return { start, requests: at.get(start)?.requests ?? 0, errors: at.get(start)?.errors ?? 0 };
+  }) };
+  SPARKS.set(name, entry);
+  return entry;
+}
+
+/** One bar per hour with its errors stacked red on top; empty slots until the buckets arrive. */
+function sparkBars(hours) {
+  const max = Math.max(1, ...(hours ?? []).map((b) => b.requests));
+  const height = (n) => `height:max(2px, ${(n / max * 100).toFixed(1)}%)`;
+  return (hours ?? Array.from({ length: SPARK_HOURS }, () => null)).map((b) => h('i', b ? { title: `${clock(b.start)} · ${t('ap.sparkTip', { requests: nf(b.requests), errors: nf(b.errors) })}` } : {},
+    b?.errors ? h('b', { class: 'bad', style: height(b.errors) }) : null,
+    b && b.requests > b.errors ? h('b', { style: height(b.requests - b.errors) }) : null));
+}
+
+function appStateLine(a) {
+  if (a.status !== 'registered') return h('div', { class: 'aline muted' }, t(`st.${a.status}`));
+  if (a.quarantine) return h('div', { class: 'aline red', title: stamp(a.quarantine.since) }, t('ap.quarantined', { reason: a.quarantine.reason }), ' · ', ticking(() => since(a.quarantine.since)));
+  if (a.release != null && a.runtime == null) return h('div', { class: 'aline muted' }, t('ap.staticLine'));
+  if (a.release == null) return h('div', { class: 'aline muted' }, t('tp.noRelease'));
+  const span = a.since == null ? null : ticking(() => duration(Date.now() - a.since));
+  return h('div', { class: `aline ${tone(a.instance)}` },
+    a.instance === 'none' ? t('ap.never') : [t(`ap.in.${a.instance}`), ' ', span],
+    a.instance === 'awake' && a.sleepsAt ? h('span', { class: 'muted' }, ' · ', ticking(() => (a.sleepsAt > Date.now() ? t('tl.sleepsIn', { d: duration(a.sleepsAt - Date.now() + 999) }) : t('tl.sleepingNow')))) : null,
+    ACTIVE.includes(a.instance) && a.node ? h('span', { class: 'muted mono' }, ` · ${a.node}`) : null);
+}
+
+/** What needs the reader first: quarantined, then erroring, then awake, then the most recently used. */
+const appRank = (a) => (appBucket(a) === 'quarantined' ? 0 : a.errors > 0 ? 1 : appBucket(a) === 'awake' ? 2 : 3);
+const byLiveliness = (a, b) => appRank(a) - appRank(b) || (b.lastAccessAt ?? 0) - (a.lastAccessAt ?? 0) || a.name.localeCompare(b.name);
 
 async function projects() {
   const count = h('p', { class: 'sub' });
-  const body = h('div');
+  const chips = h('div', { class: 'fchips' });
+  const body = h('div', { class: 'alist' });
+  const search = h('input', { type: 'search', value: appsFilter.text, placeholder: t('ap.search'), 'aria-label': t('ap.search'), oninput: () => { appsFilter.text = search.value; paint(); } });
   let apps = [];
-  const text = h('input', { type: 'search', value: appsFilter.text, placeholder: t('apps.filter'), 'aria-label': t('apps.filter'), oninput: () => { appsFilter.text = text.value; render(); } });
-  const state = h('select', { 'aria-label': t('col.state'), onchange: () => { appsFilter.state = state.value; render(); } },
-    h('option', { value: '' }, t('apps.allStates')),
-    STATE_FILTERS.map((s) => h('option', { value: s, selected: appsFilter.state === s }, t(`st.${s}`))));
-  const tenantColumn = upstream() && session.scope === ALL;
-  const render = () => {
-    count.textContent = plural('apps.count', apps.length);
-    const needle = appsFilter.text.trim().toLowerCase();
-    const rows = apps.filter((a) => (!needle || a.name.includes(needle)) && (!appsFilter.state || a.status === appsFilter.state || a.instance === appsFilter.state));
-    body.replaceChildren(apps.length === 0
-      ? h('div', { class: 'card' }, h('div', { class: 'empty' }, t('apps.empty'), h('div', { style: 'margin-top:12px' }, h('a', { class: 'btn primary', href: '#/publish' }, t('apps.publish')))))
-      : table(
-        [['col.name'], tenantColumn && ['col.tenant'], ['col.status'], ['col.runtime'], ['col.instance'], ['col.since'], ['col.release', 'r'], ['col.capabilities'], ['col.requests', 'r'], ['col.errors', 'r'], ['col.lastAccess']].filter(Boolean),
-        rows.map((a) => ({ href: `#/apps/${encodeURIComponent(a.name)}`, cells: [
-          appLink(a.name), tenantColumn && h('span', { class: 'mono' }, a.tenant), status(a.status), runtimeChip(a),
-          h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, a.quarantine ? status('quarantined') : status(a.instance), leaseChips(a.leases)),
-          a.since == null ? h('span', { class: 'muted' }, '-') : ago(a.since),
-          h('span', { class: 'num' }, a.release == null ? '-' : `#${a.release}`),
-          a.capabilities.length ? h('span', { class: 'chips' }, a.capabilities.map(chip)) : h('span', { class: 'muted' }, t('routeOnly')),
-          h('span', { class: 'num' }, nf(a.requests)), h('span', { class: 'num' }, nf(a.errors)), ago(a.lastAccessAt),
-        ].filter((cell) => cell !== false) })),
-        'empty.filtered'));
+  let painted = '';
+  const grouped = () => upstream() && session.scope === ALL;
+  const visible = new IntersectionObserver((entries) => {
+    for (const { isIntersecting, target } of entries) {
+      if (!isIntersecting) continue;
+      visible.unobserve(target);
+      sparkOf(target.dataset.app).then(({ hours }) => fill(target, sparkBars(hours))).catch(() => {});
+    }
+  });
+
+  const card = (a) => {
+    const bucket = appBucket(a);
+    const hit = SPARKS.get(a.name);
+    const spark = h('div', { class: 'spark', 'data-app': a.name, 'aria-hidden': 'true' }, sparkBars(hit?.hours));
+    if (bucket !== 'removed' && (!hit || Date.now() - hit.at >= SPARK_MS)) visible.observe(spark);
+    return h('article', { class: `card acard ${bucket}`, onclick: (e) => { if (!e.target.closest('a, button')) location.hash = `#/apps/${encodeURIComponent(a.name)}`; } },
+      h('div', { class: 'ah' }, h('i', { class: `pdot ${appDot(a)}` }), appLink(a.name), runtimeChip(a),
+        grouped() && bucket === 'removed' ? h('span', { class: 'muted' }, a.tenant) : null,
+        h('span', { class: 'rel num', title: t('d.release') }, a.release == null ? '' : `#${a.release}`)),
+      appStateLine(a),
+      bucket === 'removed' ? null : h('div', { class: 'aspark', role: 'img', 'aria-label': t('ap.sparkLabel', { requests: nf(a.requests), errors: nf(a.errors) }) }, spark,
+        h('div', { class: 'acount' }, h('b', { class: 'num' }, nf(a.requests)), h('span', { class: 'muted' }, t('ap.req24')),
+          a.errors ? h('span', { class: 'bad num' }, plural('ap.errors', a.errors)) : null)),
+      h('div', { class: 'afoot' },
+        a.capabilities.length ? h('span', { class: 'chips' }, a.capabilities.map(chip)) : h('span', { class: 'muted' }, t('routeOnly')),
+        h('span', { class: 'muted', title: a.lastAccessAt == null ? null : stamp(a.lastAccessAt) }, t('ap.lastAccess'), ' ', a.lastAccessAt == null ? t('never') : ticking(() => since(a.lastAccessAt)))));
   };
+  const cards = (list) => h('div', { class: 'agrid' }, list.map(card));
+  /** Tenants with a quarantined or erroring app first, then the busiest. */
+  const tenantGroups = (list) => [...Map.groupBy(list, (a) => a.tenant)].map(([tenant, mine]) => ({
+    tenant, mine: [...mine].sort(byLiveliness), awake: mine.filter((a) => appBucket(a) === 'awake').length, requests: mine.reduce((n, a) => n + a.requests, 0),
+    trouble: Math.min(...mine.map(appRank)),
+  })).sort((a, b) => Number(a.trouble > 1) - Number(b.trouble > 1) || b.requests - a.requests || b.awake - a.awake || a.tenant.localeCompare(b.tenant));
+
+  const paint = () => {
+    const signature = JSON.stringify([apps, appsFilter, removedOpen]);
+    if (signature === painted) return;
+    painted = signature;
+    visible.disconnect();
+    const needle = appsFilter.text.trim().toLowerCase();
+    const inTenant = apps.filter((a) => !appsFilter.tenant || a.tenant === appsFilter.tenant);
+    const byBucket = Map.groupBy(inTenant, appBucket);
+    const fchip = (field, value, label, n, dot = null) => h('button', {
+      type: 'button', class: 'fchip', 'aria-pressed': String(appsFilter[field] === value), onclick: () => { appsFilter[field] = appsFilter[field] === value ? '' : value; paint(); },
+    }, dot, label, h('span', { class: 'n num' }, nf(n)));
+    const tenants = grouped() ? [...Map.groupBy(apps, (a) => a.tenant)].sort(([a], [b]) => a.localeCompare(b)) : [];
+    fill(chips,
+      fchip('bucket', '', t('cl.f.all'), inTenant.length),
+      APP_BUCKETS.filter((b) => byBucket.has(b) || appsFilter.bucket === b).map((b) => fchip('bucket', b, t(`ap.b.${b}`), byBucket.get(b)?.length ?? 0, h('i', { class: `pdot ${BUCKET_DOT[b]}` }))),
+      tenants.length > 1 ? [h('span', { class: 'fsep', 'aria-hidden': 'true' }), tenants.map(([name, list]) => fchip('tenant', name, name, list.length))] : null);
+
+    const shown = inTenant.filter((a) => (!needle || a.name.includes(needle) || a.tenant?.includes(needle)) && (!appsFilter.bucket || appBucket(a) === appsFilter.bucket)).sort(byLiveliness);
+    const live = shown.filter((a) => appBucket(a) !== 'removed');
+    const removed = shown.filter((a) => appBucket(a) === 'removed');
+    const disclosure = () => {
+      const el = h('details', { class: 'adisc', open: removedOpen }, h('summary', {}, t('ap.b.removed'), h('span', { class: 'n num' }, nf(removed.length)), h('span', { class: 'muted' }, t('ap.removedNote'))), cards(removed));
+      el.addEventListener('toggle', () => { removedOpen = el.open; });
+      return el;
+    };
+    fill(body,
+      apps.length === 0 ? h('div', { class: 'card' }, h('div', { class: 'empty' }, t('apps.empty'), h('div', { style: 'margin-top:12px' }, h('a', { class: 'btn primary', href: '#/publish' }, t('apps.publish')))))
+        : shown.length === 0 ? h('div', { class: 'card' }, h('div', { class: 'empty' }, t('empty.filtered'))) : null,
+      live.length === 0 ? null : grouped() ? tenantGroups(live).map((g) => h('div', { class: 'agroup' },
+        h('div', { class: 'tgh' }, h('b', { class: 'mono' }, g.tenant), h('span', { class: 'muted' }, plural('apps.count', g.mine.length), ' · ', t('ap.awakeN', { n: nf(g.awake) })),
+          h('span', { class: 'muted num' }, t('ap.groupRequests', { n: nf(g.requests) }))),
+        cards(g.mine))) : cards(live),
+      removed.length === 0 ? null : appsFilter.bucket === 'removed' ? cards(removed) : disclosure());
+  };
+
   show(
     h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('apps.title')), count), h('a', { class: 'btn primary', href: '#/publish' }, t('apps.publish'))),
-    h('section', {}, h('div', { class: 'toolbar' }, text, state), body),
+    h('section', {}, h('div', { class: 'ifilter' }, chips, search), body),
   );
   return async function update() {
     apps = scoped(await api('GET', '/api/apps'));
-    render();
+    count.textContent = `${plural('apps.count', apps.length)} · ${t('ap.awakeN', { n: nf(apps.filter((a) => appBucket(a) === 'awake').length) })}`;
+    paint();
   };
 }
 
