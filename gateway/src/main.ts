@@ -9,7 +9,7 @@ import { Authority, parsePlatformAdmins } from './authz.ts';
 import { loadOrCreateSecret, LocalIdentity, parseIdentityEnv, UpstreamIdentity, type Identity } from './identity.ts';
 import { JwtVerifier } from './jwt.ts';
 import { Ingress } from './ingress.ts';
-import { hostSample, httpProbe, Metrics, profileProbe, serveMetrics, Series, tcpProbe, type Probe, type ServiceName } from './metrics.ts';
+import { hostSample, httpProbe, Metrics, networkProbe, profileProbe, serveMetrics, Series, tcpProbe, type Probe, type ServiceName } from './metrics.ts';
 import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId, type VolumeSample } from './model.ts';
 import { DockerInfra } from './infra.ts';
 import { inClusterClient } from './kube.ts';
@@ -68,7 +68,7 @@ await instances.start();
 const specFor = (app: AppId) => registry.runSpec(app);
 const guard = new AppGuard({ instances, specFor, series });
 const probes: Readonly<Record<ServiceName, Probe>> = {
-  redis: tcpProbe('redis', 6379),
+  redis: setup.pods ? tcpProbe('redis', 6379) : networkProbe('redis', 6379),
   object: httpProbe(`${config.object.endpoint}/health`),
   postgres: setup.pods ? tcpProbe('postgres', config.postgres.port) : profileProbe('postgres', 5432),
   coturn: setup.pods ? tcpProbe('coturn', 3478) : profileProbe('coturn', 3478),

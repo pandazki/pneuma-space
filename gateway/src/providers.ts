@@ -56,7 +56,9 @@ export type ServiceProbe = (service: 'postgres' | 'coturn' | NonNullable<(typeof
 
 // Docker's resolver forwards unknown names upstream and waits about 5 s; a 500 ms single try answers within 1 s (spike S2).
 const resolver = new dns.Resolver({ timeout: 500, tries: 1 });
-export const resolvesOnNetwork: ServiceProbe = (service) => resolver.resolve4(service).then(() => true, () => false);
+/** A Compose service's address, or null when the network has no such name. */
+export const addressOnNetwork = (service: string): Promise<string | null> => resolver.resolve4(service).then(([address]) => address ?? null, () => null);
+export const resolvesOnNetwork: ServiceProbe = async (service) => (await addressOnNetwork(service)) !== null;
 type ProviderProbe = (service: 'postgres' | 'coturn') => Promise<boolean>;
 
 async function requireService(probe: ProviderProbe, service: 'postgres' | 'coturn', profile: string, kind: ResourceKind): Promise<void> {
