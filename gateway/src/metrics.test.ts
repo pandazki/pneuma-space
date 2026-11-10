@@ -8,7 +8,7 @@ import dns from 'node:dns';
 import { createServer as createTcpServer } from 'node:net';
 import { mock, test } from 'node:test';
 import { EventLog } from './events.ts';
-import { EXPOSITION_TYPE, Metrics, networkProbe, profileProbe, serveMetrics, Series } from './metrics.ts';
+import { EXPOSITION_TYPE, Metrics, networkProbe, profileProbe, serveMetrics, Series, untilUp, type ServiceStatus } from './metrics.ts';
 import { DEFAULT_TENANT, USAGE_COUNTERS, appName, type AppId, type AppSummary, type InstanceState, type ReplicaId, type TenantName, type Traffic, type Usage } from './model.ts';
 import { SqliteStore } from './store.ts';
 
@@ -311,4 +311,15 @@ test('a Compose service is probed at the address the network gives, never by get
 test('a Compose service the network does not name is down, and a profile one is off', async () => {
   const nowhere = async () => null;
   assert.deepEqual([await networkProbe('redis', 6379, nowhere)(), await profileProbe('postgres', 5432, nowhere)()], ['down', 'off']);
+});
+
+test('the gateway waits for a service that is not up yet, and says so once', async () => {
+  const answers: ServiceStatus[] = ['down', 'down', 'up'];
+  let waited = 0;
+  assert.equal(await untilUp(async () => answers.shift()!, { everyMs: 1, waiting: () => waited++ }), true);
+  assert.deepEqual([answers.length, waited], [0, 1]);
+});
+
+test('the gateway stops waiting for a service that stays down', async () => {
+  assert.equal(await untilUp(async () => { throw new Error('refused'); }, { everyMs: 1, forMs: 20 }), false);
 });

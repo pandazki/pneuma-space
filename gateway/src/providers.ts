@@ -397,6 +397,12 @@ export class S3BundleStore implements BundleStore {
     return id;
   }
 
+  /** Whether the store answers a signed request within `withinMs`: rustfs reports healthy before its IAM is ready, and a read then gets 503. */
+  async answers(withinMs = 2000): Promise<boolean> {
+    const res = await signedFetch(this.#store.root, 'HEAD', objectUrl(this.#store, BUNDLES), '', {}, AbortSignal.timeout(withinMs)).catch(() => null);
+    return res !== null && res.status < 500;
+  }
+
   async index(id: BundleId): Promise<BundleIndex> {
     const cached = this.#cache.get(id);
     if (cached) return cached;
@@ -523,7 +529,7 @@ function canonicalRequest(method: string, url: URL, headers: Record<string, stri
 }
 
 export async function signedFetch(
-  cred: Credential, method: string, url: URL, body: Uint8Array | string = '', extra: Record<string, string> = {},
+  cred: Credential, method: string, url: URL, body: Uint8Array | string = '', extra: Record<string, string> = {}, signal?: AbortSignal,
 ): Promise<Response> {
   const { stamp, day } = amzDate(new Date());
   const payloadHash = sha256(body);
@@ -538,7 +544,7 @@ export async function signedFetch(
   const sig = signature(cred, day, ['AWS4-HMAC-SHA256', stamp, scope, sha256(req.text)].join('\n'));
   headers.authorization = `AWS4-HMAC-SHA256 Credential=${cred.accessKey}/${scope}, SignedHeaders=${req.signedHeaders}, Signature=${sig}`;
   delete headers.host;
-  return fetch(url, { method, headers, body: method === 'GET' || method === 'HEAD' ? undefined : body });
+  return fetch(url, { method, headers, body: method === 'GET' || method === 'HEAD' ? undefined : body, signal });
 }
 
 export function presignGet(cred: Credential, url: URL, seconds: number): string {

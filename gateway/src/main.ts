@@ -9,7 +9,7 @@ import { Authority, parsePlatformAdmins } from './authz.ts';
 import { loadOrCreateSecret, LocalIdentity, parseIdentityEnv, UpstreamIdentity, type Identity } from './identity.ts';
 import { JwtVerifier } from './jwt.ts';
 import { Ingress } from './ingress.ts';
-import { hostSample, httpProbe, Metrics, networkProbe, profileProbe, serveMetrics, Series, tcpProbe, type Probe, type ServiceName } from './metrics.ts';
+import { hostSample, httpProbe, Metrics, networkProbe, profileProbe, serveMetrics, Series, tcpProbe, untilUp, type Probe, type ServiceName } from './metrics.ts';
 import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId, type VolumeSample } from './model.ts';
 import { DockerInfra } from './infra.ts';
 import { inClusterClient } from './kube.ts';
@@ -115,6 +115,10 @@ const providerProbe = setup.pods ? (service: keyof typeof SERVICE_PORTS) => canC
 // The runner is the pool's business on both planes: a ready runner, not a name that resolves.
 const runnerUp = async (): Promise<boolean> => pool.runners().some((r) => r.ready);
 const providers = Object.values(createProviders(runtime, config, providerProbe));
+// The registry reads each current release's bundle index from the object store. After a host restart Docker starts every
+// service on its own restart policy, without depends_on, so the store may not answer yet: wait for it rather than exit.
+const objectAnswers = async () => ((await bundles.answers()) ? 'up' : 'down') as const;
+if (!(await untilUp(objectAnswers, { waiting: () => log('object-wait', { endpoint: config.object.endpoint }) }))) log('object-unready', { endpoint: config.object.endpoint });
 const registry = await PlatformRegistry.open({
   store, runtime, guard, infra, bundles, providers, statsSource: async () => metrics.stats(),
   addressing: setup.addressing, volumeGb: config.volumeGb, nodeOf: (app) => nodes.nodeOf(app),
