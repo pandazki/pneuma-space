@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { setImmediate as tick } from 'node:timers/promises';
-import { test } from 'node:test';
+import dns from 'node:dns';
+import { createServer as createTcpServer } from 'node:net';
+import { mock, test } from 'node:test';
 import { EventLog } from './events.ts';
-import { EXPOSITION_TYPE, Metrics, serveMetrics, Series, untilUp, type ServiceStatus } from './metrics.ts';
+import { EXPOSITION_TYPE, Metrics, networkProbe, profileProbe, serveMetrics, Series, untilUp, type ServiceStatus } from './metrics.ts';
 import { DEFAULT_TENANT, USAGE_COUNTERS, appName, type AppId, type AppSummary, type InstanceState, type ReplicaId, type TenantName, type Traffic, type Usage } from './model.ts';
 import { SqliteStore } from './store.ts';
 
@@ -292,6 +294,23 @@ test('the exporter answers GET /metrics in the exposition format and 404 elsewhe
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const [metrics, other] = await Promise.all([fetch(`${base}/metrics`), fetch(`${base}/api/metrics`)]);
   assert.deepEqual([metrics.status, metrics.headers.get('content-type'), await metrics.text(), other.status], [200, EXPOSITION_TYPE, 'x 1\n', 404]);
+});
+
+test('a Compose service is probed at the address the network gives, never by getaddrinfo', async (t) => {
+  const server = createTcpServer().listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  t.after(() => server.close());
+  const { port } = server.address() as { port: number };
+  const lookup = mock.method(dns, 'lookup');
+  t.after(() => lookup.mock.restore());
+  const at = async () => '127.0.0.1';
+  assert.deepEqual([await networkProbe('redis', port, at)(), await profileProbe('runner', port, at)()], ['up', 'up']);
+  assert.equal(lookup.mock.callCount(), 0);
+});
+
+test('a Compose service the network does not name is down, and a profile one is off', async () => {
+  const nowhere = async () => null;
+  assert.deepEqual([await networkProbe('redis', 6379, nowhere)(), await profileProbe('postgres', 5432, nowhere)()], ['down', 'off']);
 });
 
 test('the gateway waits for a service that is not up yet, and says so once', async () => {

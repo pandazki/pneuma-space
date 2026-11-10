@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { availableParallelism, freemem, loadavg, totalmem } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { EventLog, LifecycleEvent } from './events.ts';
-import { resolvesOnNetwork } from './providers.ts';
+import { addressOnNetwork } from './providers.ts';
 import type { RequestKind } from './requests.ts';
 import { canConnect } from './runtime.ts';
 import {
@@ -525,6 +525,16 @@ export const tcpProbe = (host: string, port: number): Probe => async () => ((awa
 export const httpProbe = (url: string): Probe => async () =>
   ((await fetch(url, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })).ok ? 'up' : 'down');
 
+/**
+ * A Compose service, connected to at the address the network gives. Connecting by name would call getaddrinfo, which libuv
+ * runs at most two at a time; one for a name Docker cannot answer holds its slot for about 5 s, and every lookup behind
+ * it waits, the runner's on each wake among them.
+ */
+export const networkProbe = (service: string, port: number, address = addressOnNetwork): Probe => async () => {
+  const at = await address(service);
+  return at !== null && (await canConnect(at, port)) ? 'up' : 'down';
+};
+
 /** Asks `probe` every `everyMs` until it answers up, calling `waiting` once if it is not up at first; false once `forMs` has passed. */
 export async function untilUp(probe: Probe, { everyMs = 500, forMs = 120_000, waiting = () => {} }: { everyMs?: number; forMs?: number; waiting?: () => void } = {}): Promise<boolean> {
   const deadline = Date.now() + forMs;
@@ -537,8 +547,10 @@ export async function untilUp(probe: Probe, { everyMs = 500, forMs = 120_000, wa
 }
 
 /** A profile service that is not running has no DNS name on the platform network: off, not down. */
-export const profileProbe = (service: 'postgres' | 'coturn' | 'runner', port: number): Probe => async () =>
-  ((await resolvesOnNetwork(service)) ? tcpProbe(service, port)() : 'off');
+export const profileProbe = (service: 'postgres' | 'coturn' | 'runner', port: number, address = addressOnNetwork): Probe => async () => {
+  const at = await address(service);
+  return at === null ? 'off' : (await canConnect(at, port)) ? 'up' : 'down';
+};
 
 export async function hostSample(dataDir: string): Promise<HostSample> {
   const fs = await statfs(dataDir).catch(() => null);
