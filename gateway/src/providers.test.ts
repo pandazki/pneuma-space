@@ -106,6 +106,16 @@ test('the bundle store answers once a signed request gets anything but a 5xx, an
   assert.equal(await store.answers(), false);
 });
 
+test('the bundle store does not answer when it takes the connection and never replies', async (t) => {
+  const server = createHttpServer(() => {}).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => server.close());
+  const { port } = server.address() as { port: number };
+  const store = new S3BundleStore({ ...providerConfig({}).object, endpoint: `http://127.0.0.1:${port}` });
+  assert.equal(await store.answers(50), false);
+  server.closeAllConnections();
+});
+
 describe('providers against the real compose services', { skip: !dockerUp && 'Docker is not available' }, () => {
   before(async () => {
     compose('up', '-d', '--wait', 'rustfs', 'redis', 'postgres', 'coturn');
