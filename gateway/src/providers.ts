@@ -395,6 +395,12 @@ export class S3BundleStore implements BundleStore {
     return id;
   }
 
+  /** Whether the store answers a signed request: rustfs reports healthy before its IAM is ready, and a read then gets 503. */
+  async answers(): Promise<boolean> {
+    const res = await signedFetch(this.#store.root, 'HEAD', objectUrl(this.#store, BUNDLES)).catch(() => null);
+    return res !== null && res.status < 500;
+  }
+
   async index(id: BundleId): Promise<BundleIndex> {
     const cached = this.#cache.get(id);
     if (cached) return cached;

@@ -1,6 +1,7 @@
 import { statfs } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { availableParallelism, freemem, loadavg, totalmem } from 'node:os';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { EventLog, LifecycleEvent } from './events.ts';
 import { resolvesOnNetwork } from './providers.ts';
 import type { RequestKind } from './requests.ts';
@@ -523,6 +524,17 @@ export const tcpProbe = (host: string, port: number): Probe => async () => ((awa
 
 export const httpProbe = (url: string): Probe => async () =>
   ((await fetch(url, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })).ok ? 'up' : 'down');
+
+/** Asks `probe` every `everyMs` until it answers up, calling `waiting` once if it is not up at first; false once `forMs` has passed. */
+export async function untilUp(probe: Probe, { everyMs = 500, forMs = 120_000, waiting = () => {} }: { everyMs?: number; forMs?: number; waiting?: () => void } = {}): Promise<boolean> {
+  const deadline = Date.now() + forMs;
+  for (let first = true; ; first = false) {
+    if ((await probe().catch((): ServiceStatus => 'down')) === 'up') return true;
+    if (first) waiting();
+    if (Date.now() >= deadline) return false;
+    await sleep(everyMs);
+  }
+}
 
 /** A profile service that is not running has no DNS name on the platform network: off, not down. */
 export const profileProbe = (service: 'postgres' | 'coturn' | 'runner', port: number): Probe => async () =>

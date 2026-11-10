@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { setImmediate as tick } from 'node:timers/promises';
 import { test } from 'node:test';
 import { EventLog } from './events.ts';
-import { EXPOSITION_TYPE, Metrics, serveMetrics, Series } from './metrics.ts';
+import { EXPOSITION_TYPE, Metrics, serveMetrics, Series, untilUp, type ServiceStatus } from './metrics.ts';
 import { DEFAULT_TENANT, USAGE_COUNTERS, appName, type AppId, type AppSummary, type InstanceState, type ReplicaId, type TenantName, type Traffic, type Usage } from './model.ts';
 import { SqliteStore } from './store.ts';
 
@@ -292,4 +292,15 @@ test('the exporter answers GET /metrics in the exposition format and 404 elsewhe
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const [metrics, other] = await Promise.all([fetch(`${base}/metrics`), fetch(`${base}/api/metrics`)]);
   assert.deepEqual([metrics.status, metrics.headers.get('content-type'), await metrics.text(), other.status], [200, EXPOSITION_TYPE, 'x 1\n', 404]);
+});
+
+test('the gateway waits for a service that is not up yet, and says so once', async () => {
+  const answers: ServiceStatus[] = ['down', 'down', 'up'];
+  let waited = 0;
+  assert.equal(await untilUp(async () => answers.shift()!, { everyMs: 1, waiting: () => waited++ }), true);
+  assert.deepEqual([answers.length, waited], [0, 1]);
+});
+
+test('the gateway stops waiting for a service that stays down', async () => {
+  assert.equal(await untilUp(async () => { throw new Error('refused'); }, { everyMs: 1, forMs: 20 }), false);
 });

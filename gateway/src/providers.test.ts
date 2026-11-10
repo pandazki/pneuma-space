@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { createHash, createHmac } from 'node:crypto';
+import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -90,6 +92,19 @@ for (const [name, kind, prefix] of [['volume', 'files', 'pneuma-space-files-'], 
     });
   });
 }
+
+test('the bundle store answers once a signed request gets anything but a 5xx, and not while nothing answers', async (t) => {
+  const statuses = [503, 404];
+  const server = createHttpServer((_, res) => void res.writeHead(statuses.shift() ?? 500).end()).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => server.close());
+  const { port } = server.address() as { port: number };
+  const store = new S3BundleStore({ ...providerConfig({}).object, endpoint: `http://127.0.0.1:${port}` });
+  assert.deepEqual([await store.answers(), await store.answers()], [false, true]);
+  server.close();
+  await once(server, 'close');
+  assert.equal(await store.answers(), false);
+});
 
 describe('providers against the real compose services', { skip: !dockerUp && 'Docker is not available' }, () => {
   before(async () => {
