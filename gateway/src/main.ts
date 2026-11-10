@@ -23,6 +23,7 @@ import { canConnect, DockerRuntime } from './runtime.ts';
 import { AppGuard, Runtimes } from './runtimes.ts';
 import { requests } from './requests.ts';
 import { DeliveryScheduler } from './scheduler.ts';
+import { parsePgUrl } from './pg.ts';
 import { PgStore } from './store-pg.ts';
 import { SqliteStore } from './store.ts';
 
@@ -56,6 +57,11 @@ const config = providerConfig(process.env);
 const replica = (process.env.PNEUMA_SPACE_REPLICA ?? hostname()) as ReplicaId;
 
 const storeUrl = process.env.PNEUMA_SPACE_STORE_URL;
+// A cluster restart starts the platform store with the gateway; its Service routes once pg_isready passes. Wait rather than exit.
+if (storeUrl) {
+  const { host, port } = parsePgUrl(storeUrl);
+  if (!(await untilUp(() => canConnect(host, port), { waiting: () => log('store-wait', { host }) }))) log('store-unready', { host });
+}
 const store = storeUrl
   ? await PgStore.open(storeUrl, {
     commands: Number(process.env.PNEUMA_SPACE_STORE_COMMANDS ?? 4), testRetry: process.env.PNEUMA_SPACE_STORE_TEST_RETRY === '1', volumeGb: config.volumeGb,
@@ -117,8 +123,7 @@ const runnerUp = async (): Promise<boolean> => pool.runners().some((r) => r.read
 const providers = Object.values(createProviders(runtime, config, providerProbe));
 // The registry reads each current release's bundle index from the object store. After a host restart Docker starts every
 // service on its own restart policy, without depends_on, so the store may not answer yet: wait for it rather than exit.
-const objectAnswers = async () => ((await bundles.answers()) ? 'up' : 'down') as const;
-if (!(await untilUp(objectAnswers, { waiting: () => log('object-wait', { endpoint: config.object.endpoint }) }))) log('object-unready', { endpoint: config.object.endpoint });
+if (!(await untilUp(() => bundles.answers(), { waiting: () => log('object-wait', { endpoint: config.object.endpoint }) }))) log('object-unready', { endpoint: config.object.endpoint });
 const registry = await PlatformRegistry.open({
   store, runtime, guard, infra, bundles, providers, statsSource: async () => metrics.stats(),
   addressing: setup.addressing, volumeGb: config.volumeGb, nodeOf: (app) => nodes.nodeOf(app),

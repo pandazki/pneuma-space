@@ -57,11 +57,17 @@ spec:
               port: admin
             periodSeconds: 2
             failureThreshold: 2
+          # The gateway waits up to 2 min each for the platform store and the object store before it listens; liveness starts once it does.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: admin
+            periodSeconds: 5
+            failureThreshold: 60
           livenessProbe:
             httpGet:
               path: /healthz
               port: admin
-            initialDelaySeconds: 30
             periodSeconds: 10
             failureThreshold: 3
           lifecycle:

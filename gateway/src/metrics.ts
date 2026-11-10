@@ -535,11 +535,11 @@ export const networkProbe = (service: string, port: number, address = addressOnN
   return at !== null && (await canConnect(at, port)) ? 'up' : 'down';
 };
 
-/** Asks `probe` every `everyMs` until it answers up, calling `waiting` once if it is not up at first; false once `forMs` has passed. */
-export async function untilUp(probe: Probe, { everyMs = 500, forMs = 120_000, waiting = () => {} }: { everyMs?: number; forMs?: number; waiting?: () => void } = {}): Promise<boolean> {
+/** Asks `ready` every `everyMs` until it answers true, calling `waiting` once if it is not ready at first; false once `forMs` has passed. */
+export async function untilUp(ready: () => Promise<boolean>, { everyMs = 500, forMs = 120_000, waiting = () => {} }: { everyMs?: number; forMs?: number; waiting?: () => void } = {}): Promise<boolean> {
   const deadline = Date.now() + forMs;
   for (let first = true; ; first = false) {
-    if ((await probe().catch((): ServiceStatus => 'down')) === 'up') return true;
+    if (await ready().catch(() => false)) return true;
     if (first) waiting();
     if (Date.now() >= deadline) return false;
     await sleep(everyMs);
