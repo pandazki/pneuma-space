@@ -1,9 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { serve } from './serve.ts';
 import type { Context, Delivery } from './serve.ts';
+import { ws } from './ws.ts';
+
+// The gateway's rule from docs/app-contract.md: `%`, control characters and non-ASCII bytes as percent-encoded UTF-8, every other byte literal.
+const encode = (name: string) =>
+  name.replace(/[\x00-\x1f%\x7f-\u{10ffff}]/gu, (ch) => [...Buffer.from(ch)].map((b) => `%${b.toString(16).toUpperCase().padStart(2, '0')}`).join(''));
+const NAMES = ['alice', '审查用户', '100% real', 'a+b c', '日本語 & <b>', 'Ünï %41 码'];
+const signedIn = (name: string) => ({ 'x-pneuma-space-subject': 'user:ann', 'x-pneuma-space-name': name });
 
 async function capture(path: string, init: RequestInit = {}) {
   const seen: { ctx?: Context; delivery?: Delivery } = {};
@@ -32,6 +40,44 @@ test('identity comes from the X-Pneuma-Space headers and is null without a subje
   const anonymous = await capture('/');
   assert.deepEqual(owner.ctx?.identity, { subject: 'user:ann', name: 'Ann', owner: true });
   assert.equal(anonymous.ctx?.identity, null);
+});
+
+test('the display name is the gateway-encoded header decoded', async () => {
+  for (const name of NAMES) assert.equal((await capture('/', { headers: signedIn(encode(name)) })).ctx?.identity?.name, name);
+});
+
+test('a WebSocket upgrade gets the same display name as a request, decoded once', async () => {
+  let connected = (_name: string) => {};
+  let requested = '';
+  const server = serve((ctx) => void ((requested = ctx.identity!.name), ctx.res.end()), { port: 0 });
+  ws(server, (socket) => connected(socket.identity!.name));
+  await once(server, 'listening');
+  const port = (server.address() as AddressInfo).port;
+  try {
+    for (const name of NAMES) {
+      await (await fetch(`http://127.0.0.1:${port}/`, { headers: signedIn(encode(name)) })).arrayBuffer();
+      const upgraded = new Promise<string>((resolve) => (connected = resolve));
+      const client = net.connect(port, '127.0.0.1');
+      client.write(
+        'GET /live HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+          'Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
+          `X-Pneuma-Space-Subject: user:ann\r\nX-Pneuma-Space-Name: ${encode(name)}\r\n\r\n`,
+      );
+      const upgradedName = await upgraded;
+      client.destroy();
+      assert.deepEqual([requested, upgradedName], [name, name]);
+    }
+  } finally {
+    server.close();
+    server.closeAllConnections();
+  }
+});
+
+test('a name header that is not valid percent-encoding is kept as sent and the request is served', async () => {
+  for (const raw of ['%', '%E5%AE', '%ZZ']) {
+    const got = await capture('/', { headers: signedIn(raw) });
+    assert.deepEqual([got.status, got.ctx?.identity?.name], [200, raw]);
+  }
 });
 
 test('a trigger POST reaches the registered function with its delivery and answers 204', async () => {

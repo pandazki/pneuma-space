@@ -21,6 +21,15 @@ function header(req: IncomingMessage, name: string): string | null {
   return (Array.isArray(value) ? value[0] : value) ?? null;
 }
 
+/** The gateway percent-encodes the display name (docs/app-contract.md); a value it could not have sent is kept as is. */
+function displayName(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 export function inbound(req: IncomingMessage): Inbound {
   const prefix = (header(req, 'x-forwarded-prefix') ?? '').replace(/\/+$/, '');
   const url = new URL(req.url ?? '/', 'http://app');
@@ -29,8 +38,9 @@ export function inbound(req: IncomingMessage): Inbound {
     url.pathname = url.pathname.slice(prefix.length) || '/';
   }
   const subject = header(req, 'x-pneuma-space-subject');
+  const name = header(req, 'x-pneuma-space-name');
   const identity = subject
-    ? { subject, name: header(req, 'x-pneuma-space-name') ?? subject, owner: header(req, 'x-pneuma-space-owner') === '1' }
+    ? { subject, name: name === null ? subject : displayName(name), owner: header(req, 'x-pneuma-space-owner') === '1' }
     : null;
   return { prefix, identity, url };
 }
