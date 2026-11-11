@@ -7,6 +7,7 @@ import { after, before, describe, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { changeKey, type AppName, type ImageId, type Leadership, type ReleaseNumber, type Subject } from './model.ts';
 import { Session, type PgOptions } from './pg.ts';
+import { replicaContract } from './registry.contract.ts';
 import { app, storeContract } from './store.contract.ts';
 import { PG_MIGRATIONS, PgStore, type PgStoreOptions } from './store-pg.ts';
 
@@ -64,6 +65,7 @@ after(async () => {
 });
 
 if (!skip) storeContract('PostgreSQL', (options) => open(options));
+if (!skip) replicaContract('PostgreSQL', async () => [await open(), await open()]);
 
 describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () => {
   test('two stores on one database see each other\'s app change within 1 s', async () => {

@@ -213,26 +213,21 @@ export class PlatformRegistry implements Registry {
     const override: PolicyOverride = app?.policyOverride ?? {};
     const pinned = kinds.includes('db') && override.db_backend === undefined ? { ...override, db_backend: this.#policy.db_backend } : override;
     const policy = effectivePolicy(this.#policy, pinned);
-    const resourceKinds = kinds.filter(isResourceKind);
-    const providers = resourceKinds.map((kind) => this.#provider(selectProvider(kind, policy)));
-    const bound = app ? await this.#store.bindings(app.id) : [];
-    const volumes = providers.filter((p) => PROVISIONED.has(p.name) && !bound.some((b) => b.kind === p.kind && b.provider === p.name)).length;
-    const storage = volumes > 0 ? { storage_gb: volumes * this.#volumeGb } : {};
+    const providers = kinds.filter(isResourceKind).map((kind) => this.#provider(selectProvider(kind, policy)));
 
     if (!app) {
       if (owner === null) throw new InputError(`owner is required on the first publish of "${name}"; pass user:<name> or service:<name>`);
       const created: App = { name, id: newAppId(), tenant, access: 'org', owner, status: 'registered', current: null, policyOverride: pinned, registeredAt: Date.now() };
-      await this.#store.transaction(async (tx) => {
-        await this.#admit(tx, tenant, { apps: 1, ...storage });
-        await tx.putApp(created);
-      });
+      await this.#store.transaction((tx) => this.#reserve(tx, created, providers, true));
       app = created;
       await this.#refresh(name);
       log('app-created', name, { id: app.id });
     } else {
-      const { tenant: own } = app;
-      if (volumes > 0) await this.#store.transaction((tx) => this.#admit(tx, own, storage));
-      if (pinned !== override) await this.#updateApp(name, (fresh) => ({ ...fresh, policyOverride: pinned }));
+      await this.#store.transaction(async (tx) => {
+        const fresh = (await tx.app(name))!;
+        if (pinned !== override) await tx.putApp({ ...fresh, policyOverride: pinned });
+        await this.#reserve(tx, fresh, providers);
+      });
     }
 
     for (const provider of providers) await this.#ensure(app.id, provider);
@@ -718,7 +713,21 @@ export class PlatformRegistry implements Registry {
     };
   }
 
-  /** Under the tenant's row lock, so concurrent publishes into one tenant are counted one after another (ADR 0023 item 3). */
+  /**
+   * The one way an App row or a files or SQLite Binding row comes to exist (ADR 0028): admitted under the tenant's row lock and inserted in the
+   * same transaction, the binding suspended until `ensure` provisions it, so storage_gb counts it before any backend resource exists.
+   */
+  async #reserve(tx: StoreOps, app: App, providers: readonly CapabilityProvider[], first = false): Promise<void> {
+    const bound = first ? [] : await tx.bindings(app.id);
+    const missing = providers.filter((p) => PROVISIONED.has(p.name) && !bound.some((b) => b.kind === p.kind && b.provider === p.name));
+    if (first || missing.length > 0) {
+      await this.#admit(tx, app.tenant, { ...(first && { apps: 1 }), ...(missing.length > 0 && { storage_gb: missing.length * this.#volumeGb }) });
+    }
+    if (first) await tx.putApp(app);
+    for (const p of missing) await tx.putBinding({ app: app.id, kind: p.kind, provider: p.name, state: 'suspended', resource: {} });
+  }
+
+  /** Under the tenant's row lock, so concurrent admissions into one tenant are counted one after another (ADR 0023 item 3). */
   async #admit(tx: StoreOps, name: TenantName, ask: Partial<QuotaUsage>): Promise<void> {
     const tenant = await this.#mustTenant(tx, name, 'update');
     const refusal = admits(tenant.quota, await tx.quotaUsed(name), ask);

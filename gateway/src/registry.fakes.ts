@@ -3,12 +3,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
-import { PlatformRegistry } from './registry.ts';
+import { PlatformRegistry, type RegistryDeps } from './registry.ts';
 import { SqliteStore } from './store.ts';
 import {
   CAPABILITIES, Conflict, NotFound,
   type AppId, type BundleId, type BundleIndex, type BundleStore, type CapabilityProvider, type Guard, type ImageId, type Infra, type Lease,
-  type ProviderName, type Quarantine, type Resource, type ResourceKind, type Runtime,
+  type ProviderName, type Quarantine, type Resource, type ResourceKind, type Runtime, type Store,
 } from './model.ts';
 
 export type Call = readonly [verb: 'ensure' | 'suspend' | 'destroy', provider: ProviderName, app: AppId];
@@ -132,7 +132,9 @@ export type World = {
   /** Compose services the registry's probe finds; none by default. */
   readonly services: Set<string>;
   /** Closes the last store and opens a fresh store and registry over the same file, as a gateway restart would. */
-  open(): Promise<{ store: SqliteStore; registry: PlatformRegistry }>;
+  open(deps?: Partial<RegistryDeps>): Promise<{ store: SqliteStore; registry: PlatformRegistry }>;
+  /** Another replica's registry over `store`, with the same backends behind it. */
+  replica(store: Store, deps?: Partial<RegistryDeps>): Promise<PlatformRegistry>;
 };
 
 const temporary: string[] = [];
@@ -150,15 +152,15 @@ export function world(): World {
   const bundles = new FakeBundles();
   const services = new Set<string>();
   let previous: SqliteStore | null = null;
+  const replica = (store: Store, deps: Partial<RegistryDeps> = {}) => PlatformRegistry.open({
+    store, runtime, guard: runtime, infra: runtime, bundles, providers: [...providers.values()], probe: async (service) => services.has(service), ...deps,
+  });
   return {
-    dir, calls, providers, runtime, bundles, services,
-    async open() {
+    dir, calls, providers, runtime, bundles, services, replica,
+    async open(deps) {
       await previous?.close();
       const store = (previous = new SqliteStore(join(dir, 'pneuma-space.sqlite3')));
-      const registry = await PlatformRegistry.open({
-        store, runtime, guard: runtime, infra: runtime, bundles, providers: [...providers.values()], probe: async (service) => services.has(service),
-      });
-      return { store, registry };
+      return { store, registry: await replica(store, deps) };
     },
   };
 }

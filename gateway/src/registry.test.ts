@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { Ingress } from './ingress.ts';
@@ -6,7 +7,9 @@ import { Series } from './metrics.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Conflict, InputError, QuotaExceeded, appName, parseManifest, subject, tenantName, triggerName, type App, type AppId, type BundleId, type Capabilities, type Change, type Store, type StoreOps } from './model.ts';
 import { PlatformRegistry } from './registry.ts';
+import { replicaContract } from './registry.contract.ts';
 import { FakeRuntime, world } from './registry.fakes.ts';
+import { SqliteStore } from './store.ts';
 import { DeliveryScheduler } from './scheduler.ts';
 
 const survey = appName('survey');
@@ -324,4 +327,57 @@ test('storage_gb counts only bindings a publish would create, and only files and
   await publishIn(registry, 'one', { files: {}, db: {}, kv: {}, object: {} }, 'example:2');
   await assert.rejects(publishIn(registry, 'two', { db: {} }), (error: unknown) =>
     error instanceof QuotaExceeded && JSON.stringify(error.refusal) === JSON.stringify({ resource: 'storage_gb', used: 2, limit: 2, ask: 1 }));
+});
+
+replicaContract('SQLite', async () => {
+  const store = new SqliteStore(join(world().dir, 'replicas.sqlite3'));
+  return [store, store];
+});
+
+const green = tenantName('green');
+const files = parseManifest({ contract: 1, capabilities: { files: {} } });
+
+for (const crash of [false, true]) {
+  test(`${crash ? 'a gateway that dies before ensure' : 'a failed ensure'} leaves the storage binding counted; the next publish adopts it without asking again and purge frees it (#11)`, async () => {
+    const w = world();
+    let { registry, store } = await w.open();
+    await registry.createTenant(blue, 'Blue', ['ann']);
+    await registry.setQuota(blue, { storage_gb: 1 });
+    const volume = w.providers.get('volume')!;
+    if (crash) {
+      let entered!: () => void;
+      const ensuring = new Promise<void>((resolve) => (entered = resolve));
+      volume.ensure = () => (entered(), new Promise(() => {}));
+      void publishIn(registry, 'one', { files: {} });
+      await ensuring;
+      Reflect.deleteProperty(volume, 'ensure');
+      ({ registry, store } = await w.open());
+      await registry.resume();
+    } else {
+      volume.fail = 'ensure';
+      await assert.rejects(publishIn(registry, 'one', { files: {} }), /volume ensure failed/);
+    }
+    const { id } = (await store.app(appName('one')))!;
+    assert.deepEqual((await store.bindings(id)).map((b) => [b.provider, b.state]), [['volume', 'suspended']]);
+    assert.equal((await store.quotaUsed(blue)).storage_gb, 1);
+    await publishIn(registry, 'one', { files: {} });
+    assert.equal((await store.quotaUsed(blue)).storage_gb, 1);
+    await registry.remove(appName('one'));
+    await registry.purge(appName('one'));
+    assert.equal((await store.quotaUsed(blue)).storage_gb, 0);
+  });
+}
+
+test('refusals in a full tenant leave a republish there and a publish into another tenant at the same moment untouched (#11)', async () => {
+  const { registry } = await quotaWorld({ storage_gb: 1 });
+  await registry.createTenant(green, 'Green', ['ann']);
+  await registry.setQuota(green, { storage_gb: 1 });
+  await publishIn(registry, 'held', { files: {} });
+  const outcomes = await Promise.allSettled([
+    publishIn(registry, 'over', { files: {} }),
+    publishIn(registry, 'held', { files: {} }, 'example:2'),
+    registry.publish({ name: appName('elsewhere'), image: 'example:1', manifest: files, bundle: null, owner: ann, tenant: green }),
+  ]);
+  const seen = outcomes.map((o) => (o.status === 'fulfilled' ? 'published' : o.reason instanceof QuotaExceeded ? o.reason.refusal.resource : String(o.reason)));
+  assert.deepEqual(seen, ['storage_gb', 'published', 'published']);
 });
