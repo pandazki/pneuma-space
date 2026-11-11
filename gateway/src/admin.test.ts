@@ -9,15 +9,21 @@ import { Metrics, Series } from './metrics.ts';
 import { NodeView } from './nodes.ts';
 import {
   appName, DEFAULT_POLICY, DEFAULT_TENANT, parseManifest, subject, USAGE_COUNTERS,
-  type AppId, type AuditRecord, type HealthCheck, type ReplicaId, type Runtime, type RuntimeKind, type TenantName, type Usage,
+  type AppId, type AuditRecord, type HealthCheck, type Infra, type ReplicaId, type Runtime, type RuntimeKind, type TenantName, type Usage,
 } from './model.ts';
 import { RequestLog } from './requests.ts';
 import { Runtimes } from './runtimes.ts';
-import { world } from './registry.fakes.ts';
+import { fakeKubernetes, world } from './registry.fakes.ts';
 
-async function admin(runtime?: Runtimes) {
+/** The admin API over a registry on a real store; `infra` is the plane's, the docker one by default, while images resolve from the fake table. */
+async function admin({ runtime, infra: plane }: { runtime?: Runtimes; infra?: Infra } = {}) {
   const w = world();
-  const { registry, store } = await w.open();
+  const up = async () => 'up' as const;
+  const off = async () => 'off' as const;
+  const infra = plane ?? new DockerInfra({ docker: new Docker('/nonexistent.sock'), probes: { redis: up, object: up, postgres: off, coturn: off, runner: off }, volumes: async () => [] });
+  const { registry, store } = await w.open({
+    infra: { resolveImage: (reference) => w.runtime.resolveImage(reference), removedBy: (name, replicas) => infra.removedBy(name, replicas), scale: (name, replicas) => infra.scale(name, replicas) },
+  });
   const metrics = new Metrics({
     events: new EventLog(() => {}),
     stats: () => [],
@@ -33,9 +39,6 @@ async function admin(runtime?: Runtimes) {
     retries: () => 0,
     replica: 'r1' as ReplicaId,
   });
-  const up = async () => 'up' as const;
-  const off = async () => 'off' as const;
-  const infra = new DockerInfra({ docker: new Docker('/nonexistent.sock'), probes: { redis: up, object: up, postgres: off, coturn: off, runner: off }, volumes: async () => [] });
   const nodes = new NodeView({
     infra,
     apps: () => registry.listing(),
@@ -116,6 +119,31 @@ test('scaling on the docker plane answers 409 and the audit lists cluster.scale 
   assert.equal((await call('PUT', '/api/cluster/workloads/pneuma-space-runner/scale', { replicas: 2 })).status, 409);
   const rows = await audit(store, 'pneuma-space-runner');
   assert.deepEqual(rows.map((r) => [r.action, r.targetKind, r.result, r.details.replicas]).sort(), [['cluster.scale', 'workload', 'refused', 2], ['cluster.scale', 'workload', 'started', 2]]);
+});
+
+test('a runner scale-down that would remove an app\'s home answers 409 with the app and its replica, reaches no Kubernetes API and is audited as refused with the count (ADR 0032)', async (t) => {
+  const k8s = await fakeKubernetes(t, { 'pneuma-space-runner': 3 });
+  const { call, server, store, w } = await admin({ infra: k8s.infra });
+  t.after(() => server.close());
+  w.runtime.homed = [{ app: appName('notes'), home: 'pneuma-space-runner-2' }];
+  const refused = await call('PUT', '/api/cluster/workloads/pneuma-space-runner/scale', { replicas: 2 });
+  assert.equal(refused.status, 409);
+  assert.deepEqual(refused.body.stranded, { workload: 'pneuma-space-runner', replicas: 2, homes: [{ app: 'notes', home: 'pneuma-space-runner-2' }], more: 0 });
+  assert.deepEqual([k8s.seen, k8s.replicas['pneuma-space-runner']], [[], 3]);
+  const rows = await audit(store, 'pneuma-space-runner');
+  assert.deepEqual(rows.map((r) => [r.result, r.details.replicas]), [['started', 2], ['refused', 2]]);
+});
+
+test('on the kubernetes plane 0 and 11 replicas answer 400 and pneuma-space-postgres 409, none reaching Kubernetes (AC-OPS-12)', async (t) => {
+  const k8s = await fakeKubernetes(t, { 'pneuma-space-runner': 3 });
+  const { call, server } = await admin({ infra: k8s.infra });
+  t.after(() => server.close());
+  const statuses = [
+    await call('PUT', '/api/cluster/workloads/pneuma-space-runner/scale', { replicas: 0 }),
+    await call('PUT', '/api/cluster/workloads/pneuma-space-runner/scale', { replicas: 11 }),
+    await call('PUT', '/api/cluster/workloads/pneuma-space-postgres/scale', { replicas: 2 }),
+  ].map((r) => r.status);
+  assert.deepEqual([statuses, k8s.seen], [[400, 400, 409], []]);
 });
 
 test('input errors answer 400, unknown apps and images 404, conflicts 409', async (t) => {
@@ -209,7 +237,7 @@ test('GET /api/health lists every runtime kind with its checks and the global po
   const runtimes = new Runtimes({
     runtimes: [reporting('container', ['exit', 'ready']), reporting('isolate', ['exit', 'ready', 'hang', 'memory'])], specFor: () => null, events: new EventLog(() => {}),
   });
-  const { call, server } = await admin(runtimes);
+  const { call, server } = await admin({ runtime: runtimes });
   t.after(() => server.close());
   const { body } = await call('GET', '/api/health');
   assert.deepEqual(body.runtimes, {

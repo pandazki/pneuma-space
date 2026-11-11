@@ -9,7 +9,7 @@ import { gather, peerSources, RING, type RequestLog, type Source } from './reque
 import { appActions, can, LOCAL_CALLER, reach, type Action, type Authority } from './authz.ts';
 import type { Answer, Identity } from './identity.ts';
 import {
-  ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, LOGOUT_PATH, NotFound, QuotaExceeded, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
+  ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, LOGOUT_PATH, NotFound, QuotaExceeded, RUNTIME_KINDS, RUNTIMES, Stranded, USAGE_COUNTERS,
   appName, bundleId, parseManifest, subject, tenantName,
   type Access, type Actor, type App, type AppId, type AuditAction, type AuditRecord, type Binding, type BundleStore, type Caller, type CapabilityProvider, type Guard, type Infra,
   type Registry, type Release, type ReplicaId, type Role, type StateInventory, type StoreOps, type Subject, type TenantName, type UsageBucket, type UsageCounters,
@@ -22,7 +22,7 @@ export type AdminDeps = {
   readonly guard: Guard;
   readonly metrics: Pick<Metrics, 'snapshot' | 'events'>;
   readonly nodes: Pick<NodeView, 'snapshot'>;
-  readonly infra: Pick<Infra, 'scale' | 'deletePod'>;
+  readonly infra: Pick<Infra, 'deletePod'>;
   /** PNEUMA_SPACE_SCALE_MAX: the most replicas the cluster page may ask of a workload (ADR 0026 item 3). */
   readonly scaleMax: number;
   readonly requests: Pick<RequestLog, 'page'>;
@@ -249,7 +249,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
         if (typeof replicas !== 'number' || !Number.isInteger(replicas) || replicas < 1 || replicas > scaleMax) {
           throw new InputError(`replicas must be a whole number from 1 to ${scaleMax} (PNEUMA_SPACE_SCALE_MAX)`);
         }
-        await infra.scale(name!, replicas);
+        await registry.scale(name!, replicas);
         return { workload: name, replicas };
       },
     },
@@ -611,7 +611,11 @@ export function createAdmin(deps: AdminDeps): Server {
     } catch (error) {
       const status = statusOf(error);
       if (status === 500) emit('admin-error', null, { path, error: String(error) });
-      send(response, status, { error: (error as Error).message, ...(error instanceof QuotaExceeded && { quota: { tenant: error.tenant, ...error.refusal } }) });
+      send(response, status, {
+        error: (error as Error).message,
+        ...(error instanceof QuotaExceeded && { quota: { tenant: error.tenant, ...error.refusal } }),
+        ...(error instanceof Stranded && { stranded: { workload: error.workload, replicas: error.replicas, homes: error.homes, more: error.more } }),
+      });
     }
   });
 }

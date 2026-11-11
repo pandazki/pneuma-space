@@ -1183,6 +1183,9 @@ const I18N = {
     'cl.leading': '领导者', 'cl.leadingTitle': '持有领导权的网关副本',
     'cl.scaleItem': '调整副本数…', 'cl.range': '1 到 {max}', 'cl.fewer': '少一个', 'cl.moreOne': '多一个', 'cl.replicas': '{name} 的副本数',
     'cl.scaleTitle': '调整{name}的副本数', 'cl.scaleBody': '现在期望 {from} 个，调到 {n} 个。缩掉的副本先排空；runner 缩掉的副本保留它的 PVC。', 'cl.scaled': '已提交 {n} 个副本，就绪数随采样更新。',
+    'cl.scaleRunnerDown': '现在期望 {from} 个，调到 {n} 个会删掉 {pods}。isolate 应用固定在首次唤醒时选定的 runner 副本上，文件和数据库在那个副本的 PVC 里，所以只要有应用固定在这些副本上（醒着、睡着或已删除未清除都算），这次调整就被拒绝，什么也不变。调整成功时，缩掉的副本保留它的 PVC。',
+    'cl.scaleAwakeOn': '上次采样里醒着的有 {apps}，这次会被拒绝。',
+    'cl.scaleRefused': '副本数没有变：调到 {n} 个会删掉这些应用固定所在的 runner：{apps}。先删除并清除这些应用，或保留这些副本。', 'cl.andMore': '，另有 {n} 个',
     'cl.restartPodItem': '重启 Pod…', 'cl.restartPodNote': '删除它，控制器重建', 'cl.restartPodTitle': '重启 {pod}？', 'cl.restarted': '已删除 {pod}，控制器正在重建。',
     'cl.restartGateway': '删除这个 Pod，控制器重建它。它先排空连接；如果它是领导者，领导权在别的副本上重选。',
     'cl.restartRunner': '删除这个 Pod，控制器重建它。它上面的 isolate worker 随之结束，下次请求重新唤醒。',
@@ -1468,6 +1471,9 @@ const I18N = {
     'cl.leading': 'leader', 'cl.leadingTitle': 'The gateway replica that holds the lead',
     'cl.scaleItem': 'Change replicas…', 'cl.range': '1 to {max}', 'cl.fewer': 'One fewer', 'cl.moreOne': 'One more', 'cl.replicas': 'Replicas of {name}',
     'cl.scaleTitle': 'Change the {name} replicas', 'cl.scaleBody': '{from} desired now; this sets {n}. A removed replica drains first; a removed runner replica keeps its PVC.', 'cl.scaled': '{n} replicas requested; the ready count follows the next samples.',
+    'cl.scaleRunnerDown': '{from} desired now; going to {n} removes {pods}. An isolate app stays on the runner replica its first wake chose, with its files and databases in that replica’s PVC, so this is refused and nothing changes while any app is homed there: awake, asleep, or removed but not purged. Once accepted, a removed replica keeps its PVC.',
+    'cl.scaleAwakeOn': 'Awake there in the last sample: {apps}; this will be refused.',
+    'cl.scaleRefused': 'Not changed: scaling to {n} would remove the runner these apps are homed on: {apps}. Remove and purge those apps first, or keep those replicas.', 'cl.andMore': ' and {n} more',
     'cl.restartPodItem': 'Restart Pod…', 'cl.restartPodNote': 'Deletes it; the controller recreates it', 'cl.restartPodTitle': 'Restart {pod}?', 'cl.restarted': '{pod} deleted; its controller is recreating it.',
     'cl.restartGateway': 'Deletes the Pod and its controller recreates it. It drains its connections first; if it leads, another replica takes the lead.',
     'cl.restartRunner': 'Deletes the Pod and its controller recreates it. Its isolate workers end with it; the next request wakes them again.',
@@ -1588,7 +1594,7 @@ async function api(method, path, body, contentType = 'application/json') {
   const text = await response.text();
   if (response.headers.get('content-type')?.startsWith('text/plain')) return text;
   const data = text ? JSON.parse(text) : null;
-  if (!response.ok) throw Object.assign(new Error(data?.error ?? `${response.status} ${response.statusText}`), { status: response.status });
+  if (!response.ok) throw Object.assign(new Error(data?.error ?? `${response.status} ${response.statusText}`), { status: response.status, body: data });
   return data;
 }
 
@@ -5083,14 +5089,14 @@ function cluster() {
   };
 
   /** An outcome's `until` says when the state it reports is gone; the note then clears itself. */
-  const run = async (key, call, outcome = null) => {
+  const run = async (key, call, outcome = null, refused = failText) => {
     ops.set(key, { busy: true });
     paint();
     try {
       const result = await call();
       if (outcome) ops.set(key, outcome(result)); else ops.delete(key);
     } catch (error) {
-      ops.set(key, { error: failText(error) });
+      ops.set(key, { error: refused(error) });
     }
     await load().catch(() => {});
     paint();
@@ -5119,15 +5125,29 @@ function cluster() {
       until: () => { const w = view.workloads.find((x) => x.name === owner); return !w || (!w.pods.some((p) => p.name === pod.name) && w.ready >= w.desired); },
     }));
   };
+  /** A StatefulSet drops its highest ordinals; a runner count below the desired one is refused while an app is homed there (ADR 0032), and the sample names the awake ones. */
+  const scaleText = (w, v) => {
+    const counts = { from: nf(w.desired), n: nf(v) };
+    if (w.role !== 'runner' || v >= w.desired) return t('cl.scaleBody', counts);
+    const gone = Array.from({ length: w.desired - v }, (_, k) => `${w.name}-${v + k}`);
+    const awake = instances().filter((i) => gone.includes(i.pod)).map((i) => i.app);
+    return [t('cl.scaleRunnerDown', { ...counts, pods: gone.map(podLabel).join(', ') }), awake.length ? [h('br'), h('b', {}, t('cl.scaleAwakeOn', { apps: awake.join(', ') }))] : null];
+  };
+  const scaleRefused = (error) => {
+    const stranded = error.body?.stranded;
+    if (!stranded) return failText(error);
+    const apps = stranded.homes.map((x) => `${x.app} (${podLabel(x.home)})`).join(', ') + (stranded.more ? t('cl.andMore', { n: nf(stranded.more) }) : '');
+    return t('cl.scaleRefused', { n: nf(stranded.replicas), apps });
+  };
   const scale = async (w) => {
     let n = w.desired;
     const body = h('span');
-    const control = stepper(w.desired, 1, view.scaleMax, t('cl.replicas', { name: w.name }), (v) => { n = v; body.textContent = t('cl.scaleBody', { from: nf(w.desired), n: nf(v) }); });
+    const control = stepper(w.desired, 1, view.scaleMax, t('cl.replicas', { name: w.name }), (v) => { n = v; fill(body, scaleText(w, v)); });
     if (!(await approve({ title: t('cl.scaleTitle', { name: roleLabel(w) }), body, control })) || n === w.desired) return;
     run(`workload:${w.name}`, () => api('PUT', `/api/cluster/workloads/${encodeURIComponent(w.name)}/scale`, { replicas: n }), () => ({
       note: t('cl.scaled', { n: nf(n) }),
       until: () => { const x = view.workloads.find((y) => y.name === w.name); return !x || (x.desired === n && x.ready === n && x.pods.length === n); },
-    }));
+    }), scaleRefused);
   };
   /** Stop and restart are safe and frequent and act at once; force release goes through its approval card. */
   const lifecycle = async (i, op) => {

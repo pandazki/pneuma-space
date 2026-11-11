@@ -1092,6 +1092,8 @@ export interface Infra {
   warnings(): Promise<Warning[]>;
   /** Only a `scalable` workload; Conflict otherwise, and NotOnThisPlane on a single host. */
   scale(name: string, replicas: number): Promise<void>;
+  /** Whether a runner home is a replica `name` no longer has at `replicas`; null when `name` holds no homes (ADR 0032). */
+  removedBy(name: string, replicas: number): ((home: string) => boolean) | null;
   /** Only a gateway or runner Pod, by its uid so a replacement under the same name stays; Conflict otherwise. */
   deletePod(name: string): Promise<void>;
 }
@@ -1100,6 +1102,30 @@ export interface Infra {
 export class NotOnThisPlane extends Conflict {
   constructor(what: string) {
     super(`${what} needs the kubernetes plane`);
+  }
+}
+
+/** An app named by an instance row, and the runner it names as home. */
+export type Home = { readonly app: AppName; readonly home: string };
+const STRANDED_LISTED = 10;
+
+/** A scale that would remove the home runner of apps (ADR 0032); `homes` holds the first ten by replica, then name, and `more` counts the rest. */
+export class Stranded extends Conflict {
+  readonly workload: string;
+  readonly replicas: number;
+  readonly homes: readonly Home[];
+  readonly more: number;
+  constructor(workload: string, replicas: number, homes: readonly Home[]) {
+    const sorted = [...homes].sort((a, b) => a.home.localeCompare(b.home, 'en', { numeric: true }) || a.app.localeCompare(b.app));
+    const listed = sorted.slice(0, STRANDED_LISTED);
+    const more = sorted.length - listed.length;
+    const apps = listed.map(({ app, home }) => `${app} (${home})`).join(', ') + (more ? ` and ${more} more` : '');
+    super(`scaling ${workload} to ${replicas} replica${replicas === 1 ? '' : 's'} would remove the home runner of ${sorted.length} app${sorted.length === 1 ? '' : 's'}: ${apps}. `
+      + 'An isolate app runs only on its home runner, and its files and databases stay in that replica\'s volume. Remove and purge those apps first, or keep those replicas');
+    this.workload = workload;
+    this.replicas = replicas;
+    this.homes = listed;
+    this.more = more;
   }
 }
 
@@ -1193,6 +1219,8 @@ export interface Registry {
   kill(name: AppName): Promise<void>;
   /** Stops every instance the sampler places on `node`, one at a time, past a failure. */
   drain(node: string): Promise<{ readonly stopped: readonly AppName[]; readonly failed: readonly { readonly app: AppName; readonly error: string }[] }>;
+  /** Infra.scale, refused with Stranded before it while an instance row names as home a replica the count would remove (ADR 0032). */
+  scale(workload: string, replicas: number): Promise<void>;
   view(name: AppName): RouteView | null;
   nameOf(id: AppId): AppName | null;
   /** The global snapshot; merge with a RouteView's override via effectivePolicy. */
