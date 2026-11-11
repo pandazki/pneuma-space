@@ -5390,7 +5390,10 @@ function cluster() {
   };
   const paintInstances = (rows) => {
     const needle = search.value.trim().toLowerCase();
-    const shown = rows.filter((i) => (!filter.bucket || bucketOf(i) === filter.bucket) && (!filter.tenant || i.tenant === filter.tenant)
+    // The tenant filter applies only while its chip is on screen to show and clear it.
+    const tenants = new Set(rows.map((i) => i.tenant));
+    const tenant = tenants.size > 1 && tenants.has(filter.tenant) ? filter.tenant : '';
+    const shown = rows.filter((i) => (!filter.bucket || bucketOf(i) === filter.bucket) && (!tenant || i.tenant === tenant)
       && (!needle || [i.app, i.tenant, i.node, i.pod].some((f) => f && f.toLowerCase().includes(needle))));
     const volumes = Map.groupBy(view.volumes, (v) => v.app);
     repaint('instances', [shown, shown.map(stuck), [...ops], [...nextWake], view.volumes], () => (shown.length === 0
