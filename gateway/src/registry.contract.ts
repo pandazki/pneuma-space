@@ -42,7 +42,8 @@ export function replicaContract(name: string, open: OpenReplicas): void {
         replicas[i % 2].publish({ name: appName(`q-${run}-${i}`), image: 'example:1', manifest, bundle: null, owner: ann, tenant })));
       running = false;
       await sampler;
-      samples.push((await one.quotaUsed(tenant)).storage_gb);      const refused = outcomes.flatMap((o) => (o.status === 'rejected' ? [o.reason as Error] : []));
+      samples.push((await one.quotaUsed(tenant)).storage_gb);
+      const refused = outcomes.flatMap((o) => (o.status === 'rejected' ? [o.reason as Error] : []));
       assert.deepEqual(refused.filter((e) => !(e instanceof QuotaExceeded)).map(String), []);
       assert.equal(outcomes.length - refused.length, limit);
       assert.ok(Math.max(...samples) <= limit, `used peaked at ${Math.max(...samples)} GiB over ${samples.length} samples; limit ${limit}`);

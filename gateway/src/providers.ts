@@ -367,12 +367,18 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
 
 const contentType = (path: string) => CONTENT_TYPES[/\.([^./]+)$/.exec(path)?.[1].toLowerCase() ?? ''] ?? 'application/octet-stream';
 
+/** Runs `write` while no other work on bundle `id` runs, on any replica. */
+type BundleExclusion = <T>(id: BundleId, write: () => Promise<T>) => Promise<T>;
+
 /** Keeps no index cache: another replica's purge may delete a bundle at any time (ADR 0028). */
 export class S3BundleStore implements BundleStore {
   readonly #store: ObjectService;
+  readonly #exclusive: BundleExclusion;
 
-  constructor(store: ObjectService) {
+  /** `exclusive` is the one a purge deletes the bundle under; main.ts passes the platform store's (ADR 0028). */
+  constructor(store: ObjectService, exclusive: BundleExclusion = (_, write) => write()) {
     this.#store = store;
+    this.#exclusive = exclusive;
   }
 
   // The id is the hash of the whole tar, so the tar is read into memory before any file is stored under it.
@@ -382,18 +388,20 @@ export class S3BundleStore implements BundleStore {
     const id = createHash('sha256').update(bytes).digest('hex') as BundleId;
     const root = this.#store.root;
     const exists = async (key: string) => (await signedFetch(root, 'HEAD', objectUrl(this.#store, BUNDLES, key))).ok;
-    if ((await exists(indexKey(id))) && (await exists(tarKey(id)))) return id;
-    await createBucket(this.#store, BUNDLES);
-    const files: Record<string, BundleFile> = {};
-    for (const { path, body } of tarFiles(bytes)) {
-      const type = contentType(path);
-      await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, `${id}/${path}`), body, { 'content-type': type }), `put ${path}`);
-      files[path] = { size: body.length, etag: createHash('md5').update(body).digest('hex'), contentType: type };
-    }
-    await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, tarKey(id)), bytes, { 'content-type': 'application/x-tar' }), 'put bundle tar');
-    const index: BundleIndex = { id, files };
-    await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, indexKey(id)), JSON.stringify(index), { 'content-type': 'application/json' }), 'put bundle index');
-    return id;
+    return this.#exclusive(id, async () => {
+      if ((await exists(indexKey(id))) && (await exists(tarKey(id)))) return id;
+      await createBucket(this.#store, BUNDLES);
+      const files: Record<string, BundleFile> = {};
+      for (const { path, body } of tarFiles(bytes)) {
+        const type = contentType(path);
+        await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, `${id}/${path}`), body, { 'content-type': type }), `put ${path}`);
+        files[path] = { size: body.length, etag: createHash('md5').update(body).digest('hex'), contentType: type };
+      }
+      await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, tarKey(id)), bytes, { 'content-type': 'application/x-tar' }), 'put bundle tar');
+      const index: BundleIndex = { id, files };
+      await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, indexKey(id)), JSON.stringify(index), { 'content-type': 'application/json' }), 'put bundle index');
+      return id;
+    });
   }
 
   /** Whether the store answers a signed request within `withinMs`: rustfs reports healthy before its IAM is ready, and a read then gets 503. */
