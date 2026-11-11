@@ -149,7 +149,7 @@ K8s 平面：命名空间 `pneuma-space` 放网关、runner 和集群内的平�
 
 ### 2.3 唤醒、休眠、退役、重启
 
-下面的语义两个平面、任意副本数都成立。跨副本时实例、租约计数和 Guard 状态在平台库，副本内有镜像，热请求零 IO，每个转换是实例行上的 CAS 并发通知；快路径、慢路径、release、回收、退役、实例自己结束、接管和副本退出见 ADR 0020 第 4 到 6 条。下文的容器操作是 Docker 平面的；K8s 平面的唤醒、休眠、日志和收养见 ADR 0019 第 5 条，休眠和退役都删 Pod。
+下面的语义两个平面、任意副本数都成立。跨副本时实例、租约计数和 Guard 状态在平台库，副本内有镜像，热请求零 IO，每个转换是实例行上的 CAS 并发通知；快路径、慢路径、release、回收、退役、实例自己结束、接管和副本退出见 ADR 0020 第 4 到 6 条，快路径的前提、isolate worker 的归属和结束观测按 ADR 0027 修订。下文的容器操作是 Docker 平面的；K8s 平面的唤醒、休眠、日志和收养见 ADR 0019 第 5 条，休眠和退役都删 Pod。
 
 唤醒（`acquire` 内）：App 不是 `registered` 时拒绝（Ingress 已 404，Scheduler 据此取消投递）。实例锁下看状态。`awake` 加 Lease 返回；`waking`、`stopping`、`draining` 等条件变量后重查；`asleep` 置 `waking` 成为唯一唤醒者，同一事务里做 Guard 准入和配额准入（INV-12）。按 `pneuma-space-<id>-<release>` 创建容器（已存在视为成功），标签 `pneuma-space.app`、`pneuma-space.release`、`pneuma-space.spec`（Injection 集合的哈希），注入 Injection 集合加 Runtime 自己给的 `PNEUMA_SPACE_APP` 和 `PNEUMA_SPACE_RELEASE`，`docker start`（已启动视为成功），inspect 一次取 IP 存为 `address`，避免 Docker DNS 对外部停止容器的 4 s 失败。轮询 8000 端口 TCP 直到就绪或 `ready_timeout_seconds`。
 
