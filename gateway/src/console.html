@@ -339,6 +339,7 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .evx.open .caret { transform: rotate(90deg); }
 .evs { background: var(--inset); box-shadow: inset 2px 0 0 var(--accent); border-bottom: 1px solid var(--line); }
 .evs .ev { min-height: 30px; border-bottom-color: var(--line-soft); }
+.evs .kept { padding: 7px 14px; font-size: 12px; color: var(--ink-3); }
 .evx.fresh { animation: fresh 2.4s ease-out; }
 .ev.mark { display: block; padding: 7px 14px; font-size: 12px; color: var(--orange); background: var(--orange-tint); text-align: center; white-space: normal; }
 @container tail (max-width: 560px) {
@@ -936,7 +937,7 @@ const I18N = {
     'tp.x.container.state.k8s': 'files 和 SQLite 在每应用的 PVC 里；kv、object 和 PostgreSQL 在平台服务里。Pod 的文件系统每次停止都丢掉。',
     'tp.x.container.failure.k8s': 'Pod 状态报告退出，唤醒后 {ready} 秒内不应答算唤醒失败；醒着时卡死的 Pod 检测不到。守卫按版本计失败：{window} 秒内 {max} 次即隔离，失败后 {backoff} 秒内不再唤醒，直到新版本或手动解除。',
     'tp.x.isolate.state.k8s': 'files 和 SQLite 在 runner PVC 的 /data/apps/<id>/ 下；kv、object 和 PostgreSQL 在平台服务里。worker 停下后内存里的东西都没了。',
-    'fold.trigger': '触发 {name}', 'fold.wake': '唤醒后休眠', 'fold.leader': '领导权', 'fold.meanWake': '平均唤醒 {ms}', 'fold.meanDelivery': '平均投递 {ms}', 'fold.since': '自 {time} 起', 'fold.started': '已 {d}', 'fold.expand': '展开这些事件',
+    'fold.trigger': '触发 {name}', 'fold.wake': '唤醒后休眠', 'fold.leader': '领导权', 'fold.meanWake': '平均唤醒 {ms}', 'fold.meanDelivery': '平均投递 {ms}', 'fold.since': '自 {time} 起', 'fold.started': '已 {d}', 'fold.expand': '展开这些事件', 'fold.kept': '只显示最近 {k} 次，共 {n} 次',
     'brand.sub': '控制台', 'nav.group': '平台', 'nav.overview': '总览', 'nav.apps': '项目', 'nav.publish': '发布',
     'theme.light': '浅色', 'theme.dark': '深色', 'theme.toLight': '切换到浅色', 'theme.toDark': '切换到深色',
     'lang.toZh': '切换到中文', 'lang.toEn': '切换到 English', 'nav.collapse': '收起侧栏', 'nav.expand': '展开侧栏',
@@ -1218,7 +1219,7 @@ const I18N = {
     'tp.x.container.state.k8s': 'Files and SQLite live in the app’s PVCs; kv, object and PostgreSQL in platform services. The Pod filesystem is discarded on every stop.',
     'tp.x.container.failure.k8s': 'The Pod status reports an exit; no answer within {ready} s of a wake fails the wake. A Pod that hangs while awake is not detected. The Guard counts failures per release: {max} within {window} s quarantine the app, and for {backoff} s after a failure it does not wake, until a new release or an unquarantine.',
     'tp.x.isolate.state.k8s': 'Files and SQLite live in the runner PVC under /data/apps/<id>/; kv, object and PostgreSQL in platform services. A worker’s memory is gone when it stops.',
-    'fold.trigger': 'trigger {name}', 'fold.wake': 'woke and slept', 'fold.leader': 'leader', 'fold.meanWake': 'mean wake {ms}', 'fold.meanDelivery': 'mean delivery {ms}', 'fold.since': 'since {time}', 'fold.started': 'for {d}', 'fold.expand': 'Show these events',
+    'fold.trigger': 'trigger {name}', 'fold.wake': 'woke and slept', 'fold.leader': 'leader', 'fold.meanWake': 'mean wake {ms}', 'fold.meanDelivery': 'mean delivery {ms}', 'fold.since': 'since {time}', 'fold.started': 'for {d}', 'fold.expand': 'Show these events', 'fold.kept': 'showing the last {k} of {n} cycles',
     'brand.sub': 'Console', 'nav.group': 'Platform', 'nav.overview': 'Overview', 'nav.apps': 'Projects', 'nav.publish': 'Publish',
     'theme.light': 'Light', 'theme.dark': 'Dark', 'theme.toLight': 'Switch to light theme', 'theme.toDark': 'Switch to dark theme',
     'lang.toZh': 'Switch to 中文', 'lang.toEn': 'Switch to English', 'nav.collapse': 'Collapse sidebar', 'nav.expand': 'Expand sidebar',
@@ -1884,6 +1885,8 @@ const SPAN_MS = 15 * 60_000;
 const AHEAD_MS = 60_000;
 const KEEP_EVENTS = 600;
 const TAIL_ROWS = 300;
+/** A folded run keeps the events of its latest RUN_CYCLES cycles to expand; its count, mean and start cover every cycle. */
+const RUN_CYCLES = 20;
 const EVENT_RING = 100;
 const FRESH_ROWS = 40;
 /** The awake timeline draws only the apps whose state changed most recently (ADR 0016). */
@@ -2684,19 +2687,30 @@ function cycleKind(c) {
 /**
  * Consumes events oldest first and answers keyed line operations: { key, item } puts the line on top, replacing the line
  * with that key; { remove: key } takes it away. An item is { kind: 'event', e }, { kind: 'open', app, events } for a cycle
- * in progress, or { kind: 'run', app, cycle, cycles, events } for consecutive healthy cycles of one kind.
+ * in progress, or { kind: 'run', app, cycle, count, first, wakes, deliveries, cycles, events } for consecutive healthy
+ * cycles of one kind: `count`, `first` and the sums cover the whole run, `cycles` and `events` only its last RUN_CYCLES.
  */
 function eventFolder() {
   const open = new Map();
   const runs = new Map();
   const raw = (e) => ({ key: `e:${e.id}`, item: { kind: 'event', e, events: [e] } });
   const extend = (scope, cycle, events, ops) => {
-    const run = runs.get(scope);
-    const next = run && run.cycle === cycle
-      ? { ...run, cycles: [...run.cycles, events], events: [...run.events, ...events] }
-      : { kind: 'run', key: `r:${events[0].id}`, app: events[0].app ?? null, replica: events[0].replica, cycle, cycles: [events], events };
-    runs.set(scope, next);
-    ops.push({ key: next.key, item: next });
+    let run = runs.get(scope);
+    if (run?.cycle !== cycle) {
+      run = {
+        kind: 'run', key: `r:${events[0].id}`, app: events[0].app ?? null, replica: events[0].replica, cycle, count: 0, first: events[0].t,
+        wakes: { sum: 0, n: 0 }, deliveries: { sum: 0, n: 0 }, cycles: [], get events() { return this.cycles.flat(); },
+      };
+      runs.set(scope, run);
+    }
+    run.count++;
+    for (const e of events) if (e.ev === 'awake' && typeof e.ms === 'number') { run.wakes.sum += e.ms; run.wakes.n++; }
+    const from = events.find((e) => e.ev === 'delivery.delivering')?.t;
+    const to = events.find((e) => e.ev === 'delivery.done')?.t;
+    if (from != null && to != null) { run.deliveries.sum += to - from; run.deliveries.n++; }
+    run.cycles.push(events);
+    if (run.cycles.length > RUN_CYCLES) run.cycles.shift();
+    ops.push({ key: run.key, item: run });
   };
   const close = (app, c, ops) => {
     open.delete(app);
@@ -2743,18 +2757,10 @@ function eventFolder() {
   };
 }
 
-const mean = (list) => (list.length ? list.reduce((n, v) => n + v, 0) / list.length : null);
-
 /** What a run line says after its count: the mean wake latency, or the mean delivery time while the app was already up. */
-function runMeta(item) {
-  const wakes = item.events.filter((e) => e.ev === 'awake' && typeof e.ms === 'number').map((e) => e.ms);
-  if (wakes.length) return t('fold.meanWake', { ms: ms(mean(wakes)) });
-  const spans = item.cycles.map((c) => {
-    const from = c.find((e) => e.ev === 'delivery.delivering')?.t;
-    const to = c.find((e) => e.ev === 'delivery.done')?.t;
-    return from != null && to != null ? to - from : null;
-  }).filter((v) => v != null);
-  return spans.length ? t('fold.meanDelivery', { ms: ms(mean(spans)) }) : null;
+function runMeta({ wakes, deliveries }) {
+  if (wakes.n) return t('fold.meanWake', { ms: ms(wakes.sum / wakes.n) });
+  return deliveries.n ? t('fold.meanDelivery', { ms: ms(deliveries.sum / deliveries.n) }) : null;
 }
 
 /** The event stream of the overview and the realtime page: folded lines that expand to their events, the filter applied to the events. */
@@ -2774,8 +2780,8 @@ function eventStream({ keep, limit, attrs }) {
     const state = last.ev.startsWith('delivery.') ? 'delivering' : last.ev === 'memory-clamped' ? 'waking' : last.ev;
     const label = item.kind === 'open'
       ? h('span', { class: `st ${tone(state)}` }, t(`st.${state}`))
-      : h('span', { class: 'st green' }, item.cycle.startsWith('trigger:') ? t('fold.trigger', { name: item.cycle.slice(8) }) : t(`fold.${item.cycle}`), h('b', { class: 'num' }, `×${nf(item.cycles.length)}`));
-    const meta = item.kind === 'run' ? [runMeta(item), item.cycles.length > 1 ? t('fold.since', { time: clock(item.events[0].t) }) : null].filter(Boolean).join(' · ') : t('fold.started', { d: duration(Date.now() - item.events[0].t) });
+      : h('span', { class: 'st green' }, item.cycle.startsWith('trigger:') ? t('fold.trigger', { name: item.cycle.slice(8) }) : t(`fold.${item.cycle}`), h('b', { class: 'num' }, `×${nf(item.count)}`));
+    const meta = item.kind === 'run' ? [runMeta(item), item.count > 1 ? t('fold.since', { time: clock(item.first) }) : null].filter(Boolean).join(' · ') : t('fold.started', { d: duration(Date.now() - item.events[0].t) });
     const wrap = h('div', { class: `evx${isOpen ? ' open' : ''}` },
       h('div', { class: 'ev fold', role: 'button', tabindex: '0', 'aria-expanded': String(isOpen), title: t('fold.expand'),
         onclick: toggle, onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } } },
@@ -2783,7 +2789,8 @@ function eventStream({ keep, limit, attrs }) {
         label,
         item.app ? appLink(item.app) : h('span', { class: 'mono muted' }, item.replica ?? '-'),
         h('span', { class: 'f' }, meta, h('span', { class: 'caret', 'aria-hidden': 'true' }, '›'))),
-      isOpen ? h('div', { class: 'evs' }, [...shown].reverse().map(eventRow)) : null);
+      isOpen ? h('div', { class: 'evs' }, [...shown].reverse().map(eventRow),
+        item.kind === 'run' && item.count > item.cycles.length ? h('div', { class: 'kept' }, t('fold.kept', { k: nf(item.cycles.length), n: nf(item.count) })) : null) : null);
     return wrap;
   };
   const stream = follow({ line, keep, limit, hold: EVENT_RING, empty: 'empty.events', newKey: 'tail.new', attrs });
