@@ -13,7 +13,7 @@ import {
 import { address, PATH_ADDRESSING, type Addressing } from './address.ts';
 import { emit, quotaRefused, type QuotaRefused } from './events.ts';
 import { issueToken } from './identity.ts';
-import { resolvesOnNetwork, type ServiceProbe } from './providers.ts';
+import type { ServiceProbe } from './providers.ts';
 
 export type RegistryDeps = {
   readonly store: Store;
@@ -22,7 +22,7 @@ export type RegistryDeps = {
   readonly infra: Pick<Infra, 'resolveImage'>;
   readonly bundles: BundleStore;
   readonly providers: readonly CapabilityProvider[];
-  /** Whether a runtime's compose service is up; publish refuses a runtime whose service is not. */
+  /** Whether a runtime's service is present (ADR 0030); publish refuses a runtime whose service is not. Absent: no service is. */
   readonly probe?: ServiceProbe;
   /** The 24 h counts and last access per app; the stored last access with no counts otherwise. */
   readonly statsSource?: () => Promise<readonly Traffic[]>;
@@ -123,7 +123,7 @@ export class PlatformRegistry implements Registry {
     this.#runtime = deps.runtime;
     this.#guard = deps.guard;
     this.#infra = deps.infra;
-    this.#probe = deps.probe ?? resolvesOnNetwork;
+    this.#probe = deps.probe ?? (async () => false);
     this.#bundles = deps.bundles;
     this.#providers = new Map(deps.providers.map((p) => [p.name, p]));
     this.#stats = deps.statsSource ?? (async () => (await deps.store.stats()).map((s) => ({ ...s, requests: 0, errors: 0 })));

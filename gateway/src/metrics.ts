@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { availableParallelism, freemem, loadavg, totalmem } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { EventLog, LifecycleEvent } from './events.ts';
-import { addressOnNetwork } from './providers.ts';
+import { addressOnNetwork, type ServiceProbe } from './providers.ts';
 import type { RequestKind } from './requests.ts';
 import { canConnect } from './runtime.ts';
 import {
@@ -558,11 +558,14 @@ export async function untilUp(ready: () => Promise<boolean>, { everyMs = 500, fo
   }
 }
 
-/** A profile service that is not running has no DNS name on the platform network: off, not down. */
+/** A profile service that is not running is not on the platform network: off, not down (ADR 0030). */
 export const profileProbe = (service: 'postgres' | 'coturn' | 'runner', port: number, address = addressOnNetwork): Probe => async () => {
   const at = await address(service);
   return at === null ? 'off' : (await canConnect(at, port)) ? 'up' : 'down';
 };
+
+/** Publish admits a profile service only when the service strip's probe reads it up, so the two never disagree (ADR 0030). */
+export const admission = (probes: Readonly<Record<'postgres' | 'coturn' | 'runner', Probe>>): ServiceProbe => async (service) => (await probes[service]()) === 'up';
 
 export async function hostSample(dataDir: string): Promise<HostSample> {
   const fs = await statfs(dataDir).catch(() => null);

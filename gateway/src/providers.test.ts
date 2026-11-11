@@ -515,7 +515,9 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
     const probe = () => {
       const script = `
         import { createProviders, providerConfig } from '/src/providers.ts';
-        const p = createProviders({ destroyStorage: async () => {} }, providerConfig({ PNEUMA_SPACE_RTC_SECRET: 's' }));
+        import { admission, profileProbe } from '/src/metrics.ts';
+        const probe = admission({ postgres: profileProbe('postgres', 5432), coturn: profileProbe('coturn', 3478), runner: profileProbe('runner', 8082) });
+        const p = createProviders({ destroyStorage: async () => {} }, providerConfig({ PNEUMA_SPACE_RTC_SECRET: 's' }), probe);
         for (const name of ['postgres', 'coturn']) {
           const t = Date.now();
           const outcome = await p[name].ensure('${newAppId()}', null).then(() => 'up', (e) => e.constructor.name);
