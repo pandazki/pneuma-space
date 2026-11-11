@@ -1,10 +1,42 @@
 package main
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+// gatewayEncode follows docs/app-contract.md: `%`, control characters and non-ASCII bytes as percent-encoded UTF-8, every other byte literal.
+func gatewayEncode(name string) string {
+	var out strings.Builder
+	for _, r := range name {
+		if r == '%' || r < 0x20 || r >= 0x7f {
+			for _, b := range []byte(string(r)) {
+				fmt.Fprintf(&out, "%%%02X", b)
+			}
+		} else {
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
+}
+
+func TestDisplayNameUndoesTheGatewayEncoding(t *testing.T) {
+	for _, name := range []string{"alice", "审查用户", "100% real", "a+b c", "日本語 & <b>", "Ünï %41 码"} {
+		if got := displayName(gatewayEncode(name)); got != name {
+			t.Errorf("displayName(%q) = %q, want %q", gatewayEncode(name), got, name)
+		}
+	}
+}
+
+func TestDisplayNameKeepsAValueThatIsNotValidPercentEncoding(t *testing.T) {
+	for _, raw := range []string{"%", "%E5%AE", "%ZZ", "%E5%AE%A1%ZZ"} {
+		if got := displayName(raw); got != raw {
+			t.Errorf("displayName(%q) = %q", raw, got)
+		}
+	}
+}
 
 func TestEveryLinkAndFormStartsWithThePrefix(t *testing.T) {
 	var html strings.Builder

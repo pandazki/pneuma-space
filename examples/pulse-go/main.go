@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -148,6 +150,16 @@ func (a *App) state(ctx context.Context) (int64, []Pulse, error) {
 	return total, recent, err
 }
 
+// displayName undoes the gateway's percent-encoding of X-Pneuma-Space-Name as decodeURIComponent does: PathUnescape keeps
+// "+" a plus, and a value the gateway could not have sent is kept as is.
+func displayName(raw string) string {
+	name, err := url.PathUnescape(raw)
+	if err != nil || !utf8.ValidString(name) {
+		return raw
+	}
+	return name
+}
+
 func (a *App) home(w http.ResponseWriter, r *http.Request) {
 	prefix := r.Header.Get("X-Forwarded-Prefix")
 	if lang := r.URL.Query().Get("lang"); lang == "zh" || lang == "en" {
@@ -172,14 +184,14 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	subject := r.Header.Get("X-Pneuma-Space-Subject")
-	v := View{Prefix: prefix, Lang: pickLang(r), Path: "/", Name: r.Header.Get("X-Pneuma-Space-Name"), Signed: subject != "", Total: total, Recent: recent}
+	v := View{Prefix: prefix, Lang: pickLang(r), Path: "/", Name: displayName(r.Header.Get("X-Pneuma-Space-Name")), Signed: subject != "", Total: total, Recent: recent}
 	if err := render(w, v); err != nil {
 		log.Print(err)
 	}
 }
 
 func (a *App) pulse(w http.ResponseWriter, r *http.Request) {
-	p := Pulse{Subject: r.Header.Get("X-Pneuma-Space-Subject"), Name: r.Header.Get("X-Pneuma-Space-Name"), At: time.Now().UTC().Format(time.RFC3339Nano)}
+	p := Pulse{Subject: r.Header.Get("X-Pneuma-Space-Subject"), Name: displayName(r.Header.Get("X-Pneuma-Space-Name")), At: time.Now().UTC().Format(time.RFC3339Nano)}
 	item, _ := json.Marshal(p)
 	var total *redis.IntCmd
 	_, err := a.rdb.TxPipelined(r.Context(), func(tx redis.Pipeliner) error {

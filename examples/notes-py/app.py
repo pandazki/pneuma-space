@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 
 DICT = {
     'en': {
@@ -160,6 +160,17 @@ def home(prefix, lang, subject, name, owner, db, files_dir):
     return page(prefix, '/', lang, t('title'), body)
 
 
+def display_name(raw):
+    """X-Pneuma-Space-Name decoded as `decodeURIComponent` does: `+` stays a plus, unlike `unquote_plus`, and a value the
+    gateway could not have sent is kept as is."""
+    if re.search(r'%(?![0-9A-Fa-f]{2})', raw):
+        return raw
+    try:
+        return unquote(raw, errors='strict')
+    except UnicodeDecodeError:
+        return raw
+
+
 def pick_lang(headers):
     cookie = re.search(r'(?:^|;\s*)lang=(en|zh)(?:;|$)', headers.get('Cookie', ''))
     if cookie:
@@ -203,17 +214,16 @@ class Handler(BaseHTTPRequestHandler):
         subject = self.headers.get('X-Pneuma-Space-Subject')
         if not subject:
             return self.reply(401, DICT[lang]['signIn'].encode())
+        name = display_name(self.headers.get('X-Pneuma-Space-Name', subject))
         owner = self.headers.get('X-Pneuma-Space-Owner') == '1'
         route = f'{method} {url.path}'
         if route == 'GET /':
-            name = self.headers.get('X-Pneuma-Space-Name', subject)
             return self.reply(200, home(prefix, lang, subject, name, owner, self.db, self.files_dir).encode(), 'text/html; charset=utf-8')
         if route == 'POST /notes':
             text = form.get('body', [''])[0].strip()[:500]
             if text:
                 self.db.run('INSERT INTO note (id, subject, name, body, created_at) VALUES (?, ?, ?, ?, ?)',
-                            (str(uuid.uuid4()), subject, self.headers.get('X-Pneuma-Space-Name', subject), text,
-                             datetime.now(timezone.utc).isoformat(timespec='milliseconds')))
+                            (str(uuid.uuid4()), subject, name, text, datetime.now(timezone.utc).isoformat(timespec='milliseconds')))
             return self.reply(303, headers=(('Location', f'{prefix}/'),))
         if route == 'GET /notes.csv':
             if not owner:

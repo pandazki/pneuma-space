@@ -6,6 +6,22 @@ import unittest
 import app
 
 
+def gateway_encode(name):
+    """docs/app-contract.md: `%`, control characters and non-ASCII bytes as percent-encoded UTF-8, every other byte literal."""
+    return ''.join(''.join(f'%{b:02X}' for b in ch.encode()) if ch == '%' or ord(ch) < 0x20 or ord(ch) >= 0x7f else ch
+                   for ch in name)
+
+
+class DisplayNameTest(unittest.TestCase):
+    def test_the_gateway_encoding_round_trips(self):
+        for name in ('alice', '审查用户', '100% real', 'a+b c', '日本語 & <b>', 'Ünï %41 码'):
+            self.assertEqual(app.display_name(gateway_encode(name)), name)
+
+    def test_a_value_that_is_not_valid_percent_encoding_is_kept_as_sent(self):
+        for raw in ('%', '%E5%AE', '%ZZ', '%E5%AE%A1%ZZ'):
+            self.assertEqual(app.display_name(raw), raw)
+
+
 class NotesTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()
