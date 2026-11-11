@@ -55,7 +55,7 @@ Provider 不知道应用用哪种运行时：`inject` 给出的存储绑定是�
 | `ws` | ingress | Ingress | | | | |
 | `cron` | schedule | Scheduler（Trigger 行是 Release 的一部分，随它由 Registry 写） | | | | |
 | `identity` | ingress | IdentityProvider | | | | |
-| `rtc` | resource | 无每 App 资源；TURN 共享密钥是部署环境变量 `PNEUMA_SPACE_RTC_SECRET`，coturn 和网关都读它 | 检查 `coturn` 服务名可解析（Compose 的 profile 未开时不可解析，发布 409） | `stun:<host>:3478` 和 `turn:<host>:3478?transport=udp`，`<host>` 取部署环境变量 `PNEUMA_SPACE_RTC_PUBLIC_HOST`（默认 `127.0.0.1`），加该密钥 | 无 | 无 |
+| `rtc` | resource | 无每 App 资源；TURN 共享密钥是部署环境变量 `PNEUMA_SPACE_RTC_SECRET`，coturn 和网关都读它 | 检查 `coturn` 在平台网络上并接受连接（ADR 0030；Compose 的 profile 未开时发布 409） | `stun:<host>:3478` 和 `turn:<host>:3478?transport=udp`，`<host>` 取部署环境变量 `PNEUMA_SPACE_RTC_PUBLIC_HOST`（默认 `127.0.0.1`），加该密钥 | 无 | 无 |
 
 每个操作可重复执行。`ensure` 对已存在的 Binding 也会执行，收敛后端漂移并把 `suspended` 置回 `active`；没有单独的 resume。`db` 的 PostgreSQL Provider 用网关的线协议客户端 `pg.ts`，`kv` Provider 用网关内一个最小的 RESP 客户端，以管理角色直接连服务供应，两个平面相同，没有供应任务（ADR 0025 第 9 条）；`object` Provider 和 BundleStore 用 `node:crypto` 签名的 HTTP 直接调用对象服务的 S3 和管理接口（ADR 0013）。网关不用 npm 驱动。平台库和平台密钥在命名卷 `gateway-data`（挂载为网关的 `/data`）；后端数据在 `rustfs-data`、`redis-data`（AOF）、`postgres-data`，以及每 App 的 `pneuma-space-files-<id>`、`pneuma-space-db-<id>`；这些卷在平台重启和 `docker compose down` 后都保留。`<id>` 是 `App.id`。K8s 平面上每 App 的卷是应用命名空间里同名的 ReadWriteOnce PVC，首次唤醒时创建，`remove` 不碰，`purge` 删除（ADR 0019 第 7 条）。
 
@@ -161,7 +161,7 @@ K8s 平面：命名空间 `pneuma-space` 放网关、runner 和集群内的平�
 
 ### 2.4 发布
 
-运行时由清单的 `runtime` 决定，缺省按发布输入推断：镜像即 container，代码包即 isolate，只有 `static` 的清单没有运行时。isolate 应用的代码包含 `node_modules`，经 bundle 存储，和静态目录同一条路；runner 未启用时发布 isolate 应用答 409（ADR 0017）。
+运行时由清单的 `runtime` 决定，缺省按发布输入推断：镜像即 container，代码包即 isolate，只有 `static` 的清单没有运行时。isolate 应用的代码包含 `node_modules`，经 bundle 存储，和静态目录同一条路；runner 未启用时发布 isolate 应用答 409（ADR 0017，是否启用按 ADR 0030 判断）。
 
 ```
 appctl publish <name> <dir | image>          Registry.publish
