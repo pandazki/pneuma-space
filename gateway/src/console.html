@@ -1029,7 +1029,7 @@ const I18N = {
     'rt.requests': '请求', 'rt.requestsDesc': '每次交换结束时记一条，最新在上。点一行看全部字段。',
     'rt.events': '事件', 'rt.eventsDesc': '生命周期事件。app 和 error 条件也作用于这里。',
     'rt.shown': '显示 {shown} / 共 {kept} 条', 'rt.new': '{n} 条新请求', 'empty.requests': '还没有请求。',
-    'rt.gap': '两次轮询之间结束的请求超过 {ring} 条，有 {n} 条没有显示。', 'rt.missing': '副本 {replica} 没有应答，它处理的请求在它恢复应答前不会显示。',
+    'rt.gap': '两次轮询之间结束的请求超过 {ring} 条，有 {n} 条没有显示。', 'rt.missing': '副本 {replica} 没有应答，它处理的请求在它恢复应答前不会显示。', 'rt.reset': '副本 {replica} 重启了，它之前的记录已经没有了。',
     'rt.cold': '冷启动 {ms}', 'rt.noAnswer': '没有应答', 'rt.addFilter': '加入过滤条件',
     'rt.c.tm': '时间', 'rt.c.sc': '状态', 'rt.c.mt': '方法', 'rt.c.ap': '应用', 'rt.c.pt': '路径', 'rt.c.du': '耗时', 'rt.c.wf': '时序', 'rt.c.sb': '主体',
     'rt.timelineDesc': '最近 15 分钟醒过的每个实例，随过滤条件收窄。点一行只看这个应用，再点一次取消。', 'rt.pick': '只看 {name}', 'rt.unpick': '取消只看 {name}',
@@ -1311,7 +1311,7 @@ const I18N = {
     'rt.requests': 'Requests', 'rt.requestsDesc': 'One row per exchange as it ends, newest on top. Click a row for every field.',
     'rt.events': 'Events', 'rt.eventsDesc': 'Lifecycle events. The app and error terms apply here too.',
     'rt.shown': '{shown} of {kept} shown', 'rt.new': '{n} new', 'empty.requests': 'No requests yet.',
-    'rt.gap': '{n} requests not shown: more than {ring} ended between two polls.', 'rt.missing': 'Replica {replica} does not answer; the requests it handles are not shown until it does.',
+    'rt.gap': '{n} requests not shown: more than {ring} ended between two polls.', 'rt.missing': 'Replica {replica} does not answer; the requests it handles are not shown until it does.', 'rt.reset': 'Replica {replica} restarted; its earlier records are gone.',
     'rt.cold': 'cold {ms}', 'rt.noAnswer': 'no answer', 'rt.addFilter': 'Add to the filter',
     'rt.c.tm': 'Time', 'rt.c.sc': 'Status', 'rt.c.mt': 'Method', 'rt.c.ap': 'App', 'rt.c.pt': 'Path', 'rt.c.du': 'Duration', 'rt.c.wf': 'Waterfall', 'rt.c.sb': 'Subject',
     'rt.timelineDesc': 'Every instance awake in the last 15 min, narrowed by the filter. Click a row to follow that app; click again to clear.', 'rt.pick': 'Follow only {name}', 'rt.unpick': 'Stop following only {name}',
@@ -3330,7 +3330,11 @@ function realtime() {
       page.cursor = batch.cursor;
       const marks = batch.missing.filter((name) => !page.missing.has(name)).map((name) => t('rt.missing', { replica: name }));
       page.missing = new Set(batch.missing);
-      // Per replica, a seq past the next one means its ring overflowed between polls; a lower one, that it restarted.
+      for (const replica of batch.reset) {
+        page.last.delete(replica);
+        marks.push(t('rt.reset', { replica }));
+      }
+      // Per replica and generation (ADR 0031), a seq past the next one means its ring overflowed between polls.
       for (const r of batch.records) {
         const last = page.last.get(r.replica);
         if (page.seeded && last !== undefined && r.seq > last + 1) marks.push(t('rt.gap', { n: nf(r.seq - last - 1), ring: nf(REQUEST_RING) }));

@@ -176,10 +176,18 @@ test('GET /api/requests answers the records after the cursor, named, without a D
   const id = (await store.app(appName('survey')))!.id as AppId;
   for (const path of ['/a', '/b', '/c']) requests.record({ app: id, kind: 'request', method: 'GET', path, status: 200, ms: 2, waitMs: 1, cold: false, subject: null, error: null });
   w.runtime.calls.length = 0;
-  const reply = await call('GET', '/api/requests?after=r1:1&limit=1');
+  const first = await call('GET', '/api/requests?after=&limit=1');
+  const reply = await call('GET', `/api/requests?after=${encodeURIComponent(first.body.cursor)}&limit=1`);
   assert.deepEqual(reply.body.records.map((r: { replica: string; seq: number; app: string; path: string }) => [r.replica, r.seq, r.app, r.path]), [['r1', 2, 'survey', '/b']]);
-  assert.equal(reply.body.cursor, 'r1:2');
+  assert.deepEqual(reply.body.reset, []);
   assert.deepEqual(w.runtime.calls, []);
+});
+
+test('GET /api/requests?local=1 tells a peer this replica restarted since its cursor (#18)', async (t) => {
+  const { call, server, requests } = await admin();
+  t.after(() => server.close());
+  const page = (await call('GET', `/api/requests?local=1&after=${encodeURIComponent(`r1:0@${requests.generation - 1}`)}`)).body;
+  assert.deepEqual([page.replica, page.generation, page.reset], ['r1', requests.generation, true]);
 });
 
 test('POST /api/apps/<name>/unquarantine lifts the quarantine the listing shows', async (t) => {

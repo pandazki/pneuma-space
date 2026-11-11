@@ -5,7 +5,7 @@ import { emit } from './events.ts';
 import type { Metrics } from './metrics.ts';
 import type { NodeView } from './nodes.ts';
 import type { Runtimes } from './runtimes.ts';
-import { gather, peerSources, RING, seqIn, type RequestLog, type Source } from './requests.ts';
+import { gather, peerSources, RING, type RequestLog, type Source } from './requests.ts';
 import { appActions, can, LOCAL_CALLER, reach, type Action, type Authority } from './authz.ts';
 import type { Answer, Identity } from './identity.ts';
 import {
@@ -25,7 +25,7 @@ export type AdminDeps = {
   readonly infra: Pick<Infra, 'scale' | 'deletePod'>;
   /** PNEUMA_SPACE_SCALE_MAX: the most replicas the cluster page may ask of a workload (ADR 0026 item 3). */
   readonly scaleMax: number;
-  readonly requests: Pick<RequestLog, 'after'>;
+  readonly requests: Pick<RequestLog, 'page'>;
   /** This replica, named in its request records and cursor entries. */
   readonly replica: ReplicaId;
   /** `PNEUMA_SPACE_PEERS` and the credential headers a fan-out forwards; absent on a single replica (ADR 0024 item 5). */
@@ -195,7 +195,10 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
     body.kind === 'service' ? `service:${tenant}.${String(body.name)}` : String(subjectOf(caller.actor) ?? '');
   const local: Source = {
     name: replica,
-    page: async (cursor, limit) => ({ replica, records: requests.after(seqIn(cursor, replica), limit).map((r) => ({ ...r, app: registry.nameOf(r.app) ?? r.app })) }),
+    page: async (cursor, limit) => {
+      const page = requests.page(cursor, replica, limit);
+      return { ...page, records: page.records.map((r) => ({ ...r, app: registry.nameOf(r.app) ?? r.app })) };
+    },
   };
   const peerNames = new Map<string, ReplicaId>();
   const forwarded = (request: IncomingMessage) => Object.fromEntries((peers?.forward ?? []).flatMap((name) => {
