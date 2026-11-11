@@ -1,4 +1,6 @@
-# App contract (protocol version 1)
+# App contract
+
+Sections before [Cloud profile](#cloud-profile-contract-2) describe protocol version 1 for M1 and M2. The hosted service accepts the separate contract 2; it does not claim protocol-1 runtime compatibility.
 
 What an app sees from PneumaSpace, and nothing else. The contract fixes protocols, not providers. `db` is a SQL connection URL, `kv` speaks the Redis protocol, `object` speaks S3, push is WebSocket and SSE. An app that follows this file runs on any PneumaSpace whichever database engine, Redis deployment, object store or runtime sits behind them. The one exception is SQL dialect: write the subset SQLite and PostgreSQL both accept. The platform model behind it is in `DESIGN.md` (Chinese). The example TypeScript SDK in `templates/` wraps this contract. Any language can do the same by reading environment variables and headers.
 
@@ -186,3 +188,91 @@ Policy fields: `idle_seconds`, `ready_timeout_seconds`, `drain_timeout_seconds`,
 Quota fields, each `null` for unlimited: `apps` (apps not being purged), `awake` (instances not asleep), `cpu_millis` and `memory_mb` (sums over those instances), `storage_gb` (the provisioned volume capacity of the tenant's `files` and SQLite bindings, checked when a publish adds one; databases and buckets are not counted).
 
 `GET /metrics` serves Prometheus text on its own port, `PNEUMA_SPACE_METRICS_PORT`, when the operator sets it (ADR 0024).
+
+## Cloud profile (contract 2)
+
+The hosted profile is `pneuma-space.fetch/1`. It is a bounded private application service. Its rationale is in [ADR 0027](adr/0027-hosted-fetch-profile.md); product scope is in [M3 requirements](../REQUIREMENTS-M3.md).
+
+### Manifest and execution
+
+```json
+{
+  "contract": 2,
+  "runtime": "fetch",
+  "abi": "pneuma-space.fetch/1",
+  "entry": "app.mjs",
+  "capabilities": {
+    "records": {},
+    "identity": {},
+    "static": {"dir": "public"}
+  }
+}
+```
+
+`route` is implicit. `records`, `identity` and `static` are optional. All other capabilities, unknown fields, runtime names and ABI versions are rejected before changing an app. The entry is a prebundled JavaScript ES module. Build TypeScript and dependencies on the developer's machine. The service neither installs packages nor builds code.
+
+The module default-exports an object with `fetch(request, app)`. It returns a Web `Response`, synchronously or asynchronously. `app` contains the logical app ID, name and release number. It contains `identity` only when declared, with `subject`, `name` and `owner`; `records` exists only when declared. Applications import no provider-specific runtime or database API. There is no process environment, listening port, persistent filesystem, raw socket or background-task contract. Global network access is denied in this profile.
+
+Compute may be discarded or reused between requests, and requests may run concurrently in different isolates. Keep durable state in records. This profile has no single-instance, idle-stop, streaming-connection, WebSocket or scheduled-trigger promise. Request bodies, response bodies, execution duration, CPU and records operations are bounded; the active service limits are returned by `GET /api/profile`.
+
+Names use the protocol-1 name grammar, but are unique within a tenant. The address is `https://<name>--<tenant>.<apps-domain>/`. The platform generates a tenant identifier of bounded length. App IDs and addresses are independent of provider resource IDs. Publication changes the release, not the address or data ownership.
+
+### Private requests
+
+All hosted applications are private. Authentication and tenant authorization apply before both static and dynamic responses. `org`, `public` and custom domain settings are unavailable. An unauthenticated browser's top-level navigation enters the platform's sign-in flow; an API request receives 401. A credential from another tenant receives 404 for the app.
+
+The platform handles the reserved `/_pneuma-space/` routes. It removes platform credentials and incoming reserved identity headers before invoking code. The identity header encoding from protocol 1 remains unchanged. An app receives neither the console session nor the deployment token. App response cookies lose `Domain`, and reserved platform cookie names are rejected. Cookie-authenticated unsafe methods require the app's exact Origin. GET and HEAD must not mutate business state. Browser service workers and embedding in frames are disabled in this profile.
+
+Declared static assets use normalized relative paths and exact lookup; `/` selects `index.html`. The platform serves them after authorization, with HEAD, ETag and a single byte range. Missing assets fall through to the Fetch handler. Static bytes pass through the gateway. There is no application object-storage capability in this profile.
+
+### Records
+
+Record keys are UTF-8 strings of 1 to 200 bytes with no control characters. Values are finite JSON values; binary objects are not supported. A stored record has `{key, value, revision}`. Revisions are opaque strings and are never reused for that AppId.
+
+```ts
+interface Records {
+  get(key: string): Promise<{key: string; value: Json; revision: string} | null>;
+  list(options: {prefix?: string; after?: string; limit?: number}): Promise<{
+    items: {key: string; value: Json; revision: string}[];
+    next: string | null;
+  }>;
+  commit(changes: (
+    | {kind: 'put'; key: string; expected: string | null; value: Json}
+    | {kind: 'delete'; key: string; expected: string | null}
+  )[]): Promise<
+    | {ok: true; revisions: string[]}
+    | {ok: false; reason: 'conflict'}
+  >;
+}
+```
+
+Reads are strongly consistent. `list` orders keys lexically and returns a cursor for the next page; separate pages are not a snapshot. A commit contains distinct keys. Every expected revision must match; `null` means currently absent. All changes and quota checks commit together, or none do. Delete followed by recreation gets a new revision, so an old revision cannot overwrite the new record. Limits apply to individual values, live bytes, record count, batch size and operations per invocation.
+
+The handle is scoped to one AppId and one invocation. It accepts no tenant, resource or database selector. Retaining a handle for a later invocation is unsupported. Downstream lifecycle checks can reject a handle after removal or purge even before its deadline.
+
+### Hosted management API
+
+Use `PNEUMA_SPACE_ADMIN` for the control origin and `PNEUMA_SPACE_TOKEN` for a deployment credential. No provider account credential is accepted. Credentials contain a tenant locator and a random secret; the locator only selects storage and is not authorization. Tokens have expiry, action scopes and either tenant-wide or selected-app scope. They cannot manage credentials, membership or purge. Token secrets are returned once and stored only as hashes.
+
+Browser writes require the control session, exact Origin and `X-Pneuma-Space-CSRF`. Token-authenticated requests use `Authorization: Bearer <token>` without a cookie fallback. Revocation rejects admissions started after the revocation commit; already-admitted bounded requests can finish. Pending publication rechecks the credential before activation.
+
+| Route | Permission | Result |
+| --- | --- | --- |
+| `GET /api/profile` | none | Contract and active limits, without account data |
+| `GET /api/me` | session | User, personal tenant and CSRF token |
+| `GET /api/apps` | read | Accessible apps only |
+| `GET /api/apps/<name>` | read | App, releases and pending operation |
+| `PUT /api/apps/<name>/release` | publish | Idempotent publication of `{manifest, source, assets}` |
+| `POST /api/apps/<name>/remove` | remove | Remove and suspend without deleting records |
+| `POST /api/apps/<name>/purge` | session | Removed-only purge; `{confirm: <name>}` required |
+| `GET /api/apps/<name>/export` | export | Archive of a removed, suspended app |
+| `PUT /api/apps/<name>/import` | publish | Restore a validated archive into a new removed app |
+| `GET /api/tokens` | session | Credential metadata, never secrets or hashes |
+| `POST /api/tokens` | session | Create a scoped, expiring token |
+| `POST /api/tokens/<id>/revoke` | session | Idempotent revocation |
+| `GET /api/usage` | session | This tenant's admitted requests and publishing activity |
+| `GET /api/audit` | session | This tenant's bounded operation history |
+
+`assets` is an array of `{path, contentType, body}`, where `body` is base64 bytes and `path` is relative to the declared static root. The server computes the canonical artifact digest. A publication requires `Idempotency-Key`; repeating it with different content returns 409. The app's current release changes only after artifact checks and resource convergence. An unchanged active artifact returns the existing release. A concurrent different publication returns 409. Removal prevents an older publication from activating. Retrying the same publication resumes its persisted intent after interruption. Pending and failed states remain visible.
+
+An export includes format version, source manifest/module/assets, live records, a revision watermark and checksum. It excludes credentials and provider resource identifiers. Export requires completed suspension. Import validates the format, digest, paths and quotas before writing; an existing target is refused. Restored apps remain removed until an explicit publish. Removing or exporting never deletes source data. Purge is terminal for the old AppId; a recreated name receives a new ID.

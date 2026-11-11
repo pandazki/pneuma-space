@@ -374,7 +374,7 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
           const outcome = await p[name].ensure('${newAppId()}', null).then(() => 'up', (e) => e.constructor.name);
           console.log(name, outcome, Date.now() - t);
         }`;
-      return docker('run', '--rm', '--network', project, '-v', `${join(root, 'gateway/src')}:/src:ro`, 'node:24-alpine',
+      return docker('run', '--rm', '--network', project, '-v', `${join(root, 'gateway/src')}:/src:ro`, '-v', `${join(root, 'shared')}:/shared:ro`, 'node:24-alpine',
         'node', '--input-type=module', '-e', script).trim().split('\n').map((line) => line.split(' '));
     };
 

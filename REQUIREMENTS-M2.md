@@ -116,6 +116,8 @@ M2 不承诺对抗性的租户隔离（计算、网络、数据、控制面各�
 
 M3 在 M2 的模型上只加：租户的计量（分时统计乘以价格）和计费；对抗性隔离，每租户的网络、计算、数据和控制面边界；自助注册和自定义域名；模板市场。地址、清单、契约、Binding 和 Tenant 都不改。
 
+以上为 M2 时的后续设想。2026-11-11 确定的云端首版采用独立受限契约，其范围以 [REQUIREMENTS-M3.md](REQUIREMENTS-M3.md) 为准；差异的决定理由在 [ADR 0027](docs/adr/0027-hosted-fetch-profile.md) 和 [ADR 0028](docs/adr/0028-personal-tenants-and-private-origins.md)。M2 的要求不变。
+
 ## 验收
 
 验收行写进 `docs/acceptance.md` 的 M2 节，对运营者的集群跑（`PNEUMA_SPACE_TEST_KUBECONTEXT` 指定的 kubectl context）；M1 的全部行在集群上仍然通过。速度用 `tests/bench/runtimes.ts` 在集群上量并存档对比，不进单元测试。

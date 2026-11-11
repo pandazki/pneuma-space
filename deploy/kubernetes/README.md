@@ -8,7 +8,7 @@ Plain manifests for the `kubernetes` plane ([ADR 0019](../../docs/adr/0019-kuber
 - A wildcard DNS record for the apps domain (`*.apps.example.com`) and hosts for the console, the API and the object store, all pointing at your ingress, with TLS terminated there.
 - An authenticating proxy in front of those hosts that puts a signed JWT in a request header ([ADR 0021](../../docs/adr/0021-trusted-upstream-identity.md)). The `kubernetes` plane refuses `PNEUMA_SPACE_IDENTITY=local`.
 - A storage class whose volumes can move between nodes. App data only follows an instance to another node on such a class (US-O-4).
-- An image registry and a pull credential for it. PneumaSpace ships no image: build `gateway/` and push it yourself. `appctl publish` pushes app images to `PNEUMA_SPACE_REGISTRY`.
+- An image registry and a pull credential for it. PneumaSpace ships no image: build `gateway/Dockerfile` with the repository root as context and push it yourself. `appctl publish` pushes app images to `PNEUMA_SPACE_REGISTRY`.
 
 ## Fill in
 
@@ -33,7 +33,7 @@ The other ConfigMap keys carry their ADR defaults. `PNEUMA_SPACE_K8S_STORAGE_CLA
 
 ## Apply
 
-1. `docker build -t <registry>/pneuma-space-gateway:<tag> gateway && docker push <registry>/pneuma-space-gateway:<tag>`.
+1. `docker build -f gateway/Dockerfile -t <registry>/pneuma-space-gateway:<tag> . && docker push <registry>/pneuma-space-gateway:<tag>`.
 2. Fill in the tokens until `node deploy/kubernetes/check.mjs` prints `ok` and no `fill in:` line.
 3. `kubectl apply -k deploy/kubernetes`. Kustomize creates the namespaces first.
 4. `kubectl -n pneuma-space rollout status statefulset/pneuma-space-store`, then `deployment/pneuma-space-gateway`.
@@ -68,7 +68,7 @@ Cordon a node for maintenance; do not drain it. `kubectl drain` refuses instance
    - `REPLACE_ME_REGISTRY=localhost:30500`: the daemon pulls and `docker push` pushes through the NodePort, and `localhost` needs no TLS. `PNEUMA_SPACE_REGISTRY_API=http://pneuma-space-registry.pneuma-space.svc:5000`, because the gateway Pod cannot reach the node's `localhost`.
    - `PNEUMA_SPACE_K8S_STORAGE_CLASS=hostpath` and `PNEUMA_SPACE_APPS_ORIGIN=http://*.apps.localtest.me:18080`; `*.localtest.me` resolves to 127.0.0.1.
    - Identity: header `x-auth-jwt`, issuer `https://pneuma-space.test`, audience `pneuma-space-apps`, console audience `pneuma-space-console`, `PNEUMA_SPACE_IDENTITY_KEYS_FILE=/etc/pneuma-space/identity/keys.json`, an empty JWKS URL, and your own `user:<id>` in `REPLACE_ME_PLATFORM_ADMINS`.
-3. `docker build -t localhost:30500/pneuma-space-gateway:dev gateway && docker push localhost:30500/pneuma-space-gateway:dev`, then `kubectl apply -k deploy/dev-cluster`.
+3. `docker build -f gateway/Dockerfile -t localhost:30500/pneuma-space-gateway:dev . && docker push localhost:30500/pneuma-space-gateway:dev`, then `kubectl apply -k deploy/dev-cluster`.
 4. `kubectl -n pneuma-space port-forward svc/pneuma-space-gateway 38080:8080 38081:8081`. It ends when the Pod it picked goes, so run it again after a gateway rollout.
 5. `node deploy/dev-cluster/identity.mjs proxy <id> [other ids]` signs every browser request: apps at `http://<name>.apps.localtest.me:18080/` as the user the cookie `pneuma_dev_as` names (default `<id>`), the console at http://127.0.0.1:18081/ as `<id>` and on 18082 onwards as the other ids. Requests that carry `Authorization` pass untouched.
 6. Issue a service token on the console's Team page, then publish with `PNEUMA_SPACE_ADMIN=http://127.0.0.1:38081 PNEUMA_SPACE_TOKEN=<token> PNEUMA_SPACE_REGISTRY=localhost:30500 node cli/appctl.ts publish ...`. `identity.mjs jwt <id> <audience>` prints a 15-minute token for curl and for the `PNEUMA_SPACE_TEST_*_JWT` variables of `test:k8s`.

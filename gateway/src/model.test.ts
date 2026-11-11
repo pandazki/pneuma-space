@@ -1,8 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import {
   DEFAULT_POLICY, DEFAULT_QUOTA, ManifestError, InputError, QUOTA_RESOURCES, admits, appName, effectivePolicy, parseManifest, releaseKey,
@@ -78,11 +74,10 @@ test('appName accepts 40 lowercase characters and rejects uppercase or 41', () =
   assert.throws(() => appName('a'.repeat(41)), InputError);
 });
 
-test('model.ts refuses to load when CAPABILITIES lacks a kind', async () => {
-  const source = readFileSync(new URL('./model.ts', import.meta.url), 'utf8');
-  const mutated = source.replace(/^ {2}rtc: .*\n/m, '');
-  assert.notEqual(mutated, source);
-  const path = join(mkdtempSync(join(tmpdir(), 'pneuma-space-model-')), 'model.ts');
-  writeFileSync(path, mutated);
-  await assert.rejects(import(pathToFileURL(path).href), /CAPABILITIES must cover exactly.*rtc/);
+test('contract 1 rejects the records capability', () => {
+  assert.throws(() => parseManifest({ contract: 1, capabilities: { records: {} } }), /unknown capability "records"/);
+});
+
+test('contract 1 rejects the fetch runtime', () => {
+  assert.throws(() => parseManifest({ contract: 1, runtime: 'fetch', capabilities: {} }), /runtime must be one of container, isolate/);
 });

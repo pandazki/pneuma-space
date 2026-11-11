@@ -1,0 +1,7 @@
+{
+  "contract": 2,
+  "runtime": "fetch",
+  "abi": "pneuma-space.fetch/1",
+  "entry": "app.mjs",
+  "capabilities": { "records": {}, "identity": {}, "static": { "dir": "public" } }
+}

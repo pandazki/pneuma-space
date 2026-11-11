@@ -7,6 +7,8 @@ PneumaSpace runs many small stateful web apps on one machine you own, or on your
 
 ## Run and publish
 
+The separate hosted profile is under development on this branch. Its [local quickstart](cloud/README.md), [launch plan](docs/saas-launch.md), and [verification record](docs/saas-verification.md) describe what is implemented and which cloud checks remain open. It uses [contract 2](docs/app-contract.md#cloud-profile-contract-2); the instructions below remain for the original deployment profile.
+
 Requirements: Docker with Compose v2, and Node.js 24 or newer on the host for `appctl`.
 
 ```sh

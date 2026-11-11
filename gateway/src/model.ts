@@ -4,61 +4,18 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Readable } from 'node:stream';
 
-type Brand<T, B extends string> = T & { readonly __brand: B };
+import {
+  Conflict, InputError, ManifestError, type AppId, type AppName, type Brand, type BundleId, type CronExpr, type DeliveryId,
+  type ImageId, type ReleaseNumber, type Subject, type TenantName, type TriggerName,
+} from '../../shared/values.ts';
+import { asObject, capabilitiesFor, onlyKeys, runtimesFor, type IdentityDeclaration } from '../../shared/catalog.ts';
 
-/** Errors the admin API maps to 400, 404 and 409; messages are written for the person who sent the input. */
-export class InputError extends Error {}
-export class ManifestError extends InputError {}
-export class NotFound extends Error {}
-export class Conflict extends Error {}
-
-// Ids
-
-const NAME_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
-
-export type AppName = Brand<string, 'AppName'>;
-export type TenantName = Brand<string, 'TenantName'>;
-export type AppId = Brand<string, 'AppId'>;
-export type ReleaseNumber = Brand<number, 'ReleaseNumber'>;
-/** Docker image id (`sha256:...`), resolved from a reference at publish. */
-export type ImageId = Brand<string, 'ImageId'>;
-/** sha256 hex of the bundle tar. */
-export type BundleId = Brand<string, 'BundleId'>;
-export type Subject = Brand<`user:${string}` | `service:${string}`, 'Subject'>;
-export type DeliveryId = Brand<string, 'DeliveryId'>;
-export type TriggerName = Brand<string, 'TriggerName'>;
-/** Five-field cron expression, bounds already checked. */
-export type CronExpr = Brand<string, 'CronExpr'>;
-
-export function appName(raw: string): AppName {
-  if (!NAME_PATTERN.test(raw)) throw new InputError(`app name "${raw}" must match ${NAME_PATTERN.source}`);
-  return raw as AppName;
-}
-
-export function tenantName(raw: string): TenantName {
-  if (!NAME_PATTERN.test(raw)) throw new InputError(`tenant name "${raw}" must match ${NAME_PATTERN.source}`);
-  return raw as TenantName;
-}
-
-/** Where single-host writes land and where migration step 4 put every M1 app and token (ADR 0022). */
-export const DEFAULT_TENANT = 'default' as TenantName;
-
-export function triggerName(raw: string): TriggerName {
-  if (!NAME_PATTERN.test(raw)) throw new InputError(`trigger name "${raw}" must match ${NAME_PATTERN.source}`);
-  return raw as TriggerName;
-}
-
-export function subject(raw: string): Subject {
-  if (!/^(user|service):[A-Za-z0-9._@+-]{1,64}$/.test(raw)) {
-    throw new InputError(`subject "${raw}" must be user:<id> or service:<id>, id of up to 64 letters, digits and ._@+-`);
-  }
-  return raw as Subject;
-}
-
-export function bundleId(raw: string): BundleId {
-  if (!/^[0-9a-f]{64}$/.test(raw)) throw new InputError(`bundle "${raw}" must be the id returned by POST /api/bundles`);
-  return raw as BundleId;
-}
+export {
+  Conflict, DEFAULT_TENANT, InputError, ManifestError, NotFound, appName, bundleId, subject, tenantName, triggerName,
+  type AppId, type AppName, type BundleId, type CronExpr, type DeliveryId, type ImageId, type ReleaseNumber, type Subject,
+  type TenantName, type TriggerName,
+} from '../../shared/values.ts';
+export type { CronDeclaration, EmptyDeclaration, IdentityDeclaration, KindClass, StaticDeclaration } from '../../shared/catalog.ts';
 
 export function newAppId(): AppId {
   return randomBytes(6).toString('hex') as AppId;
@@ -66,38 +23,9 @@ export function newAppId(): AppId {
 
 // Capabilities
 
-export const CAPABILITY_KINDS = ['route', 'files', 'db', 'kv', 'object', 'static', 'ws', 'cron', 'identity', 'rtc'] as const;
-export type CapabilityKind = (typeof CAPABILITY_KINDS)[number];
-export type KindClass = 'resource' | 'ingress' | 'schedule';
-
-export type EmptyDeclaration = Record<string, never>;
-export type StaticDeclaration = { readonly dir: string };
-export type CronDeclaration = { readonly triggers: Readonly<Record<TriggerName, { readonly schedule?: CronExpr }>> };
-/** `required` absent means true. */
-export type IdentityDeclaration = { readonly required?: boolean };
-
-type CapabilitySpec = {
-  readonly class: KindClass;
-  readonly needsRuntime: boolean;
-  /** Provider implementations; non-empty exactly for resource kinds. */
-  readonly providers: readonly string[];
-  readonly parse: (raw: unknown, where: string) => unknown;
-};
-
-/** The only capability list. Env names, providers to call and gateway flags derive from it. */
-export const CAPABILITIES = {
-  route:    { class: 'ingress',  needsRuntime: false, providers: [],                     parse: implicit },
-  files:    { class: 'resource', needsRuntime: true,  providers: ['volume'],             parse: empty },
-  db:       { class: 'resource', needsRuntime: true,  providers: ['sqlite', 'postgres'], parse: empty },
-  kv:       { class: 'resource', needsRuntime: true,  providers: ['redis'],              parse: empty },
-  object:   { class: 'resource', needsRuntime: true,  providers: ['s3'],                 parse: empty },
-  static:   { class: 'ingress',  needsRuntime: false, providers: [],                     parse: parseStatic },
-  ws:       { class: 'ingress',  needsRuntime: true,  providers: [],                     parse: empty },
-  cron:     { class: 'schedule', needsRuntime: true,  providers: [],                     parse: parseCron },
-  identity: { class: 'ingress',  needsRuntime: true,  providers: [],                     parse: parseIdentity },
-  rtc:      { class: 'resource', needsRuntime: true,  providers: ['coturn'],             parse: empty },
-} as const satisfies Record<CapabilityKind, CapabilitySpec>;
-
+export const CAPABILITIES = capabilitiesFor(1);
+export type CapabilityKind = keyof typeof CAPABILITIES;
+export const CAPABILITY_KINDS = Object.keys(CAPABILITIES) as readonly CapabilityKind[];
 export type Declaration<K extends CapabilityKind> = ReturnType<(typeof CAPABILITIES)[K]['parse']>;
 export type ResourceKind = {
   [K in CapabilityKind]: (typeof CAPABILITIES)[K]['class'] extends 'resource' ? K : never;
@@ -124,13 +52,9 @@ export const RUNTIME_ENV = { app: 'PNEUMA_SPACE_APP', release: 'PNEUMA_SPACE_REL
 
 // Runtimes (ADR 0017)
 
-export const RUNTIME_KINDS = ['container', 'isolate'] as const;
-export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
-/** The only runtime list: a kind is one row here and one Runtime implementation. `service` names the compose service and profile it needs; `input` is what a publish must carry. */
-export const RUNTIMES = {
-  container: { service: null,     profile: null,      input: 'image' },
-  isolate:   { service: 'runner', profile: 'isolate', input: 'bundle' },
-} as const satisfies Record<RuntimeKind, { readonly service: string | null; readonly profile: string | null; readonly input: 'image' | 'bundle' }>;
+export const RUNTIMES = runtimesFor(1);
+export type RuntimeKind = keyof typeof RUNTIMES;
+export const RUNTIME_KINDS = Object.keys(RUNTIMES) as readonly RuntimeKind[];
 export const DEFAULT_ENTRY = 'src/server.ts';
 
 function assertCoversKinds(label: string, table: object): void {
@@ -138,13 +62,7 @@ function assertCoversKinds(label: string, table: object): void {
   const want = [...CAPABILITY_KINDS].sort().join(',');
   if (has !== want) throw new Error(`${label} must cover exactly the capability kinds: has [${has}], expected [${want}]`);
 }
-assertCoversKinds('CAPABILITIES', CAPABILITIES);
 assertCoversKinds('ENV_BY_KIND', ENV_BY_KIND);
-for (const [kind, spec] of Object.entries(CAPABILITIES) as [string, CapabilitySpec][]) {
-  if ((spec.class === 'resource') !== spec.providers.length > 0) {
-    throw new Error(`CAPABILITIES.${kind}: a kind has providers exactly when its class is resource`);
-  }
-}
 
 /** The provider that serves `kind` for an app under its effective policy. */
 export function selectProvider(kind: ResourceKind, policy: Policy): ProviderName {
@@ -163,85 +81,6 @@ export type Manifest = {
   /** Isolate apps only: the module the runner loads, relative to the bundle; DEFAULT_ENTRY when absent. */
   readonly entry?: string;
 };
-
-type RawObject = Record<string, unknown>;
-
-function asObject(raw: unknown, where: string): RawObject {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new ManifestError(`${where} must be a JSON object`);
-  return raw as RawObject;
-}
-
-function onlyKeys(raw: RawObject, allowed: readonly string[], where: string): void {
-  const unknown = Object.keys(raw).find((key) => !allowed.includes(key));
-  if (unknown !== undefined) {
-    throw new ManifestError(`${where}: unknown field "${unknown}"; allowed: ${allowed.length ? allowed.join(', ') : 'none'}`);
-  }
-}
-
-function implicit(_raw: unknown, where: string): never {
-  throw new ManifestError(`${where}: route is implicit for every app; remove it from the manifest`);
-}
-
-function empty(raw: unknown, where: string): EmptyDeclaration {
-  onlyKeys(asObject(raw, where), [], where);
-  return {};
-}
-
-function parseIdentity(raw: unknown, where: string): IdentityDeclaration {
-  const declaration = asObject(raw, where);
-  onlyKeys(declaration, ['required'], where);
-  if (declaration.required !== undefined && typeof declaration.required !== 'boolean') {
-    throw new ManifestError(`${where}.required must be true or false`);
-  }
-  return declaration.required === undefined ? {} : { required: declaration.required };
-}
-
-function parseStatic(raw: unknown, where: string): StaticDeclaration {
-  const declaration = asObject(raw, where);
-  onlyKeys(declaration, ['dir'], where);
-  const dir = declaration.dir;
-  if (typeof dir !== 'string' || dir === '' || dir.startsWith('/') || dir.split('/').includes('..')) {
-    throw new ManifestError(`${where}.dir must be a relative directory inside the source root, like "dist"`);
-  }
-  return { dir };
-}
-
-const CRON_BOUNDS: readonly (readonly [number, number])[] = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]];
-
-function cronFieldValid(field: string, [low, high]: readonly [number, number]): boolean {
-  return field.split(',').every((item) => {
-    const match = /^(?:\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/.exec(item);
-    if (!match) return false;
-    const [, from, to, step] = match;
-    const start = from === undefined ? low : Number(from);
-    const end = to === undefined ? (from === undefined ? high : start) : Number(to);
-    return low <= start && start <= end && end <= high && (step === undefined || Number(step) >= 1);
-  });
-}
-
-function parseCron(raw: unknown, where: string): CronDeclaration {
-  const declaration = asObject(raw, where);
-  onlyKeys(declaration, ['triggers'], where);
-  const triggers: Record<string, { schedule?: CronExpr }> = {};
-  for (const [name, value] of Object.entries(asObject(declaration.triggers, `${where}.triggers`))) {
-    const at = `${where}.triggers.${name}`;
-    if (!NAME_PATTERN.test(name)) throw new ManifestError(`${at}: trigger name must match ${NAME_PATTERN.source}`);
-    const trigger = asObject(value, at);
-    onlyKeys(trigger, ['schedule'], at);
-    if (trigger.schedule === undefined) {
-      triggers[name] = {};
-      continue;
-    }
-    const fields = typeof trigger.schedule === 'string' ? trigger.schedule.trim().split(/\s+/) : [];
-    if (fields.length !== 5 || !fields.every((field, i) => cronFieldValid(field, CRON_BOUNDS[i]))) {
-      throw new ManifestError(
-        `${at}.schedule must be a 5-field cron expression (minute hour day-of-month month day-of-week) using numbers, *, -, / and ,`,
-      );
-    }
-    triggers[name] = { schedule: fields.join(' ') as CronExpr };
-  }
-  return { triggers: triggers as CronDeclaration['triggers'] };
-}
 
 export function parseManifest(raw: unknown): Manifest {
   const manifest = asObject(raw, 'manifest');
