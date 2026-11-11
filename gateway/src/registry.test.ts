@@ -505,3 +505,62 @@ test('a replica that indexed a bundle another replica purged refuses a release a
   assert.deepEqual(blog ? (await store.releases(blog.id)).map((r) => r.bundle) : [], []);
 });
 
+function publishOn(registry: PlatformRegistry, runtime: 'container' | 'isolate', capabilities: Record<string, unknown>, code: BundleId) {
+  const manifest = parseManifest({ contract: 1, runtime, capabilities: capabilities as Capabilities });
+  return registry.publish({ name: survey, image: runtime === 'container' ? 'example:1' : null, manifest, bundle: runtime === 'isolate' ? code : null, owner: ann });
+}
+
+for (const [storage, capabilities] of [['files', { files: {} }], ['a SQLite database', { db: {} }]] as const) {
+  for (const [from, to] of [['container', 'isolate'], ['isolate', 'container']] as const) {
+    test(`a release moving an app with ${storage} from ${from} to ${to} is refused with 409 before anything changes (#14)`, async () => {
+      const w = world();
+      w.services.add('runner');
+      const { registry, store } = await w.open();
+      const code = await w.bundles.put(Readable.from([Buffer.from('app dir')]));
+      const { app } = await publishOn(registry, from, capabilities, code);
+      const state = async () => JSON.stringify([await store.app(survey), await store.releases(app), await store.bindings(app), registry.runSpec(app), w.calls]);
+      const before = await state();
+      await assert.rejects(publishOn(registry, to, capabilities, code), (error) =>
+        error instanceof Conflict && [`"${survey}"`, `"${from}"`, `"${to}"`, 'new name', 'purge'].every((part) => error.message.includes(part)));
+      assert.equal(await state(), before);
+      assert.deepEqual(w.runtime.calls.filter((call) => call.startsWith('retire')), []);
+    });
+  }
+}
+
+test('an app whose database is PostgreSQL, and one without storage, may change runtime (#14)', async () => {
+  const w = world();
+  w.services.add('runner');
+  const { registry } = await w.open();
+  await registry.setGlobalPolicy({ db_backend: 'postgres' });
+  const moved: unknown[] = [];
+  for (const capabilities of [{ db: {} }, { kv: {}, object: {} }]) {
+    const code = await w.bundles.put(Readable.from([Buffer.from(JSON.stringify(capabilities))]));
+    await publishOn(registry, 'container', capabilities, code);
+    moved.push((await publishOn(registry, 'isolate', capabilities, code)).runtime);
+    await registry.remove(survey);
+    await registry.purge(survey);
+  }
+  assert.deepEqual(moved, ['isolate', 'isolate']);
+});
+
+test('a static-only release in between does not let an app with files change runtime (#14)', async () => {
+  const w = world();
+  w.services.add('runner');
+  const { registry } = await w.open();
+  const code = await w.bundles.put(Readable.from([Buffer.from('app dir')]));
+  await publishOn(registry, 'container', { files: {} }, code);
+  await site(registry, 'survey', await w.bundles.put(Readable.from([Buffer.from('site')])));
+  await assert.rejects(publishOn(registry, 'isolate', { files: {} }, code), Conflict);
+});
+
+test('after remove and purge, the name of an app with files publishes under the other runtime (#14)', async () => {
+  const w = world();
+  w.services.add('runner');
+  const { registry } = await w.open();
+  const code = await w.bundles.put(Readable.from([Buffer.from('app dir')]));
+  await publishOn(registry, 'container', { files: {} }, code);
+  await registry.remove(survey);
+  await registry.purge(survey);
+  assert.equal((await publishOn(registry, 'isolate', { files: {} }, code)).runtime, 'isolate');
+});

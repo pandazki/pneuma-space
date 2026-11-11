@@ -219,6 +219,7 @@ export class PlatformRegistry implements Registry {
     if (app?.status === 'purging') throw new Conflict(`app "${name}" is being purged; publish again once purge finishes`);
     const current = app && (await currentRelease(this.#store, app));
     if (app?.status === 'registered' && current?.releaseKey === key) return current;
+    if (app && runtime !== null) await this.#keepsRuntime(app, runtime);
     const service = runtime === null ? null : RUNTIMES[runtime].service;
     if (runtime !== null && service !== null && !(await this.#probe(service))) {
       throw new Conflict(`runtime "${runtime}" needs the ${service} service; start the platform with --profile ${RUNTIMES[runtime].profile}`);
@@ -267,6 +268,16 @@ export class PlatformRegistry implements Registry {
     await this.#settled(next, suspended);
     log('publish', name, { release: release.number });
     return release;
+  }
+
+  /** A files or SQLite binding's data lies where the runtime that wrote it put it, out of the other runtime's reach (ADR 0028). */
+  async #keepsRuntime(app: App, runtime: RuntimeKind): Promise<void> {
+    const held = (await this.#store.releases(app.id)).findLast((r) => r.runtime !== null)?.runtime;
+    if (!held || held === runtime || !(await this.#store.bindings(app.id)).some((b) => PROVISIONED.has(b.provider))) return;
+    throw new Conflict(
+      `app "${app.name}" keeps its files or SQLite data where runtime "${held}" put them, which runtime "${runtime}" cannot read; ` +
+        `publish under a new name, or remove and purge "${app.name}" first`,
+    );
   }
 
   remove(name: AppName): Promise<void> {
