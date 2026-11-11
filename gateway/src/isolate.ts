@@ -4,7 +4,7 @@ import { emit, type Emit } from './events.ts';
 import type { Instances } from './instances.ts';
 import type { KubeClient, Pod } from './kube.ts';
 import { Lifecycle, specHash, type Adopted, type Driver, type Ending, type Gone, type Slot } from './lifecycle.ts';
-import { RUNTIME_ENV, type AppId, type BundleId, type HealthCheck, type RunSpec } from './model.ts';
+import { RUNTIME_ENV, type AppId, type BundleId, type HealthCheck, type Instance, type RunSpec } from './model.ts';
 import type { EventPage, Listed, RunnerEvent, Started, StartRequest } from './runner.ts';
 import { Unavailable, type AppGuard } from './runtimes.ts';
 
@@ -136,6 +136,11 @@ class RunnerError extends Error {}
 /** Failures before the request is sent; anything later may be the request's doing. */
 const UNREACHED: ReadonlySet<string> = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
 
+/** The row names the worker and keeps it running: an asleep isolate row holds no worker, whatever handle it kept. */
+const names = (row: Instance | null, worker: string): boolean => row?.runtime === 'isolate' && row.handle === worker && row.state !== 'asleep';
+/** Whether the worker is its app's, judged by the row read after the runner listed it; a waking row's waker may still be creating it (ADR 0027 item 2). */
+const owns = (row: Instance | null, worker: string): boolean => names(row, worker) || (row?.runtime === 'isolate' && row.state === 'waking');
+
 const ending = (event: RunnerEvent): Ending => {
   if (event.ev === 'hung') return { ev: 'hung', reason: event.reason ?? 'hung' };
   if (event.ev === 'oom') return { ev: 'crashed', reason: `worker exceeded its ${event.reason ?? 'heap'} memory limit` };
@@ -153,9 +158,7 @@ type Runner = {
   readonly live: Map<string, AppId>;
   /** Terminal events of workers not yet known: a start whose worker ended before its POST answered fails. */
   readonly unclaimed: Map<string, RunnerEvent>;
-  /** Apps whose start is in flight: the runner lists their worker before the start answers. */
-  readonly starting: Set<AppId>;
-  /** A control call failed or instances went asleep unavailable: the runner may hold workers nobody tracks. */
+  /** A control call failed or instances went asleep unavailable: the runner may hold workers no row owns. */
   suspect: boolean;
 };
 
@@ -217,13 +220,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     const address = await this.#resolve(runner);
     // No app code has run yet, so a runner that does not answer this is never the app's fault.
     await this.#call(runner, 'GET', '/health', undefined, readyMs).catch(() => { throw this.#unavailable(); });
-    runner.starting.add(spec.app);
-    let started: Started;
-    try {
-      started = await this.#call<Started>(runner, 'POST', `/instances/${spec.app}`, request, readyMs + CALL_MS);
-    } finally {
-      runner.starting.delete(spec.app);
-    }
+    const started = await this.#call<Started>(runner, 'POST', `/instances/${spec.app}`, request, readyMs + CALL_MS);
     const ended = runner.unclaimed.get(started.worker);
     if (ended) throw new RunnerError(`worker of app ${spec.app} ended as soon as it listened: ${ended.reason ?? ended.ev}`);
     slot.handle = started.worker;
@@ -241,9 +238,10 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     slot.handle = null;
   }
 
+  /** Names the worker, so a late removal leaves a worker a later wake started (ADR 0027 item 2). */
   async remove(app: AppId, worker: string): Promise<void> {
     const runner = this.#reach(app, worker);
-    await this.#call(runner, 'DELETE', `/instances/${app}?drain=${STOP_MS}&retire=1`, undefined, STOP_MS + CALL_MS);
+    await this.#call(runner, 'DELETE', `/instances/${app}?drain=${STOP_MS}&retire=1&worker=${worker}`, undefined, STOP_MS + CALL_MS);
     runner.live.delete(worker);
   }
 
@@ -260,7 +258,7 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     try {
       runner = this.#reach(app, worker);
       runner.live.delete(worker);
-      await this.#call(runner, 'DELETE', `/instances/${app}?drain=${STOP_MS}&retire=1`, undefined, STOP_MS + CALL_MS);
+      await this.#call(runner, 'DELETE', `/instances/${app}?drain=${STOP_MS}&retire=1&worker=${worker}`, undefined, STOP_MS + CALL_MS);
       return true;
     } catch (error) {
       if (runner) runner.suspect = true;
@@ -270,8 +268,9 @@ class IsolateDriver implements Driver<IsolateRun, string> {
   }
 
   /**
-   * Null when the pool or any runner in it could not be asked, or a transition names a home the pool does not list:
-   * a worker may still run there, so nothing is known to be gone.
+   * The listening workers whose rows, read after the listing, name them; every other worker is left to the recovery poll, which stops it
+   * unless a row owns it (ADR 0027 item 2). Null when the pool or any runner in it could not be asked, or a transition names a home the pool
+   * does not list: a worker may still run there, so nothing is known to be gone.
    */
   async adopt(): Promise<readonly Adopted<string>[] | null> {
     if (!(await this.#pool.ready())) return null;
@@ -280,18 +279,21 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     if ([...this.#instances.rows()].some((row) => row.runtime === 'isolate' && row.state !== 'asleep' && row.home !== null && !known.has(row.home))) return null;
     const asked = await Promise.all(refs.map((ref) => this.#list(this.#track(ref))));
     if (asked.some((answer) => answer === null)) {
-      // The workers the others listed belong to no gateway now; the recovery poll stops them.
       for (const answer of asked) if (answer) answer.runner.suspect = true;
       return null;
     }
-    return asked.flatMap((answer) => {
-      const { runner, address, listed } = answer!;
-      const listening = listed.filter(({ state }) => state === 'listening');
-      // A worker still starting or ending belongs to no gateway now; the recovery poll stops it.
-      if (listening.length < listed.length) runner.suspect = true;
-      for (const { worker, app } of listening) runner.live.set(worker, app as AppId);
-      return listening.map(({ app, worker, release, spec, port }) => ({ app: app as AppId, handle: worker, release: String(release), spec, address: `${address}:${port}` }));
-    });
+    const adopted: Adopted<string>[] = [];
+    for (const { runner, address, listed } of asked as NonNullable<(typeof asked)[number]>[]) {
+      for (const { app, worker, release, spec, port, state } of listed) {
+        if (state !== 'listening' || !names(await this.#instances.store.instance(app as AppId), worker)) {
+          runner.suspect = true;
+          continue;
+        }
+        runner.live.set(worker, app as AppId);
+        adopted.push({ app: app as AppId, handle: worker, release: String(release), spec, address: `${address}:${port}` });
+      }
+    }
+    return adopted;
   }
 
   /** A runner that is off or does not answer reports null. */
@@ -308,16 +310,25 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     }
   }
 
+  /** Also tracks every runner an isolate row names as home, so this replica reaches workers other replicas started there. */
   follow(gone: Gone<string>, signal: AbortSignal): void {
     this.#follow = { gone, signal };
     for (const runner of this.#runners.values()) this.#loop(runner);
+    void (async () => {
+      while (!signal.aborted) {
+        const homes = new Set<string>();
+        for (const row of this.#instances.rows()) if (row.runtime === 'isolate' && row.home !== null) homes.add(row.home);
+        for (const ref of this.#pool.runners()) if (homes.has(ref.id)) this.#track(ref);
+        await sleep(POLL_MS, undefined, { ref: false });
+      }
+    })();
   }
 
   /** The tracked state of a runner the pool lists; a new one is polled from now on. */
   #track(ref: RunnerRef): Runner {
     let runner = this.#runners.get(ref.id);
     if (!runner) {
-      runner = { id: ref.id, url: ref.url, startedAt: null, after: 0, live: new Map(), unclaimed: new Map(), starting: new Set(), suspect: false };
+      runner = { id: ref.id, url: ref.url, startedAt: null, after: 0, live: new Map(), unclaimed: new Map(), suspect: false };
       this.#runners.set(ref.id, runner);
       if (this.#follow) this.#loop(runner);
     }
@@ -359,9 +370,9 @@ class IsolateDriver implements Driver<IsolateRun, string> {
           this.#runners.delete(runner.id);
           return;
         }
-        if (runner.suspect && performance.now() - probed >= RECOVER_MS) {
+        if ((runner.suspect || this.#instances.leading) && performance.now() - probed >= RECOVER_MS) {
           probed = performance.now();
-          await this.#recover(runner).catch(() => {});
+          await this.#recover(runner, runner.suspect).catch(() => {});
         }
         if (runner.live.size === 0) continue;
         try {
@@ -385,17 +396,25 @@ class IsolateDriver implements Driver<IsolateRun, string> {
     runner.suspect = true;
   }
 
-  /** Once the runner answers again, stops the workers it kept that no lease can reach; the next request wakes the app in tens of ms. */
-  async #recover(runner: Runner): Promise<void> {
+  /**
+   * The leader's pass every RECOVER_MS, and any replica's once the runner answers again after a call to it failed: stops each worker no row
+   * owns (ADR 0027 item 2). The mirror only spares; a stop needs the row read after the listing, and names its worker. Logged when it stops
+   * anything or follows a failure.
+   */
+  async #recover(runner: Runner, suspected: boolean): Promise<void> {
     await this.#call(runner, 'GET', '/health', undefined, PROBE_MS);
     if (runner.startedAt === null) await this.#cursor(runner);
     const listed = await this.#call<Listed[]>(runner, 'GET', '/instances', undefined, PROBE_MS);
-    const untracked = listed.filter(({ worker, app }) => !runner.live.has(worker) && !runner.starting.has(app as AppId));
+    const orphans: Listed[] = [];
+    for (const entry of listed) {
+      const app = entry.app as AppId;
+      if (!owns(this.#instances.row(app), entry.worker) && !owns(await this.#instances.store.instance(app), entry.worker)) orphans.push(entry);
+    }
     runner.suspect = false;
-    const stops = await Promise.allSettled(untracked.map(({ app, worker }) => this.#call(runner, 'DELETE', `/instances/${app}?drain=${STOP_MS}&worker=${worker}`, undefined, STOP_MS + CALL_MS)));
+    const stops = await Promise.allSettled(orphans.map(({ app, worker }) => this.#call(runner, 'DELETE', `/instances/${app}?drain=${STOP_MS}&worker=${worker}`, undefined, STOP_MS + CALL_MS)));
     const failed = stops.filter((stop) => stop.status === 'rejected').length;
     if (failed > 0) runner.suspect = true;
-    this.#log('runner-recovered', null, { runner: runner.id, stopped: untracked.length - failed, failed });
+    if (suspected || orphans.length > 0) this.#log('runner-recovered', null, { runner: runner.id, stopped: orphans.length - failed, failed });
   }
 
   async #cursor(runner: Runner): Promise<void> {
