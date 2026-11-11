@@ -49,6 +49,10 @@ export class DockerInfra implements Infra {
     throw new NotOnThisPlane('scaling');
   }
 
+  removedBy(): null {
+    return null;
+  }
+
   async deletePod(): Promise<never> {
     throw new NotOnThisPlane('restarting a Pod');
   }

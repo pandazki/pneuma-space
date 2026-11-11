@@ -3,7 +3,7 @@ import type { Instances } from './instances.ts';
 import type { Series } from './metrics.ts';
 import {
   admits, Conflict, NotFound, QuotaExceeded, RUNTIMES,
-  type AppId, type Guard, type HealthCheck, type InstanceState, type Lease, type LeaseKind, type Quarantine,
+  type AppId, type Guard, type HealthCheck, type Home, type InstanceState, type Lease, type LeaseKind, type Quarantine,
   type Runtime, type RunSpec, type RuntimeKind, type StoreOps,
 } from './model.ts';
 
@@ -127,6 +127,20 @@ export class Runtimes implements Omit<Runtime, 'kind'> {
   /** What one runtime detects; empty for a kind with no registered implementation. */
   healthOf(kind: RuntimeKind): readonly HealthCheck[] {
     return this.#byKind.get(kind)?.health() ?? [];
+  }
+
+  /**
+   * Every app whose instance row names a home runner, read from the store, not the mirror (ADR 0032). The apps are read
+   * after the rows, so a row whose app is missing belongs to a purge whose row cleanup has not run yet.
+   */
+  async homes(): Promise<Home[]> {
+    const { store } = this.#instances;
+    const rows = await store.instances();
+    const names = new Map((await store.apps()).map((app) => [app.id, app.name]));
+    return rows.flatMap(({ app, home }) => {
+      const name = names.get(app);
+      return home !== null && name !== undefined ? [{ app: name, home }] : [];
+    });
   }
 
   #all(): Runtime[] {

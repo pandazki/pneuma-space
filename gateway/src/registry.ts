@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
-  CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_QUOTA, DEFAULT_TENANT, GLOBAL_ONLY_POLICY, InputError, NotFound, QUOTA_RESOURCES, QuotaExceeded, RUNTIMES,
+  CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_QUOTA, DEFAULT_TENANT, GLOBAL_ONLY_POLICY, InputError, NotFound, QUOTA_RESOURCES, QuotaExceeded, RUNTIMES, Stranded,
   admits, declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider, subject,
   type Access, type App, type AppDetail, type AppId, type AppName, type AppSummary, type Binding, type BindingState,
   type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type Change, type CapabilityProvider, type Guard, type Infra, type IssuedToken,
@@ -12,14 +12,15 @@ import {
 } from './model.ts';
 import { address, PATH_ADDRESSING, type Addressing } from './address.ts';
 import { emit, quotaRefused, type QuotaRefused } from './events.ts';
+import type { Runtimes } from './runtimes.ts';
 import { issueToken } from './identity.ts';
 import type { ServiceProbe } from './providers.ts';
 
 export type RegistryDeps = {
   readonly store: Store;
-  readonly runtime: Pick<Runtime, 'retire' | 'kill' | 'acquire' | 'release' | 'state' | 'since' | 'leases' | 'sleepsAt'>;
+  readonly runtime: Pick<Runtime, 'retire' | 'kill' | 'acquire' | 'release' | 'state' | 'since' | 'leases' | 'sleepsAt'> & Pick<Runtimes, 'homes'>;
   readonly guard: Pick<Guard, 'quarantine'>;
-  readonly infra: Pick<Infra, 'resolveImage'>;
+  readonly infra: Pick<Infra, 'resolveImage' | 'removedBy' | 'scale'>;
   readonly bundles: BundleStore;
   readonly providers: readonly CapabilityProvider[];
   /** Whether a runtime's service is present (ADR 0030); publish refuses a runtime whose service is not. Absent: no service is. */
@@ -524,6 +525,13 @@ export class PlatformRegistry implements Registry {
     }
     log('drain', null, { node, stopped: stopped.length, failed: failed.length });
     return { stopped, failed };
+  }
+
+  async scale(workload: string, replicas: number): Promise<void> {
+    const removed = this.#infra.removedBy(workload, replicas);
+    const stranded = removed ? (await this.#runtime.homes()).filter(({ home }) => removed(home)) : [];
+    if (stranded.length) throw new Stranded(workload, replicas, stranded);
+    await this.#infra.scale(workload, replicas);
   }
 
   /** The authentication path's User write: once per user per 5 min on this replica, at once when the name or groups change (ADR 0022 item 1). */

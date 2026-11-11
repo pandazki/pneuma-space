@@ -46,7 +46,7 @@ Remove `35-platform-store.yaml` from `kustomization.yaml` and set `PNEUMA_SPACE_
 
 ## Nodes
 
-Cordon a node for maintenance; do not drain it. `kubectl drain` refuses instance Pods because no controller owns them, and `--force` deletes them behind the platform. Instances on a cordoned node move when they next wake. When a node is lost, an instance Pod on it stays Terminating until you confirm the node is down by adding the taint `node.kubernetes.io/out-of-service=nodeshutdown:NoExecute`; the platform then force-deletes the Pod. Scale the runner StatefulSet up only: an isolate app whose home replica is removed stays unavailable.
+Cordon a node for maintenance; do not drain it. `kubectl drain` refuses instance Pods because no controller owns them, and `--force` deletes them behind the platform. Instances on a cordoned node move when they next wake. When a node is lost, an instance Pod on it stays Terminating until you confirm the node is down by adding the taint `node.kubernetes.io/out-of-service=nodeshutdown:NoExecute`; the platform then force-deletes the Pod. Scale the runner StatefulSet from the console or `PUT /api/cluster/workloads/pneuma-space-runner/scale`: an isolate app runs only on its home replica and keeps its files there, so the API refuses a count that would remove a replica any app is homed on, and names those apps; purge them first or keep the replicas ([ADR 0032](../../docs/adr/0032-runner-scale-down-keeps-homes.md)). `kubectl scale` bypasses that check, and an app whose home replica it removes answers 503 until you scale back up.
 
 ## Smoke RBAC
 

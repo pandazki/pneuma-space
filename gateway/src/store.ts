@@ -86,8 +86,8 @@ export const MIGRATIONS = [
   'DROP TABLE storage_usage',
   // ADR 0026 item 2: the cluster view marks the leading gateway from its heartbeat.
   'ALTER TABLE replica ADD COLUMN leads INTEGER NOT NULL DEFAULT 0',
-  // ADR 0028: purge asks whether another app's release references a bundle.
-  'CREATE INDEX release_bundle ON release (bundle)',
+  // ADR 0028: purge asks whether another app's release references a bundle. Repeatable: a gateway released before the constructor kept a newer version sets it back to before this step.
+  'CREATE INDEX IF NOT EXISTS release_bundle ON release (bundle)',
 ];
 
 /** `$n` placeholders become `?n`, which node:sqlite binds by position. */
@@ -167,7 +167,8 @@ export class SqliteStore implements Store {
     this.#db.exec('BEGIN IMMEDIATE');
     try {
       MIGRATIONS.slice(applied).forEach((step) => this.#db.exec(step));
-      this.#db.exec(`PRAGMA user_version = ${MIGRATIONS.length}`);
+      // An older gateway on a newer library applies nothing and keeps its version, as PgStore does, so the newer one never reruns a step.
+      if (applied < MIGRATIONS.length) this.#db.exec(`PRAGMA user_version = ${MIGRATIONS.length}`);
       this.#db.exec('COMMIT');
     } catch (error) {
       this.#db.exec('ROLLBACK');
