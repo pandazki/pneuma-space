@@ -19,7 +19,7 @@ import { Backoff, QUOTA_RETRY_SECONDS, Quarantined, Unavailable } from './runtim
 import { serveStatic, staticPath } from './static.ts';
 
 export type IngressDeps = {
-  readonly registry: Pick<Registry, 'view' | 'policy'>;
+  readonly registry: Pick<Registry, 'view' | 'nameOf' | 'policy'>;
   readonly runtime: Pick<Runtime, 'acquire' | 'release' | 'channel' | 'state'>;
   readonly identity: Pick<Identity, 'identify' | 'challenge' | 'serve'>;
   readonly authority: Pick<Authority, 'callerOf'>;
@@ -28,7 +28,7 @@ export type IngressDeps = {
   readonly upstream: Upstream | null;
   readonly bundles: Pick<BundleStore, 'open'>;
   readonly scheduler: Pick<Scheduler, 'invoke'>;
-  /** The stored last access per app, loaded at startup (INV-7); counts start at zero in every process. */
+  /** The stored last access per app, loaded at startup for apps the registry holds (INV-7); counts start at zero in every process. */
   readonly stats: readonly Stats[];
   readonly flushStats: (stats: Traffic[]) => Promise<void>;
   readonly deleteStats: (app: AppId) => Promise<void>;
@@ -151,10 +151,15 @@ export class Ingress {
   readonly server: http.Server;
   readonly #deps: IngressDeps;
   readonly #stats = new Map<AppId, Counter>();
+  /** Apps without a RouteView here whose rows the next flush deletes. */
+  readonly #gone = new Set<AppId>();
 
   constructor(deps: IngressDeps) {
     this.#deps = deps;
-    for (const { app, lastAccessAt } of deps.stats) this.#stats.set(app, { requests: 0, errors: 0, lastAccessAt });
+    for (const { app, lastAccessAt } of deps.stats) {
+      if (this.#held(app)) this.#stats.set(app, { requests: 0, errors: 0, lastAccessAt });
+      else this.#gone.add(app);
+    }
     this.server = http.createServer({ requestTimeout: 0 }, (req, res) => void this.#request(req, res))
       .on('upgrade', (req: IncomingMessage, socket: net.Socket, head: Buffer) => void this.#upgrade(req, socket, head));
   }
@@ -177,11 +182,26 @@ export class Ingress {
     return [...this.#stats].map(([app, counter]) => ({ app, ...counter }));
   }
 
-  flush(): Promise<void> {
+  /** Writes only apps this replica still holds a RouteView for; every replica drops a purged app's view, so none writes its row back. */
+  async flush(): Promise<void> {
+    for (const app of this.#stats.keys()) {
+      if (this.#held(app)) continue;
+      this.#stats.delete(app);
+      this.#gone.add(app);
+    }
+    for (const app of this.#gone) {
+      await this.#deps.deleteStats(app);
+      this.#gone.delete(app);
+    }
     return this.#deps.flushStats(this.snapshot());
   }
 
-  /** For a purged app: its counter and row go, so no later flush brings the row back. */
+  #held(app: AppId): boolean {
+    const name = this.#deps.registry.nameOf(app);
+    return name !== null && this.#deps.registry.view(name)?.app === app;
+  }
+
+  /** For a purged app: its counter and row go now rather than at the next flush. */
   forget(app: AppId): Promise<void> {
     this.#stats.delete(app);
     return this.#deps.deleteStats(app);

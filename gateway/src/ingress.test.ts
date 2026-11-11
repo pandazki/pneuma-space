@@ -87,7 +87,11 @@ before(async () => {
   await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
   upstreamPort = (upstream.address() as net.AddressInfo).port;
   ingress = new Ingress({
-    registry: { view: (name) => VIEWS.get(name) ?? null, policy: () => DEFAULT_POLICY },
+    registry: {
+      view: (name) => VIEWS.get(name) ?? null,
+      nameOf: (id) => [...VIEWS.values()].find((view) => view.app === id)?.name ?? null,
+      policy: () => DEFAULT_POLICY,
+    },
     runtime: {
       async acquire(app, kind) {
         events.push(`acquire ${kind}`);
