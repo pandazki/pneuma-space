@@ -12,7 +12,7 @@ import { hostLabel, type Addressing } from './address.ts';
 import { allows, type Authority } from './authz.ts';
 import { emit } from './events.ts';
 import { carriesJwt, type Answer, type Auth, type Failure, type Identity } from './identity.ts';
-import { connect, forward, tunnel, type Hold } from './proxy.ts';
+import { connect, forward, fromClient, tunnel, type Hold } from './proxy.ts';
 import type { Series } from './metrics.ts';
 import { requests, type RequestKind } from './requests.ts';
 import { Backoff, QUOTA_RETRY_SECONDS, Quarantined, Unavailable } from './runtimes.ts';
@@ -81,10 +81,10 @@ function withoutCookies(header: string, names: readonly string[]): string {
   return header.split(';').map((pair) => pair.trim()).filter((pair) => pair !== '' && !names.includes(pair.split('=')[0]!.trim())).join('; ');
 }
 
-/** Inbound headers minus every X-Pneuma-Space-*, X-Forwarded-Prefix and upstream credential, plus the ones the platform sets (INV-5). */
-function forwardedHeaders(req: IncomingMessage, view: RouteView, who: Principal | null, prefix: string, upstream: Upstream | null): string[] {
+/** The client's end-to-end headers minus every X-Pneuma-Space-*, X-Forwarded-Prefix and upstream credential, plus the ones the platform sets (INV-5). */
+function forwardedHeaders(req: IncomingMessage, view: RouteView, who: Principal | null, prefix: string, upstream: Upstream | null, upgrade: boolean): string[] {
   const out: string[] = [];
-  const raw = req.rawHeaders;
+  const raw = fromClient(req.rawHeaders, upgrade);
   for (let i = 0; i < raw.length; i += 2) {
     // CGI-style servers read X_Pneuma_Space_Subject as X-Pneuma-Space-Subject.
     const name = raw[i].toLowerCase().replaceAll('_', '-');
@@ -302,7 +302,7 @@ export class Ingress {
     trace.subject = who?.subject ?? null;
     if (view.runtime === null) return reply(404, 'no file at this path');
     const prefix = this.#deps.addressing.mode === 'path' ? `${APPS_PATH}/${view.name}` : '';
-    return { to: 'app', view, path: rest + search, headers: forwardedHeaders(req, view, who, prefix, this.#deps.upstream) };
+    return { to: 'app', view, path: rest + search, headers: forwardedHeaders(req, view, who, prefix, this.#deps.upstream, upgrade) };
   }
 
   /** Step 8: acquire and connect; a connect failure precedes the request line, so it is retried once with a fresh lease. */

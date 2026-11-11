@@ -17,6 +17,17 @@ const HOP_BY_HOP = new Set([
   'te', 'trailer', 'transfer-encoding', 'upgrade',
 ]);
 
+/**
+ * What a client's request passes on: its headers without hop-by-hop ones or those its Connection names. Ingress adds the platform's
+ * headers after this, so nothing a client sends can name them out of the request (INV-5). An upgrade keeps `Connection: Upgrade` and `Upgrade`.
+ */
+export function fromClient(raw: readonly string[], upgrade: boolean): string[] {
+  const out = endToEnd(raw);
+  if (!upgrade) return out;
+  const protocol = raw.findIndex((name, i) => i % 2 === 0 && name.toLowerCase() === 'upgrade');
+  return [...out, 'Connection', 'Upgrade', 'Upgrade', raw[protocol + 1]];
+}
+
 /** Raw header list (`[name, value, ...]`) without hop-by-hop headers or those named in Connection. */
 function endToEnd(raw: readonly string[]): string[] {
   const named = new Set<string>();
@@ -60,13 +71,13 @@ export function connect(address: string): Promise<net.Socket> {
   });
 }
 
-/** Path A. Streams both bodies with back-pressure; Node picks Content-Length or chunked framing on each leg. */
+/** Path A, with `headers` already end to end. Streams both bodies with back-pressure; Node picks Content-Length or chunked framing on each leg. */
 export function forward(
   req: http.IncomingMessage, res: http.ServerResponse, socket: net.Socket,
   path: string, headers: readonly string[], hold: Hold, failed: (reason: string) => void,
 ): void {
   let stream = false;
-  const up = http.request({ createConnection: () => socket, method: req.method, path, headers: endToEnd(headers) }, (ur) => {
+  const up = http.request({ createConnection: () => socket, method: req.method, path, headers: [...headers] }, (ur) => {
     if (res.destroyed) return void ur.resume();
     stream = String(ur.headers['content-type']).startsWith('text/event-stream');
     if (stream) {
@@ -137,8 +148,8 @@ class FrameCursor {
 }
 
 /**
- * Path B. Replays the upgrade request and relays raw bytes. An end is forwarded as a half-close; only an error destroys
- * the other side, because destroying on close drops bytes still buffered.
+ * Path B, with `headers` already end to end. Replays the upgrade request and relays raw bytes. An end is forwarded as a half-close;
+ * only an error destroys the other side, because destroying on close drops bytes still buffered.
  */
 export function tunnel(
   req: http.IncomingMessage, client: net.Socket, head: Buffer, up: net.Socket,
