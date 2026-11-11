@@ -8,7 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { EventLog, type Emit } from './events.ts';
 import { Instances } from './instances.ts';
 import { IsolateRuntime, StaticPool } from './isolate.ts';
-import { CURRENT, register, tempStore } from './lifecycle.fakes.ts';
+import { CURRENT, register, tempStore, withheld } from './lifecycle.fakes.ts';
 import {
   appName, DEFAULT_POLICY, DEFAULT_TENANT, newAppId, NotFound, type AppId, type BundleId, type Policy, type ReleaseNumber, type ReplicaId, type RunSpec, type StorageBinding,
   type Store,
@@ -411,6 +411,98 @@ test('two replicas recovering at once stop a stray worker once between them, fai
     [(await workers()).some((w) => w.worker === worker), failed, await answer(one.address), await answer(two.address)],
     [false, 0, `fixture-${x} 1`, `fixture-${y} 1`],
   );
+});
+
+/** Replica A wakes an app and dies; replica B, which never started or adopted the worker, then leads. */
+async function abandoned(t: TestContext) {
+  const fixed = await replicas(t, { idle_seconds: 600, restart_backoff_seconds: 0 });
+  const { store, publish, replica } = fixed;
+  const app = publish();
+  const a = replica('replica-a');
+  const lead = withheld(store);
+  const b = replica('replica-b', { store: lead.store });
+  await Promise.all([a.runtime.reconcile(), b.runtime.reconcile()]);
+  const lease = await a.runtime.acquire(app, 'request');
+  a.runtime.release(lease);
+  await until('replica b sees the instance awake', () => b.runtime.state(app) === 'awake');
+  await a.close();
+  // Past a poll interval, as a dead process polls no more.
+  await sleep(500);
+  lead.grant();
+  await b.instances.start();
+  await until('replica b leads', () => b.instances.leading);
+  return { ...fixed, app, lease, b };
+}
+
+const asleep = (store: Store, app: AppId) => async () => (await store.instance(app))?.state === 'asleep';
+
+test('a worker that exits after the replica that started it died goes asleep within a poll, with one failure and one crashed event (#9)', async (t) => {
+  const { store, app, lease, b } = await abandoned(t);
+  await fetch(`http://${lease.address}/exit`).catch(() => {});
+  await until('the row is asleep', asleep(store, app), 3000);
+  await sleep(500);
+  assert.deepEqual([(await store.guard(app))?.failures.length, b.events.filter((e) => e.ev === 'crashed').length], [1, 1]);
+});
+
+test('the next request after an abandoned worker exited wakes the app again (#9)', async (t) => {
+  const { store, app, lease, b } = await abandoned(t);
+  await fetch(`http://${lease.address}/exit`).catch(() => {});
+  await until('the row is asleep', asleep(store, app), 3000);
+  assert.equal(await answer((await b.runtime.acquire(app, 'request')).address), `fixture-${app} 1`);
+});
+
+test('a worker that exited while no replica followed it is found ended once a replica follows its row (#9)', async (t) => {
+  const { store, publish, replica } = await replicas(t, { idle_seconds: 600 });
+  const app = publish();
+  const a = replica('replica-a');
+  await a.runtime.reconcile();
+  const lease = await a.runtime.acquire(app, 'request');
+  a.runtime.release(lease);
+  await a.close();
+  await sleep(500);
+  await fetch(`http://${lease.address}/exit`).catch(() => {});
+  const b = replica('replica-b', { leader: false });
+  await b.runtime.reconcile();
+  await until('the row is asleep', asleep(store, app), 3000);
+  assert.deepEqual([(await store.guard(app))?.failures.length, b.events.find((e) => e.ev === 'crashed')?.reason], [1, 'worker exited with code 3']);
+});
+
+test('a worker that exited before a replica\'s cursor began is found ended through the runner\'s inventory (#9)', async (t) => {
+  const { store, publish, replica, runner } = await replicas(t, { idle_seconds: 600 });
+  const app = publish();
+  const a = replica('replica-a');
+  await a.runtime.reconcile();
+  const lease = await a.runtime.acquire(app, 'request');
+  a.runtime.release(lease);
+  await a.close();
+  await sleep(500);
+  await fetch(`http://${lease.address}/exit`).catch(() => {});
+  // The first poll fails, so the recovery that follows starts the cursor after the exit.
+  const proxy = await controlProxy(t, runner.url);
+  proxy.drop();
+  const b = replica('replica-b', { url: proxy.url, leader: false });
+  await b.runtime.reconcile();
+  await until('the row is asleep', asleep(store, app), 10_000);
+  assert.deepEqual([recovered(b.events).length, b.events.find((e) => e.ev === 'crashed')?.reason], [1, 'worker exited with code 3']);
+});
+
+test('a replica that takes the lead stops no worker a row names, whichever replica started it (#9)', async (t) => {
+  const { store, publish, replica, workers } = await replicas(t, { idle_seconds: 600 });
+  const [x, y] = [publish(), publish()];
+  const a = replica('replica-a');
+  const c = replica('replica-c', { leader: false });
+  const lead = withheld(store);
+  const b = replica('replica-b', { store: lead.store });
+  await Promise.all([a.runtime.reconcile(), b.runtime.reconcile(), c.runtime.reconcile()]);
+  const [one, two] = [await a.runtime.acquire(x, 'request'), await c.runtime.acquire(y, 'request')];
+  const before = (await workers()).map((w) => w.worker).sort();
+  await a.close();
+  lead.grant();
+  await b.instances.start();
+  await until('replica b leads', () => b.instances.leading);
+  // Longer than the leader's recovery period.
+  await sleep(6000);
+  assert.deepEqual([(await workers()).map((w) => w.worker).sort(), await answer(one.address), await answer(two.address)], [before, `fixture-${x} 1`, `fixture-${y} 1`]);
 });
 
 // A stopped compose service has no name on the platform network; `.invalid` never resolves (RFC 6761).

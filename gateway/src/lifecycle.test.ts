@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { registered, replica, tempStore, until } from './lifecycle.fakes.ts';
+import { registered, replica, tempStore, until, withheld } from './lifecycle.fakes.ts';
 import { Unavailable } from './runtimes.ts';
 import { changeKey, DEFAULT_QUOTA, DEFAULT_TENANT, QuotaExceeded, type AppId, type Instance, type ReleaseNumber, type ReplicaId, type Store } from './model.ts';
 
@@ -9,19 +9,6 @@ const instance = (app: AppId, state: Instance['state'], actor: string | null, ha
   app, runtime: 'container', release: 1 as ReleaseNumber, specHash: 'h', epoch, state, actor: actor as ReplicaId | null, handle,
   address: null, node: null, home: null, since: 0, awakeAt: null, cpuMillis: 0, memoryMb: 0,
 });
-
-/** Grants the lead only once `grant` is called. */
-function withheld(store: Store): { store: Store; grant: () => void } {
-  let granted = false;
-  const proxy = new Proxy(store, {
-    get(target, key, receiver) {
-      if (key === 'leader') return async () => (granted ? target.leader() : null);
-      const value = Reflect.get(target, key, receiver);
-      return typeof value === 'function' ? value.bind(target) : value;
-    },
-  });
-  return { store: proxy, grant: () => void (granted = true) };
-}
 
 const orphan = (app: AppId) => ({ app, handle: 'orphan', release: '1', spec: 'h', address: 'fake:9' });
 
