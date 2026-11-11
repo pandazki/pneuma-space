@@ -310,6 +310,18 @@ test('a first publish past the tenant\'s apps quota answers 409 with the quota f
   assert.deepEqual([refused.status, refused.body.quota], [409, { tenant: 'blue', resource: 'apps', used: 1, limit: 1, ask: 1 }]);
 });
 
+test('switching an app to SQLite past the tenant\'s storage_gb answers 409 with the quota field (#12)', async (t) => {
+  const { call, server } = await admin();
+  t.after(() => server.close());
+  await call('POST', '/api/tenants', { name: 'blue', admins: ['ann'] });
+  await call('PUT', '/api/tenants/blue/quota', { storage_gb: 0 });
+  await call('PUT', '/api/policy', { db_backend: 'postgres' });
+  await call('PUT', '/api/apps/one/release', { ...kvApp, manifest: { contract: 1, capabilities: { db: {} } }, tenant: 'blue' });
+  const refused = await call('PUT', '/api/apps/one/policy', { db_backend: 'sqlite' });
+  assert.deepEqual([refused.status, refused.body.quota], [409, { tenant: 'blue', resource: 'storage_gb', used: 0, limit: 0, ask: 1 }]);
+  assert.equal((await call('GET', '/api/tenants/blue/quota')).body.used.storage_gb, 0);
+});
+
 test('a per-app cpu_millis or memory_mb above the tenant\'s total answers 400', async (t) => {
   const { call, server } = await admin();
   t.after(() => server.close());

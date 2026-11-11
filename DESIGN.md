@@ -51,7 +51,7 @@ Provider 不知道应用用哪种运行时：`inject` 给出的存储绑定是�
 | `db` | resource | SQLite：卷 `pneuma-space-db-<id>`；PostgreSQL：库和角色 `app_<id>` | 建卷，或建角色和库、`REVOKE CONNECT FROM PUBLIC` | 连接 URL | `NOLOGIN`（`ensure` 恢复 `LOGIN`） | 删卷，或删库删角色 |
 | `kv` | resource | Redis ACL 用户 `app_<id>`，键和频道限 `<id>:*` | `ACL SETUSER` | 连接 URL，前缀 | ACL `off`（`ensure` 恢复 `on`） | `SCAN` + `UNLINK` 前缀，`ACL DELUSER` |
 | `object` | resource | bucket `app-<id>`，限该 bucket 的密钥对，`public/*` 匿名读策略，CORS | 建 bucket、策略、密钥 | 端点、bucket、密钥 | 撤销匿名读、禁用密钥（`ensure` 恢复） | 删对象、bucket、密钥 |
-| `static` | ingress | Ingress（Bundle 不是能力资源，是 Release 的制品，由 BundleStore 存取，purge 时删除） | | 无，网关直接服务 | | |
+| `static` | ingress | Ingress（Bundle 不是能力资源，是 Release 的制品，由 BundleStore 存取；purge 时删除没有别的应用的 Release 引用的，与提交引用它的 Release 按 bundle 互斥，ADR 0028） | | 无，网关直接服务 | | |
 | `ws` | ingress | Ingress | | | | |
 | `cron` | schedule | Scheduler（Trigger 行是 Release 的一部分，随它由 Registry 写） | | | | |
 | `identity` | ingress | IdentityProvider | | | | |
@@ -84,7 +84,7 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 | INV-9 | 每条 Binding 恰好属于一个 Provider 实现，每个 ingress 和 schedule kind 恰好有一个负责组件（1.3 节）；Registry 写 Binding 行，Provider 写资源，Runtime 应用 Injection（环境变量和挂载），Ingress 注入请求头，没有别的路径。 |
 | INV-10 | 对象字节在浏览器和对象服务之间移动，静态字节在对象存储和网关之间移动，两条路径都不经过 `acquire`。 |
 | INV-11 | 每个 App 在整个集群同一时刻至多一个 Instance，只靠实例行上带 `state` 和 `epoch` 的条件更新保证，领导者错位或两个副本同时自认领导都不产生第二个（ADR 0020）。新 Release 的实例在旧实例 `draining` 结束、旧容器或 Pod 消失后才创建，所以两个进程不会同时打开一个 `/data` 或 SQLite 文件。 |
-| INV-12 | 配额按租户，只在两处判定：发布时（首次插 App 行、将新建 Binding 行），唤醒的 CAS 事务里在租户行锁下。用量取自平台库的计数和已供应的卷容量，不存计数器（ADR 0023）。超额是带原因的拒绝，不是失败，Guard 不计数。 |
+| INV-12 | 配额按租户，只在两处判定，都在租户行锁下：插 App 行或 files、SQLite 的 Binding 行的事务里（发布和 `db_backend` 变更，判定和插行同一事务，Binding 行先于 `ensure`，ADR 0028），唤醒的 CAS 事务里。用量取自平台库的计数和已供应的卷容量，不存计数器（ADR 0023）。超额是带原因的拒绝，不是失败，Guard 不计数。 |
 
 ## 2 架构
 
@@ -94,7 +94,7 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 
 | 组件 | 拥有 | 从不做 |
 | --- | --- | --- |
-| Registry | 平台库里 App、Release、Binding、Policy、Trigger、Token、Tenant、User、Membership 的行；每 App 的只读 RouteView，在任何改变该 App 行的命令后重建，其他副本经变更通知重建；publish、remove、purge、policy、owner、access、tenant、token、member、quota 命令，同一应用名的命令经 `Store.exclusive` 互斥 | 直接调 Docker 或 K8s（镜像引用的解析走 `Infra.resolveImage`）；连应用 |
+| Registry | 平台库里 App、Release、Binding、Policy、Trigger、Token、Tenant、User、Membership 的行；每 App 的只读 RouteView，在任何改变该 App 行的命令后重建，其他副本经变更通知重建；publish、remove、purge、policy、owner、access、tenant、token、member、quota 命令，同一应用名的命令经 `Store.exclusive` 互斥，同一 bundle 的提交和删除经 `Store.exclusiveBundle` 互斥 | 直接调 Docker 或 K8s（镜像引用的解析走 `Infra.resolveImage`）；连应用 |
 | Ingress | 8080 请求路径：取应用名、访问范围检查、身份头、静态服务、流式和 WebSocket 转发、通过 `acquire` 取得 request 和 channel Lease、Stats | 写平台库（只读 RouteView，只写 Stats） |
 | Runtime | Instance 行、本副本的 Lease、三张表的镜像、reaper；`Runtimes` 门面按 RunSpec 分发到 `RUNTIMES` 表里的实现：`container`（Docker 容器或 Pod）和 `isolate`（runner 服务，`--profile isolate` 或 StatefulSet）（ADR 0017、0019） | 读 Manifest（只接收 Injection 集合）；计失败或隔离（那是 Guard 的事） |
 | Guard | 订阅生命周期事件，按 Policy 计失败、退避和隔离，状态在 `guard` 行，acquire 前被问；一处实现覆盖所有运行时和副本 | 探活（那是各运行时的事） |
@@ -102,7 +102,7 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 | Scheduler | 读 Trigger，写 Delivery（包括 Ingress 转来的按需 `invoke`），cron 计算，投递 worker；集群上只在领导者跑 | 除 `acquire` 和应用触发端点外的一切 |
 | Providers | 每种资源 kind 一个；`ensure`、`inject`、`suspend`、`destroy`；BundleStore；IdentityProvider（`local` 或 `upstream`） | 互相调用；写平台库 |
 | 认证与授权 | `jwt.ts` 验上游 JWT（只用 `node:crypto` 和 `fetch`，ADR 0021）；每请求至多认证一次，得到 `Caller`；`authz.ts` 的 `ACTIONS` 表和纯函数 `can(caller, action, tenant)` 是管理 API 唯一的授权判定；成员和令牌缓存，按 `tenant/<name>` 通知失效（ADR 0022） | 写库（User 行经 `registry.sighted()` 由 Registry 写） |
-| Store | `SqliteStore` 或 `PgStore`（`pg.ts`），DML 只写一次，在 `sql.ts`；`transaction`（PostgreSQL 上 `SERIALIZABLE`，冲突重跑）、`exclusive`（按应用名互斥）、行触发器在提交时向通道 `pneuma_space` 发变更通知（ADR 0025） | 业务判断；每张表的写者仍是 1.2 节那一列 |
+| Store | `SqliteStore` 或 `PgStore`（`pg.ts`），DML 只写一次，在 `sql.ts`；`transaction`（PostgreSQL 上 `SERIALIZABLE`，冲突重跑）、`exclusive`（按应用名互斥）、`exclusiveBundle`（按 bundle 互斥，在命令里先应用名后 bundle）、行触发器在提交时向通道 `pneuma_space` 发变更通知（ADR 0025） | 业务判断；每张表的写者仍是 1.2 节那一列 |
 | Metrics | 1.2 节的 Usage、Event 和 Metrics 行。订阅生命周期事件流（每行 JSON 日志同时发给订阅者），批量写 `events`；每 10 s 写本副本的 `usage` 行并读回总览的序列，采样 Runtime 的实例和 Lease 计数、Delivery 的状态计数、宿主机和平台服务可达性；`GET /api/metrics` 返回一份内存快照，每 App 的 Lease 计数、进入状态的时间和休眠时刻随列表返回（ADR 0015）；`GET /api/requests` 由接到请求的副本扇出到 `PNEUMA_SPACE_PEERS` 并归并，记录由 Ingress 和 Scheduler 写入内存环（ADR 0016）；`GET /api/nodes` 有人请求才采样；`/metrics` 在单独端口（ADR 0024） | 写这三张表之外的表；在请求路径上调 Docker、K8s 或网络（探测只在采样器里） |
 | Console 和 CLI | 8081 管理边界；页面是总览（US-P-13 列的指标）、实时（ADR 0016）、拓扑（ADR 0018）和项目（US-P-6 列的字段，项目详情含 Release 列表、Delivery 列表和容器日志），`upstream` 模式另有团队页和租户切换器（ADR 0022 第 8 条），中英双语，明暗主题，单文件 HTML 内联 CSS、JS 和 SVG 图表，不加载外部资源；发布表单收镜像引用、manifest、可选 bundle 和首次发布时的 owner，引用由网关解析为镜像 id 或 digest；`appctl publish` 用 `--owner`（默认取环境变量 `PNEUMA_SPACE_OWNER`）；全局 Policy 和 owner 变更只有 `appctl`，`upstream` 模式的令牌只在团队页签发；`appctl` 先读 `pneuma-space.json`，需要容器时才 `docker build`（K8s 平面再 `docker push` 到 `PNEUMA_SPACE_REGISTRY`），有 `static` 时打包目录，再以 `PNEUMA_SPACE_TOKEN` 作 Bearer 调管理接口；管理接口的分发器按 `ACTIONS` 授权，按路由声明的 `audit` 在处理结束后写审计行（ADR 0024 第 6 条） | 任何业务逻辑；它们是薄壳 |
 
@@ -155,7 +155,7 @@ K8s 平面：命名空间 `pneuma-space` 放网关、runner 和集群内的平�
 
 休眠（reaper 每 `min(idle_seconds, 10)` s，只遍历 awake 集合）：锁内 Lease 为空且闲置到期则置 `stopping`；锁外 `docker stop`，容器保留供下次 `docker start`；锁内置 `asleep` 并通知。
 
-退役（Registry 在发布、改变 Injection 的 policy 变更、remove 之后调用）：`awake` 时置 `draining`，调用每个 `channel` 的 `on_retire`（WebSocket 发 close 1001，SSE 直接关闭连接），等待 Lease 清空至多 `drain_timeout_seconds`，`docker stop` 并 `docker rm`；`asleep` 时直接 `docker rm`。下一次 `acquire` 为当前 Release 建新容器。`purge` 先退役，再销毁每条 Binding 的资源和该 App 的 bundle，所以卷不会被容器占用。
+退役（Registry 在发布、改变 Injection 的 policy 变更、remove 之后调用）：`awake` 时置 `draining`，调用每个 `channel` 的 `on_retire`（WebSocket 发 close 1001，SSE 直接关闭连接），等待 Lease 清空至多 `drain_timeout_seconds`，`docker stop` 并 `docker rm`；`asleep` 时直接 `docker rm`。下一次 `acquire` 为当前 Release 建新容器。`purge` 先退役，再销毁每条 Binding 的资源和只有该 App 引用的 bundle，所以卷不会被容器占用。
 
 重启：开平台库，加载实例行的镜像；领导者把 `replica` 已死的 `delivering` 回 `due`。先核对实例，再续跑 `purging`（续跑要退役该 App 可能还活着的实例，所以核对在前）。领导者按标签 `pneuma-space.role=instance` 列出容器或 Pod，与实例行比对：没有对应行、或行的 `release`、`spec_hash`、`epoch` 与标签不符的删掉；行是 `awake` 而容器或 Pod 不在的，CAS 回 `asleep` 并发 `crashed`；其余保持行的状态（ADR 0019 第 5 条，ADR 0020）。每个副本订阅自己平面的结束事件（Docker `die`、Pod watch、runner 查询），观察到结束就做 CAS，赢家发事件。Provider 在后台对每条 Binding 按其 `state` 重跑 `ensure` 或 `suspend`，收敛后端可能丢失或与行不一致的状态（例如重建的 Redis 容器，或 ensure 和提交之间的崩溃）。
 
@@ -168,9 +168,11 @@ appctl publish <name> <dir | image>          Registry.publish
  ├─ 读 pneuma-space.json                       ├─ 解析 manifest，错误 400；Infra.resolveImage 把引用解析为 id 或 digest，不存在 404
  ├─ 需要容器时 docker build                    ├─ 声明的 kind 没有可用 Provider（profile 未开）409
  ├─ K8s 平面再 docker push                     ├─ registered 且 release_key 等于当前，返回当前；removed 时继续，不插新 Release
- ├─ 打包静态目录，POST /api/bundles            ├─ 首次发布：先插 App 行（id、owner、tenant，current 为空，地址 404），资源才有归属；同一事务判 apps 配额
-                                               ├─ 将新建 Binding 行时判 storage_gb 配额；配额超额 409（INV-12）
+ ├─ 打包静态目录，POST /api/bundles            ├─ 有 files 或 SQLite 的 Binding 行而运行时与上一个有运行时的 Release 不同 409（ADR 0028）
+                                               ├─ 一个事务，租户行锁下：首次发布插 App 行（id、owner、tenant，current 为空，地址 404），
+                                               │   资源才有归属，判 apps；缺的 files、SQLite Binding 行判 storage_gb 后插成 suspended；超额 409（INV-12）
  └─ PUT /api/apps/<name>/release               ├─ 对每个声明的资源 kind：provider.ensure（创建或收敛，置 active）
+                                               ├─ 有 bundle 时进它的 exclusiveBundle：从对象存储重读索引，已删 409；下一步的事务也在其中（ADR 0028）
                                                ├─ 一个事务：插 Release，重写 Trigger，Binding 行置 active 或 suspended，
                                                │   设 current 和 registered；首次发布时 owner 取自请求，缺省为调用主体
                                                ├─ 对刚置 suspended 的 Binding：provider.suspend（后端向行收敛，重启会重做）
@@ -178,7 +180,7 @@ appctl publish <name> <dir | image>          Registry.publish
                                                └─ 发 AppChanged：Runtime.retire，Scheduler.reload
 ```
 
-先 ensure 再提交。资源属于 App 而不是 Release，`ensure` 可重复，所以 ensure 和提交之间崩溃留下的资源会被下一次发布采纳，不需要 `pending` 状态和启动时的全量核对。首次发布后的 `owner` 字段被忽略，owner 只能用 owner 命令改。首次发布的租户：令牌取 `token.tenant`，浏览器取请求体 `tenant`，调用者只在一个租户时可省略；之后只有平台管理员能移动（ADR 0022 第 3 条）。提交之后崩溃，重启时 `AppChanged` 的效果由 Runtime 重启核对和 Scheduler 重载重新得到。
+先 ensure 再提交。资源属于 App 而不是 Release，`ensure` 可重复，所以 ensure 和提交之间崩溃留下的资源会被下一次发布采纳，不需要 `pending` 状态。files 和 SQLite 的 Binding 行先于 `ensure` 插入：准入之后崩溃或 `ensure` 失败，留下一条计入 `storage_gb`、后端还没有资源的 `suspended` 行，下一次发布不再申请配额，`ensure` 采纳它；启动收敛按期望状态处理它，purge 照常销毁（ADR 0028）。首次发布后的 `owner` 字段被忽略，owner 只能用 owner 命令改。首次发布的租户：令牌取 `token.tenant`，浏览器取请求体 `tenant`，调用者只在一个租户时可省略；之后只有平台管理员能移动（ADR 0022 第 3 条）。提交之后崩溃，重启时 `AppChanged` 的效果由 Runtime 重启核对和 Scheduler 重载重新得到。
 
 ### 2.5 五个决定
 

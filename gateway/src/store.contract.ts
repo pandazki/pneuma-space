@@ -5,7 +5,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { after, before, describe, test } from 'node:test';
 import {
   DEFAULT_POLICY, DEFAULT_QUOTA, DEFAULT_TENANT, IDEMPOTENCY_WINDOW_MS, USAGE_COUNTERS, changeKey,
-  type App, type AppId, type AppName, type Binding, type Delivery, type DeliveryId, type ImageId, type Instance, type ReleaseNumber, type ReplicaId, type Store,
+  type App, type AppId, type AppName, type Binding, type BundleId, type Delivery, type DeliveryId, type ImageId, type Instance, type ReleaseNumber, type ReplicaId, type Store,
   type Subject, type TenantName, type TriggerName, type Usage,
 } from './model.ts';
 
@@ -90,6 +90,37 @@ export function storeContract(name: string, open: OpenStore): void {
       finish();
       await Promise.all([first, second]);
       assert.deepEqual(order, ['x1 start', 'y', 'x1 end', 'x2']);
+    });
+
+    test('exclusiveBundle inside commands on two names runs work on one bundle one at a time and on another bundle meanwhile', async () => {
+      const order: string[] = [];
+      let started!: () => void;
+      let finish!: () => void;
+      const running = new Promise<void>((resolve) => (started = resolve));
+      const gate = new Promise<void>((resolve) => (finish = resolve));
+      const first = store.exclusive('p' as AppName, () => store.exclusiveBundle('b1' as BundleId, async () => {
+        order.push('p start');
+        started();
+        await gate;
+        order.push('p end');
+      }));
+      await running;
+      const second = store.exclusive('q' as AppName, () => store.exclusiveBundle('b1' as BundleId, async () => order.push('q')));
+      await store.exclusive('r' as AppName, () => store.exclusiveBundle('b2' as BundleId, async () => order.push('r')));
+      finish();
+      await Promise.all([first, second]);
+      assert.deepEqual(order, ['p start', 'r', 'p end', 'q']);
+    });
+
+    test('bundleReferenced answers for releases of apps other than the one named', async () => {
+      const release = (name: string, bundle: string) => store.putRelease({
+        app: appId(name), number: 1 as ReleaseNumber, image: null, manifest: { contract: 1, capabilities: {} }, bundle: bundle as BundleId, runtime: null, releaseKey: bundle, publishedAt: 0,
+      });
+      await release('ref-own', 'only-own');
+      await release('ref-own-2', 'shared');
+      await release('ref-other', 'shared');
+      const asked = [['only-own', 'ref-own'], ['shared', 'ref-own-2'], ['absent', 'ref-own']] as const;
+      assert.deepEqual(await Promise.all(asked.map(([bundle, app]) => store.bundleReferenced(bundle as BundleId, appId(app)))), [false, true, false]);
     });
 
     test('a transaction announces each key it wrote once, after commit, and nothing when it rolls back', async () => {

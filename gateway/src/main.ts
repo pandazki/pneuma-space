@@ -109,7 +109,7 @@ const { infra, container, pool } = setup.pods
       pool: new StaticPool(`http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`),
     };
   })();
-const bundles = new S3BundleStore(config.object);
+const bundles = new S3BundleStore(config.object, (id, write) => store.exclusiveBundle(id, write));
 const isolate = new IsolateRuntime({
   pool, bundleUrl: (id) => bundles.presignTar(id), specFor,
   hasRun: async (app) => (await store.releases(app)).some((release) => release.runtime === 'isolate'), instances, guard,

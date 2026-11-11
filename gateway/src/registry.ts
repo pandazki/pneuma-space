@@ -164,9 +164,23 @@ export class PlatformRegistry implements Registry {
     for (const { app, release } of pairs) this.#apply(app.name, { app, release, bindings: byApp.get(app.id) ?? [] });
   }
 
+  /** A bundle an interrupted purge already deleted leaves its app without static files instead of failing the load. */
   async #index(release: Release | null): Promise<void> {
     const bundle = release?.bundle;
-    if (bundle && !this.#indexes.has(bundle)) this.#indexes.set(bundle, await this.#bundles.index(bundle));
+    if (!bundle || this.#indexes.has(bundle)) return;
+    const index = await this.#bundles.index(bundle).catch((error: unknown) => (error instanceof NotFound ? null : Promise.reject(error)));
+    if (index) this.#indexes.set(bundle, index);
+  }
+
+  /** Inside the bundle's exclusion, so no purge deletes it between this read and the commit; another replica's purge may have before (ADR 0028). */
+  async #reindex(bundle: BundleId): Promise<void> {
+    try {
+      this.#indexes.set(bundle, await this.#bundles.index(bundle));
+    } catch (error) {
+      if (!(error instanceof NotFound)) throw error;
+      this.#indexes.delete(bundle);
+      throw new Conflict(`bundle ${bundle} was deleted while this publish ran, by the purge of the last app that used it; upload it again and publish again`);
+    }
   }
 
   /** Fetches the current release's bundle index if this replica has not seen it, then refreshes. */
@@ -205,6 +219,7 @@ export class PlatformRegistry implements Registry {
     if (app?.status === 'purging') throw new Conflict(`app "${name}" is being purged; publish again once purge finishes`);
     const current = app && (await currentRelease(this.#store, app));
     if (app?.status === 'registered' && current?.releaseKey === key) return current;
+    if (app && runtime !== null) await this.#keepsRuntime(app, runtime);
     const service = runtime === null ? null : RUNTIMES[runtime].service;
     if (runtime !== null && service !== null && !(await this.#probe(service))) {
       throw new Conflict(`runtime "${runtime}" needs the ${service} service; start the platform with --profile ${RUNTIMES[runtime].profile}`);
@@ -213,31 +228,26 @@ export class PlatformRegistry implements Registry {
     const override: PolicyOverride = app?.policyOverride ?? {};
     const pinned = kinds.includes('db') && override.db_backend === undefined ? { ...override, db_backend: this.#policy.db_backend } : override;
     const policy = effectivePolicy(this.#policy, pinned);
-    const resourceKinds = kinds.filter(isResourceKind);
-    const providers = resourceKinds.map((kind) => this.#provider(selectProvider(kind, policy)));
-    const bound = app ? await this.#store.bindings(app.id) : [];
-    const volumes = providers.filter((p) => PROVISIONED.has(p.name) && !bound.some((b) => b.kind === p.kind && b.provider === p.name)).length;
-    const storage = volumes > 0 ? { storage_gb: volumes * this.#volumeGb } : {};
+    const providers = kinds.filter(isResourceKind).map((kind) => this.#provider(selectProvider(kind, policy)));
 
     if (!app) {
       if (owner === null) throw new InputError(`owner is required on the first publish of "${name}"; pass user:<name> or service:<name>`);
       const created: App = { name, id: newAppId(), tenant, access: 'org', owner, status: 'registered', current: null, policyOverride: pinned, registeredAt: Date.now() };
-      await this.#store.transaction(async (tx) => {
-        await this.#admit(tx, tenant, { apps: 1, ...storage });
-        await tx.putApp(created);
-      });
+      await this.#store.transaction((tx) => this.#reserve(tx, created, providers, true));
       app = created;
       await this.#refresh(name);
       log('app-created', name, { id: app.id });
     } else {
-      const { tenant: own } = app;
-      if (volumes > 0) await this.#store.transaction((tx) => this.#admit(tx, own, storage));
-      if (pinned !== override) await this.#updateApp(name, (fresh) => ({ ...fresh, policyOverride: pinned }));
+      await this.#store.transaction(async (tx) => {
+        const fresh = (await tx.app(name))!;
+        if (pinned !== override) await tx.putApp({ ...fresh, policyOverride: pinned });
+        await this.#reserve(tx, fresh, providers);
+      });
     }
 
     for (const provider of providers) await this.#ensure(app.id, provider);
 
-    const { next, release, suspended } = await this.#store.transaction(async (tx) => {
+    const commit = () => this.#store.transaction(async (tx) => {
       const fresh = (await tx.app(name))!;
       const reused = current?.releaseKey === key ? current : null;
       const release: Release = reused ?? {
@@ -252,9 +262,22 @@ export class PlatformRegistry implements Registry {
       await tx.putApp(next);
       return { next, release, suspended: await this.#settle(tx, next, manifest) };
     });
+    const { next, release, suspended } = bundle === null
+      ? await commit()
+      : await this.#store.exclusiveBundle(bundle, async () => (await this.#reindex(bundle), commit()));
     await this.#settled(next, suspended);
     log('publish', name, { release: release.number });
     return release;
+  }
+
+  /** A files or SQLite binding's data lies where the runtime that wrote it put it, out of the other runtime's reach (ADR 0028). */
+  async #keepsRuntime(app: App, runtime: RuntimeKind): Promise<void> {
+    const held = (await this.#store.releases(app.id)).findLast((r) => r.runtime !== null)?.runtime;
+    if (!held || held === runtime || !(await this.#store.bindings(app.id)).some((b) => PROVISIONED.has(b.provider))) return;
+    throw new Conflict(
+      `app "${app.name}" keeps its files or SQLite data where runtime "${held}" put them, which runtime "${runtime}" cannot read; ` +
+        `publish under a new name, or remove and purge "${app.name}" first`,
+    );
   }
 
   remove(name: AppName): Promise<void> {
@@ -291,13 +314,13 @@ export class PlatformRegistry implements Registry {
       await this.#provider(binding.provider).destroy(app.id, binding.resource);
       log('destroy', app.name, { kind: binding.kind, provider: binding.provider });
     }
-    const bundlesOf = async (id: AppId) => (await this.#store.releases(id)).flatMap((r) => (r.bundle ? [r.bundle] : []));
-    const others = (await this.#store.apps()).filter((a) => a.id !== app.id);
-    const elsewhere = new Set((await Promise.all(others.map((a) => bundlesOf(a.id)))).flat());
-    for (const bundle of new Set(await bundlesOf(app.id))) {
-      if (elsewhere.has(bundle)) continue;
-      await this.#bundles.delete(bundle);
-      this.#indexes.delete(bundle);
+    for (const bundle of new Set((await this.#store.releases(app.id)).flatMap((r) => (r.bundle ? [r.bundle] : [])))) {
+      const deleted = await this.#store.exclusiveBundle(bundle, async () => {
+        if (await this.#store.bundleReferenced(bundle, app.id)) return false;
+        await this.#bundles.delete(bundle);
+        return true;
+      });
+      if (deleted) this.#indexes.delete(bundle);
     }
     await this.#store.deleteApp(app.id);
     this.#forget(app.name);
@@ -354,7 +377,11 @@ export class PlatformRegistry implements Registry {
       const before = selectProvider('db', effectivePolicy(this.#policy, app.policyOverride));
       const after = selectProvider('db', effectivePolicy(this.#policy, override));
       const switching = app.status === 'registered' && manifest?.capabilities.db !== undefined && before !== after;
-      if (switching) await this.#ensure(app.id, this.#provider(after));
+      if (switching) {
+        const provider = this.#provider(after);
+        await this.#store.transaction((tx) => this.#reserve(tx, app, [provider]));
+        await this.#ensure(app.id, provider);
+      }
       const { next, suspended } = await this.#store.transaction(async (tx) => {
         const next: App = { ...(await tx.app(name))!, policyOverride: override };
         await tx.putApp(next);
@@ -363,6 +390,9 @@ export class PlatformRegistry implements Registry {
       await this.#settled(next, suspended, switching);
       log('app-policy', name, { override });
       return override as PolicyOverride;
+    }).catch((error: unknown) => {
+      if (error instanceof QuotaExceeded) this.#quotaRefused(error, name, 'policy');
+      throw error;
     });
   }
 
@@ -718,7 +748,21 @@ export class PlatformRegistry implements Registry {
     };
   }
 
-  /** Under the tenant's row lock, so concurrent publishes into one tenant are counted one after another (ADR 0023 item 3). */
+  /**
+   * The one way an App row or a files or SQLite Binding row comes to exist (ADR 0028): admitted under the tenant's row lock and inserted in the
+   * same transaction, the binding suspended until `ensure` provisions it, so storage_gb counts it before any backend resource exists.
+   */
+  async #reserve(tx: StoreOps, app: App, providers: readonly CapabilityProvider[], first = false): Promise<void> {
+    const bound = first ? [] : await tx.bindings(app.id);
+    const missing = providers.filter((p) => PROVISIONED.has(p.name) && !bound.some((b) => b.kind === p.kind && b.provider === p.name));
+    if (first || missing.length > 0) {
+      await this.#admit(tx, app.tenant, { ...(first && { apps: 1 }), ...(missing.length > 0 && { storage_gb: missing.length * this.#volumeGb }) });
+    }
+    if (first) await tx.putApp(app);
+    for (const p of missing) await tx.putBinding({ app: app.id, kind: p.kind, provider: p.name, state: 'suspended', resource: {} });
+  }
+
+  /** Under the tenant's row lock, so concurrent admissions into one tenant are counted one after another (ADR 0023 item 3). */
   async #admit(tx: StoreOps, name: TenantName, ask: Partial<QuotaUsage>): Promise<void> {
     const tenant = await this.#mustTenant(tx, name, 'update');
     const refusal = admits(tenant.quota, await tx.quotaUsed(name), ask);

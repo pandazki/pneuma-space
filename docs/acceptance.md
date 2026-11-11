@@ -26,6 +26,7 @@ One check per M1 story in `docs/user-stories.md`, plus the numeric thresholds; t
 | AC-ISO-4 | A file under `PNEUMA_SPACE_FILES_DIR` and a row in the SQLite database of an isolate app survive sleep, a new release and `docker compose restart runner`; purge deletes them. |
 | AC-ISO-5 | Publishing an isolate app while the runner is not running is refused with 409; the overview's service strip shows the runner off. |
 | AC-ISO-6 | Five apps across the container, isolate and static kinds answer at the same time; the listing names each app's runtime. |
+| AC-ISO-7 | A container app with `files` writes a file; publishing the same name as an isolate app with `files` answers 409 naming both runtimes; the container release still serves the file with the same bytes. |
 | AC-FORM-1 | The same app image serves correct results with `db_backend=sqlite` and, after switching and republishing, with `db_backend=postgres`, with no code change. |
 | AC-FORM-2 | A request with a forged `X-Pneuma-Space-Subject` header reaches the app without it. A logged-in browser's request reaches the app with the platform-set subject. |
 | AC-FORM-3 | `X-Pneuma-Space-Owner: 1` is present only for the owner's subject. |

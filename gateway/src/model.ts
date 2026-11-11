@@ -818,6 +818,8 @@ export interface StoreOps {
   release(app: AppId, number: ReleaseNumber): Promise<Release | null>;
   releases(app: AppId): Promise<Release[]>;
   putRelease(release: Release): Promise<void>;
+  /** Whether a release of an app other than `except` references the bundle; one read on the release bundle index (ADR 0028). */
+  bundleReferenced(bundle: BundleId, except: AppId): Promise<boolean>;
 
   triggers(): Promise<Trigger[]>;
   replaceTriggers(app: AppId, triggers: readonly Trigger[]): Promise<void>;
@@ -921,6 +923,8 @@ export interface Store extends StoreOps {
   transaction<T>(fn: (tx: StoreOps) => Promise<T>): Promise<T>;
   /** Runs commands on one name one at a time, across replicas; `fn` may await anything. */
   exclusive<T>(name: AppName, fn: () => Promise<T>): Promise<T>;
+  /** Runs work on one bundle one at a time, across replicas; a command takes it after its name and holds one bundle at a time (ADR 0028). */
+  exclusiveBundle<T>(bundle: BundleId, fn: () => Promise<T>): Promise<T>;
   /** Called once per changed key after each commit, on every replica. */
   onChange(listener: (change: Change) => void): void;
   /** Called when changes may have been missed; listeners re-read everything. */

@@ -2,7 +2,7 @@
 
 import {
   DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS, USAGE_COUNTERS,
-  type App, type AppId, type AppName, type AuditFilter, type AuditRecord, type Binding, type Change, type Delivery, type DeliveryFilter,
+  type App, type AppId, type AppName, type AuditFilter, type AuditRecord, type Binding, type BundleId, type Change, type Delivery, type DeliveryFilter,
   type DeliveryId, type DeliveryState, type EventFilter, type EventRecord, type GuardRecord, type Instance, type InstanceLog, type LeaseTally, type Membership,
   type Policy, type QuotaUsage, type Release, type ReleaseNumber, type Replica, type ReplicaId, type RowLock, type Stats,
   type StoreOps, type Tenant, type TenantName, type Token, type Trigger, type TriggerName, type Usage, type UsageBucket, type UsageFilter,
@@ -59,6 +59,8 @@ const toRelease = (r: Row): Release => ({
 });
 
 const RELEASE_COLUMNS = ['number', 'image', 'manifest', 'bundle', 'runtime', 'release_key', 'published_at'] as const;
+/** Searches the `release_bundle` index on both engines. */
+export const BUNDLE_REFERENCED = 'SELECT 1 FROM release WHERE bundle = $1 AND app <> $2 LIMIT 1';
 
 const toBinding = (r: Row): Binding => ({
   app: r.app as AppId,
@@ -243,6 +245,10 @@ export class SqlOps implements StoreOps {
       [r.app, r.number, r.image, JSON.stringify(r.manifest), r.bundle, r.runtime, r.releaseKey, r.publishedAt],
     );
     await this.#touchApp(r.app);
+  }
+
+  async bundleReferenced(bundle: BundleId, except: AppId) {
+    return (await this.#s.all(BUNDLE_REFERENCED, [bundle, except])).length > 0;
   }
 
   async triggers() {
