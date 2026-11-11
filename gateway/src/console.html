@@ -3524,7 +3524,7 @@ async function projects() {
     const needle = appsFilter.text.trim().toLowerCase();
     const tenants = grouped() ? [...Map.groupBy(apps, (a) => a.tenant)].sort(([a], [b]) => a.localeCompare(b)) : [];
     // The tenant filter applies only while its chips are on screen to show and clear it.
-    const tenant = tenants.length > 1 ? appsFilter.tenant : '';
+    const tenant = tenants.length > 1 && tenants.some(([name]) => name === appsFilter.tenant) ? appsFilter.tenant : '';
     const inTenant = apps.filter((a) => !tenant || a.tenant === tenant);
     const byBucket = Map.groupBy(inTenant, appBucket);
     const fchip = (field, value, label, n, dot = null) => h('button', {

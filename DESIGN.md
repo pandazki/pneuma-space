@@ -94,11 +94,11 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 
 | 组件 | 拥有 | 从不做 |
 | --- | --- | --- |
-| Registry | 平台库里 App、Release、Binding、Policy、Trigger、Token、Tenant、User、Membership 的行；每 App 的只读 RouteView，在任何改变该 App 行的命令后重建，其他副本经变更通知重建；publish、remove、purge、policy、owner、access、tenant、token、member、quota 命令，同一应用名的命令经 `Store.exclusive` 互斥，同一 bundle 的提交和删除经 `Store.exclusiveBundle` 互斥 | 直接调 Docker 或 K8s（镜像引用的解析走 `Infra.resolveImage`）；连应用 |
+| Registry | 平台库里 App、Release、Binding、Policy、Trigger、Token、Tenant、User、Membership 的行；每 App 的只读 RouteView，在任何改变该 App 行的命令后重建，其他副本经变更通知重建；publish、remove、purge、policy、owner、access、tenant、token、member、quota 命令，同一应用名的命令经 `Store.exclusive` 互斥，同一 bundle 的提交和删除经 `Store.exclusiveBundle` 互斥；工作负载的 scale 命令，先问 Runtime 的 home 和 Infra 的将删副本再转交 `Infra.scale`（ADR 0032） | 直接调 Docker 或 K8s（镜像引用的解析走 `Infra.resolveImage`）；连应用 |
 | Ingress | 8080 请求路径：取应用名、访问范围检查、身份头、静态服务、流式和 WebSocket 转发、通过 `acquire` 取得 request 和 channel Lease、Stats | 写平台库（只读 RouteView，只写 Stats） |
 | Runtime | Instance 行、本副本的 Lease、三张表的镜像、reaper；`Runtimes` 门面按 RunSpec 分发到 `RUNTIMES` 表里的实现：`container`（Docker 容器或 Pod）和 `isolate`（runner 服务，`--profile isolate` 或 StatefulSet）（ADR 0017、0019） | 读 Manifest（只接收 Injection 集合）；计失败或隔离（那是 Guard 的事） |
 | Guard | 订阅生命周期事件，按 Policy 计失败、退避和隔离，状态在 `guard` 行，acquire 前被问；一处实现覆盖所有运行时和副本 | 探活（那是各运行时的事） |
-| Infra | 只有 `resolveImage`，供发布用，与应用的运行时无关（ADR 0025 第 9 条） | 应用生命周期；供应 |
+| Infra | `resolveImage`，供发布用，与应用的运行时无关（ADR 0025 第 9 条）；集群视图和运维操作：节点、工作负载、卷、告警、`scale`、`deletePod`（ADR 0026 第 4 条），以及一个副本数会删掉哪些 runner 副本（ADR 0032） | 应用生命周期；供应 |
 | Scheduler | 读 Trigger，写 Delivery（包括 Ingress 转来的按需 `invoke`），cron 计算，投递 worker；集群上只在领导者跑 | 除 `acquire` 和应用触发端点外的一切 |
 | Providers | 每种资源 kind 一个；`ensure`、`inject`、`suspend`、`destroy`；BundleStore；IdentityProvider（`local` 或 `upstream`） | 互相调用；写平台库 |
 | 认证与授权 | `jwt.ts` 验上游 JWT（只用 `node:crypto` 和 `fetch`，ADR 0021）；每请求至多认证一次，得到 `Caller`；`authz.ts` 的 `ACTIONS` 表和纯函数 `can(caller, action, tenant)` 是管理 API 唯一的授权判定；成员和令牌缓存，按 `tenant/<name>` 通知失效（ADR 0022） | 写库（User 行经 `registry.sighted()` 由 Registry 写） |
@@ -111,7 +111,7 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 | 接缝 | `docker` | `kubernetes` |
 | --- | --- | --- |
 | container 的 Driver | `DockerDriver` | `PodDriver`：实例是平台直接创建和删除的 Pod，经 `kube.ts`（只用 `node:https` 的 K8s API 客户端，ADR 0019 第 2、4 条） |
-| isolate 的 runner 池 | 一个 `runner:8082` | runner StatefulSet，网关 watch 它的 Pod；带存储的应用固定在首次唤醒选定的 runner 上（ADR 0019 第 8 条） |
+| isolate 的 runner 池 | 一个 `runner:8082` | runner StatefulSet，网关 watch 它的 Pod；每个 isolate 应用固定在首次唤醒选定的 runner 上（ADR 0019 第 8 条），缩容不改派（ADR 0032） |
 | `Infra.resolveImage` | 本地镜像 id | 组织仓库里的 digest |
 | `Store` | `SqliteStore` | `PgStore` |
 
