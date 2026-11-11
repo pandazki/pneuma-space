@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { Conflict, ENV_BY_KIND, newAppId, type BundleId, type CapabilityKind, type Injection } from './model.ts';
+import { Conflict, ENV_BY_KIND, NotFound, newAppId, type BundleId, type CapabilityKind, type Injection } from './model.ts';
 import { PgError } from './pg.ts';
 import { createProviders, objectUrl, providerConfig, S3BundleStore, signedFetch } from './providers.ts';
 import { Resp, RespError } from './resp.ts';
@@ -114,6 +114,25 @@ test('the bundle store does not answer when it takes the connection and never re
   const store = new S3BundleStore({ ...providerConfig({}).object, endpoint: `http://127.0.0.1:${port}` });
   assert.equal(await store.answers(50), false);
   server.closeAllConnections();
+});
+
+test('the bundle store deletes a bundle\'s index before any other of its objects (#13)', async (t) => {
+  const requests: string[] = [];
+  let listed = false;
+  const server = createHttpServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://store');
+    requests.push(`${req.method} ${url.pathname}`);
+    req.resume().on('end', () => {
+      if (req.method !== 'GET') return void res.writeHead(req.method === 'DELETE' ? 204 : 200).end();
+      res.writeHead(200).end(listed ? '<ListBucketResult/>' : '<ListBucketResult><Contents><Key>b1/app.js</Key></Contents></ListBucketResult>');
+      listed = true;
+    });
+  }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => server.close());
+  const { port } = server.address() as { port: number };
+  await new S3BundleStore({ ...providerConfig({}).object, endpoint: `http://127.0.0.1:${port}` }).delete('b1' as BundleId);
+  assert.deepEqual(requests.filter((r) => !r.startsWith('GET')), ['DELETE /pneuma-space-bundles/b1/_pneuma-space/index.json', 'POST /pneuma-space-bundles']);
 });
 
 describe('providers against the real compose services', { skip: !dockerUp && 'Docker is not available' }, () => {
@@ -361,6 +380,14 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       const list = await signedFetch(config.object.root, 'GET', objectUrl(config.object, 'pneuma-space-bundles', '', `?list-type=2&prefix=${stale}/`));
       assert.doesNotMatch(await list.text(), /<Key>/);
       assert.equal((await bundles.index(id)).id, id);
+    });
+
+    test('index answers NotFound once another store deleted a bundle this one had read (#13)', async () => {
+      writeFileSync(join(dir, 'app.js'), 'console.log(3)');
+      const gone = await bundles.put(Readable.from([pack()]));
+      await bundles.index(gone);
+      await new S3BundleStore(config.object).delete(gone);
+      await assert.rejects(bundles.index(gone), NotFound);
     });
   });
 

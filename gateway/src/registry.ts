@@ -164,9 +164,23 @@ export class PlatformRegistry implements Registry {
     for (const { app, release } of pairs) this.#apply(app.name, { app, release, bindings: byApp.get(app.id) ?? [] });
   }
 
+  /** A bundle an interrupted purge already deleted leaves its app without static files instead of failing the load. */
   async #index(release: Release | null): Promise<void> {
     const bundle = release?.bundle;
-    if (bundle && !this.#indexes.has(bundle)) this.#indexes.set(bundle, await this.#bundles.index(bundle));
+    if (!bundle || this.#indexes.has(bundle)) return;
+    const index = await this.#bundles.index(bundle).catch((error: unknown) => (error instanceof NotFound ? null : Promise.reject(error)));
+    if (index) this.#indexes.set(bundle, index);
+  }
+
+  /** Inside the bundle's exclusion, so no purge deletes it between this read and the commit; another replica's purge may have before (ADR 0028). */
+  async #reindex(bundle: BundleId): Promise<void> {
+    try {
+      this.#indexes.set(bundle, await this.#bundles.index(bundle));
+    } catch (error) {
+      if (!(error instanceof NotFound)) throw error;
+      this.#indexes.delete(bundle);
+      throw new Conflict(`bundle ${bundle} was deleted while this publish ran, by the purge of the last app that used it; upload it again and publish again`);
+    }
   }
 
   /** Fetches the current release's bundle index if this replica has not seen it, then refreshes. */
@@ -232,7 +246,7 @@ export class PlatformRegistry implements Registry {
 
     for (const provider of providers) await this.#ensure(app.id, provider);
 
-    const { next, release, suspended } = await this.#store.transaction(async (tx) => {
+    const commit = () => this.#store.transaction(async (tx) => {
       const fresh = (await tx.app(name))!;
       const reused = current?.releaseKey === key ? current : null;
       const release: Release = reused ?? {
@@ -247,6 +261,9 @@ export class PlatformRegistry implements Registry {
       await tx.putApp(next);
       return { next, release, suspended: await this.#settle(tx, next, manifest) };
     });
+    const { next, release, suspended } = bundle === null
+      ? await commit()
+      : await this.#store.exclusiveBundle(bundle, async () => (await this.#reindex(bundle), commit()));
     await this.#settled(next, suspended);
     log('publish', name, { release: release.number });
     return release;
@@ -286,13 +303,13 @@ export class PlatformRegistry implements Registry {
       await this.#provider(binding.provider).destroy(app.id, binding.resource);
       log('destroy', app.name, { kind: binding.kind, provider: binding.provider });
     }
-    const bundlesOf = async (id: AppId) => (await this.#store.releases(id)).flatMap((r) => (r.bundle ? [r.bundle] : []));
-    const others = (await this.#store.apps()).filter((a) => a.id !== app.id);
-    const elsewhere = new Set((await Promise.all(others.map((a) => bundlesOf(a.id)))).flat());
-    for (const bundle of new Set(await bundlesOf(app.id))) {
-      if (elsewhere.has(bundle)) continue;
-      await this.#bundles.delete(bundle);
-      this.#indexes.delete(bundle);
+    for (const bundle of new Set((await this.#store.releases(app.id)).flatMap((r) => (r.bundle ? [r.bundle] : [])))) {
+      const deleted = await this.#store.exclusiveBundle(bundle, async () => {
+        if (await this.#store.bundleReferenced(bundle, app.id)) return false;
+        await this.#bundles.delete(bundle);
+        return true;
+      });
+      if (deleted) this.#indexes.delete(bundle);
     }
     await this.#store.deleteApp(app.id);
     this.#forget(app.name);

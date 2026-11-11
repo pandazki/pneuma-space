@@ -7,7 +7,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
 import { DEFAULT_TENANT, type AppName, type Subject } from './model.ts';
 import { app, storeContract } from './store.contract.ts';
-import { MIGRATIONS, SqliteSession, SqliteStore } from './store.ts';
+import { BUNDLE_REFERENCED } from './sql.ts';
+import { MIGRATIONS, positional, SqliteSession, SqliteStore } from './store.ts';
 
 const path = () => join(mkdtempSync(join(tmpdir(), 'pneuma-space-store-')), 'pneuma-space.sqlite3');
 
@@ -73,6 +74,15 @@ test('the audit table refuses update and delete', async () => {
   assert.throws(() => db.exec("UPDATE audit SET result = 'error'"), /append-only/);
   assert.throws(() => db.exec('DELETE FROM audit'), /append-only/);
   db.close();
+});
+
+test('the bundle reference query searches the release bundle index (#13)', async () => {
+  const file = path();
+  await new SqliteStore(file).close();
+  const db = new DatabaseSync(file);
+  const plan = db.prepare(`EXPLAIN QUERY PLAN ${positional(BUNDLE_REFERENCED)}`).all('bundle', 'app') as { detail: string }[];
+  db.close();
+  assert.match(plan.map((row) => row.detail).join('\n'), /USING (COVERING )?INDEX release_bundle \(bundle=\?\)/);
 });
 
 test('step 6 makes an already migrated default tenant unlimited', async () => {

@@ -5,11 +5,14 @@ import { test } from 'node:test';
 import { Ingress } from './ingress.ts';
 import { Series } from './metrics.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { Conflict, InputError, QuotaExceeded, appName, parseManifest, subject, tenantName, triggerName, type App, type AppId, type BundleId, type Capabilities, type Change, type Store, type StoreOps } from './model.ts';
+import {
+  Conflict, DEFAULT_TENANT, InputError, QuotaExceeded, appName, parseManifest, subject, tenantName, triggerName,
+  type App, type AppId, type BundleId, type Capabilities, type Change, type ReleaseNumber, type Store, type StoreOps,
+} from './model.ts';
 import { PlatformRegistry } from './registry.ts';
 import { replicaContract } from './registry.contract.ts';
 import { FakeRuntime, world } from './registry.fakes.ts';
-import { SqliteStore } from './store.ts';
+import { SqliteSession, SqliteStore } from './store.ts';
 import { DeliveryScheduler } from './scheduler.ts';
 
 const survey = appName('survey');
@@ -408,3 +411,97 @@ test('switching db_backend from postgres to sqlite and back and forth asks stora
   }
   assert.deepEqual(used, [1, 1, 1]);
 });
+
+function site(registry: PlatformRegistry, name: string, bundle: BundleId) {
+  return registry.publish({ name: appName(name), image: null, manifest: parseManifest({ contract: 1, capabilities: { static: { dir: 'dist' } } }), bundle, owner: ann });
+}
+
+test('the purge of the last app that references a bundle deletes it (#13)', async () => {
+  const w = world();
+  const { registry } = await w.open();
+  const shared = await w.bundles.put(Readable.from([Buffer.from('shared')]));
+  await site(registry, 'survey', shared);
+  await site(registry, 'blog', shared);
+  const kept: boolean[] = [];
+  for (const name of [survey, appName('blog')]) {
+    await registry.remove(name);
+    await registry.purge(name);
+    kept.push(w.bundles.stored.has(shared));
+  }
+  assert.deepEqual(kept, [true, false]);
+});
+
+test('a purge interrupted after its bundle delete finishes when rerun, and deleting the bundle again is fine (#13)', async () => {
+  const w = world();
+  const { registry } = await w.open();
+  const own = await w.bundles.put(Readable.from([Buffer.from('own')]));
+  await site(registry, 'survey', own);
+  await registry.remove(survey);
+  const remove = w.bundles.delete.bind(w.bundles);
+  let crashes = 2;
+  w.bundles.delete = async (id) => {
+    await remove(id);
+    if (crashes-- > 0) throw new Error('crashed after the delete');
+  };
+  await assert.rejects(registry.purge(survey), /crashed after the delete/);
+  const restarted = await w.open();
+  await restarted.registry.resume();
+  assert.equal((await restarted.store.app(survey))?.status, 'purging');
+  await restarted.registry.purge(survey);
+  assert.deepEqual([await restarted.store.app(survey), w.bundles.stored.has(own)], [null, false]);
+});
+
+test('purge issues the same SQL statements whether 10 or 1000 other apps have releases (#13)', async () => {
+  const statements = async (others: number) => {
+    const w = world();
+    const { store } = await w.open();
+    const manifest = parseManifest({ contract: 1, capabilities: { static: { dir: 'dist' } } });
+    await store.transaction(async (tx) => {
+      for (let i = 0; i < others; i++) {
+        const bundle = `other-${i}` as BundleId;
+        const id = `id-other-${i}` as AppId;
+        w.bundles.stored.add(bundle);
+        await tx.putApp({ name: appName(`other-${i}`), id, tenant: DEFAULT_TENANT, access: 'org', owner: ann, status: 'registered', current: 1 as ReleaseNumber, policyOverride: {}, registeredAt: 0, version: 1 });
+        await tx.putRelease({ app: id, number: 1 as ReleaseNumber, image: null, manifest, bundle, runtime: null, releaseKey: bundle, publishedAt: 0 });
+      }
+    });
+    const { registry } = await w.open();
+    await site(registry, 'survey', await w.bundles.put(Readable.from([Buffer.from('own')])));
+    await registry.remove(survey);
+    let count = 0;
+    const { all, run } = SqliteSession.prototype;
+    SqliteSession.prototype.all = function (...args) {
+      count++;
+      return all.apply(this, args);
+    };
+    SqliteSession.prototype.run = function (...args) {
+      count++;
+      return run.apply(this, args);
+    };
+    try {
+      await registry.purge(survey);
+    } finally {
+      Object.assign(SqliteSession.prototype, { all, run });
+    }
+    return count;
+  };
+  assert.equal(await statements(1000), await statements(10));
+});
+
+test('a replica that indexed a bundle another replica purged refuses a release against it (#13)', async () => {
+  const w = world();
+  const { store, registry: purger } = await w.open();
+  const stale = await w.replica(store);
+  const bundle = await w.bundles.put(Readable.from([Buffer.from('purged')]));
+  await site(purger, 'survey', bundle);
+  for (let waited = 0; stale.view(survey)?.bundle?.id !== bundle; waited += 5) {
+    assert.ok(waited < 2000, 'the other replica indexed the bundle');
+    await sleep(5);
+  }
+  await purger.remove(survey);
+  await purger.purge(survey);
+  await assert.rejects(site(stale, 'blog', bundle), (error) => error instanceof Conflict && /upload/.test(error.message));
+  const blog = await store.app(appName('blog'));
+  assert.deepEqual(blog ? (await store.releases(blog.id)).map((r) => r.bundle) : [], []);
+});
+

@@ -367,9 +367,9 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
 
 const contentType = (path: string) => CONTENT_TYPES[/\.([^./]+)$/.exec(path)?.[1].toLowerCase() ?? ''] ?? 'application/octet-stream';
 
+/** Keeps no index cache: another replica's purge may delete a bundle at any time (ADR 0028). */
 export class S3BundleStore implements BundleStore {
   readonly #store: ObjectService;
-  readonly #cache = new Map<BundleId, BundleIndex>();
 
   constructor(store: ObjectService) {
     this.#store = store;
@@ -393,7 +393,6 @@ export class S3BundleStore implements BundleStore {
     await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, tarKey(id)), bytes, { 'content-type': 'application/x-tar' }), 'put bundle tar');
     const index: BundleIndex = { id, files };
     await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, indexKey(id)), JSON.stringify(index), { 'content-type': 'application/json' }), 'put bundle index');
-    this.#cache.set(id, index);
     return id;
   }
 
@@ -404,13 +403,9 @@ export class S3BundleStore implements BundleStore {
   }
 
   async index(id: BundleId): Promise<BundleIndex> {
-    const cached = this.#cache.get(id);
-    if (cached) return cached;
     const res = await signedFetch(this.#store.root, 'GET', objectUrl(this.#store, BUNDLES, indexKey(id)));
     if (res.status === 404) throw new NotFound(`bundle ${id} does not exist`);
-    const index = (await ok(res, 'get bundle index').then((r) => r.json())) as BundleIndex;
-    this.#cache.set(id, index);
-    return index;
+    return (await ok(res, 'get bundle index').then((r) => r.json())) as BundleIndex;
   }
 
   /** `range.end` is inclusive, as in an HTTP Range header. */
@@ -427,8 +422,10 @@ export class S3BundleStore implements BundleStore {
     return presignGet(this.#store.root, objectUrl(this.#store, BUNDLES, tarKey(id)), seconds);
   }
 
+  /** The index goes first: put() writes it last, so a bundle without one is gone to a publish, and a new put() restores it whole. */
   async delete(id: BundleId): Promise<void> {
-    this.#cache.delete(id);
+    const res = await signedFetch(this.#store.root, 'DELETE', objectUrl(this.#store, BUNDLES, indexKey(id)));
+    if (!res.ok && res.status !== 404) throw new Error(`object service delete bundle index: ${res.status} ${await res.text()}`);
     await deleteObjects(this.#store, BUNDLES, `${id}/`);
   }
 }

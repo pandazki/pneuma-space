@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { DEFAULT_TENANT, QUOTA_RESOURCES, parseChange, type AppName, type Change, type Leadership, type Store, type StoreOps } from './model.ts';
+import { DEFAULT_TENANT, QUOTA_RESOURCES, parseChange, type AppName, type BundleId, type Change, type Leadership, type Store, type StoreOps } from './model.ts';
 import { parsePgUrl, PgError, Pool, Session, type Param, type PgOptions, type Result } from './pg.ts';
 import { POSTGRES, STORE_OPS, SqlOps, wrap, type Row, type Session as SqlSession } from './sql.ts';
 
@@ -12,8 +12,8 @@ const PROBE_TIMEOUT_MS = 3000;
 const RECONNECT_MS = 1000;
 /** Serialization failure and deadlock: `fn` runs again (ADR 0025 item 3). */
 const RETRYABLE = new Set(['40001', '40P01']);
-/** Advisory lock classes: migrations, commands by name, leadership. */
-const LOCK = { migrate: 0, command: 1, leader: 2 } as const;
+/** Advisory lock classes: migrations, commands by name, leadership, work on one bundle. */
+const LOCK = { migrate: 0, command: 1, leader: 2, bundle: 3 } as const;
 
 const UNLIMITED = JSON.stringify(Object.fromEntries(QUOTA_RESOURCES.map((resource) => [resource, null])));
 const changed = (table: string) => `CREATE TRIGGER ${table}_changed AFTER INSERT OR UPDATE OR DELETE ON ${table} FOR EACH ROW EXECUTE FUNCTION pneuma_space_changed();`;
@@ -101,6 +101,8 @@ export const PG_MIGRATIONS = [
    ${['app', 'release', 'trigger', 'binding', 'policy', 'instance', 'guard', 'tenant', 'membership', 'token'].map(changed).join('\n   ')}`,
   // ADR 0026 item 2: the cluster view marks the leading gateway from its heartbeat.
   'ALTER TABLE replica ADD COLUMN leads INTEGER NOT NULL DEFAULT 0',
+  // ADR 0028: purge asks whether another app's release references a bundle.
+  'CREATE INDEX release_bundle ON release (bundle)',
 ];
 
 /** Runs every step not yet recorded, each in its own transaction, under a lock so replicas that start together migrate once. */
@@ -213,7 +215,7 @@ export class PgStore implements Store {
   readonly #commands: number;
   readonly #testRetry: boolean;
   readonly #context = new AsyncLocalStorage<Context>();
-  readonly #names = new Map<AppName, Promise<unknown>>();
+  readonly #names = new Map<string, Promise<unknown>>();
   readonly #slots: (() => void)[] = [];
   readonly #changeListeners: ((change: Change) => void)[] = [];
   readonly #resyncListeners: (() => void)[] = [];
@@ -269,10 +271,22 @@ export class PgStore implements Store {
   }
 
   exclusive<T>(name: AppName, fn: () => Promise<T>): Promise<T> {
-    const run = (this.#names.get(name) ?? Promise.resolve()).then(() => this.#command(name, fn));
+    return this.#queued(name, () => this.#command(LOCK.command, name, fn));
+  }
+
+  /** Inside a command it locks on the command's own session: its transactions run under the lock, and it takes no second command slot. */
+  exclusiveBundle<T>(bundle: BundleId, fn: () => Promise<T>): Promise<T> {
+    if (!this.#context.getStore()?.command?.open) return this.#queued(`bundle/${bundle}`, () => this.#command(LOCK.bundle, bundle, fn));
+    const lock = (call: string) => this.#enter((_, __, session) => session.query(`SELECT ${call}(${LOCK.bundle}, hashtext($1))`, [bundle]));
+    // A failed unlock means the session is gone, and the server released the lock with it.
+    return lock('pg_advisory_lock').then(() => fn().finally(() => lock('pg_advisory_unlock').catch(() => undefined)));
+  }
+
+  #queued<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const run = (this.#names.get(key) ?? Promise.resolve()).then(work);
     const tail = run.catch(() => undefined);
-    this.#names.set(name, tail);
-    void tail.then(() => this.#names.get(name) === tail && this.#names.delete(name));
+    this.#names.set(key, tail);
+    void tail.then(() => this.#names.get(key) === tail && this.#names.delete(key));
     return run;
   }
 
@@ -337,14 +351,14 @@ export class PgStore implements Store {
     }
   }
 
-  async #command<T>(name: AppName, fn: () => Promise<T>): Promise<T> {
+  async #command<T>(lock: number, key: string, fn: () => Promise<T>): Promise<T> {
     if (this.#running < this.#commands) this.#running++;
     else await new Promise<void>((resolve) => this.#slots.push(resolve));
     try {
       const session = await Session.open({ ...this.#options, statementTimeoutMs: 0 });
       const command: Command = { session, open: true, tail: Promise.resolve() };
       try {
-        await session.query(`SELECT pg_advisory_lock(${LOCK.command}, hashtext($1))`, [name]);
+        await session.query(`SELECT pg_advisory_lock(${lock}, hashtext($1))`, [key]);
         return await this.#context.run({ command }, fn);
       } finally {
         command.open = false;
