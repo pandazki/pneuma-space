@@ -1153,9 +1153,12 @@ const I18N = {
     'err.forbidden': '权限不足：{msg}', 'err.conflict': '无法完成：{msg}',
    
     'ac.label': '访问范围', 'ac.tenant': '租户内', 'ac.org': '组织内', 'ac.public': '公开',
-    'ac.tenant.desc': '只有 {tenant} 的成员和平台管理员能打开，静态文件也一样。',
+    'ac.tenant.desc': '只有 {tenant} 的成员、它的令牌和平台管理员能打开，静态文件也一样。',
     'ac.org.desc': '组织里任何登录的人或有效令牌都能打开。',
-    'ac.public.desc': '不需要登录；应用声明了 identity 时，登录的访客仍带着身份。上游也要为它放行匿名访问。',
+    'ac.public.open': '任何人不用登录就能打开。上游也要为它放行匿名访问。',
+    'ac.public.optional': '任何人不用登录就能打开，登录的访客带着身份。上游也要为它放行匿名访问。',
+    'ac.public.required': '公开只解除组织边界：应用的 identity 要求登录，访客仍要先登录才能到达它。',
+    'ac.public.requiredStatic': '公开只解除组织边界：静态文件任何人都能取，但应用的 identity 要求登录，访客仍要先登录才能到达它。',
     'd.tenant': '所属租户', 'd.move': '移到租户…',
     'mv.title': '把 {name} 移到另一个租户', 'mv.body': '移动会先退役实例：配额占用、标签和旧租户令牌的访问一次切换，下一次请求在新租户下唤醒。数据全部保留。',
     'mv.to': '目标租户', 'mv.action': '移动并退役实例', 'mv.none': '没有别的租户。',
@@ -1435,9 +1438,12 @@ const I18N = {
     'err.forbidden': 'Not allowed: {msg}', 'err.conflict': 'Cannot do that: {msg}',
    
     'ac.label': 'Access', 'ac.tenant': 'Tenant', 'ac.org': 'Organization', 'ac.public': 'Public',
-    'ac.tenant.desc': 'Only members of {tenant} and platform admins can open it, static files included.',
+    'ac.tenant.desc': 'Only members of {tenant}, its tokens and platform admins can open it, static files included.',
     'ac.org.desc': 'Anyone signed in to the organization, or any valid token, can open it.',
-    'ac.public.desc': 'No sign-in needed; when the app declares identity, a signed-in visitor still carries it. The upstream must also let anonymous requests through.',
+    'ac.public.open': 'Anyone can open it without signing in. The upstream must also let anonymous requests through.',
+    'ac.public.optional': 'Anyone can open it without signing in, and a signed-in visitor is identified. The upstream must also let anonymous requests through.',
+    'ac.public.required': 'Public lifts only the organization boundary: the app requires identity, so visitors still sign in before reaching it.',
+    'ac.public.requiredStatic': 'Public lifts only the organization boundary: its static files open to anyone, but the app requires identity, so visitors still sign in before reaching it.',
     'd.tenant': 'Tenant', 'd.move': 'Move to tenant…',
     'mv.title': 'Move {name} to another tenant', 'mv.body': 'The move retires the instance first: quota usage, labels and the old tenant’s token access switch at once, and the next request wakes it under the new tenant. All data is kept.',
     'mv.to': 'Destination', 'mv.action': 'Move and retire instance', 'mv.none': 'There is no other tenant.',
@@ -3655,11 +3661,15 @@ async function detail(name) {
   }, post('purge'), () => { location.hash = '#/apps'; });
   const access = () => {
     let pick = app.access;
-    const note = h('span', {}, t(`ac.${pick}.desc`, { tenant: app.tenant }));
+    // `access` decides whether a request arrives, the current release's `identity` whether it must sign in (docs/app-contract.md, Access).
+    const caps = current?.manifest.capabilities ?? {};
+    const open = caps.identity === undefined ? 'open' : caps.identity.required === false ? 'optional' : caps.static ? 'requiredStatic' : 'required';
+    const desc = (x) => t(x === 'public' ? `ac.public.${open}` : `ac.${x}.desc`, { tenant: app.tenant });
+    const note = h('span', {}, desc(pick));
     const control = h('div', { class: 'field' });
     const paint = () => fill(control, segmented(ACCESS_LEVELS.map((x) => [x, t(`ac.${x}`)]), pick, (x) => {
       pick = x;
-      note.textContent = t(`ac.${x}.desc`, { tenant: app.tenant });
+      note.textContent = desc(x);
       paint();
     }, t('ac.label')));
     paint();
