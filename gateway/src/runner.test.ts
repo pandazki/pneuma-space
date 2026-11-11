@@ -270,6 +270,15 @@ test('two starts of one app at once get the same worker', async (t) => {
   assert.equal(a.worker, b.worker);
 });
 
+test('a retiring stop that names an earlier worker of the app leaves its current worker and that worker\'s code in place (ADR 0027)', async (t) => {
+  const runner = await startRunner(t, HEALTHY);
+  const bundleUrl = await serveBundle(t);
+  const earlier = await start(runner, bundleUrl, 'later');
+  const current = await start(runner, bundleUrl, 'later', { spec: 'changed' });
+  await call(runner, 'DELETE', `/instances/later?drain=0&retire=1&worker=${earlier.worker}`);
+  assert.deepEqual([await current.get('/'), existsSync(join(runner.data, 'apps', 'later', '1'))], ['later 1', true]);
+});
+
 test('v8.setFlagsFromString throws inside a worker and the runner keeps running', async (t) => {
   const runner = await startRunner(t, HEALTHY);
   const app = await start(runner, await serveBundle(t), 'flags');

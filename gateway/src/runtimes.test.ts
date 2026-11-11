@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Instances } from './instances.ts';
-import { registered, replica, tempStore, until } from './lifecycle.fakes.ts';
+import { register, registered, replica, tempStore, until } from './lifecycle.fakes.ts';
 import {
   appName, Conflict, DEFAULT_POLICY, DEFAULT_QUOTA, DEFAULT_TENANT, newAppId, QuotaExceeded,
   type AppId, type BundleId, type ImageId, type Lease, type ReleaseNumber, type Runtime, type RunSpec, type RuntimeKind,
@@ -52,6 +52,7 @@ function facade(kinds: readonly RuntimeKind[]) {
     app, name: appName('fixture'), tenant: DEFAULT_TENANT, release: 1 as ReleaseNumber, runtime: RUN.container, injection: { env: {}, storage: [], services: [] }, policy: DEFAULT_POLICY, version: 0,
   };
   const store = tempStore();
+  register(store, spec);
   const instances = new Instances(store);
   const calls: string[] = [];
   const fakes = kinds.map((kind) => new FakeRuntime(kind, calls));

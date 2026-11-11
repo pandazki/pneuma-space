@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { registered, replica, tempStore, until } from './lifecycle.fakes.ts';
+import { registered, replica, tempStore, until, withheld } from './lifecycle.fakes.ts';
 import { Unavailable } from './runtimes.ts';
 import { changeKey, DEFAULT_QUOTA, DEFAULT_TENANT, QuotaExceeded, type AppId, type Instance, type ReleaseNumber, type ReplicaId, type Store } from './model.ts';
 
@@ -9,19 +9,6 @@ const instance = (app: AppId, state: Instance['state'], actor: string | null, ha
   app, runtime: 'container', release: 1 as ReleaseNumber, specHash: 'h', epoch, state, actor: actor as ReplicaId | null, handle,
   address: null, node: null, home: null, since: 0, awakeAt: null, cpuMillis: 0, memoryMb: 0,
 });
-
-/** Grants the lead only once `grant` is called. */
-function withheld(store: Store): { store: Store; grant: () => void } {
-  let granted = false;
-  const proxy = new Proxy(store, {
-    get(target, key, receiver) {
-      if (key === 'leader') return async () => (granted ? target.leader() : null);
-      const value = Reflect.get(target, key, receiver);
-      return typeof value === 'function' ? value.bind(target) : value;
-    },
-  });
-  return { store: proxy, grant: () => void (granted = true) };
-}
 
 const orphan = (app: AppId) => ({ app, handle: 'orphan', release: '1', spec: 'h', address: 'fake:9' });
 
@@ -67,6 +54,93 @@ test('an acquire on an awake app whose tally this replica holds makes no store c
   calls.length = 0;
   await lifecycle.acquire(app, 'request');
   assert.deepEqual(calls, []);
+});
+
+/** Holds every transaction until `open` is called; `failing` makes the next one throw instead. */
+function gated(store: Store) {
+  const gate = Promise.withResolvers<void>();
+  let begun = 0;
+  let failing = false;
+  const proxy = new Proxy(store, {
+    get(target, key, receiver) {
+      if (key === 'transaction') {
+        return async (fn: Parameters<Store['transaction']>[0]) => {
+          begun++;
+          await gate.promise;
+          if (failing) {
+            failing = false;
+            throw new Error('the store is down');
+          }
+          return target.transaction(fn);
+        };
+      }
+      const value = Reflect.get(target, key, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return { store: proxy, begun: () => begun, open: () => gate.resolve(), failNext: () => void (failing = true) };
+}
+
+const awake = (app: AppId): Instance => ({ ...instance(app, 'awake', null), address: 'fake:awake', awakeAt: Date.now() });
+
+test('acquires behind an uncommitted 0 to >0 tally write get no lease until it commits, and share it (INV-3)', async () => {
+  const base = tempStore();
+  const { app, specFor } = await registered(base);
+  await base.insertInstance(awake(app));
+  const { store, begun, open } = gated(base);
+  const { lifecycle } = replica(store as never, specFor);
+  let resolved = 0;
+  const acquires = Array.from({ length: 100 }, () => lifecycle.acquire(app, 'request').then(() => resolved++));
+  await until('the first tally write is held', () => begun() === 1);
+  await sleep(20);
+  const early = resolved;
+  open();
+  await Promise.all(acquires);
+  assert.deepEqual([early, resolved, begun()], [0, 100, 1]);
+});
+
+test('when the first tally write fails every acquire waiting on it fails and no lease is counted', async () => {
+  const base = tempStore();
+  const { app, specFor } = await registered(base);
+  await base.insertInstance(awake(app));
+  const { store, open, failNext } = gated(base);
+  const { lifecycle } = replica(store as never, specFor);
+  failNext();
+  open();
+  const outcomes = await Promise.allSettled(Array.from({ length: 10 }, () => lifecycle.acquire(app, 'request')));
+  assert.deepEqual([outcomes.filter((o) => o.status === 'rejected').length, lifecycle.leases(app).request], [10, 0]);
+});
+
+test('after a failed first tally write the next acquire holds a lease its committed tally covers', async () => {
+  const base = tempStore();
+  const { app, specFor } = await registered(base);
+  await base.insertInstance(awake(app));
+  const { store, open, failNext } = gated(base);
+  const { lifecycle } = replica(store as never, specFor);
+  failNext();
+  open();
+  await assert.rejects(lifecycle.acquire(app, 'request'));
+  await lifecycle.acquire(app, 'request');
+  assert.equal((await base.leaseTallies(app)).find((t) => t.replica === 'replica-a')?.request, 1);
+});
+
+test('acquires behind a 0 to >0 tally write that the leader\'s reaper beats get no lease on the stopped epoch', async () => {
+  const base = tempStore();
+  const { app, specFor } = await registered(base, { idle_seconds: 1 });
+  const a = replica(base, specFor, 'replica-a');
+  await a.lifecycle.reconcile();
+  a.lifecycle.release(await a.lifecycle.acquire(app, 'request'));
+  const { store, open } = gated(base);
+  const b = replica(store as never, specFor, 'replica-b', { leader: false });
+  await b.instances.ready();
+  await until('replica b sees the instance awake', () => b.lifecycle.state(app) === 'awake');
+  let resolved = 0;
+  const acquires = [b.lifecycle.acquire(app, 'request'), b.lifecycle.acquire(app, 'request')].map((lease) => lease.then(() => resolved++));
+  await until('the reaper puts the idle instance asleep', async () => (await base.instance(app))?.state === 'asleep', 5000);
+  const early = resolved;
+  open();
+  await Promise.all(acquires);
+  assert.deepEqual([early, b.driver.starts, (await base.instance(app))?.epoch], [0, 1, 2]);
 });
 
 test('releasing every lease writes this replica\'s tally once, on the 0 edge', async () => {

@@ -2,7 +2,8 @@
 
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { after, before, describe, test } from 'node:test';
+import { after, before, describe, test, type TestContext } from 'node:test';
+import { Instances } from './instances.ts';
 import {
   DEFAULT_POLICY, DEFAULT_QUOTA, DEFAULT_TENANT, IDEMPOTENCY_WINDOW_MS, USAGE_COUNTERS, changeKey,
   type App, type AppId, type AppName, type Binding, type BundleId, type Delivery, type DeliveryId, type ImageId, type Instance, type ReleaseNumber, type ReplicaId, type Store,
@@ -34,6 +35,19 @@ function instance(name: string, fields: Partial<Instance> = {}): Instance {
     address: null, node: null, home: null, since: 1, awakeAt: null, cpuMillis: 0, memoryMb: 0, ...fields,
   };
 }
+
+/** An app with an instance row, two replicas' lease tallies, a guard row and a full log row. */
+async function seeded(store: Store, name: string): Promise<AppId> {
+  const id = appId(name);
+  await store.putApp(app(name));
+  await store.insertInstance(instance(name));
+  for (const r of [replica, 'replica-b' as ReplicaId]) await store.putLeaseTally({ app: id, replica: r, epoch: 0, request: 1, channel: 0, trigger: 0, releasedAt: null });
+  await store.putGuard({ app: id, release: 1 as ReleaseNumber, failures: [1], quarantineReason: null, quarantinedAt: null });
+  await store.putInstanceLog({ app: id, release: 1 as ReleaseNumber, endedAt: 1, reason: 'crashed', tail: 'x'.repeat(65_536) });
+  return id;
+}
+
+const held = (store: Store, app: AppId) => Promise.all([store.instance(app), store.leaseTallies(app), store.guard(app), store.instanceLog(app)]);
 
 /** Waits until every expected key was announced, then a little longer so an extra one would show. */
 async function announced(seen: readonly string[], expected: readonly string[]): Promise<void> {
@@ -334,6 +348,51 @@ export function storeContract(name: string, open: OpenStore): void {
       await store.putInstanceLog(log);
       await store.putInstanceLog({ ...log, endedAt: 2, reason: 'retired' });
       assert.deepEqual(await store.instanceLog(log.app), { ...log, endedAt: 2, reason: 'retired' });
+    });
+
+    /** A store of its own: on SQLite its replicas meet no other test's rows, and they stop listening when the test ends. */
+    async function own(t: TestContext) {
+      const store = await open({ volumeGb: 2 });
+      const replicas: Instances[] = [];
+      t.after(async () => {
+        for (const instances of replicas) await instances.close();
+        await store.close();
+      });
+      const start = (id: string) => {
+        const instances = new Instances(store, { replica: id as ReplicaId, leader: false });
+        replicas.push(instances);
+        return instances.ready();
+      };
+      return { store, start };
+    }
+
+    test('a purge deletes the app\'s instance, lease tally, guard and log rows and leaves another app\'s (ADR 0020 item 8)', async (t) => {
+      const { store, start } = await own(t);
+      const [gone, kept] = [await seeded(store, 'purge-gone'), await seeded(store, 'purge-kept')];
+      await start('replica-a');
+      const before = await held(store, kept);
+      await store.deleteApp(gone);
+      for (let waited = 0; waited < 3000 && (await store.instanceLog(gone)) !== null; waited += 10) await sleep(10);
+      assert.deepEqual([await held(store, gone), await held(store, kept)], [[null, [], null, null], before]);
+    });
+
+    test('a replica that starts deletes the rows of apps the library no longer has, a lone log row included (ADR 0020 item 8)', async (t) => {
+      const { store, start } = await own(t);
+      const [gone, kept] = [await seeded(store, 'start-gone'), await seeded(store, 'start-kept')];
+      await store.deleteApp(gone);
+      await store.putInstanceLog({ app: appId('start-never'), release: 1 as ReleaseNumber, endedAt: 1, reason: 'retired', tail: 'x'.repeat(65_536) });
+      const before = await held(store, kept);
+      await start('replica-a');
+      assert.deepEqual([await held(store, gone), await held(store, appId('start-never')), await held(store, kept)], [[null, [], null, null], [null, [], null, null], before]);
+    });
+
+    test('two replicas that clean up the same purged app at once both succeed (ADR 0020 item 8)', async (t) => {
+      const { store, start } = await own(t);
+      const [gone, kept] = [await seeded(store, 'twice-gone'), await seeded(store, 'twice-kept')];
+      await store.deleteApp(gone);
+      const before = await held(store, kept);
+      await Promise.all([start('replica-a'), start('replica-b')]);
+      assert.deepEqual([await held(store, gone), await held(store, kept)], [[null, [], null, null], before]);
     });
   });
 }

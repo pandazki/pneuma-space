@@ -19,7 +19,7 @@ export type InstancesOptions = {
 /**
  * This replica's mirror of the instance, lease_tally and guard rows (ADR 0020 item 3): every read is zero IO, an `instance/<id>` notice
  * re-reads the app's instance and guard rows, a resync re-reads everything. Correctness never reads it: transactions read rows.
- * Also this replica's id, heartbeat and leadership, and the purge cleanup of these three tables (ADR 0020 item 8).
+ * Also this replica's id, heartbeat and leadership, and the purge cleanup of these three tables and instance_log (ADR 0020 item 8).
  */
 export class Instances {
   readonly replica: ReplicaId;
@@ -49,12 +49,12 @@ export class Instances {
       if (change.kind === 'instance') void this.refresh(change.app).catch(() => {});
       if (change.kind === 'app') void this.#purged(change.name).catch(() => {});
     });
-    store.onResync(() => void this.#load().catch(() => {}));
+    store.onResync(() => void this.#load().then(() => this.#converge()).catch(() => {}));
   }
 
-  /** Resolves once the first full read is in and the lead was asked for once; the mirror is empty until then. */
+  /** Resolves once the first full read and the purge cleanup are in and the lead was asked for once; the mirror is empty until then. */
   ready(): Promise<void> {
-    this.#ready ??= this.#load().then(() => this.#lead()).then(() => {
+    this.#ready ??= this.#load().then(() => this.#converge()).then(() => this.#lead()).then(() => {
       this.#resync = setInterval(() => void this.#load().catch(() => {}), RESYNC_MS).unref();
       this.#tallyTimer = setInterval(() => void this.#readTallies().catch(() => {}), TALLY_MS).unref();
     });
@@ -121,16 +121,23 @@ export class Instances {
     this.#announce(app);
   }
 
-  /** An `app/<name>` notice whose row is gone: deletes the rows of every mirrored app the library no longer has. Idempotent, so every replica may run it. */
   async #purged(name: AppName): Promise<void> {
-    if (await this.store.app(name)) return;
+    if (!(await this.store.app(name))) await this.#converge();
+  }
+
+  /**
+   * Deletes the instance, lease_tally, guard and instance_log rows of every app the library no longer has; idempotent, so every replica may run it.
+   * Reads the apps last: a row read before it whose app is missing from it belongs to an app that is gone for good.
+   */
+  async #converge(): Promise<void> {
+    const held = new Set([...this.#rows.keys(), ...this.#tallies.keys(), ...this.#guards.keys(), ...(await this.store.loggedApps())]);
     const live = new Set((await this.store.apps()).map((a) => a.id));
-    const mirrored = new Set([...this.#rows.keys(), ...this.#tallies.keys(), ...this.#guards.keys()]);
-    for (const app of mirrored) {
+    for (const app of held) {
       if (live.has(app)) continue;
       await this.store.transaction(async (tx) => {
         await tx.deleteInstance(app);
         await tx.deleteGuard(app);
+        await tx.deleteInstanceLog(app);
       });
       this.#bump(app);
       this.#set(app, null, [], null);

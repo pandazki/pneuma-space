@@ -649,6 +649,14 @@ export class SqlOps implements StoreOps {
       [l.app, l.release, l.endedAt, l.reason, l.tail],
     );
   }
+
+  async loggedApps() {
+    return (await this.#s.all('SELECT app FROM instance_log ORDER BY app')).map((r) => r.app as AppId);
+  }
+
+  async deleteInstanceLog(app: AppId) {
+    await this.#s.run('DELETE FROM instance_log WHERE app = $1', [app]);
+  }
 }
 
 /** Every StoreOps method name, for stores that wrap each call (a queue, a pool session). */
