@@ -65,7 +65,7 @@ App：`(无) --publish--> registered --remove--> removed --publish--> registered
 
 Instance：`asleep --acquire--> waking --就绪--> awake`；`awake --无 Lease 且闲置到期--> stopping --> asleep`；`awake --retire--> draining --Lease 清空或到期--> stopping --> asleep`（容器或 Pod 删掉，实例行留下，handle 为空，下次唤醒用新 Release）；`asleep --retire--> asleep`，直接删掉停止的容器。`waking` 就绪超时回到 `asleep`，等待者得到 502。所有转换在该实例自己的锁内，没有全局锁；多副本时这把锁是实例行上带 `state` 和 `epoch` 的条件更新（ADR 0020）。`awake -> stopping` 要求 Lease 集合为空，`acquire` 在同一把锁内加 Lease，所以二者不会同时成立。`docker stop` 在锁外执行，期间到达的请求等待后重新唤醒，代价是一次多余的停启，不是被切断的连接。
 
-Delivery：`due --worker 取走--> delivering --2xx--> done`；非 2xx、超时、连接丢失回到 `due` 并退避，第 5 次失败进入 `failed`；`removed` 或 Trigger 不再声明时 `cancelled`。重启或换领导者时所有 `delivering` 回到 `due`。
+Delivery：`due --worker 取走--> delivering --2xx--> done`；非 2xx、超时、连接丢失回到 `due` 并退避，第 5 次失败进入 `failed`；`removed` 或 Trigger 不再声明时 `cancelled`。认领者已死或已重启的 `delivering` 由领导者周期地放回 `due`；只有仍在认领下的尝试，其结果才写入（ADR 0029）。
 
 Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端断开不提前释放；响应是 WebSocket 101 或 `text/event-stream` 时改为 `channel`，直到任一端关闭；`trigger` 覆盖一次投递。闲置停止从不结束 Lease。平台进程存活期间只在三种有界、可见的情况下主动结束 Lease：`draining`（对 `channel` 发 WebSocket close 1001，对 `request` 和 `trigger` 等到 `drain_timeout_seconds`）；`channel` 超过 `connection_idle_seconds` 没有字节（close 1001，客户端重连会再唤醒）；`trigger` 超过 `trigger_timeout_seconds`（关闭连接，该次尝试记为失败并按退避重试）。平台重启丢失所有 Lease：连接断开，客户端重连，`delivering` 的投递重投；一个副本退出只丢失流经它的 Lease（ADR 0020 第 6 条）。Delivery 被 `cancelled` 时正在进行的尝试跑完，不再有下一次。
 
@@ -157,7 +157,7 @@ K8s 平面：命名空间 `pneuma-space` 放网关、runner 和集群内的平�
 
 退役（Registry 在发布、改变 Injection 的 policy 变更、remove 之后调用）：`awake` 时置 `draining`，调用每个 `channel` 的 `on_retire`（WebSocket 发 close 1001，SSE 直接关闭连接），等待 Lease 清空至多 `drain_timeout_seconds`，`docker stop` 并 `docker rm`；`asleep` 时直接 `docker rm`。下一次 `acquire` 为当前 Release 建新容器。`purge` 先退役，再销毁每条 Binding 的资源和只有该 App 引用的 bundle，所以卷不会被容器占用。
 
-重启：开平台库，加载实例行的镜像；领导者把 `replica` 已死的 `delivering` 回 `due`。先核对实例，再续跑 `purging`（续跑要退役该 App 可能还活着的实例，所以核对在前）。领导者按标签 `pneuma-space.role=instance` 列出容器或 Pod，与实例行比对：没有对应行、或行的 `release`、`spec_hash`、`epoch` 与标签不符的删掉；行是 `awake` 而容器或 Pod 不在的，CAS 回 `asleep` 并发 `crashed`；其余保持行的状态（ADR 0019 第 5 条，ADR 0020）。每个副本订阅自己平面的结束事件（Docker `die`、Pod watch、runner 查询），观察到结束就做 CAS，赢家发事件。Provider 在后台对每条 Binding 按其 `state` 重跑 `ensure` 或 `suspend`，收敛后端可能丢失或与行不一致的状态（例如重建的 Redis 容器，或 ensure 和提交之间的崩溃）。
+重启：开平台库，加载实例行的镜像；领导者把认领者已死或已重启的 `delivering` 回 `due`（ADR 0029）。先核对实例，再续跑 `purging`（续跑要退役该 App 可能还活着的实例，所以核对在前）。领导者按标签 `pneuma-space.role=instance` 列出容器或 Pod，与实例行比对：没有对应行、或行的 `release`、`spec_hash`、`epoch` 与标签不符的删掉；行是 `awake` 而容器或 Pod 不在的，CAS 回 `asleep` 并发 `crashed`；其余保持行的状态（ADR 0019 第 5 条，ADR 0020）。每个副本订阅自己平面的结束事件（Docker `die`、Pod watch、runner 查询），观察到结束就做 CAS，赢家发事件。Provider 在后台对每条 Binding 按其 `state` 重跑 `ensure` 或 `suspend`，收敛后端可能丢失或与行不一致的状态（例如重建的 Redis 容器，或 ensure 和提交之间的崩溃）。
 
 ### 2.4 发布
 
