@@ -263,6 +263,26 @@ export function storeContract(name: string, open: OpenStore): void {
       assert.deepEqual((await store.deliveries({ state: 'delivering' })).find((d) => d.id === 'claimed')?.replica, replica);
     });
 
+    test("a write that ends an attempt lands only under that attempt's claim, not after another replica re-claimed the delivery (ADR 0029)", async () => {
+      const id = 'reclaimed' as DeliveryId;
+      const other = 'replica-b' as ReplicaId;
+      await store.insertDelivery(delivery(id, {}));
+      await store.claimDelivery(id, replica, 1);
+      const old = delivery(id, { state: 'delivering', replica, attempts: 1 });
+      await store.casDelivery(old, { ...old, state: 'due', nextAttemptAt: 5 });
+      await store.claimDelivery(id, other, 2);
+      const current = delivery(id, { state: 'delivering', replica: other, attempts: 2, nextAttemptAt: 5 });
+      assert.deepEqual([await store.casDelivery(old, { ...old, state: 'done' }), await store.casDelivery(current, { ...current, state: 'done' })], [false, true]);
+      const stored = (await store.deliveries({})).find((d) => d.id === id)!;
+      assert.deepEqual([stored.state, stored.replica, stored.attempts, stored.nextAttemptAt], ['done', other, 2, 5]);
+    });
+
+    test('a conditional write matches a delivery no replica has claimed yet (ADR 0029)', async () => {
+      const due = delivery('unclaimed', {});
+      await store.insertDelivery(due);
+      assert.equal(await store.casDelivery(due, { ...due, state: 'cancelled' }), true);
+    });
+
     test('lease tally round-trips per replica', async () => {
       const tally = { app: appId('leased'), replica, epoch: 4, request: 2, channel: 1, trigger: 0, releasedAt: 9 };
       await store.putLeaseTally(tally);

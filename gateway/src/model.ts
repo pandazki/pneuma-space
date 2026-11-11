@@ -851,7 +851,8 @@ export interface StoreOps {
 
   /** Returns the stored row: an existing one for the same scheduled slot, or the same (app, trigger, idempotencyKey) within IDEMPOTENCY_WINDOW_MS. */
   insertDelivery(delivery: Delivery): Promise<Delivery>;
-  updateDelivery(delivery: Delivery): Promise<void>;
+  /** Writes `next`'s state, attempts and next attempt only while the row still has `expected`'s state, claimer and attempts; false otherwise (ADR 0029). */
+  casDelivery(expected: Pick<Delivery, 'id' | 'state' | 'replica' | 'attempts'>, next: Delivery): Promise<boolean>;
   /** Moves a due delivery to delivering for `replica` with `attempts`; false when it was not due any more (ADR 0020 item 4). */
   claimDelivery(id: DeliveryId, replica: ReplicaId, attempts: number): Promise<boolean>;
   deliveries(filter: DeliveryFilter): Promise<Delivery[]>;
@@ -1146,7 +1147,7 @@ export interface Scheduler {
   invoke(request: InvokeRequest): Promise<DeliveryId>;
   /** Re-reads the app's triggers; cancels deliveries of undeclared triggers and of removed apps, and deletes those of purged apps. */
   reload(app: AppId): Promise<void>;
-  /** Startup: delivering rows return to due, then the loop and worker start. */
+  /** On taking the lead: delivering rows no running attempt holds return to due, then the loop and worker start (ADR 0029). */
   resume(): Promise<void>;
 }
 

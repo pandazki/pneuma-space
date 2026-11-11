@@ -403,8 +403,12 @@ export class SqlOps implements StoreOps {
     });
   }
 
-  async updateDelivery(d: Delivery) {
-    await this.#s.run('UPDATE delivery SET state = $1, attempts = $2, next_attempt_at = $3 WHERE id = $4', [d.state, d.attempts, d.nextAttemptAt, d.id]);
+  async casDelivery(expected: Pick<Delivery, 'id' | 'state' | 'replica' | 'attempts'>, next: Delivery) {
+    const { changes } = await this.#s.run(
+      'UPDATE delivery SET state = $1, attempts = $2, next_attempt_at = $3 WHERE id = $4 AND state = $5 AND replica IS NOT DISTINCT FROM $6 AND attempts = $7',
+      [next.state, next.attempts, next.nextAttemptAt, expected.id, expected.state, expected.replica, expected.attempts],
+    );
+    return changes > 0;
   }
 
   async claimDelivery(id: DeliveryId, replica: ReplicaId, attempts: number) {
