@@ -270,6 +270,42 @@ test('the sweep keeps an instance whose row is waking, as its waker may still be
   assert.deepEqual(driver.discarded, ['orphan']);
 });
 
+test('a leader starting while another live replica wakes an app keeps the instance being created, and the wake ends awake with a lease (#8)', async () => {
+  const store = tempStore();
+  const { app, specFor } = await registered(store);
+  const [waker, leader] = [replica(store, specFor, 'replica-a', { leader: false }), replica(store, specFor, 'replica-b')];
+  await store.putReplica({ id: 'replica-a' as ReplicaId, startedAt: Date.now(), seenAt: Date.now(), leading: false });
+  let created!: () => void;
+  let finish!: () => void;
+  const creating = new Promise<void>((resolve) => (created = resolve));
+  const finished = new Promise<void>((resolve) => (finish = resolve));
+  waker.driver.start = async (slot) => {
+    slot.handle = 'creating';
+    leader.driver.adopted = [{ app, handle: 'creating', release: '1', spec: 'h', address: null }];
+    created();
+    await finished;
+    if (leader.driver.discarded.includes('creating')) throw new Error('the instance was removed while it started');
+    return 'fake:1';
+  };
+  const lease = waker.lifecycle.acquire(app, 'request');
+  await creating;
+  await leader.lifecycle.reconcile();
+  finish();
+  assert.equal((await lease).address, 'fake:1');
+  assert.deepEqual([(await store.instance(app))?.state, leader.driver.discarded], ['awake', []]);
+});
+
+test('a leader starting over a waking row whose actor is dead takes it asleep and discards the instance the waker left (#8)', async () => {
+  const store = tempStore();
+  const { app, specFor } = await registered(store);
+  await store.insertInstance(instance(app, 'waking', 'dead', null));
+  const { driver, lifecycle } = replica(store, specFor);
+  driver.adopted = [orphan(app)];
+  await lifecycle.reconcile();
+  await until('the leftover instance is discarded', () => driver.discarded.includes('orphan'));
+  assert.equal((await store.instance(app))?.state, 'asleep');
+});
+
 test('an instance end that two replicas both report records one Guard failure', async () => {
   const store = tempStore();
   const { app, specFor } = await registered(store, { max_failures: 5 });
