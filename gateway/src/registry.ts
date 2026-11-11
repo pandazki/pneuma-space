@@ -349,7 +349,11 @@ export class PlatformRegistry implements Registry {
       const before = selectProvider('db', effectivePolicy(this.#policy, app.policyOverride));
       const after = selectProvider('db', effectivePolicy(this.#policy, override));
       const switching = app.status === 'registered' && manifest?.capabilities.db !== undefined && before !== after;
-      if (switching) await this.#ensure(app.id, this.#provider(after));
+      if (switching) {
+        const provider = this.#provider(after);
+        await this.#store.transaction((tx) => this.#reserve(tx, app, [provider]));
+        await this.#ensure(app.id, provider);
+      }
       const { next, suspended } = await this.#store.transaction(async (tx) => {
         const next: App = { ...(await tx.app(name))!, policyOverride: override };
         await tx.putApp(next);
@@ -358,6 +362,9 @@ export class PlatformRegistry implements Registry {
       await this.#settled(next, suspended, switching);
       log('app-policy', name, { override });
       return override as PolicyOverride;
+    }).catch((error: unknown) => {
+      if (error instanceof QuotaExceeded) this.#quotaRefused(error, name, 'policy');
+      throw error;
     });
   }
 

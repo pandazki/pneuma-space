@@ -158,7 +158,7 @@ GET    /api/audit?tenant=&from=&to=&actor=&action=&target=&limit=  member  audit
 PUT    /api/apps/<name>/release        member     first publish; owner after it. {"image": reference|null, "manifest": {...}, "bundle": id|null, "owner": subject, "tenant": name} -> the release {"number": n, "image": id|null, "bundle": id|null, ...}; the gateway resolves the reference to a local image id (Docker) or a registry digest reference (Kubernetes); owner and tenant apply to the first publish only, owner defaults to the caller (required under local) and only a tenant admin or a service token may name another, tenant may be omitted by a caller in one tenant; a quota refusal answers 409 with a quota field {tenant, resource, used, limit, ask}
 POST   /api/bundles                    member     tar body -> {"bundle": id}; member of any tenant
 PUT    /api/policy                     platform   global policy fields
-PUT    /api/apps/<name>/policy         owner      per-app overrides; cpu_millis or memory_mb above the tenant's quota totals answers 400
+PUT    /api/apps/<name>/policy         owner      per-app overrides; cpu_millis or memory_mb above the tenant's quota totals answers 400; a db_backend switch to sqlite past storage_gb answers 409 with the quota field and changes nothing
 PUT    /api/apps/<name>/access         owner      {"access": "tenant"|"org"|"public"}
 PUT    /api/apps/<name>/owner          admin      {"owner": subject}; the current owner may also call it
 PUT    /api/apps/<name>/tenant         platform*  {"tenant": name}
@@ -183,6 +183,6 @@ POST   /api/tokens                     local only {"name": ...} -> {"token": one
 
 Policy fields: `idle_seconds`, `ready_timeout_seconds`, `drain_timeout_seconds`, `connection_idle_seconds`, `trigger_timeout_seconds`, `max_failures`, `failure_window_seconds`, `restart_backoff_seconds`, `db_backend` (`sqlite` or `postgres`; the global value is the default for an app's first database; a per-app change provisions the other engine and does not migrate data), `cpu_millis`, `memory_mb` (changing either retires the instance), and global-only `timezone`, `usage_retention_days`, `events_retention_days`, `events_max_rows`.
 
-Quota fields, each `null` for unlimited: `apps` (apps not being purged), `awake` (instances not asleep), `cpu_millis` and `memory_mb` (sums over those instances), `storage_gb` (the provisioned volume capacity of the tenant's `files` and SQLite bindings, checked when a publish adds one; databases and buckets are not counted).
+Quota fields, each `null` for unlimited: `apps` (apps not being purged), `awake` (instances not asleep), `cpu_millis` and `memory_mb` (sums over those instances), `storage_gb` (the provisioned volume capacity of the tenant's `files` and SQLite bindings, checked when a publish or a switch to SQLite adds one; databases and buckets are not counted).
 
 `GET /metrics` serves Prometheus text on its own port, `PNEUMA_SPACE_METRICS_PORT`, when the operator sets it (ADR 0024).

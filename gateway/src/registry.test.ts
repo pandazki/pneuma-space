@@ -381,3 +381,30 @@ test('refusals in a full tenant leave a republish there and a publish into anoth
   const seen = outcomes.map((o) => (o.status === 'fulfilled' ? 'published' : o.reason instanceof QuotaExceeded ? o.reason.refusal.resource : String(o.reason)));
   assert.deepEqual(seen, ['storage_gb', 'published', 'published']);
 });
+
+test('switching db_backend to sqlite past storage_gb is refused with quota-refused and leaves the override and bindings as they were (#12)', async () => {
+  const refusals: unknown[] = [];
+  const { registry, store } = await world().open({ quotaRefused: (error, app, action) => refusals.push([error.refusal.resource, app, action]) });
+  await registry.setGlobalPolicy({ db_backend: 'postgres' });
+  await registry.createTenant(blue, 'Blue', ['ann']);
+  await registry.setQuota(blue, { storage_gb: 0 });
+  const { app } = await publishIn(registry, 'one', { db: {} });
+  const rows = async () => JSON.stringify([await store.app(appName('one')), await store.bindings(app)]);
+  const before = await rows();
+  await assert.rejects(registry.setAppPolicy(appName('one'), { db_backend: 'sqlite' }), (error) => error instanceof QuotaExceeded && error.refusal.resource === 'storage_gb');
+  assert.equal(await rows(), before);
+  assert.equal((await store.quotaUsed(blue)).storage_gb, 0);
+  assert.deepEqual(refusals, [['storage_gb', 'one', 'policy']]);
+});
+
+test('switching db_backend from postgres to sqlite and back and forth asks storage_gb for the first SQLite binding only (#12)', async () => {
+  const { registry, store } = await quotaWorld({ storage_gb: 1 });
+  await registry.setGlobalPolicy({ db_backend: 'postgres' });
+  await publishIn(registry, 'one', { db: {} });
+  const used: number[] = [];
+  for (const db_backend of ['sqlite', 'postgres', 'sqlite'] as const) {
+    await registry.setAppPolicy(appName('one'), { db_backend });
+    used.push((await store.quotaUsed(blue)).storage_gb);
+  }
+  assert.deepEqual(used, [1, 1, 1]);
+});
