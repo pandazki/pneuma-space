@@ -47,3 +47,7 @@ Cloudflare account queries timed out, including through the configured system pr
 ## Runtime measurements
 
 The process benchmark and the local Fetch benchmark use different transports and lifecycle semantics. Fetch has no sleep-and-wake promise. Its engine-restart case is an eviction experiment. Results are diagnostic samples under the recorded host load and do not establish a performance ranking or production latency.
+
+The measured implementation commit is `ee5ddf3`. The [process sample](../tests/bench/results/2026-11-11-ee5ddf3.tsv) covers the running Compose stack. The [Fetch sample](../tests/bench/results/2026-11-11-hosted-fetch.tsv) contains 106 checked responses with zero errors, including five complete local-engine replacements. Each file records host load. The host was busy, so these samples are unsuitable for choosing a faster runtime.
+
+Reproduce them with `node tests/bench/runtimes.ts` against an isolated running Compose stack and `npm run bench --prefix cloud` for the local Workers engine.
