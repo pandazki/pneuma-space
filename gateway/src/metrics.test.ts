@@ -1,25 +1,34 @@
 import assert from 'node:assert/strict';
+import { createSocket } from 'node:dgram';
+import { once } from 'node:events';
 import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, type NetworkInterfaceInfo } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { Readable } from 'node:stream';
 import { setImmediate as tick } from 'node:timers/promises';
 import dns from 'node:dns';
-import { createServer as createTcpServer } from 'node:net';
-import { mock, test } from 'node:test';
+import { createServer as createTcpServer, type AddressInfo } from 'node:net';
+import { mock, test, type TestContext } from 'node:test';
 import { EventLog } from './events.ts';
-import { EXPOSITION_TYPE, Metrics, networkProbe, profileProbe, serveMetrics, Series, untilUp } from './metrics.ts';
-import { DEFAULT_TENANT, USAGE_COUNTERS, appName, type AppId, type AppSummary, type InstanceState, type ReplicaId, type TenantName, type Traffic, type Usage } from './model.ts';
+import { admission, EXPOSITION_TYPE, Metrics, networkProbe, profileProbe, serveMetrics, Series, untilUp, type ServiceStatus } from './metrics.ts';
+import {
+  Conflict, DEFAULT_TENANT, USAGE_COUNTERS, appName, parseManifest, subject,
+  type AppId, type AppSummary, type InstanceState, type ReplicaId, type TenantName, type Traffic, type Usage,
+} from './model.ts';
+import { addressOnNetwork, createProviders, networkResolver, providerConfig } from './providers.ts';
+import { world } from './registry.fakes.ts';
 import { SqliteStore } from './store.ts';
 
 const HOUR = 3_600_000;
 const app = 'a1b2c3d4e5f6' as AppId;
 const survey = appName('survey');
 
-function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader = true, clock = { now: 1_800_000_000_000 }, policy = {} } = {}) {
+function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader = true, term = undefined as (() => { readonly since: number } | null) | undefined, clock = { now: 1_800_000_000_000 }, policy = {} } = {}) {
   const events = new EventLog(() => {});
   const stats: Traffic[] = [];
   const apps: AppSummary[] = [];
+  const always = { since: clock.now };
   const metrics = new Metrics({
     events,
     stats: () => stats,
@@ -34,7 +43,7 @@ function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader =
     series: new Series(),
     retries: () => 0,
     replica: replica as ReplicaId,
-    leader: () => leader,
+    term: term ?? (() => (leader ? always : null)),
     now: () => clock.now,
   });
   const last = (series: readonly (number | null)[]) => series.at(-1);
@@ -136,6 +145,89 @@ test('awake_ms is written only when the leader flag is set', async () => {
     return (await hourRow())?.awakeMs ?? 0;
   };
   assert.deepEqual([await awake(true), await awake(false)], [10_000, 0]);
+});
+
+/** Replicas a and b over one store and one clock, the app awake throughout; `lead(r)` starts r's term now and ends the other's. */
+function awakeReplicas() {
+  const store = new SqliteStore(':memory:');
+  const clock = { now: 1_800_000_000_000 };
+  const terms: Record<'a' | 'b', { readonly since: number } | null> = { a: null, b: null };
+  const replica = (id: 'a' | 'b') => {
+    const f = fixture({ store, replica: id, clock, term: () => terms[id] });
+    f.apps.push(summary('awake'));
+    return f.metrics;
+  };
+  const lead = (id: 'a' | 'b') => {
+    terms.a = terms.b = null;
+    terms[id] = { since: clock.now };
+  };
+  const awakeMs = async (from = 0, to = clock.now + HOUR) => (await store.usage({ step: 3600, app, from, to })).reduce((sum, b) => sum + b.awakeMs, 0);
+  return { a: replica('a'), b: replica('b'), lead, clock, awakeMs };
+}
+
+test('a replica that leads again after another led counts none of the time the other led (#15)', async () => {
+  const { a, b, lead, clock, awakeMs } = awakeReplicas();
+  const start = clock.now;
+  lead('a');
+  await a.sample();
+  clock.now += 10_000;
+  await a.sample();
+  lead('b');
+  await b.sample();
+  for (let i = 0; i < 6; i++) {
+    clock.now += 10_000;
+    await b.sample();
+  }
+  lead('a');
+  await a.sample();
+  const [total, truth] = [await awakeMs(), clock.now - start];
+  assert.ok(total <= truth && total >= truth - 2 * 10_000, `awake ${total} ms of ${truth}`);
+});
+
+test('across 20 rounds of a, b, a leading, awake time loses at most one sampling interval per switch and counts nothing twice (#15)', async () => {
+  const { a, b, lead, clock, awakeMs } = awakeReplicas();
+  const start = clock.now;
+  let [leader, switches, last] = ['a' as 'a' | 'b', 0, start];
+  lead('a');
+  // a samples at :00 and b at :05 of every 10 s; each switch comes 100 ms after the new leader's sample, so its next one is almost an interval away.
+  for (let t = 0; t < 35_100 + 40 * 35_000; t += 100) {
+    clock.now = start + t;
+    if (t >= 35_100 && (t - 35_100) % 35_000 === 0) {
+      leader = leader === 'a' ? 'b' : 'a';
+      lead(leader);
+      switches++;
+    }
+    for (const [id, phase, metrics] of [['a', 0, a], ['b', 5000, b]] as const) {
+      if (t % 10_000 !== phase) continue;
+      await metrics.sample();
+      if (leader === id) last = clock.now;
+    }
+  }
+  const [total, truth] = [await awakeMs(), last - start];
+  assert.ok(total <= truth && total >= truth - switches * 10_000, `awake ${total} ms of ${truth} after ${switches} switches`);
+});
+
+test('a switch across an hour boundary writes nothing into the earlier hour after it (#15)', async () => {
+  const { a, b, lead, clock, awakeMs } = awakeReplicas();
+  const hour = clock.now + HOUR;
+  clock.now = hour - 20_000;
+  lead('a');
+  await a.sample();
+  clock.now = hour - 10_000;
+  await a.sample();
+  const earlier = await awakeMs(hour - HOUR, hour);
+  clock.now = hour - 5000;
+  lead('b');
+  await b.sample();
+  clock.now = hour + 5000;
+  await b.sample();
+  clock.now = hour + 12_000;
+  lead('a');
+  for (const at of [20_000, 30_000]) {
+    clock.now = hour + at;
+    await a.sample();
+  }
+  assert.deepEqual([earlier, await awakeMs(hour - HOUR, hour)], [10_000, 10_000]);
 });
 
 test('the sweep deletes hourly rows past the retention and minute rows past 24 h, and keeps the rest', async () => {
@@ -311,6 +403,84 @@ test('a Compose service is probed at the address the network gives, never by get
 test('a Compose service the network does not name is down, and a profile one is off', async () => {
   const nowhere = async () => null;
   assert.deepEqual([await networkProbe('redis', 6379, nowhere)(), await profileProbe('postgres', 5432, nowhere)()], ['down', 'off']);
+});
+
+/** The gateway on 172.20.0.5/16, and on 127.0.0.5/8 as an ordinary interface so a local listener is a service on its network. */
+const gatewayInterfaces = (): NodeJS.Dict<NetworkInterfaceInfo[]> => ({
+  eth0: [{ address: '172.20.0.5', netmask: '255.255.0.0', family: 'IPv4', mac: '02:42:ac:14:00:05', internal: false, cidr: '172.20.0.5/16' }],
+  eth1: [{ address: '127.0.0.5', netmask: '255.0.0.0', family: 'IPv4', mac: '02:42:7f:00:00:05', internal: false, cidr: '127.0.0.5/8' }],
+});
+
+type ServiceCase = { readonly name: string; readonly address: (service: string) => Promise<string | null>; readonly port: number; readonly strip: ServiceStatus };
+
+/** The four ways a profile service can look to the gateway (#16): what its name resolves to, and whether that address accepts on the port. */
+async function serviceCases(t: TestContext): Promise<ServiceCase[]> {
+  const listen = async () => {
+    const server = createTcpServer((socket) => socket.destroy()).listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    return { server, port: (server.address() as AddressInfo).port };
+  };
+  const open = await listen();
+  t.after(() => open.server.close());
+  const closed = await listen();
+  closed.server.close();
+  const answering = (answer: () => Promise<string[]>) => (service: string) => addressOnNetwork(service, { resolve: answer, interfaces: gatewayInterfaces });
+  const nxdomain = () => Promise.reject(Object.assign(new Error('queryA ENOTFOUND'), { code: 'ENOTFOUND' }));
+  return [
+    { name: 'no such name', address: answering(nxdomain), port: open.port, strip: 'off' },
+    { name: 'a synthetic answer', address: answering(async () => ['198.18.6.17']), port: open.port, strip: 'off' },
+    { name: 'an address on the network that refuses', address: answering(async () => ['127.0.0.1']), port: closed.port, strip: 'down' },
+    { name: 'an address on the network that accepts', address: answering(async () => ['127.0.0.1']), port: open.port, strip: 'up' },
+  ];
+}
+
+const profiles = (c: ServiceCase) => ({
+  postgres: profileProbe('postgres', c.port, c.address), coturn: profileProbe('coturn', c.port, c.address), runner: profileProbe('runner', c.port, c.address),
+});
+
+test('the service strip reads off for no name and for a synthetic answer, down for a refusing address, up for an accepting one, and admission admits only up (#16)', async (t) => {
+  for (const c of await serviceCases(t)) {
+    for (const service of ['postgres', 'coturn', 'runner'] as const) {
+      const probes = profiles(c);
+      assert.deepEqual([await probes[service](), await admission(probes)(service)], [c.strip, c.strip === 'up'], `${service}: ${c.name}`);
+    }
+  }
+});
+
+test("a publish needing the runner, coturn or postgres answers the contract's 409 unless the service is on the network and accepts (#16)", async (t) => {
+  for (const c of await serviceCases(t)) {
+    const probe = admission(profiles(c));
+    const config = { ...providerConfig({ PNEUMA_SPACE_RTC_SECRET: 's' }), postgres: { host: '127.0.0.1', port: c.port, password: 'p' } };
+    const real = createProviders({ destroyStorage: async () => {} }, config, probe);
+    const w = world();
+    const providers = [...[...w.providers.values()].filter((p) => p.name !== 'coturn' && p.name !== 'postgres'), real.coturn, real.postgres];
+    const { registry } = await w.open({ probe, providers });
+    await registry.setGlobalPolicy({ db_backend: 'postgres' });
+    const bundle = await w.bundles.put(Readable.from([Buffer.from('app dir')]));
+    const publish = (name: string, image: string | null, manifest: Record<string, unknown>) =>
+      registry.publish({ name: appName(name), image, manifest: parseManifest({ contract: 1, ...manifest }), bundle: image ? null : bundle, owner: subject('user:ann') })
+        .then(() => 'published', (error) => (error instanceof Conflict && /--profile/.test(error.message) ? '409' : 'admitted'));
+    const outcomes = [
+      await publish('iso', null, { runtime: 'isolate', capabilities: {} }),
+      await publish('game', 'example:1', { capabilities: { rtc: {} } }),
+      await publish('form', 'example:1', { capabilities: { db: {} } }),
+    ];
+    // Past admission the postgres provider speaks to the test's listener, which is not PostgreSQL.
+    assert.deepEqual(outcomes, c.strip === 'up' ? ['published', 'published', 'admitted'] : ['409', '409', '409'], c.name);
+  }
+});
+
+test('a resolver that never answers costs one bounded query and no connection, and never the libuv lookup pool (#16)', async (t) => {
+  const silent = createSocket('udp4');
+  silent.bind(0, '127.0.0.1');
+  await once(silent, 'listening');
+  t.after(() => silent.close());
+  const resolver = networkResolver([`127.0.0.1:${silent.address().port}`]);
+  const lookup = mock.method(dns, 'lookup');
+  t.after(() => lookup.mock.restore());
+  let queries = 0;
+  const address = (service: string) => addressOnNetwork(service, { resolve: (name) => (queries++, resolver.resolve4(name)) });
+  assert.deepEqual([await profileProbe('runner', 8082, address)(), queries, lookup.mock.callCount()], ['off', 1, 0]);
 });
 
 test('the gateway waits for a service that is not up yet, and says so once', async () => {

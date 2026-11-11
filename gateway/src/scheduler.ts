@@ -12,7 +12,7 @@ import {
 } from './model.ts';
 
 export type SchedulerDeps = {
-  readonly store: Pick<Store, 'apps' | 'insertDelivery' | 'updateDelivery' | 'claimDelivery' | 'deliveries' | 'lastScheduledFor' | 'deleteDeliveries' | 'replicas' | 'sweepDeliveries'>;
+  readonly store: Pick<Store, 'apps' | 'insertDelivery' | 'casDelivery' | 'claimDelivery' | 'deliveries' | 'lastScheduledFor' | 'deleteDeliveries' | 'replicas' | 'sweepDeliveries'>;
   readonly runtime: Pick<Runtime, 'acquire' | 'release' | 'state'>;
   readonly view: (app: AppId) => SchedulerView | null;
   readonly now?: () => number;
@@ -24,6 +24,8 @@ export type SchedulerDeps = {
 
 const TICK_MS = 1000;
 const BACKOFF_MS = 10_000;
+/** No longer than the instance takeover period (ADR 0029). */
+const RECLAIM_MS = 5000;
 
 /** `refused`: the tenant's quota turned the wake away; the attempt does not count (ADR 0023 item 5). */
 type Outcome = { readonly ok: boolean; readonly cancel: boolean; readonly refused?: boolean; readonly reason?: string };
@@ -37,7 +39,10 @@ export class DeliveryScheduler implements Scheduler {
   readonly #replica: ReplicaId;
   readonly #policy: () => Pick<Policy, 'events_retention_days'>;
   #sweptAt = -Infinity;
+  #reclaimedAt = -Infinity;
   readonly #inFlight = new Set<AppId>();
+  /** The deliveries this process is attempting, from just before the claim until the attempt's result is written. */
+  readonly #attempting = new Set<DeliveryId>();
   #timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(deps: SchedulerDeps) {
@@ -64,18 +69,12 @@ export class DeliveryScheduler implements Scheduler {
     const view = this.#view(app);
     if (view === null) return this.#store.deleteDeliveries(app);
     for (const d of await this.#store.deliveries({ app, state: 'due' })) {
-      if (!declares(view, d.trigger)) await this.#write({ ...d, state: 'cancelled' }, 'trigger not declared or app not registered');
+      if (!declares(view, d.trigger)) await this.#write(d, { ...d, state: 'cancelled' }, 'trigger not declared or app not registered');
     }
   }
 
-  /** On taking leadership: deliveries claimed by a dead replica, or by this one before it restarted, go back to due (ADR 0020 item 4). */
   async resume(): Promise<void> {
-    const seen = Date.now() - DEAD_MS;
-    const live = new Set((await this.#store.replicas()).filter((r) => r.seenAt >= seen && r.id !== this.#replica).map((r) => r.id));
-    for (const d of await this.#store.deliveries({ state: 'delivering' })) {
-      if (d.replica && live.has(d.replica)) continue;
-      await this.#write({ ...d, state: 'due', nextAttemptAt: this.#now() }, 'gateway restarted mid-delivery');
-    }
+    await this.#reclaim(this.#now());
     this.#timer ??= setInterval(() => void this.tick(), TICK_MS).unref();
   }
 
@@ -86,7 +85,7 @@ export class DeliveryScheduler implements Scheduler {
 
   /**
    * Materializes due cron slots, then starts at most one delivery per app; resolves when the started ones settle. Never rejects.
-   * Ticks run on the leader only, which also sweeps finished deliveries once an hour (ADR 0024 item 4; failed ones stay, INV-4).
+   * Ticks run on the leader only, which also reclaims every RECLAIM_MS and sweeps finished deliveries once an hour (ADR 0024 item 4; failed ones stay, INV-4).
    */
   async tick(): Promise<void> {
     try {
@@ -96,6 +95,7 @@ export class DeliveryScheduler implements Scheduler {
         await this.#store.sweepDeliveries(now - this.#policy().events_retention_days * DAY)
           .catch((error) => this.#log('sweep-failed', null, { error: String(error) }));
       }
+      if (now - this.#reclaimedAt >= RECLAIM_MS) await this.#reclaim(now);
       await this.#materialize(now);
       const started: Promise<void>[] = [];
       const due = (await this.#store.deliveries({ state: 'due', dueBefore: now }))
@@ -108,6 +108,20 @@ export class DeliveryScheduler implements Scheduler {
       await Promise.all(started);
     } catch (error) {
       this.#log('tick-failed', null, { error: String(error) });
+    }
+  }
+
+  /**
+   * Puts back to due, with its id and attempts, every delivering row no running attempt holds: one claimed by a replica not seen for
+   * DEAD_MS, or by this replica's earlier process. One read of each table, whatever the number of apps (ADR 0029).
+   */
+  async #reclaim(now: number): Promise<void> {
+    this.#reclaimedAt = now;
+    const live = new Set((await this.#store.replicas()).filter((r) => r.seenAt >= now - DEAD_MS).map((r) => r.id));
+    for (const d of await this.#store.deliveries({ state: 'delivering' })) {
+      const mine = d.replica === this.#replica;
+      if (mine ? this.#attempting.has(d.id) : d.replica !== null && live.has(d.replica)) continue;
+      await this.#write(d, { ...d, state: 'due', nextAttemptAt: now }, mine ? 'gateway restarted mid-delivery' : `replica ${d.replica} died mid-delivery`);
     }
   }
 
@@ -130,7 +144,7 @@ export class DeliveryScheduler implements Scheduler {
   async #insert(fields: Pick<Delivery, 'app' | 'trigger' | 'scheduledFor' | 'caller' | 'idempotencyKey' | 'body'>): Promise<Delivery> {
     const now = this.#now();
     const fresh: Delivery = {
-      ...fields, id: randomUUID() as DeliveryId, state: 'due', attempts: 0, nextAttemptAt: now, createdAt: now,
+      ...fields, id: randomUUID() as DeliveryId, state: 'due', attempts: 0, nextAttemptAt: now, createdAt: now, replica: null,
     };
     const stored = await this.#store.insertDelivery(fresh);
     if (stored.id === fresh.id) this.#emit(stored);
@@ -140,17 +154,28 @@ export class DeliveryScheduler implements Scheduler {
   async #deliver(due: Delivery): Promise<void> {
     const view = this.#view(due.app);
     if (!declares(view, due.trigger)) {
-      return this.#write({ ...due, state: 'cancelled' }, 'trigger not declared or app not registered');
+      await this.#write(due, { ...due, state: 'cancelled' }, 'trigger not declared or app not registered');
+      return;
     }
     const d: Delivery = { ...due, state: 'delivering', attempts: due.attempts + 1, replica: this.#replica };
-    if (!(await this.#store.claimDelivery(d.id, this.#replica, d.attempts))) return;
-    this.#emit(d);
-    const outcome = await this.#attempt(d, view.policy.trigger_timeout_seconds * 1000);
-    if (outcome.ok) await this.#write({ ...d, state: 'done' });
-    else if (outcome.refused) await this.#write({ ...d, state: 'due', attempts: due.attempts, nextAttemptAt: this.#now() + QUOTA_RETRY_SECONDS * 1000 }, 'refused');
-    else if (outcome.cancel || !declares(this.#view(d.app), d.trigger)) await this.#write({ ...d, state: 'cancelled' }, outcome.reason);
-    else if (d.attempts >= MAX_ATTEMPTS) await this.#write({ ...d, state: 'failed' }, outcome.reason);
-    else await this.#write({ ...d, state: 'due', nextAttemptAt: this.#now() + BACKOFF_MS * 2 ** (d.attempts - 1) }, outcome.reason);
+    this.#attempting.add(d.id);
+    try {
+      if (!(await this.#store.claimDelivery(d.id, this.#replica, d.attempts))) return;
+      this.#emit(d);
+      const outcome = await this.#attempt(d, view.policy.trigger_timeout_seconds * 1000);
+      const end = async (next: Delivery, reason?: string) => {
+        if (!(await this.#write(d, next, reason))) {
+          this.#log('delivery-result-dropped', d.app, { trigger: d.trigger, delivery: d.id, attempt: d.attempts, result: next.state, reason });
+        }
+      };
+      if (outcome.ok) await end({ ...d, state: 'done' });
+      else if (outcome.refused) await end({ ...d, state: 'due', attempts: due.attempts, nextAttemptAt: this.#now() + QUOTA_RETRY_SECONDS * 1000 }, 'refused');
+      else if (outcome.cancel || !declares(this.#view(d.app), d.trigger)) await end({ ...d, state: 'cancelled' }, outcome.reason);
+      else if (d.attempts >= MAX_ATTEMPTS) await end({ ...d, state: 'failed' }, outcome.reason);
+      else await end({ ...d, state: 'due', nextAttemptAt: this.#now() + BACKOFF_MS * 2 ** (d.attempts - 1) }, outcome.reason);
+    } finally {
+      this.#attempting.delete(d.id);
+    }
   }
 
   async #attempt(d: Delivery, timeoutMs: number): Promise<Outcome> {
@@ -183,9 +208,11 @@ export class DeliveryScheduler implements Scheduler {
     }
   }
 
-  async #write(d: Delivery, reason?: string): Promise<void> {
-    await this.#store.updateDelivery(d);
-    this.#emit(d, reason);
+  /** Writes `next` only while the row is as `expected` was read or claimed (ADR 0029); emits its event when it did. */
+  async #write(expected: Delivery, next: Delivery, reason?: string): Promise<boolean> {
+    if (!(await this.#store.casDelivery(expected, next))) return false;
+    this.#emit(next, reason);
+    return true;
   }
 
   #emit(d: Delivery, reason?: string): void {

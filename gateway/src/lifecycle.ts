@@ -689,8 +689,8 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
   }
 
   /**
-   * Leader at startup: an instance the driver reports without a matching row, or for another release or spec, is removed;
-   * an awake row whose instance is gone goes asleep as crashed.
+   * Leader at startup: an instance the driver reports without a matching row, or for another release or spec, is removed unless its row,
+   * read after the listing, is waking, as the sweep judges (ADR 0020 item 4); an awake row whose instance is gone goes asleep as crashed.
    */
   async #adopt(): Promise<void> {
     const found = await this.#driver.adopt();
@@ -703,6 +703,8 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
       const fits = row !== null && row.handle === handle && spec !== null && !matched.has(app)
         && instance.release === String(spec.release) && instance.spec === specHash(spec) && row.release === spec.release && row.specHash === specHash(spec);
       if (!fits) {
+        const current = await this.#store.instance(app);
+        if (current?.runtime === this.kind && current.state === 'waking') continue;
         discarded.add(handle);
         if (await this.#driver.discard(app, handle)) this.#emit('removed', app, { [this.#driver.handleKey]: handle });
         continue;

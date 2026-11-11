@@ -1,5 +1,6 @@
 import { argon2Sync, createCipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
 import { promises as dns } from 'node:dns';
+import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
 import { Readable } from 'node:stream';
 import {
   CAPABILITIES, Conflict, FILES_DIR, InputError, NotFound, RESERVED_SEGMENT, RUNTIMES,
@@ -51,14 +52,33 @@ export function providerConfig(env: Readonly<Record<string, string | undefined>>
 }
 
 type Storage = Pick<Runtime, 'destroyStorage'>;
-/** True when a profiled Compose service is on the network. */
+/** True when a profiled service is present (ADR 0030). */
 export type ServiceProbe = (service: 'postgres' | 'coturn' | NonNullable<(typeof RUNTIMES)[RuntimeKind]['service']>) => Promise<boolean>;
 
-// Docker's resolver forwards unknown names upstream and waits about 5 s; a 500 ms single try answers within 1 s (spike S2).
-const resolver = new dns.Resolver({ timeout: 500, tries: 1 });
-/** A Compose service's address, or null when the network has no such name. */
-export const addressOnNetwork = (service: string): Promise<string | null> => resolver.resolve4(service).then(([address]) => address ?? null, () => null);
-export const resolvesOnNetwork: ServiceProbe = async (service) => (await addressOnNetwork(service)) !== null;
+/** Docker's resolver forwards unknown names upstream and waits about 5 s; a 500 ms single try answers within 1 s (spike S2), and c-ares never takes a libuv lookup slot. */
+export function networkResolver(servers?: readonly string[]): dns.Resolver {
+  const resolver = new dns.Resolver({ timeout: 500, tries: 1 });
+  if (servers) resolver.setServers(servers);
+  return resolver;
+}
+
+const resolver = networkResolver();
+const ipv4 = (address: string) => address.split('.').reduce((n, octet) => n * 256 + Number(octet), 0);
+const sameSubnet = (a: string, b: string, mask: string) => (ipv4(a) & ipv4(mask)) === (ipv4(b) & ipv4(mask));
+
+/**
+ * A Compose service's address, or null when the network has no such name. Docker's resolver hands names it does not know to the host's,
+ * which may answer any name, so an address outside every subnet of the gateway's own interfaces is no such service (ADR 0030).
+ */
+export async function addressOnNetwork(
+  service: string,
+  { resolve = (name: string) => resolver.resolve4(name), interfaces = networkInterfaces }: { readonly resolve?: (name: string) => Promise<string[]>; readonly interfaces?: () => NodeJS.Dict<NetworkInterfaceInfo[]> } = {},
+): Promise<string | null> {
+  const [address] = await resolve(service).catch((): string[] => []);
+  if (address === undefined) return null;
+  const own = Object.values(interfaces()).flatMap((list) => list ?? []).filter((i) => i.family === 'IPv4' && !i.internal);
+  return own.some((i) => sameSubnet(address, i.address, i.netmask)) ? address : null;
+}
 type ProviderProbe = (service: 'postgres' | 'coturn') => Promise<boolean>;
 
 async function requireService(probe: ProviderProbe, service: 'postgres' | 'coturn', profile: string, kind: ResourceKind): Promise<void> {
@@ -332,7 +352,7 @@ class CoturnProvider implements CapabilityProvider {
 
 export type Providers = { readonly [N in ProviderName]: CapabilityProvider };
 
-export function createProviders(storage: Storage, config: ProviderConfig, probe: ProviderProbe = resolvesOnNetwork): Providers {
+export function createProviders(storage: Storage, config: ProviderConfig, probe: ProviderProbe): Providers {
   const providers: Providers = {
     volume: new StorageProvider('files', 'volume', storage, 'pneuma-space-files-', FILES_DIR, { PNEUMA_SPACE_FILES_DIR: '{dir}' }),
     sqlite: new StorageProvider('db', 'sqlite', storage, 'pneuma-space-db-', '/pneuma/db', { PNEUMA_SPACE_DB_URL: 'sqlite://{dir}/app.sqlite3' }),

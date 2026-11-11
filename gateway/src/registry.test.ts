@@ -165,6 +165,47 @@ test('after purge, a stats flush and a scheduler reload leave no row of the app 
   assert.deepEqual([await store.stats(), await store.deliveries({ app })], [[], []]);
 });
 
+/** Ingress as main wires its Stats for `registry`, loaded from `store` now. */
+async function statsOn(registry: PlatformRegistry, store: Store) {
+  const ingress = new Ingress({
+    registry, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (id) => store.deleteStats(id),
+  } as never);
+  registry.onAppChanged((id) => void (registry.schedule(id) === null && ingress.forget(id)));
+  return ingress;
+}
+
+test('a purge through one replica leaves no Stats row once both replicas flush, and later flushes keep it gone (#19)', async () => {
+  const w = world();
+  const { store, registry: one } = await w.open();
+  const two = await w.replica(store);
+  const { app } = await publish(one, {});
+  const blog = await one.publish({ name: appName('blog'), image: 'example:1', manifest: parseManifest({ contract: 1, capabilities: {} }), bundle: null, owner: ann });
+  await store.putStats([app, blog.app].map((id) => ({ app: id, requests: 1, errors: 0, lastAccessAt: 1 })));
+  for (let waited = 0; two.view(appName('blog')) === null; waited += 5) {
+    assert.ok(waited < 2000, 'the other replica loaded blog');
+    await sleep(5);
+  }
+  const ingresses = [await statsOn(one, store), await statsOn(two, store)];
+  await one.remove(survey);
+  await one.purge(survey);
+  for (let waited = 0; two.view(survey) !== null; waited += 5) {
+    assert.ok(waited < 2000, 'the other replica dropped survey');
+    await sleep(5);
+  }
+  for (let round = 0; round < 3; round++) for (const ingress of ingresses) await ingress.flush();
+  assert.deepEqual((await store.stats()).map((s) => s.app), [blog.app]);
+});
+
+test('a Stats row whose app is gone is not loaded at startup and is deleted by the first flush (#19)', async () => {
+  const { store, registry } = await world().open();
+  const { app } = await publish(registry, {});
+  await store.putStats([app, 'a-gone' as AppId].map((id) => ({ app: id, requests: 1, errors: 0, lastAccessAt: 1 })));
+  const ingress = await statsOn(registry, store);
+  assert.deepEqual(ingress.snapshot().map((s) => s.app), [app]);
+  await ingress.flush();
+  assert.deepEqual((await store.stats()).map((s) => s.app), [app]);
+});
+
 test('purge deletes the bundles only its releases reference and keeps one shared with another app or not yet published', async () => {
   const w = world();
   const { registry } = await w.open();

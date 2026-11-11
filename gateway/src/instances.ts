@@ -36,6 +36,7 @@ export class Instances {
   readonly #leaderListeners: ((leading: boolean) => unknown)[] = [];
   readonly #mayLead: boolean;
   #tenure: Leadership | null = null;
+  #term = { since: 0 };
   #ready: Promise<void> | null = null;
   #resync: NodeJS.Timeout | null = null;
   #tallyTimer: NodeJS.Timeout | null = null;
@@ -149,6 +150,11 @@ export class Instances {
     return this.#tenure?.held() ?? false;
   }
 
+  /** The tenure this replica leads in, a new object each time it takes the lead; null while it follows. */
+  get term(): { readonly since: number } | null {
+    return this.leading ? this.#term : null;
+  }
+
   /** Calls `listener` whenever leadership changes, and at once when this replica leads already; resolves with that first call. */
   async onLeader(listener: (leading: boolean) => unknown): Promise<void> {
     this.#leaderListeners.push(listener);
@@ -161,6 +167,7 @@ export class Instances {
     const tenure = await this.store.leader();
     if (!tenure || this.#tenure) return;
     this.#tenure = tenure;
+    this.#term = { since: Date.now() };
     tenure.onLost(() => {
       if (this.#tenure !== tenure) return;
       this.#tenure = null;

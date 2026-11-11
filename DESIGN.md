@@ -55,7 +55,7 @@ Provider 不知道应用用哪种运行时：`inject` 给出的存储绑定是�
 | `ws` | ingress | Ingress | | | | |
 | `cron` | schedule | Scheduler（Trigger 行是 Release 的一部分，随它由 Registry 写） | | | | |
 | `identity` | ingress | IdentityProvider | | | | |
-| `rtc` | resource | 无每 App 资源；TURN 共享密钥是部署环境变量 `PNEUMA_SPACE_RTC_SECRET`，coturn 和网关都读它 | 检查 `coturn` 服务名可解析（Compose 的 profile 未开时不可解析，发布 409） | `stun:<host>:3478` 和 `turn:<host>:3478?transport=udp`，`<host>` 取部署环境变量 `PNEUMA_SPACE_RTC_PUBLIC_HOST`（默认 `127.0.0.1`），加该密钥 | 无 | 无 |
+| `rtc` | resource | 无每 App 资源；TURN 共享密钥是部署环境变量 `PNEUMA_SPACE_RTC_SECRET`，coturn 和网关都读它 | 检查 `coturn` 在平台网络上并接受连接（ADR 0030；Compose 的 profile 未开时发布 409） | `stun:<host>:3478` 和 `turn:<host>:3478?transport=udp`，`<host>` 取部署环境变量 `PNEUMA_SPACE_RTC_PUBLIC_HOST`（默认 `127.0.0.1`），加该密钥 | 无 | 无 |
 
 每个操作可重复执行。`ensure` 对已存在的 Binding 也会执行，收敛后端漂移并把 `suspended` 置回 `active`；没有单独的 resume。`db` 的 PostgreSQL Provider 用网关的线协议客户端 `pg.ts`，`kv` Provider 用网关内一个最小的 RESP 客户端，以管理角色直接连服务供应，两个平面相同，没有供应任务（ADR 0025 第 9 条）；`object` Provider 和 BundleStore 用 `node:crypto` 签名的 HTTP 直接调用对象服务的 S3 和管理接口（ADR 0013）。网关不用 npm 驱动。平台库和平台密钥在命名卷 `gateway-data`（挂载为网关的 `/data`）；后端数据在 `rustfs-data`、`redis-data`（AOF）、`postgres-data`，以及每 App 的 `pneuma-space-files-<id>`、`pneuma-space-db-<id>`；这些卷在平台重启和 `docker compose down` 后都保留。`<id>` 是 `App.id`。K8s 平面上每 App 的卷是应用命名空间里同名的 ReadWriteOnce PVC，首次唤醒时创建，`remove` 不碰，`purge` 删除（ADR 0019 第 7 条）。
 
@@ -65,7 +65,7 @@ App：`(无) --publish--> registered --remove--> removed --publish--> registered
 
 Instance：`asleep --acquire--> waking --就绪--> awake`；`awake --无 Lease 且闲置到期--> stopping --> asleep`；`awake --retire--> draining --Lease 清空或到期--> stopping --> asleep`（容器或 Pod 删掉，实例行留下，handle 为空，下次唤醒用新 Release）；`asleep --retire--> asleep`，直接删掉停止的容器。`waking` 就绪超时回到 `asleep`，等待者得到 502。所有转换在该实例自己的锁内，没有全局锁；多副本时这把锁是实例行上带 `state` 和 `epoch` 的条件更新（ADR 0020）。`awake -> stopping` 要求 Lease 集合为空，`acquire` 在同一把锁内加 Lease，所以二者不会同时成立。`docker stop` 在锁外执行，期间到达的请求等待后重新唤醒，代价是一次多余的停启，不是被切断的连接。
 
-Delivery：`due --worker 取走--> delivering --2xx--> done`；非 2xx、超时、连接丢失回到 `due` 并退避，第 5 次失败进入 `failed`；`removed` 或 Trigger 不再声明时 `cancelled`。重启或换领导者时所有 `delivering` 回到 `due`。
+Delivery：`due --worker 取走--> delivering --2xx--> done`；非 2xx、超时、连接丢失回到 `due` 并退避，第 5 次失败进入 `failed`；`removed` 或 Trigger 不再声明时 `cancelled`。认领者已死或已重启的 `delivering` 由领导者周期地放回 `due`；只有仍在认领下的尝试，其结果才写入（ADR 0029）。
 
 Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端断开不提前释放；响应是 WebSocket 101 或 `text/event-stream` 时改为 `channel`，直到任一端关闭；`trigger` 覆盖一次投递。闲置停止从不结束 Lease。平台进程存活期间只在三种有界、可见的情况下主动结束 Lease：`draining`（对 `channel` 发 WebSocket close 1001，对 `request` 和 `trigger` 等到 `drain_timeout_seconds`）；`channel` 超过 `connection_idle_seconds` 没有字节（close 1001，客户端重连会再唤醒）；`trigger` 超过 `trigger_timeout_seconds`（关闭连接，该次尝试记为失败并按退避重试）。平台重启丢失所有 Lease：连接断开，客户端重连，`delivering` 的投递重投；一个副本退出只丢失流经它的 Lease（ADR 0020 第 6 条）。Delivery 被 `cancelled` 时正在进行的尝试跑完，不再有下一次。
 
@@ -157,11 +157,11 @@ K8s 平面：命名空间 `pneuma-space` 放网关、runner 和集群内的平�
 
 退役（Registry 在发布、改变 Injection 的 policy 变更、remove 之后调用）：`awake` 时置 `draining`，调用每个 `channel` 的 `on_retire`（WebSocket 发 close 1001，SSE 直接关闭连接），等待 Lease 清空至多 `drain_timeout_seconds`，`docker stop` 并 `docker rm`；`asleep` 时直接 `docker rm`。下一次 `acquire` 为当前 Release 建新容器。`purge` 先退役，再销毁每条 Binding 的资源和只有该 App 引用的 bundle，所以卷不会被容器占用。
 
-重启：开平台库，加载实例行的镜像；领导者把 `replica` 已死的 `delivering` 回 `due`。先核对实例，再续跑 `purging`（续跑要退役该 App 可能还活着的实例，所以核对在前）。领导者按标签 `pneuma-space.role=instance` 列出容器或 Pod，与实例行比对：没有对应行、或行的 `release`、`spec_hash`、`epoch` 与标签不符的删掉；行是 `awake` 而容器或 Pod 不在的，CAS 回 `asleep` 并发 `crashed`；其余保持行的状态（ADR 0019 第 5 条，ADR 0020）。每个副本订阅自己平面的结束事件（Docker `die`、Pod watch、runner 查询），观察到结束就做 CAS，赢家发事件。Provider 在后台对每条 Binding 按其 `state` 重跑 `ensure` 或 `suspend`，收敛后端可能丢失或与行不一致的状态（例如重建的 Redis 容器，或 ensure 和提交之间的崩溃）。
+重启：开平台库，加载实例行的镜像；领导者把认领者已死或已重启的 `delivering` 回 `due`（ADR 0029）。先核对实例，再续跑 `purging`（续跑要退役该 App 可能还活着的实例，所以核对在前）。领导者按标签 `pneuma-space.role=instance` 列出容器或 Pod，与实例行比对：没有对应行、或行的 `release`、`spec_hash`、`epoch` 与标签不符的删掉；行是 `awake` 而容器或 Pod 不在的，CAS 回 `asleep` 并发 `crashed`；其余保持行的状态（ADR 0019 第 5 条，ADR 0020）。每个副本订阅自己平面的结束事件（Docker `die`、Pod watch、runner 查询），观察到结束就做 CAS，赢家发事件。Provider 在后台对每条 Binding 按其 `state` 重跑 `ensure` 或 `suspend`，收敛后端可能丢失或与行不一致的状态（例如重建的 Redis 容器，或 ensure 和提交之间的崩溃）。
 
 ### 2.4 发布
 
-运行时由清单的 `runtime` 决定，缺省按发布输入推断：镜像即 container，代码包即 isolate，只有 `static` 的清单没有运行时。isolate 应用的代码包含 `node_modules`，经 bundle 存储，和静态目录同一条路；runner 未启用时发布 isolate 应用答 409（ADR 0017）。
+运行时由清单的 `runtime` 决定，缺省按发布输入推断：镜像即 container，代码包即 isolate，只有 `static` 的清单没有运行时。isolate 应用的代码包含 `node_modules`，经 bundle 存储，和静态目录同一条路；runner 未启用时发布 isolate 应用答 409（ADR 0017，是否启用按 ADR 0030 判断）。
 
 ```
 appctl publish <name> <dir | image>          Registry.publish
