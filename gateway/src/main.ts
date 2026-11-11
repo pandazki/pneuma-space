@@ -154,7 +154,7 @@ const metrics = new Metrics({
   series,
   retries: () => (store instanceof PgStore ? store.retries : 0),
   replica,
-  leader: () => instances.leading,
+  term: () => instances.term,
 });
 
 const nodes = new NodeView({

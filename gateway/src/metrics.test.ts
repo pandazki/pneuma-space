@@ -16,10 +16,11 @@ const HOUR = 3_600_000;
 const app = 'a1b2c3d4e5f6' as AppId;
 const survey = appName('survey');
 
-function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader = true, clock = { now: 1_800_000_000_000 }, policy = {} } = {}) {
+function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader = true, term = undefined as (() => { readonly since: number } | null) | undefined, clock = { now: 1_800_000_000_000 }, policy = {} } = {}) {
   const events = new EventLog(() => {});
   const stats: Traffic[] = [];
   const apps: AppSummary[] = [];
+  const always = { since: clock.now };
   const metrics = new Metrics({
     events,
     stats: () => stats,
@@ -34,7 +35,7 @@ function fixture({ store = new SqliteStore(':memory:'), replica = 'r1', leader =
     series: new Series(),
     retries: () => 0,
     replica: replica as ReplicaId,
-    leader: () => leader,
+    term: term ?? (() => (leader ? always : null)),
     now: () => clock.now,
   });
   const last = (series: readonly (number | null)[]) => series.at(-1);
@@ -136,6 +137,89 @@ test('awake_ms is written only when the leader flag is set', async () => {
     return (await hourRow())?.awakeMs ?? 0;
   };
   assert.deepEqual([await awake(true), await awake(false)], [10_000, 0]);
+});
+
+/** Replicas a and b over one store and one clock, the app awake throughout; `lead(r)` starts r's term now and ends the other's. */
+function awakeReplicas() {
+  const store = new SqliteStore(':memory:');
+  const clock = { now: 1_800_000_000_000 };
+  const terms: Record<'a' | 'b', { readonly since: number } | null> = { a: null, b: null };
+  const replica = (id: 'a' | 'b') => {
+    const f = fixture({ store, replica: id, clock, term: () => terms[id] });
+    f.apps.push(summary('awake'));
+    return f.metrics;
+  };
+  const lead = (id: 'a' | 'b') => {
+    terms.a = terms.b = null;
+    terms[id] = { since: clock.now };
+  };
+  const awakeMs = async (from = 0, to = clock.now + HOUR) => (await store.usage({ step: 3600, app, from, to })).reduce((sum, b) => sum + b.awakeMs, 0);
+  return { a: replica('a'), b: replica('b'), lead, clock, awakeMs };
+}
+
+test('a replica that leads again after another led counts none of the time the other led (#15)', async () => {
+  const { a, b, lead, clock, awakeMs } = awakeReplicas();
+  const start = clock.now;
+  lead('a');
+  await a.sample();
+  clock.now += 10_000;
+  await a.sample();
+  lead('b');
+  await b.sample();
+  for (let i = 0; i < 6; i++) {
+    clock.now += 10_000;
+    await b.sample();
+  }
+  lead('a');
+  await a.sample();
+  const [total, truth] = [await awakeMs(), clock.now - start];
+  assert.ok(total <= truth && total >= truth - 2 * 10_000, `awake ${total} ms of ${truth}`);
+});
+
+test('across 20 rounds of a, b, a leading, awake time loses at most one sampling interval per switch and counts nothing twice (#15)', async () => {
+  const { a, b, lead, clock, awakeMs } = awakeReplicas();
+  const start = clock.now;
+  let [leader, switches, last] = ['a' as 'a' | 'b', 0, start];
+  lead('a');
+  // a samples at :00 and b at :05 of every 10 s; each switch comes 100 ms after the new leader's sample, so its next one is almost an interval away.
+  for (let t = 0; t < 35_100 + 40 * 35_000; t += 100) {
+    clock.now = start + t;
+    if (t >= 35_100 && (t - 35_100) % 35_000 === 0) {
+      leader = leader === 'a' ? 'b' : 'a';
+      lead(leader);
+      switches++;
+    }
+    for (const [id, phase, metrics] of [['a', 0, a], ['b', 5000, b]] as const) {
+      if (t % 10_000 !== phase) continue;
+      await metrics.sample();
+      if (leader === id) last = clock.now;
+    }
+  }
+  const [total, truth] = [await awakeMs(), last - start];
+  assert.ok(total <= truth && total >= truth - switches * 10_000, `awake ${total} ms of ${truth} after ${switches} switches`);
+});
+
+test('a switch across an hour boundary writes nothing into the earlier hour after it (#15)', async () => {
+  const { a, b, lead, clock, awakeMs } = awakeReplicas();
+  const hour = clock.now + HOUR;
+  clock.now = hour - 20_000;
+  lead('a');
+  await a.sample();
+  clock.now = hour - 10_000;
+  await a.sample();
+  const earlier = await awakeMs(hour - HOUR, hour);
+  clock.now = hour - 5000;
+  lead('b');
+  await b.sample();
+  clock.now = hour + 5000;
+  await b.sample();
+  clock.now = hour + 12_000;
+  lead('a');
+  for (const at of [20_000, 30_000]) {
+    clock.now = hour + at;
+    await a.sample();
+  }
+  assert.deepEqual([earlier, await awakeMs(hour - HOUR, hour)], [10_000, 10_000]);
 });
 
 test('the sweep deletes hourly rows past the retention and minute rows past 24 h, and keeps the rest', async () => {
