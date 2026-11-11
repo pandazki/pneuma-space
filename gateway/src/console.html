@@ -1833,6 +1833,7 @@ function addressPattern(apps) {
 
 function setScope(scope) {
   session.scope = scope;
+  appsFilter.tenant = '';
   store.set(TENANT_KEY, scope);
   route();
 }
@@ -3473,12 +3474,14 @@ async function projects() {
     painted = signature;
     visible.disconnect();
     const needle = appsFilter.text.trim().toLowerCase();
-    const inTenant = apps.filter((a) => !appsFilter.tenant || a.tenant === appsFilter.tenant);
+    const tenants = grouped() ? [...Map.groupBy(apps, (a) => a.tenant)].sort(([a], [b]) => a.localeCompare(b)) : [];
+    // The tenant filter applies only while its chips are on screen to show and clear it.
+    const tenant = tenants.length > 1 ? appsFilter.tenant : '';
+    const inTenant = apps.filter((a) => !tenant || a.tenant === tenant);
     const byBucket = Map.groupBy(inTenant, appBucket);
     const fchip = (field, value, label, n, dot = null) => h('button', {
       type: 'button', class: 'fchip', 'aria-pressed': String(appsFilter[field] === value), onclick: () => { appsFilter[field] = appsFilter[field] === value ? '' : value; paint(); },
     }, dot, label, h('span', { class: 'n num' }, nf(n)));
-    const tenants = grouped() ? [...Map.groupBy(apps, (a) => a.tenant)].sort(([a], [b]) => a.localeCompare(b)) : [];
     fill(chips,
       fchip('bucket', '', t('cl.f.all'), inTenant.length),
       APP_BUCKETS.filter((b) => byBucket.has(b) || appsFilter.bucket === b).map((b) => fchip('bucket', b, t(`ap.b.${b}`), byBucket.get(b)?.length ?? 0, h('i', { class: `pdot ${BUCKET_DOT[b]}` }))),
