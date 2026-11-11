@@ -1623,6 +1623,7 @@ function popover(wrap, button, build) {
   let list = null;
   const outside = (e) => { if (!wrap.contains(e.target)) close(); };
   const keys = (e) => {
+    if (e.isComposing) return;
     if (e.key === 'Escape') { close(); button.focus(); e.preventDefault(); }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       const all = [...list.querySelectorAll('button:not([disabled]):not([hidden])')];
@@ -1666,6 +1667,29 @@ function moreMenu(label, items, text = null) {
   return wrap;
 }
 
+/** Printable keys typed less than this apart spell one type-ahead prefix (WAI-ARIA listbox pattern). */
+const TYPEAHEAD_MS = 500;
+
+/**
+ * Type-ahead over a list's option buttons: the focus moves to the next shown option whose label starts with what was
+ * typed, wrapping; one key repeated cycles through the options starting with it. The filter field keeps its own typing.
+ */
+function typeahead(items) {
+  let typed = '';
+  let at = -Infinity;
+  return (e) => {
+    const { key } = e;
+    if (e.target.tagName === 'INPUT' || e.isComposing || e.keyCode === 229 || e.ctrlKey || e.metaKey || e.altKey || [...key].length !== 1 || !key.trim()) return;
+    typed = e.timeStamp - at > TYPEAHEAD_MS ? key : typed + key;
+    at = e.timeStamp;
+    const same = [...typed].every((c) => c === key);
+    const prefix = (same ? key : typed).toLocaleLowerCase();
+    const shown = items.filter((b) => !b.hidden && !b.disabled);
+    const from = Math.max(0, shown.indexOf(document.activeElement) + (same ? 1 : 0));
+    [...shown.slice(from), ...shown.slice(0, from)].find((b) => b.firstChild.textContent.toLocaleLowerCase().startsWith(prefix))?.focus();
+  };
+}
+
 /**
  * One choice from a list that can grow: a button showing the value opens a menu-pattern list with a check on the chosen
  * item, and a filter field past eight items. `options` are { value, label, note }.
@@ -1695,8 +1719,8 @@ function listbox({ label, options, value, onPick, placeholder = null, disabled =
     }, h('span', {}, o.label), o.note ? h('small', {}, o.note) : null, o.value === value ? icon('check') : null));
     const search = options.length > 8 ? h('input', { type: 'search', name: 'find', class: 'lfind', placeholder: t('lb.find'), 'aria-label': t('lb.find'),
       oninput: () => { const q = search.value.trim().toLowerCase(); for (const b of items) b.hidden = q !== '' && !b.dataset.text.includes(q); },
-      onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); items.find((b) => !b.hidden)?.click(); } } }) : null;
-    return h('div', { class: 'menu lmenu', role: 'listbox', 'aria-label': label }, search, items);
+      onkeydown: (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); items.find((b) => !b.hidden)?.click(); } } }) : null;
+    return h('div', { class: 'menu lmenu', role: 'listbox', 'aria-label': label, onkeydown: typeahead(items) }, search, items);
   });
   button.addEventListener('keydown', (e) => {
     if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && button.getAttribute('aria-expanded') !== 'true') { e.preventDefault(); button.click(); }
