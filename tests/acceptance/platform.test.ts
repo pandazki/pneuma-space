@@ -180,14 +180,16 @@ test('AC-P-15', { timeout: 120_000 }, async (t) => {
   const requests = async (after: string) => (await fetch(`${adminUrl}/api/requests?after=${encodeURIComponent(after)}&limit=1000`)).json();
   const records = async (after: string) => (await requests(after)).records;
   const cursor = async () => (await requests('')).cursor as string;
-  const seqIn = (after: string, replica: string) => Number(after.split(',').find((e) => e.startsWith(`${replica}:`))?.slice(replica.length + 1) ?? 0);
   const newer = (after: string, kind: string) => waitFor(async () => (await records(after)).filter((r: any) => r.app === app.name && r.kind === kind).at(-1), 15_000, `a ${kind} record`);
-  const start = await cursor();
+  const opening = await requests('');
+  const start = opening.cursor as string;
+  // The cursor is opaque (ADR 0031): compare with the records it was issued with.
+  const answered = (replica: string) => Math.max(0, ...opening.records.filter((r: any) => r.replica === replica).map((r: any) => r.seq));
 
   await appJson(app.name, '/');
   const cold = await newer(start, 'request');
   const wake = await waitFor(async () => (await (await fetch(adminUrl + '/api/metrics')).json()).events.findLast((e: any) => e.ev === 'awake' && e.app === app.name), 5000, 'the wake in the event tail');
-  assert.ok((await records(start)).every((r: any) => r.seq > seqIn(start, r.replica)), 'only records after the cursor');
+  assert.ok((await records(start)).every((r: any) => r.seq > answered(r.replica)), 'only records after the cursor');
   assert.equal(cold.cold, true, 'the first request found the app asleep');
   assert.ok(cold.ms >= wake.ms, `ms ${cold.ms} against a wake of ${wake.ms} ms`);
 

@@ -7,7 +7,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
 import { DEFAULT_TENANT, type AppName, type Subject } from './model.ts';
 import { app, storeContract } from './store.contract.ts';
-import { MIGRATIONS, SqliteSession, SqliteStore } from './store.ts';
+import { BUNDLE_REFERENCED } from './sql.ts';
+import { MIGRATIONS, positional, SqliteSession, SqliteStore } from './store.ts';
 
 const path = () => join(mkdtempSync(join(tmpdir(), 'pneuma-space-store-')), 'pneuma-space.sqlite3');
 
@@ -75,6 +76,15 @@ test('the audit table refuses update and delete', async () => {
   db.close();
 });
 
+test('the bundle reference query searches the release bundle index (#13)', async () => {
+  const file = path();
+  await new SqliteStore(file).close();
+  const db = new DatabaseSync(file);
+  const plan = db.prepare(`EXPLAIN QUERY PLAN ${positional(BUNDLE_REFERENCED)}`).all('bundle', 'app') as { detail: string }[];
+  db.close();
+  assert.match(plan.map((row) => row.detail).join('\n'), /USING (COVERING )?INDEX release_bundle \(bundle=\?\)/);
+});
+
 test('step 6 makes an already migrated default tenant unlimited', async () => {
   const file = path();
   const migrated = new DatabaseSync(file);
@@ -84,4 +94,35 @@ test('step 6 makes an already migrated default tenant unlimited', async () => {
   const store = new SqliteStore(file);
   assert.deepEqual((await store.tenant(DEFAULT_TENANT))?.quota, { apps: null, awake: null, cpu_millis: null, memory_mb: null, storage_gb: null });
   await store.close();
+});
+
+test('a gateway with one migration fewer leaves a newer library at its version, and the newer gateway opens it again', async () => {
+  const file = path();
+  const opened = async () => {
+    await new SqliteStore(file).close();
+    const db = new DatabaseSync(file);
+    const { user_version: version } = db.prepare('PRAGMA user_version').get() as { user_version: number };
+    const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'release_bundle'").all().length;
+    db.close();
+    return [version, indexes];
+  };
+  const full = MIGRATIONS.length;
+  const newer = await opened();
+  const last = MIGRATIONS.pop()!;
+  const older = await opened().finally(() => MIGRATIONS.push(last));
+  assert.deepEqual([newer, older, await opened()], [[full, 1], [full, 1], [full, 1]]);
+});
+
+test('a library that a gateway without that rule set back to before release_bundle opens again with the index once', async () => {
+  const file = path();
+  await new SqliteStore(file).close();
+  const db = new DatabaseSync(file);
+  db.exec(`PRAGMA user_version = ${MIGRATIONS.findIndex((step) => step.includes('release_bundle'))}`);
+  db.close();
+  await new SqliteStore(file).close();
+  const after = new DatabaseSync(file);
+  const { user_version: version } = after.prepare('PRAGMA user_version').get() as { user_version: number };
+  const indexes = after.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'release_bundle'").all().length;
+  after.close();
+  assert.deepEqual([version, indexes], [MIGRATIONS.length, 1]);
 });

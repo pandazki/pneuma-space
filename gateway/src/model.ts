@@ -818,6 +818,8 @@ export interface StoreOps {
   release(app: AppId, number: ReleaseNumber): Promise<Release | null>;
   releases(app: AppId): Promise<Release[]>;
   putRelease(release: Release): Promise<void>;
+  /** Whether a release of an app other than `except` references the bundle; one read on the release bundle index (ADR 0028). */
+  bundleReferenced(bundle: BundleId, except: AppId): Promise<boolean>;
 
   triggers(): Promise<Trigger[]>;
   replaceTriggers(app: AppId, triggers: readonly Trigger[]): Promise<void>;
@@ -849,7 +851,8 @@ export interface StoreOps {
 
   /** Returns the stored row: an existing one for the same scheduled slot, or the same (app, trigger, idempotencyKey) within IDEMPOTENCY_WINDOW_MS. */
   insertDelivery(delivery: Delivery): Promise<Delivery>;
-  updateDelivery(delivery: Delivery): Promise<void>;
+  /** Writes `next`'s state, attempts and next attempt only while the row still has `expected`'s state, claimer and attempts; false otherwise (ADR 0029). */
+  casDelivery(expected: Pick<Delivery, 'id' | 'state' | 'replica' | 'attempts'>, next: Delivery): Promise<boolean>;
   /** Moves a due delivery to delivering for `replica` with `attempts`; false when it was not due any more (ADR 0020 item 4). */
   claimDelivery(id: DeliveryId, replica: ReplicaId, attempts: number): Promise<boolean>;
   deliveries(filter: DeliveryFilter): Promise<Delivery[]>;
@@ -910,6 +913,10 @@ export interface StoreOps {
 
   instanceLog(app: AppId): Promise<InstanceLog | null>;
   putInstanceLog(log: InstanceLog): Promise<void>;
+  /** The apps with a log row; purge cleanup reads it to find what no mirror holds (ADR 0020 item 8). */
+  loggedApps(): Promise<AppId[]>;
+  /** Purge cleanup, idempotent (ADR 0020 item 8). */
+  deleteInstanceLog(app: AppId): Promise<void>;
 }
 
 /** Hides the platform library: SQLite on a single host, PostgreSQL on a cluster (ADR 0025). */
@@ -921,6 +928,8 @@ export interface Store extends StoreOps {
   transaction<T>(fn: (tx: StoreOps) => Promise<T>): Promise<T>;
   /** Runs commands on one name one at a time, across replicas; `fn` may await anything. */
   exclusive<T>(name: AppName, fn: () => Promise<T>): Promise<T>;
+  /** Runs work on one bundle one at a time, across replicas; a command takes it after its name and holds one bundle at a time (ADR 0028). */
+  exclusiveBundle<T>(bundle: BundleId, fn: () => Promise<T>): Promise<T>;
   /** Called once per changed key after each commit, on every replica. */
   onChange(listener: (change: Change) => void): void;
   /** Called when changes may have been missed; listeners re-read everything. */
@@ -1084,6 +1093,8 @@ export interface Infra {
   warnings(): Promise<Warning[]>;
   /** Only a `scalable` workload; Conflict otherwise, and NotOnThisPlane on a single host. */
   scale(name: string, replicas: number): Promise<void>;
+  /** Whether a runner home is a replica `name` no longer has at `replicas`; null when `name` holds no homes (ADR 0032). */
+  removedBy(name: string, replicas: number): ((home: string) => boolean) | null;
   /** Only a gateway or runner Pod, by its uid so a replacement under the same name stays; Conflict otherwise. */
   deletePod(name: string): Promise<void>;
 }
@@ -1092,6 +1103,30 @@ export interface Infra {
 export class NotOnThisPlane extends Conflict {
   constructor(what: string) {
     super(`${what} needs the kubernetes plane`);
+  }
+}
+
+/** An app named by an instance row, and the runner it names as home. */
+export type Home = { readonly app: AppName; readonly home: string };
+const STRANDED_LISTED = 10;
+
+/** A scale that would remove the home runner of apps (ADR 0032); `homes` holds the first ten by replica, then name, and `more` counts the rest. */
+export class Stranded extends Conflict {
+  readonly workload: string;
+  readonly replicas: number;
+  readonly homes: readonly Home[];
+  readonly more: number;
+  constructor(workload: string, replicas: number, homes: readonly Home[]) {
+    const sorted = [...homes].sort((a, b) => a.home.localeCompare(b.home, 'en', { numeric: true }) || a.app.localeCompare(b.app));
+    const listed = sorted.slice(0, STRANDED_LISTED);
+    const more = sorted.length - listed.length;
+    const apps = listed.map(({ app, home }) => `${app} (${home})`).join(', ') + (more ? ` and ${more} more` : '');
+    super(`scaling ${workload} to ${replicas} replica${replicas === 1 ? '' : 's'} would remove the home runner of ${sorted.length} app${sorted.length === 1 ? '' : 's'}: ${apps}. `
+      + 'An isolate app runs only on its home runner, and its files and databases stay in that replica\'s volume. Remove and purge those apps first, or keep those replicas');
+    this.workload = workload;
+    this.replicas = replicas;
+    this.homes = listed;
+    this.more = more;
   }
 }
 
@@ -1138,7 +1173,7 @@ export interface Scheduler {
   invoke(request: InvokeRequest): Promise<DeliveryId>;
   /** Re-reads the app's triggers; cancels deliveries of undeclared triggers and of removed apps, and deletes those of purged apps. */
   reload(app: AppId): Promise<void>;
-  /** Startup: delivering rows return to due, then the loop and worker start. */
+  /** On taking the lead: delivering rows no running attempt holds return to due, then the loop and worker start (ADR 0029). */
   resume(): Promise<void>;
 }
 
@@ -1185,6 +1220,8 @@ export interface Registry {
   kill(name: AppName): Promise<void>;
   /** Stops every instance the sampler places on `node`, one at a time, past a failure. */
   drain(node: string): Promise<{ readonly stopped: readonly AppName[]; readonly failed: readonly { readonly app: AppName; readonly error: string }[] }>;
+  /** Infra.scale, refused with Stranded before it while an instance row names as home a replica the count would remove (ADR 0032). */
+  scale(workload: string, replicas: number): Promise<void>;
   view(name: AppName): RouteView | null;
   nameOf(id: AppId): AppName | null;
   /** The global snapshot; merge with a RouteView's override via effectivePolicy. */

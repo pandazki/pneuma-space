@@ -1,5 +1,6 @@
 import { argon2Sync, createCipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
 import { promises as dns } from 'node:dns';
+import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
 import { Readable } from 'node:stream';
 import {
   CAPABILITIES, Conflict, FILES_DIR, InputError, NotFound, RESERVED_SEGMENT, RUNTIMES,
@@ -51,14 +52,33 @@ export function providerConfig(env: Readonly<Record<string, string | undefined>>
 }
 
 type Storage = Pick<Runtime, 'destroyStorage'>;
-/** True when a profiled Compose service is on the network. */
+/** True when a profiled service is present (ADR 0030). */
 export type ServiceProbe = (service: 'postgres' | 'coturn' | NonNullable<(typeof RUNTIMES)[RuntimeKind]['service']>) => Promise<boolean>;
 
-// Docker's resolver forwards unknown names upstream and waits about 5 s; a 500 ms single try answers within 1 s (spike S2).
-const resolver = new dns.Resolver({ timeout: 500, tries: 1 });
-/** A Compose service's address, or null when the network has no such name. */
-export const addressOnNetwork = (service: string): Promise<string | null> => resolver.resolve4(service).then(([address]) => address ?? null, () => null);
-export const resolvesOnNetwork: ServiceProbe = async (service) => (await addressOnNetwork(service)) !== null;
+/** Docker's resolver forwards unknown names upstream and waits about 5 s; a 500 ms single try answers within 1 s (spike S2), and c-ares never takes a libuv lookup slot. */
+export function networkResolver(servers?: readonly string[]): dns.Resolver {
+  const resolver = new dns.Resolver({ timeout: 500, tries: 1 });
+  if (servers) resolver.setServers(servers);
+  return resolver;
+}
+
+const resolver = networkResolver();
+const ipv4 = (address: string) => address.split('.').reduce((n, octet) => n * 256 + Number(octet), 0);
+const sameSubnet = (a: string, b: string, mask: string) => (ipv4(a) & ipv4(mask)) === (ipv4(b) & ipv4(mask));
+
+/**
+ * A Compose service's address, or null when the network has no such name. Docker's resolver hands names it does not know to the host's,
+ * which may answer any name, so an address outside every subnet of the gateway's own interfaces is no such service (ADR 0030).
+ */
+export async function addressOnNetwork(
+  service: string,
+  { resolve = (name: string) => resolver.resolve4(name), interfaces = networkInterfaces }: { readonly resolve?: (name: string) => Promise<string[]>; readonly interfaces?: () => NodeJS.Dict<NetworkInterfaceInfo[]> } = {},
+): Promise<string | null> {
+  const [address] = await resolve(service).catch((): string[] => []);
+  if (address === undefined) return null;
+  const own = Object.values(interfaces()).flatMap((list) => list ?? []).filter((i) => i.family === 'IPv4' && !i.internal);
+  return own.some((i) => sameSubnet(address, i.address, i.netmask)) ? address : null;
+}
 type ProviderProbe = (service: 'postgres' | 'coturn') => Promise<boolean>;
 
 async function requireService(probe: ProviderProbe, service: 'postgres' | 'coturn', profile: string, kind: ResourceKind): Promise<void> {
@@ -332,7 +352,7 @@ class CoturnProvider implements CapabilityProvider {
 
 export type Providers = { readonly [N in ProviderName]: CapabilityProvider };
 
-export function createProviders(storage: Storage, config: ProviderConfig, probe: ProviderProbe = resolvesOnNetwork): Providers {
+export function createProviders(storage: Storage, config: ProviderConfig, probe: ProviderProbe): Providers {
   const providers: Providers = {
     volume: new StorageProvider('files', 'volume', storage, 'pneuma-space-files-', FILES_DIR, { PNEUMA_SPACE_FILES_DIR: '{dir}' }),
     sqlite: new StorageProvider('db', 'sqlite', storage, 'pneuma-space-db-', '/pneuma/db', { PNEUMA_SPACE_DB_URL: 'sqlite://{dir}/app.sqlite3' }),
@@ -367,12 +387,18 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
 
 const contentType = (path: string) => CONTENT_TYPES[/\.([^./]+)$/.exec(path)?.[1].toLowerCase() ?? ''] ?? 'application/octet-stream';
 
+/** Runs `write` while no other work on bundle `id` runs, on any replica. */
+type BundleExclusion = <T>(id: BundleId, write: () => Promise<T>) => Promise<T>;
+
+/** Keeps no index cache: another replica's purge may delete a bundle at any time (ADR 0028). */
 export class S3BundleStore implements BundleStore {
   readonly #store: ObjectService;
-  readonly #cache = new Map<BundleId, BundleIndex>();
+  readonly #exclusive: BundleExclusion;
 
-  constructor(store: ObjectService) {
+  /** `exclusive` is the one a purge deletes the bundle under; main.ts passes the platform store's (ADR 0028). */
+  constructor(store: ObjectService, exclusive: BundleExclusion = (_, write) => write()) {
     this.#store = store;
+    this.#exclusive = exclusive;
   }
 
   // The id is the hash of the whole tar, so the tar is read into memory before any file is stored under it.
@@ -382,19 +408,20 @@ export class S3BundleStore implements BundleStore {
     const id = createHash('sha256').update(bytes).digest('hex') as BundleId;
     const root = this.#store.root;
     const exists = async (key: string) => (await signedFetch(root, 'HEAD', objectUrl(this.#store, BUNDLES, key))).ok;
-    if ((await exists(indexKey(id))) && (await exists(tarKey(id)))) return id;
-    await createBucket(this.#store, BUNDLES);
-    const files: Record<string, BundleFile> = {};
-    for (const { path, body } of tarFiles(bytes)) {
-      const type = contentType(path);
-      await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, `${id}/${path}`), body, { 'content-type': type }), `put ${path}`);
-      files[path] = { size: body.length, etag: createHash('md5').update(body).digest('hex'), contentType: type };
-    }
-    await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, tarKey(id)), bytes, { 'content-type': 'application/x-tar' }), 'put bundle tar');
-    const index: BundleIndex = { id, files };
-    await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, indexKey(id)), JSON.stringify(index), { 'content-type': 'application/json' }), 'put bundle index');
-    this.#cache.set(id, index);
-    return id;
+    return this.#exclusive(id, async () => {
+      if ((await exists(indexKey(id))) && (await exists(tarKey(id)))) return id;
+      await createBucket(this.#store, BUNDLES);
+      const files: Record<string, BundleFile> = {};
+      for (const { path, body } of tarFiles(bytes)) {
+        const type = contentType(path);
+        await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, `${id}/${path}`), body, { 'content-type': type }), `put ${path}`);
+        files[path] = { size: body.length, etag: createHash('md5').update(body).digest('hex'), contentType: type };
+      }
+      await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, tarKey(id)), bytes, { 'content-type': 'application/x-tar' }), 'put bundle tar');
+      const index: BundleIndex = { id, files };
+      await ok(await signedFetch(root, 'PUT', objectUrl(this.#store, BUNDLES, indexKey(id)), JSON.stringify(index), { 'content-type': 'application/json' }), 'put bundle index');
+      return id;
+    });
   }
 
   /** Whether the store answers a signed request within `withinMs`: rustfs reports healthy before its IAM is ready, and a read then gets 503. */
@@ -404,13 +431,9 @@ export class S3BundleStore implements BundleStore {
   }
 
   async index(id: BundleId): Promise<BundleIndex> {
-    const cached = this.#cache.get(id);
-    if (cached) return cached;
     const res = await signedFetch(this.#store.root, 'GET', objectUrl(this.#store, BUNDLES, indexKey(id)));
     if (res.status === 404) throw new NotFound(`bundle ${id} does not exist`);
-    const index = (await ok(res, 'get bundle index').then((r) => r.json())) as BundleIndex;
-    this.#cache.set(id, index);
-    return index;
+    return (await ok(res, 'get bundle index').then((r) => r.json())) as BundleIndex;
   }
 
   /** `range.end` is inclusive, as in an HTTP Range header. */
@@ -427,8 +450,10 @@ export class S3BundleStore implements BundleStore {
     return presignGet(this.#store.root, objectUrl(this.#store, BUNDLES, tarKey(id)), seconds);
   }
 
+  /** The index goes first: put() writes it last, so a bundle without one is gone to a publish, and a new put() restores it whole. */
   async delete(id: BundleId): Promise<void> {
-    this.#cache.delete(id);
+    const res = await signedFetch(this.#store.root, 'DELETE', objectUrl(this.#store, BUNDLES, indexKey(id)));
+    if (!res.ok && res.status !== 404) throw new Error(`object service delete bundle index: ${res.status} ${await res.text()}`);
     await deleteObjects(this.#store, BUNDLES, `${id}/`);
   }
 }

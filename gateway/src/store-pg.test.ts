@@ -5,8 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { changeKey, type AppName, type ImageId, type Leadership, type ReleaseNumber, type Subject } from './model.ts';
+import { changeKey, type AppName, type BundleId, type ImageId, type Leadership, type ReleaseNumber, type Subject } from './model.ts';
 import { Session, type PgOptions } from './pg.ts';
+import { replicaContract } from './registry.contract.ts';
+import { BUNDLE_REFERENCED } from './sql.ts';
 import { app, storeContract } from './store.contract.ts';
 import { PG_MIGRATIONS, PgStore, type PgStoreOptions } from './store-pg.ts';
 
@@ -64,6 +66,7 @@ after(async () => {
 });
 
 if (!skip) storeContract('PostgreSQL', (options) => open(options));
+if (!skip) replicaContract('PostgreSQL', async () => [await open(), await open()]);
 
 describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () => {
   test('two stores on one database see each other\'s app change within 1 s', async () => {
@@ -117,6 +120,33 @@ describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () 
     await b.exclusive('locked' as AppName, async () => void order.push('b'));
     await first;
     assert.deepEqual(order, ['a start', 'a end', 'b']);
+  });
+
+  test('exclusiveBundle on one bundle from commands on two stores runs one at a time', async () => {
+    const [a, b] = [await open(), await open()];
+    const order: string[] = [];
+    let entered!: () => void;
+    const inside = new Promise<void>((resolve) => (entered = resolve));
+    const first = a.exclusive('bundler-a' as AppName, () => a.exclusiveBundle('contended' as BundleId, async () => {
+      order.push('a start');
+      entered();
+      await delay(300);
+      order.push('a end');
+    }));
+    await inside;
+    await b.exclusive('bundler-b' as AppName, () => b.exclusiveBundle('contended' as BundleId, async () => void order.push('b')));
+    await first;
+    assert.deepEqual(order, ['a start', 'a end', 'b']);
+  });
+
+  test('the bundle reference query uses the release bundle index (#13)', async () => {
+    await open();
+    const s = await Session.open(plain());
+    await s.simple(`INSERT INTO release (app, number, manifest, bundle, release_key, published_at)
+      SELECT 'plan-app-' || n, 1, '{}', 'plan-bundle-' || n, 'k', 0 FROM generate_series(1, 5000) AS n; ANALYZE release`);
+    const { rows } = await s.query(`EXPLAIN ${BUNDLE_REFERENCED}`, ['plan-bundle-17', 'plan-app-18']);
+    await s.close();
+    assert.match(rows.map((r) => r['QUERY PLAN']).join('\n'), /release_bundle/);
   });
 
   test('terminating the leader\'s session fires onLost within 5 s and the other store then leads', async () => {

@@ -1,18 +1,24 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import { after, before, describe, test } from 'node:test';
+import { after, before, describe, test, type TestContext } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { Conflict, ENV_BY_KIND, newAppId, type BundleId, type CapabilityKind, type Injection } from './model.ts';
+import {
+  Conflict, ENV_BY_KIND, NotFound, appName, newAppId, parseManifest, subject, type BundleId, type CapabilityKind, type Injection, type Store,
+} from './model.ts';
 import { PgError } from './pg.ts';
-import { createProviders, objectUrl, providerConfig, S3BundleStore, signedFetch } from './providers.ts';
+import { createProviders, objectUrl, providerConfig, S3BundleStore, signedFetch, tarFiles } from './providers.ts';
+import { world } from './registry.fakes.ts';
 import { Resp, RespError } from './resp.ts';
+import { PgStore } from './store-pg.ts';
+import { SqliteStore } from './store.ts';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const project = 'pneuma-space-u6';
@@ -114,6 +120,25 @@ test('the bundle store does not answer when it takes the connection and never re
   const store = new S3BundleStore({ ...providerConfig({}).object, endpoint: `http://127.0.0.1:${port}` });
   assert.equal(await store.answers(50), false);
   server.closeAllConnections();
+});
+
+test('the bundle store deletes a bundle\'s index before any other of its objects (#13)', async (t) => {
+  const requests: string[] = [];
+  let listed = false;
+  const server = createHttpServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://store');
+    requests.push(`${req.method} ${url.pathname}`);
+    req.resume().on('end', () => {
+      if (req.method !== 'GET') return void res.writeHead(req.method === 'DELETE' ? 204 : 200).end();
+      res.writeHead(200).end(listed ? '<ListBucketResult/>' : '<ListBucketResult><Contents><Key>b1/app.js</Key></Contents></ListBucketResult>');
+      listed = true;
+    });
+  }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => server.close());
+  const { port } = server.address() as { port: number };
+  await new S3BundleStore({ ...providerConfig({}).object, endpoint: `http://127.0.0.1:${port}` }).delete('b1' as BundleId);
+  assert.deepEqual(requests.filter((r) => !r.startsWith('GET')), ['DELETE /pneuma-space-bundles/b1/_pneuma-space/index.json', 'POST /pneuma-space-bundles']);
 });
 
 describe('providers against the real compose services', { skip: !dockerUp && 'Docker is not available' }, () => {
@@ -362,13 +387,137 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       assert.doesNotMatch(await list.text(), /<Key>/);
       assert.equal((await bundles.index(id)).id, id);
     });
+
+    test('index answers NotFound once another store deleted a bundle this one had read (#13)', async () => {
+      writeFileSync(join(dir, 'app.js'), 'console.log(3)');
+      const gone = await bundles.put(Readable.from([pack()]));
+      await bundles.index(gone);
+      await new S3BundleStore(config.object).delete(gone);
+      await assert.rejects(bundles.index(gone), NotFound);
+    });
+  });
+
+  describe('bundle uploads beside purges, through two replicas (#13)', () => {
+    const ann = subject('user:ann');
+    const site = parseManifest({ contract: 1, capabilities: { static: { dir: 'dist' } } });
+    const tag = () => randomBytes(3).toString('hex');
+    const siteTar = () => {
+      const dir = mkdtempSync(join(tmpdir(), 'pneuma-space-site-'));
+      mkdirSync(join(dir, 'assets'));
+      writeFileSync(join(dir, 'index.html'), `<!doctype html><title>${tag()}</title>`);
+      writeFileSync(join(dir, 'assets', 'app.js'), `console.log('${tag()}')`);
+      return execFileSync('tar', ['-cf', '-', '-C', dir, '.'], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
+    };
+    const stores: Record<string, (t: TestContext) => Promise<readonly [Store, Store]>> = {
+      SQLite: async (t) => {
+        const store = new SqliteStore(join(world().dir, 'replicas.sqlite3'));
+        t.after(() => store.close());
+        return [store, store];
+      },
+      PostgreSQL: async (t) => {
+        const database = `bundles_${tag()}`;
+        assert.equal((await exec('postgres', ['psql', '-U', 'postgres', '-tAc', `CREATE DATABASE ${database}`])).exitCode, 0);
+        const url = `postgres://postgres:${config.postgres.password}@127.0.0.1:${pgPort}/${database}?sslmode=disable`;
+        const both = [await PgStore.open(url), await PgStore.open(url)] as const;
+        t.after(() => Promise.all(both.map((store) => store.close())));
+        return both;
+      },
+    };
+    /** Each replica's bundle store and registry, wired as main.ts wires them. */
+    async function replicas(t: TestContext, open: (t: TestContext) => Promise<readonly [Store, Store]>) {
+      const w = world();
+      return Promise.all((await open(t)).map(async (store) => {
+        const bundles = new S3BundleStore(config.object, (id, write) => store.exclusiveBundle(id, write));
+        return { bundles, registry: await w.replica(store, { bundles }) };
+      }));
+    }
+    async function assertComplete(id: BundleId, tar: Buffer): Promise<void> {
+      const reader = new S3BundleStore(config.object);
+      const files = [...tarFiles(tar)];
+      assert.deepEqual(Object.keys((await reader.index(id)).files).sort(), files.map((f) => f.path).sort());
+      for (const { path, body } of files) assert.deepEqual(Buffer.concat(await (await reader.open(id, path, null)).toArray()), body, path);
+      assert.deepEqual(Buffer.from(await (await fetch(reader.presignTar(id))).arrayBuffer()), tar);
+    }
+
+    for (const [name, open] of Object.entries(stores)) {
+      test(`${name}: an upload while a purge deletes the same bundle writes only after the purge, and leaves the bundle whole and publishable`, async (t) => {
+        const [one, two] = await replicas(t, open);
+        const tar = siteTar();
+        const id = await one.bundles.put(Readable.from([tar]));
+        const [owner, next] = [appName(`a-${tag()}`), appName(`b-${tag()}`)];
+        await one.registry.publish({ name: owner, image: null, manifest: site, bundle: id, owner: ann });
+        await one.registry.remove(owner);
+        const real = globalThis.fetch;
+        t.after(() => (globalThis.fetch = real));
+        const writes: string[] = [];
+        let atDelete!: () => void;
+        let proceed!: () => void;
+        let tarWritten!: () => void;
+        const deleting = new Promise<void>((resolve) => (atDelete = resolve));
+        const held = new Promise<void>((resolve) => (proceed = resolve));
+        const tarPut = new Promise<void>((resolve) => (tarWritten = resolve));
+        let purged: Promise<void> = Promise.resolve();
+        // The purge pauses between its index delete and its batch delete; an upload's index lands after the purge,
+        // the order in which an upload outside the exclusion leaves an index whose files are gone.
+        globalThis.fetch = async (input, init) => {
+          const url = new URL(String(input));
+          if (init?.method === 'POST' && url.search === '?delete') {
+            atDelete();
+            await held;
+          }
+          if (init?.method === 'PUT' && url.pathname.includes(`/${id}/`)) {
+            writes.push(url.pathname);
+            if (url.pathname.endsWith('/bundle.tar')) tarWritten();
+            if (url.pathname.endsWith('/index.json')) await purged;
+          }
+          return real(input, init);
+        };
+        purged = one.registry.purge(owner);
+        await deleting;
+        const upload = two.bundles.put(Readable.from([tar]));
+        // Time for the upload to write if nothing holds it back.
+        await Promise.race([tarPut, upload, sleep(200)]);
+        const early = [...writes];
+        proceed();
+        await purged;
+        assert.equal(await upload, id);
+        assert.deepEqual(early, []);
+        await assertComplete(id, tar);
+        await two.registry.publish({ name: next, image: null, manifest: site, bundle: id, owner: ann });
+        assert.equal(two.registry.view(next)?.bundle?.id, id);
+        assert.deepEqual(Buffer.concat(await (await two.bundles.open(id, 'index.html', null)).toArray()), [...tarFiles(tar)].find((f) => f.path === 'index.html')?.body);
+      });
+
+      test(`${name}: an upload before the purge of the last app that references the bundle leaves the purge deleting it, and a later publish refused`, async (t) => {
+        const [one, two] = await replicas(t, open);
+        const id = await two.bundles.put(Readable.from([siteTar()]));
+        const owner = appName(`a-${tag()}`);
+        await two.registry.publish({ name: owner, image: null, manifest: site, bundle: id, owner: ann });
+        await one.registry.remove(owner);
+        await one.registry.purge(owner);
+        const list = await signedFetch(config.object.root, 'GET', objectUrl(config.object, 'pneuma-space-bundles', '', `?list-type=2&prefix=${id}/`));
+        assert.doesNotMatch(await list.text(), /<Key>/);
+        await assert.rejects(two.registry.publish({ name: appName(`b-${tag()}`), image: null, manifest: site, bundle: id, owner: ann }),
+          (error) => error instanceof Conflict && /upload/.test(error.message));
+      });
+
+      test(`${name}: two uploads of the same tar at once, one through each replica, answer the same id`, async (t) => {
+        const replicated = await replicas(t, open);
+        const tar = siteTar();
+        const ids = await Promise.all(replicated.map(({ bundles }) => bundles.put(Readable.from([tar]))));
+        const id = createHash('sha256').update(tar).digest('hex');
+        assert.deepEqual(ids, [id, id]);
+      });
+    }
   });
 
   describe('profile detection on the compose network', () => {
     const probe = () => {
       const script = `
         import { createProviders, providerConfig } from '/src/providers.ts';
-        const p = createProviders({ destroyStorage: async () => {} }, providerConfig({ PNEUMA_SPACE_RTC_SECRET: 's' }));
+        import { admission, profileProbe } from '/src/metrics.ts';
+        const probe = admission({ postgres: profileProbe('postgres', 5432), coturn: profileProbe('coturn', 3478), runner: profileProbe('runner', 8082) });
+        const p = createProviders({ destroyStorage: async () => {} }, providerConfig({ PNEUMA_SPACE_RTC_SECRET: 's' }), probe);
         for (const name of ['postgres', 'coturn']) {
           const t = Date.now();
           const outcome = await p[name].ensure('${newAppId()}', null).then(() => 'up', (e) => e.constructor.name);

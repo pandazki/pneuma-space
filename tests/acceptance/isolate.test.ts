@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test, type TestContext } from 'node:test';
 import {
-  adminClient, adminUrl, appctl, appId, appJson, appUrl, cleanup, compose, containerFor, deploy, deployIsolate, docker, fixtureDir, images, OWNER, publishIsolate,
+  adminClient, adminUrl, appctl, appId, appJson, appPut, appUrl, cleanup, compose, containerFor, deploy, deployIsolate, docker, fixtureDir, images, OWNER, publishIsolate,
   scratch, setIdle, setupSuite, sleep, summary, teardownSuite, uniqueName, waitFor, waitInstance,
 } from './harness.ts';
 
@@ -157,4 +157,13 @@ test('AC-ISO-6', { timeout: 120_000 }, async (t) => {
   assert.deepEqual(statuses, [200, 200, 200, 200, 200]);
   const listed = await Promise.all(apps.map((app) => summary(app.name)));
   assert.deepEqual(listed.map((a) => a.runtime), apps.map((a) => a.runtime));
+});
+
+test('AC-ISO-7', { timeout: 120_000 }, async (t) => {
+  const app = await deploy(t, { image: images.echo, capabilities: { files: {} } });
+  await appPut(app.name, '/files/note', 'written-by-the-container');
+  await assert.rejects(publishIsolate(app.name, fixture, { ...manifest, capabilities: { files: {} } }), /409 .*runtime \\"container\\".*runtime \\"isolate\\"/);
+  const listed = await summary(app.name);
+  assert.deepEqual([listed.runtime, listed.release], ['container', 1]);
+  assert.equal((await appJson(app.name, '/files/note')).value, 'written-by-the-container');
 });

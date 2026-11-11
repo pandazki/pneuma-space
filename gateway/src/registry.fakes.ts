@@ -1,14 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
-import { PlatformRegistry } from './registry.ts';
+import type { TestContext } from 'node:test';
+import { KubeClient } from './kube.ts';
+import { KubeInfra } from './kube-infra.ts';
+import { PlatformRegistry, type RegistryDeps } from './registry.ts';
 import { SqliteStore } from './store.ts';
 import {
   CAPABILITIES, Conflict, NotFound,
-  type AppId, type BundleId, type BundleIndex, type BundleStore, type CapabilityProvider, type Guard, type ImageId, type Infra, type Lease,
-  type ProviderName, type Quarantine, type Resource, type ResourceKind, type Runtime,
+  type AppId, type BundleId, type BundleIndex, type BundleStore, type CapabilityProvider, type Guard, type Home, type ImageId, type Infra, type Lease,
+  type ProviderName, type Quarantine, type Resource, type ResourceKind, type Runtime, type Store,
 } from './model.ts';
 
 export type Call = readonly [verb: 'ensure' | 'suspend' | 'destroy', provider: ProviderName, app: AppId];
@@ -97,6 +103,10 @@ export class FakeRuntime implements Runtime, Infra, Guard {
   async volumes() { return []; }
   async warnings() { return []; }
   async scale(name: string, replicas: number): Promise<void> { this.calls.push(`scale ${name} ${replicas}`); }
+  removedBy(): null { return null; }
+  /** What `homes` answers, as instance rows would. */
+  homed: Home[] = [];
+  async homes(): Promise<Home[]> { return this.homed; }
   async deletePod(name: string): Promise<void> { this.calls.push(`deletePod ${name}`); }
   async resolveImage(reference: string): Promise<ImageId | null> {
     this.calls.push(`resolveImage ${reference}`);
@@ -132,7 +142,9 @@ export type World = {
   /** Compose services the registry's probe finds; none by default. */
   readonly services: Set<string>;
   /** Closes the last store and opens a fresh store and registry over the same file, as a gateway restart would. */
-  open(): Promise<{ store: SqliteStore; registry: PlatformRegistry }>;
+  open(deps?: Partial<RegistryDeps>): Promise<{ store: SqliteStore; registry: PlatformRegistry }>;
+  /** Another replica's registry over `store`, with the same backends behind it. */
+  replica(store: Store, deps?: Partial<RegistryDeps>): Promise<PlatformRegistry>;
 };
 
 const temporary: string[] = [];
@@ -150,15 +162,33 @@ export function world(): World {
   const bundles = new FakeBundles();
   const services = new Set<string>();
   let previous: SqliteStore | null = null;
+  const replica = (store: Store, deps: Partial<RegistryDeps> = {}) => PlatformRegistry.open({
+    store, runtime, guard: runtime, infra: runtime, bundles, providers: [...providers.values()], probe: async (service) => services.has(service), ...deps,
+  });
   return {
-    dir, calls, providers, runtime, bundles, services,
-    async open() {
+    dir, calls, providers, runtime, bundles, services, replica,
+    async open(deps) {
       await previous?.close();
       const store = (previous = new SqliteStore(join(dir, 'pneuma-space.sqlite3')));
-      const registry = await PlatformRegistry.open({
-        store, runtime, guard: runtime, infra: runtime, bundles, providers: [...providers.values()], probe: async (service) => services.has(service),
-      });
-      return { store, registry };
+      return { store, registry: await replica(store, deps) };
     },
   };
+}
+
+/** KubeInfra over a platform namespace whose Deployments and StatefulSets hold `replicas`, which a scale patch changes; records every request as `METHOD path`. */
+export async function fakeKubernetes(t: TestContext, replicas: Record<string, number>) {
+  const seen: string[] = [];
+  const server = createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    seen.push(`${req.method} ${req.url}`);
+    const scaled = /\/(?:deployments|statefulsets)\/([^/]+)\/scale$/.exec(req.url ?? '');
+    if (req.method === 'PATCH' && scaled) replicas[scaled[1]!] = (JSON.parse(body) as { spec: { replicas: number } }).spec.replicas;
+    res.writeHead(200, { 'content-type': 'application/json' }).end('{}');
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => server.close());
+  const kube = new KubeClient({ server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, token: async () => 't', namespace: 'pneuma-space' });
+  return { seen, replicas, infra: new KubeInfra({ platform: kube, apps: kube, registry: null, registryApi: null, authFile: null }) };
 }

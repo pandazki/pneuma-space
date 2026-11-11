@@ -209,6 +209,15 @@ export class KubeInfra implements Infra {
     await this.#platform.scale(kind, name, replicas);
   }
 
+  /** A home is a runner Pod's name, `<StatefulSet>-<ordinal>`; at `replicas` the StatefulSet keeps ordinals 0 to replicas - 1 (ADR 0032). */
+  removedBy(name: string, replicas: number): ((home: string) => boolean) | null {
+    if (SCALABLE.get(name) !== 'statefulsets') return null;
+    return (home) => {
+      const ordinal = home.startsWith(`${name}-`) ? home.slice(name.length + 1) : '';
+      return /^\d+$/.test(ordinal) && Number(ordinal) >= replicas;
+    };
+  }
+
   /** The uid precondition keeps a replacement the controller already made under the same name. */
   async deletePod(name: string): Promise<void> {
     const pod = await this.#platform.get('pods', name).catch((error: unknown) => {

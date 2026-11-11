@@ -225,7 +225,8 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 @keyframes bump { from { background: var(--accent-tint); color: var(--accent-ink); } }
 .seats { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; margin-top: 14px; }
 .seat { aspect-ratio: 1; border-radius: 7px; background: var(--inset); box-shadow: inset 0 0 0 1px var(--line-strong); transition: background-color .6s, box-shadow .6s; cursor: default; }
-.seat[data-app] { cursor: pointer; }
+.seat > a { display: block; height: 100%; border-radius: inherit; }
+.seat > a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .seat[data-state="awake"] { background: var(--green); box-shadow: 0 0 0 3px var(--green-tint); }
 .seat[data-state="waking"] { background: var(--orange-tint); box-shadow: inset 0 0 0 1.5px var(--orange); animation: breathe 1.1s ease-in-out infinite; }
 .seat[data-state="draining"], .seat[data-state="stopping"] { background: repeating-linear-gradient(-45deg, var(--orange) 0 3px, var(--orange-tint) 3px 6px); box-shadow: inset 0 0 0 1px var(--orange); animation: breathe 1.1s ease-in-out infinite; }
@@ -339,6 +340,7 @@ pre.log { margin: 0; max-height: 520px; overflow: auto; font: 12px/18px var(--mo
 .evx.open .caret { transform: rotate(90deg); }
 .evs { background: var(--inset); box-shadow: inset 2px 0 0 var(--accent); border-bottom: 1px solid var(--line); }
 .evs .ev { min-height: 30px; border-bottom-color: var(--line-soft); }
+.evs .kept { padding: 7px 14px; font-size: 12px; color: var(--ink-3); }
 .evx.fresh { animation: fresh 2.4s ease-out; }
 .ev.mark { display: block; padding: 7px 14px; font-size: 12px; color: var(--orange); background: var(--orange-tint); text-align: center; white-space: normal; }
 @container tail (max-width: 560px) {
@@ -936,7 +938,7 @@ const I18N = {
     'tp.x.container.state.k8s': 'files 和 SQLite 在每应用的 PVC 里；kv、object 和 PostgreSQL 在平台服务里。Pod 的文件系统每次停止都丢掉。',
     'tp.x.container.failure.k8s': 'Pod 状态报告退出，唤醒后 {ready} 秒内不应答算唤醒失败；醒着时卡死的 Pod 检测不到。守卫按版本计失败：{window} 秒内 {max} 次即隔离，失败后 {backoff} 秒内不再唤醒，直到新版本或手动解除。',
     'tp.x.isolate.state.k8s': 'files 和 SQLite 在 runner PVC 的 /data/apps/<id>/ 下；kv、object 和 PostgreSQL 在平台服务里。worker 停下后内存里的东西都没了。',
-    'fold.trigger': '触发 {name}', 'fold.wake': '唤醒后休眠', 'fold.leader': '领导权', 'fold.meanWake': '平均唤醒 {ms}', 'fold.meanDelivery': '平均投递 {ms}', 'fold.since': '自 {time} 起', 'fold.started': '已 {d}', 'fold.expand': '展开这些事件',
+    'fold.trigger': '触发 {name}', 'fold.wake': '唤醒后休眠', 'fold.leader': '领导权', 'fold.meanWake': '平均唤醒 {ms}', 'fold.meanDelivery': '平均投递 {ms}', 'fold.since': '自 {time} 起', 'fold.started': '已 {d}', 'fold.expand': '展开这些事件', 'fold.kept': '只显示最近 {k} 次，共 {n} 次',
     'brand.sub': '控制台', 'nav.group': '平台', 'nav.overview': '总览', 'nav.apps': '项目', 'nav.publish': '发布',
     'theme.light': '浅色', 'theme.dark': '深色', 'theme.toLight': '切换到浅色', 'theme.toDark': '切换到深色',
     'lang.toZh': '切换到中文', 'lang.toEn': '切换到 English', 'nav.collapse': '收起侧栏', 'nav.expand': '展开侧栏',
@@ -1029,7 +1031,7 @@ const I18N = {
     'rt.requests': '请求', 'rt.requestsDesc': '每次交换结束时记一条，最新在上。点一行看全部字段。',
     'rt.events': '事件', 'rt.eventsDesc': '生命周期事件。app 和 error 条件也作用于这里。',
     'rt.shown': '显示 {shown} / 共 {kept} 条', 'rt.new': '{n} 条新请求', 'empty.requests': '还没有请求。',
-    'rt.gap': '两次轮询之间结束的请求超过 {ring} 条，有 {n} 条没有显示。', 'rt.missing': '副本 {replica} 没有应答，它处理的请求在它恢复应答前不会显示。',
+    'rt.gap': '两次轮询之间结束的请求超过 {ring} 条，有 {n} 条没有显示。', 'rt.missing': '副本 {replica} 没有应答，它处理的请求在它恢复应答前不会显示。', 'rt.reset': '副本 {replica} 重启了，它之前的记录已经没有了。',
     'rt.cold': '冷启动 {ms}', 'rt.noAnswer': '没有应答', 'rt.addFilter': '加入过滤条件',
     'rt.c.tm': '时间', 'rt.c.sc': '状态', 'rt.c.mt': '方法', 'rt.c.ap': '应用', 'rt.c.pt': '路径', 'rt.c.du': '耗时', 'rt.c.wf': '时序', 'rt.c.sb': '主体',
     'rt.timelineDesc': '最近 15 分钟醒过的每个实例，随过滤条件收窄。点一行只看这个应用，再点一次取消。', 'rt.pick': '只看 {name}', 'rt.unpick': '取消只看 {name}',
@@ -1151,9 +1153,12 @@ const I18N = {
     'err.forbidden': '权限不足：{msg}', 'err.conflict': '无法完成：{msg}',
    
     'ac.label': '访问范围', 'ac.tenant': '租户内', 'ac.org': '组织内', 'ac.public': '公开',
-    'ac.tenant.desc': '只有 {tenant} 的成员和平台管理员能打开，静态文件也一样。',
+    'ac.tenant.desc': '只有 {tenant} 的成员、它的令牌和平台管理员能打开，静态文件也一样。',
     'ac.org.desc': '组织里任何登录的人或有效令牌都能打开。',
-    'ac.public.desc': '不需要登录；应用声明了 identity 时，登录的访客仍带着身份。上游也要为它放行匿名访问。',
+    'ac.public.open': '任何人不用登录就能打开。上游也要为它放行匿名访问。',
+    'ac.public.optional': '任何人不用登录就能打开，登录的访客带着身份。上游也要为它放行匿名访问。',
+    'ac.public.required': '公开只解除组织边界：应用的 identity 要求登录，访客仍要先登录才能到达它。',
+    'ac.public.requiredStatic': '公开只解除组织边界：静态文件任何人都能取，但应用的 identity 要求登录，访客仍要先登录才能到达它。',
     'd.tenant': '所属租户', 'd.move': '移到租户…',
     'mv.title': '把 {name} 移到另一个租户', 'mv.body': '移动会先退役实例：配额占用、标签和旧租户令牌的访问一次切换，下一次请求在新租户下唤醒。数据全部保留。',
     'mv.to': '目标租户', 'mv.action': '移动并退役实例', 'mv.none': '没有别的租户。',
@@ -1178,6 +1183,9 @@ const I18N = {
     'cl.leading': '领导者', 'cl.leadingTitle': '持有领导权的网关副本',
     'cl.scaleItem': '调整副本数…', 'cl.range': '1 到 {max}', 'cl.fewer': '少一个', 'cl.moreOne': '多一个', 'cl.replicas': '{name} 的副本数',
     'cl.scaleTitle': '调整{name}的副本数', 'cl.scaleBody': '现在期望 {from} 个，调到 {n} 个。缩掉的副本先排空；runner 缩掉的副本保留它的 PVC。', 'cl.scaled': '已提交 {n} 个副本，就绪数随采样更新。',
+    'cl.scaleRunnerDown': '现在期望 {from} 个，调到 {n} 个会删掉 {pods}。isolate 应用固定在首次唤醒时选定的 runner 副本上，文件和数据库在那个副本的 PVC 里，所以只要有应用固定在这些副本上（醒着、睡着或已删除未清除都算），这次调整就被拒绝，什么也不变。调整成功时，缩掉的副本保留它的 PVC。',
+    'cl.scaleAwakeOn': '上次采样里醒着的有 {apps}，这次会被拒绝。',
+    'cl.scaleRefused': '副本数没有变：调到 {n} 个会删掉这些应用固定所在的 runner：{apps}。先删除并清除这些应用，或保留这些副本。', 'cl.andMore': '，另有 {n} 个',
     'cl.restartPodItem': '重启 Pod…', 'cl.restartPodNote': '删除它，控制器重建', 'cl.restartPodTitle': '重启 {pod}？', 'cl.restarted': '已删除 {pod}，控制器正在重建。',
     'cl.restartGateway': '删除这个 Pod，控制器重建它。它先排空连接；如果它是领导者，领导权在别的副本上重选。',
     'cl.restartRunner': '删除这个 Pod，控制器重建它。它上面的 isolate worker 随之结束，下次请求重新唤醒。',
@@ -1218,7 +1226,7 @@ const I18N = {
     'tp.x.container.state.k8s': 'Files and SQLite live in the app’s PVCs; kv, object and PostgreSQL in platform services. The Pod filesystem is discarded on every stop.',
     'tp.x.container.failure.k8s': 'The Pod status reports an exit; no answer within {ready} s of a wake fails the wake. A Pod that hangs while awake is not detected. The Guard counts failures per release: {max} within {window} s quarantine the app, and for {backoff} s after a failure it does not wake, until a new release or an unquarantine.',
     'tp.x.isolate.state.k8s': 'Files and SQLite live in the runner PVC under /data/apps/<id>/; kv, object and PostgreSQL in platform services. A worker’s memory is gone when it stops.',
-    'fold.trigger': 'trigger {name}', 'fold.wake': 'woke and slept', 'fold.leader': 'leader', 'fold.meanWake': 'mean wake {ms}', 'fold.meanDelivery': 'mean delivery {ms}', 'fold.since': 'since {time}', 'fold.started': 'for {d}', 'fold.expand': 'Show these events',
+    'fold.trigger': 'trigger {name}', 'fold.wake': 'woke and slept', 'fold.leader': 'leader', 'fold.meanWake': 'mean wake {ms}', 'fold.meanDelivery': 'mean delivery {ms}', 'fold.since': 'since {time}', 'fold.started': 'for {d}', 'fold.expand': 'Show these events', 'fold.kept': 'showing the last {k} of {n} cycles',
     'brand.sub': 'Console', 'nav.group': 'Platform', 'nav.overview': 'Overview', 'nav.apps': 'Projects', 'nav.publish': 'Publish',
     'theme.light': 'Light', 'theme.dark': 'Dark', 'theme.toLight': 'Switch to light theme', 'theme.toDark': 'Switch to dark theme',
     'lang.toZh': 'Switch to 中文', 'lang.toEn': 'Switch to English', 'nav.collapse': 'Collapse sidebar', 'nav.expand': 'Expand sidebar',
@@ -1311,7 +1319,7 @@ const I18N = {
     'rt.requests': 'Requests', 'rt.requestsDesc': 'One row per exchange as it ends, newest on top. Click a row for every field.',
     'rt.events': 'Events', 'rt.eventsDesc': 'Lifecycle events. The app and error terms apply here too.',
     'rt.shown': '{shown} of {kept} shown', 'rt.new': '{n} new', 'empty.requests': 'No requests yet.',
-    'rt.gap': '{n} requests not shown: more than {ring} ended between two polls.', 'rt.missing': 'Replica {replica} does not answer; the requests it handles are not shown until it does.',
+    'rt.gap': '{n} requests not shown: more than {ring} ended between two polls.', 'rt.missing': 'Replica {replica} does not answer; the requests it handles are not shown until it does.', 'rt.reset': 'Replica {replica} restarted; its earlier records are gone.',
     'rt.cold': 'cold {ms}', 'rt.noAnswer': 'no answer', 'rt.addFilter': 'Add to the filter',
     'rt.c.tm': 'Time', 'rt.c.sc': 'Status', 'rt.c.mt': 'Method', 'rt.c.ap': 'App', 'rt.c.pt': 'Path', 'rt.c.du': 'Duration', 'rt.c.wf': 'Waterfall', 'rt.c.sb': 'Subject',
     'rt.timelineDesc': 'Every instance awake in the last 15 min, narrowed by the filter. Click a row to follow that app; click again to clear.', 'rt.pick': 'Follow only {name}', 'rt.unpick': 'Stop following only {name}',
@@ -1433,9 +1441,12 @@ const I18N = {
     'err.forbidden': 'Not allowed: {msg}', 'err.conflict': 'Cannot do that: {msg}',
    
     'ac.label': 'Access', 'ac.tenant': 'Tenant', 'ac.org': 'Organization', 'ac.public': 'Public',
-    'ac.tenant.desc': 'Only members of {tenant} and platform admins can open it, static files included.',
+    'ac.tenant.desc': 'Only members of {tenant}, its tokens and platform admins can open it, static files included.',
     'ac.org.desc': 'Anyone signed in to the organization, or any valid token, can open it.',
-    'ac.public.desc': 'No sign-in needed; when the app declares identity, a signed-in visitor still carries it. The upstream must also let anonymous requests through.',
+    'ac.public.open': 'Anyone can open it without signing in. The upstream must also let anonymous requests through.',
+    'ac.public.optional': 'Anyone can open it without signing in, and a signed-in visitor is identified. The upstream must also let anonymous requests through.',
+    'ac.public.required': 'Public lifts only the organization boundary: the app requires identity, so visitors still sign in before reaching it.',
+    'ac.public.requiredStatic': 'Public lifts only the organization boundary: its static files open to anyone, but the app requires identity, so visitors still sign in before reaching it.',
     'd.tenant': 'Tenant', 'd.move': 'Move to tenant…',
     'mv.title': 'Move {name} to another tenant', 'mv.body': 'The move retires the instance first: quota usage, labels and the old tenant’s token access switch at once, and the next request wakes it under the new tenant. All data is kept.',
     'mv.to': 'Destination', 'mv.action': 'Move and retire instance', 'mv.none': 'There is no other tenant.',
@@ -1460,6 +1471,9 @@ const I18N = {
     'cl.leading': 'leader', 'cl.leadingTitle': 'The gateway replica that holds the lead',
     'cl.scaleItem': 'Change replicas…', 'cl.range': '1 to {max}', 'cl.fewer': 'One fewer', 'cl.moreOne': 'One more', 'cl.replicas': 'Replicas of {name}',
     'cl.scaleTitle': 'Change the {name} replicas', 'cl.scaleBody': '{from} desired now; this sets {n}. A removed replica drains first; a removed runner replica keeps its PVC.', 'cl.scaled': '{n} replicas requested; the ready count follows the next samples.',
+    'cl.scaleRunnerDown': '{from} desired now; going to {n} removes {pods}. An isolate app stays on the runner replica its first wake chose, with its files and databases in that replica’s PVC, so this is refused and nothing changes while any app is homed there: awake, asleep, or removed but not purged. Once accepted, a removed replica keeps its PVC.',
+    'cl.scaleAwakeOn': 'Awake there in the last sample: {apps}; this will be refused.',
+    'cl.scaleRefused': 'Not changed: scaling to {n} would remove the runner these apps are homed on: {apps}. Remove and purge those apps first, or keep those replicas.', 'cl.andMore': ' and {n} more',
     'cl.restartPodItem': 'Restart Pod…', 'cl.restartPodNote': 'Deletes it; the controller recreates it', 'cl.restartPodTitle': 'Restart {pod}?', 'cl.restarted': '{pod} deleted; its controller is recreating it.',
     'cl.restartGateway': 'Deletes the Pod and its controller recreates it. It drains its connections first; if it leads, another replica takes the lead.',
     'cl.restartRunner': 'Deletes the Pod and its controller recreates it. Its isolate workers end with it; the next request wakes them again.',
@@ -1580,7 +1594,7 @@ async function api(method, path, body, contentType = 'application/json') {
   const text = await response.text();
   if (response.headers.get('content-type')?.startsWith('text/plain')) return text;
   const data = text ? JSON.parse(text) : null;
-  if (!response.ok) throw Object.assign(new Error(data?.error ?? `${response.status} ${response.statusText}`), { status: response.status });
+  if (!response.ok) throw Object.assign(new Error(data?.error ?? `${response.status} ${response.statusText}`), { status: response.status, body: data });
   return data;
 }
 
@@ -1615,6 +1629,7 @@ function popover(wrap, button, build) {
   let list = null;
   const outside = (e) => { if (!wrap.contains(e.target)) close(); };
   const keys = (e) => {
+    if (e.isComposing) return;
     if (e.key === 'Escape') { close(); button.focus(); e.preventDefault(); }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       const all = [...list.querySelectorAll('button:not([disabled]):not([hidden])')];
@@ -1658,6 +1673,29 @@ function moreMenu(label, items, text = null) {
   return wrap;
 }
 
+/** Printable keys typed less than this apart spell one type-ahead prefix (WAI-ARIA listbox pattern). */
+const TYPEAHEAD_MS = 500;
+
+/**
+ * Type-ahead over a list's option buttons: the focus moves to the next shown option whose label starts with what was
+ * typed, wrapping; one key repeated cycles through the options starting with it. The filter field keeps its own typing.
+ */
+function typeahead(items) {
+  let typed = '';
+  let at = -Infinity;
+  return (e) => {
+    const { key } = e;
+    if (e.target.tagName === 'INPUT' || e.isComposing || e.keyCode === 229 || e.ctrlKey || e.metaKey || e.altKey || [...key].length !== 1 || !key.trim()) return;
+    typed = e.timeStamp - at > TYPEAHEAD_MS ? key : typed + key;
+    at = e.timeStamp;
+    const same = [...typed].every((c) => c === key);
+    const prefix = (same ? key : typed).toLocaleLowerCase();
+    const shown = items.filter((b) => !b.hidden && !b.disabled);
+    const from = Math.max(0, shown.indexOf(document.activeElement) + (same ? 1 : 0));
+    [...shown.slice(from), ...shown.slice(0, from)].find((b) => b.firstChild.textContent.toLocaleLowerCase().startsWith(prefix))?.focus();
+  };
+}
+
 /**
  * One choice from a list that can grow: a button showing the value opens a menu-pattern list with a check on the chosen
  * item, and a filter field past eight items. `options` are { value, label, note }.
@@ -1687,8 +1725,8 @@ function listbox({ label, options, value, onPick, placeholder = null, disabled =
     }, h('span', {}, o.label), o.note ? h('small', {}, o.note) : null, o.value === value ? icon('check') : null));
     const search = options.length > 8 ? h('input', { type: 'search', name: 'find', class: 'lfind', placeholder: t('lb.find'), 'aria-label': t('lb.find'),
       oninput: () => { const q = search.value.trim().toLowerCase(); for (const b of items) b.hidden = q !== '' && !b.dataset.text.includes(q); },
-      onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); items.find((b) => !b.hidden)?.click(); } } }) : null;
-    return h('div', { class: 'menu lmenu', role: 'listbox', 'aria-label': label }, search, items);
+      onkeydown: (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); items.find((b) => !b.hidden)?.click(); } } }) : null;
+    return h('div', { class: 'menu lmenu', role: 'listbox', 'aria-label': label, onkeydown: typeahead(items) }, search, items);
   });
   button.addEventListener('keydown', (e) => {
     if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && button.getAttribute('aria-expanded') !== 'true') { e.preventDefault(); button.click(); }
@@ -1833,6 +1871,7 @@ function addressPattern(apps) {
 
 function setScope(scope) {
   session.scope = scope;
+  appsFilter.tenant = '';
   store.set(TENANT_KEY, scope);
   route();
 }
@@ -1883,6 +1922,8 @@ const SPAN_MS = 15 * 60_000;
 const AHEAD_MS = 60_000;
 const KEEP_EVENTS = 600;
 const TAIL_ROWS = 300;
+/** A folded run keeps the events of its latest RUN_CYCLES cycles to expand; its count, mean and start cover every cycle. */
+const RUN_CYCLES = 20;
 const EVENT_RING = 100;
 const FRESH_ROWS = 40;
 /** The awake timeline draws only the apps whose state changed most recently (ADR 0016). */
@@ -2081,7 +2122,7 @@ function seatsCard() {
   const sub = h('div', { class: 'ks' });
   const fleet = h('div', { class: 'ks' });
   const grid = h('div', { class: 'seats', role: 'list' });
-  const cells = Array.from({ length: AWAKE_GATE }, () => h('div', { class: 'seat', role: 'listitem', onclick: (e) => { const app = e.currentTarget.dataset.app; if (app) location.hash = `#/apps/${encodeURIComponent(app)}`; } }));
+  const cells = Array.from({ length: AWAKE_GATE }, () => h('div', { class: 'seat', role: 'listitem' }));
   grid.append(...cells);
   const el = h('div', { class: 'card', 'data-section': 'seats' }, h('div', { class: 'kh' }, h('span', { class: 'l' }, t('seats.title')), h('span', { class: 'ks', style: 'margin:0' }, t('seats.gate', { n: AWAKE_GATE }))), value, sub, grid, fleet);
   const seatOf = new Map();
@@ -2107,8 +2148,12 @@ function seatsCard() {
         cell.classList.remove('ignite');
         if (animate && state === 'awake' && cell.dataset.state !== 'awake') flash(cell, 'ignite');
         cell.dataset.state = state;
-        if (name) cell.dataset.app = name; else delete cell.dataset.app;
         cell.title = name ? `${name} · ${t(`st.${state}`)}` : t('seats.free');
+        if (!name) return cell.replaceChildren();
+        // Updated in place, so the 2 s poll keeps keyboard focus on the seat.
+        const link = cell.firstChild ?? cell.appendChild(h('a'));
+        link.href = `#/apps/${encodeURIComponent(name)}`;
+        link.setAttribute('aria-label', cell.title);
       });
       const count = (state) => [...names].filter((n) => stateOf(model, n) === state).length;
       const next = `${names.size}`;
@@ -2683,19 +2728,30 @@ function cycleKind(c) {
 /**
  * Consumes events oldest first and answers keyed line operations: { key, item } puts the line on top, replacing the line
  * with that key; { remove: key } takes it away. An item is { kind: 'event', e }, { kind: 'open', app, events } for a cycle
- * in progress, or { kind: 'run', app, cycle, cycles, events } for consecutive healthy cycles of one kind.
+ * in progress, or { kind: 'run', app, cycle, count, first, wakes, deliveries, cycles, events } for consecutive healthy
+ * cycles of one kind: `count`, `first` and the sums cover the whole run, `cycles` and `events` only its last RUN_CYCLES.
  */
 function eventFolder() {
   const open = new Map();
   const runs = new Map();
   const raw = (e) => ({ key: `e:${e.id}`, item: { kind: 'event', e, events: [e] } });
   const extend = (scope, cycle, events, ops) => {
-    const run = runs.get(scope);
-    const next = run && run.cycle === cycle
-      ? { ...run, cycles: [...run.cycles, events], events: [...run.events, ...events] }
-      : { kind: 'run', key: `r:${events[0].id}`, app: events[0].app ?? null, replica: events[0].replica, cycle, cycles: [events], events };
-    runs.set(scope, next);
-    ops.push({ key: next.key, item: next });
+    let run = runs.get(scope);
+    if (run?.cycle !== cycle) {
+      run = {
+        kind: 'run', key: `r:${events[0].id}`, app: events[0].app ?? null, replica: events[0].replica, cycle, count: 0, first: events[0].t,
+        wakes: { sum: 0, n: 0 }, deliveries: { sum: 0, n: 0 }, cycles: [], get events() { return this.cycles.flat(); },
+      };
+      runs.set(scope, run);
+    }
+    run.count++;
+    for (const e of events) if (e.ev === 'awake' && typeof e.ms === 'number') { run.wakes.sum += e.ms; run.wakes.n++; }
+    const from = events.find((e) => e.ev === 'delivery.delivering')?.t;
+    const to = events.find((e) => e.ev === 'delivery.done')?.t;
+    if (from != null && to != null) { run.deliveries.sum += to - from; run.deliveries.n++; }
+    run.cycles.push(events);
+    if (run.cycles.length > RUN_CYCLES) run.cycles.shift();
+    ops.push({ key: run.key, item: run });
   };
   const close = (app, c, ops) => {
     open.delete(app);
@@ -2742,18 +2798,10 @@ function eventFolder() {
   };
 }
 
-const mean = (list) => (list.length ? list.reduce((n, v) => n + v, 0) / list.length : null);
-
 /** What a run line says after its count: the mean wake latency, or the mean delivery time while the app was already up. */
-function runMeta(item) {
-  const wakes = item.events.filter((e) => e.ev === 'awake' && typeof e.ms === 'number').map((e) => e.ms);
-  if (wakes.length) return t('fold.meanWake', { ms: ms(mean(wakes)) });
-  const spans = item.cycles.map((c) => {
-    const from = c.find((e) => e.ev === 'delivery.delivering')?.t;
-    const to = c.find((e) => e.ev === 'delivery.done')?.t;
-    return from != null && to != null ? to - from : null;
-  }).filter((v) => v != null);
-  return spans.length ? t('fold.meanDelivery', { ms: ms(mean(spans)) }) : null;
+function runMeta({ wakes, deliveries }) {
+  if (wakes.n) return t('fold.meanWake', { ms: ms(wakes.sum / wakes.n) });
+  return deliveries.n ? t('fold.meanDelivery', { ms: ms(deliveries.sum / deliveries.n) }) : null;
 }
 
 /** The event stream of the overview and the realtime page: folded lines that expand to their events, the filter applied to the events. */
@@ -2773,8 +2821,8 @@ function eventStream({ keep, limit, attrs }) {
     const state = last.ev.startsWith('delivery.') ? 'delivering' : last.ev === 'memory-clamped' ? 'waking' : last.ev;
     const label = item.kind === 'open'
       ? h('span', { class: `st ${tone(state)}` }, t(`st.${state}`))
-      : h('span', { class: 'st green' }, item.cycle.startsWith('trigger:') ? t('fold.trigger', { name: item.cycle.slice(8) }) : t(`fold.${item.cycle}`), h('b', { class: 'num' }, `×${nf(item.cycles.length)}`));
-    const meta = item.kind === 'run' ? [runMeta(item), item.cycles.length > 1 ? t('fold.since', { time: clock(item.events[0].t) }) : null].filter(Boolean).join(' · ') : t('fold.started', { d: duration(Date.now() - item.events[0].t) });
+      : h('span', { class: 'st green' }, item.cycle.startsWith('trigger:') ? t('fold.trigger', { name: item.cycle.slice(8) }) : t(`fold.${item.cycle}`), h('b', { class: 'num' }, `×${nf(item.count)}`));
+    const meta = item.kind === 'run' ? [runMeta(item), item.count > 1 ? t('fold.since', { time: clock(item.first) }) : null].filter(Boolean).join(' · ') : t('fold.started', { d: duration(Date.now() - item.events[0].t) });
     const wrap = h('div', { class: `evx${isOpen ? ' open' : ''}` },
       h('div', { class: 'ev fold', role: 'button', tabindex: '0', 'aria-expanded': String(isOpen), title: t('fold.expand'),
         onclick: toggle, onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } } },
@@ -2782,7 +2830,8 @@ function eventStream({ keep, limit, attrs }) {
         label,
         item.app ? appLink(item.app) : h('span', { class: 'mono muted' }, item.replica ?? '-'),
         h('span', { class: 'f' }, meta, h('span', { class: 'caret', 'aria-hidden': 'true' }, '›'))),
-      isOpen ? h('div', { class: 'evs' }, [...shown].reverse().map(eventRow)) : null);
+      isOpen ? h('div', { class: 'evs' }, [...shown].reverse().map(eventRow),
+        item.kind === 'run' && item.count > item.cycles.length ? h('div', { class: 'kept' }, t('fold.kept', { k: nf(item.cycles.length), n: nf(item.count) })) : null) : null);
     return wrap;
   };
   const stream = follow({ line, keep, limit, hold: EVENT_RING, empty: 'empty.events', newKey: 'tail.new', attrs });
@@ -3330,7 +3379,11 @@ function realtime() {
       page.cursor = batch.cursor;
       const marks = batch.missing.filter((name) => !page.missing.has(name)).map((name) => t('rt.missing', { replica: name }));
       page.missing = new Set(batch.missing);
-      // Per replica, a seq past the next one means its ring overflowed between polls; a lower one, that it restarted.
+      for (const replica of batch.reset) {
+        page.last.delete(replica);
+        marks.push(t('rt.reset', { replica }));
+      }
+      // Per replica and generation (ADR 0031), a seq past the next one means its ring overflowed between polls.
       for (const r of batch.records) {
         const last = page.last.get(r.replica);
         if (page.seeded && last !== undefined && r.seq > last + 1) marks.push(t('rt.gap', { n: nf(r.seq - last - 1), ring: nf(REQUEST_RING) }));
@@ -3469,12 +3522,14 @@ async function projects() {
     painted = signature;
     visible.disconnect();
     const needle = appsFilter.text.trim().toLowerCase();
-    const inTenant = apps.filter((a) => !appsFilter.tenant || a.tenant === appsFilter.tenant);
+    const tenants = grouped() ? [...Map.groupBy(apps, (a) => a.tenant)].sort(([a], [b]) => a.localeCompare(b)) : [];
+    // The tenant filter applies only while its chips are on screen to show and clear it.
+    const tenant = tenants.length > 1 && tenants.some(([name]) => name === appsFilter.tenant) ? appsFilter.tenant : '';
+    const inTenant = apps.filter((a) => !tenant || a.tenant === tenant);
     const byBucket = Map.groupBy(inTenant, appBucket);
     const fchip = (field, value, label, n, dot = null) => h('button', {
       type: 'button', class: 'fchip', 'aria-pressed': String(appsFilter[field] === value), onclick: () => { appsFilter[field] = appsFilter[field] === value ? '' : value; paint(); },
     }, dot, label, h('span', { class: 'n num' }, nf(n)));
-    const tenants = grouped() ? [...Map.groupBy(apps, (a) => a.tenant)].sort(([a], [b]) => a.localeCompare(b)) : [];
     fill(chips,
       fchip('bucket', '', t('cl.f.all'), inTenant.length),
       APP_BUCKETS.filter((b) => byBucket.has(b) || appsFilter.bucket === b).map((b) => fchip('bucket', b, t(`ap.b.${b}`), byBucket.get(b)?.length ?? 0, h('i', { class: `pdot ${BUCKET_DOT[b]}` }))),
@@ -3636,11 +3691,15 @@ async function detail(name) {
   }, post('purge'), () => { location.hash = '#/apps'; });
   const access = () => {
     let pick = app.access;
-    const note = h('span', {}, t(`ac.${pick}.desc`, { tenant: app.tenant }));
+    // `access` decides whether a request arrives, the current release's `identity` whether it must sign in (docs/app-contract.md, Access).
+    const caps = current?.manifest.capabilities ?? {};
+    const open = caps.identity === undefined ? 'open' : caps.identity.required === false ? 'optional' : caps.static ? 'requiredStatic' : 'required';
+    const desc = (x) => t(x === 'public' ? `ac.public.${open}` : `ac.${x}.desc`, { tenant: app.tenant });
+    const note = h('span', {}, desc(pick));
     const control = h('div', { class: 'field' });
     const paint = () => fill(control, segmented(ACCESS_LEVELS.map((x) => [x, t(`ac.${x}`)]), pick, (x) => {
       pick = x;
-      note.textContent = t(`ac.${x}.desc`, { tenant: app.tenant });
+      note.textContent = desc(x);
       paint();
     }, t('ac.label')));
     paint();
@@ -5030,14 +5089,14 @@ function cluster() {
   };
 
   /** An outcome's `until` says when the state it reports is gone; the note then clears itself. */
-  const run = async (key, call, outcome = null) => {
+  const run = async (key, call, outcome = null, refused = failText) => {
     ops.set(key, { busy: true });
     paint();
     try {
       const result = await call();
       if (outcome) ops.set(key, outcome(result)); else ops.delete(key);
     } catch (error) {
-      ops.set(key, { error: failText(error) });
+      ops.set(key, { error: refused(error) });
     }
     await load().catch(() => {});
     paint();
@@ -5066,15 +5125,29 @@ function cluster() {
       until: () => { const w = view.workloads.find((x) => x.name === owner); return !w || (!w.pods.some((p) => p.name === pod.name) && w.ready >= w.desired); },
     }));
   };
+  /** A StatefulSet drops its highest ordinals; a runner count below the desired one is refused while an app is homed there (ADR 0032), and the sample names the awake ones. */
+  const scaleText = (w, v) => {
+    const counts = { from: nf(w.desired), n: nf(v) };
+    if (w.role !== 'runner' || v >= w.desired) return t('cl.scaleBody', counts);
+    const gone = Array.from({ length: w.desired - v }, (_, k) => `${w.name}-${v + k}`);
+    const awake = instances().filter((i) => gone.includes(i.pod)).map((i) => i.app);
+    return [t('cl.scaleRunnerDown', { ...counts, pods: gone.map(podLabel).join(', ') }), awake.length ? [h('br'), h('b', {}, t('cl.scaleAwakeOn', { apps: awake.join(', ') }))] : null];
+  };
+  const scaleRefused = (error) => {
+    const stranded = error.body?.stranded;
+    if (!stranded) return failText(error);
+    const apps = stranded.homes.map((x) => `${x.app} (${podLabel(x.home)})`).join(', ') + (stranded.more ? t('cl.andMore', { n: nf(stranded.more) }) : '');
+    return t('cl.scaleRefused', { n: nf(stranded.replicas), apps });
+  };
   const scale = async (w) => {
     let n = w.desired;
     const body = h('span');
-    const control = stepper(w.desired, 1, view.scaleMax, t('cl.replicas', { name: w.name }), (v) => { n = v; body.textContent = t('cl.scaleBody', { from: nf(w.desired), n: nf(v) }); });
+    const control = stepper(w.desired, 1, view.scaleMax, t('cl.replicas', { name: w.name }), (v) => { n = v; fill(body, scaleText(w, v)); });
     if (!(await approve({ title: t('cl.scaleTitle', { name: roleLabel(w) }), body, control })) || n === w.desired) return;
     run(`workload:${w.name}`, () => api('PUT', `/api/cluster/workloads/${encodeURIComponent(w.name)}/scale`, { replicas: n }), () => ({
       note: t('cl.scaled', { n: nf(n) }),
       until: () => { const x = view.workloads.find((y) => y.name === w.name); return !x || (x.desired === n && x.ready === n && x.pods.length === n); },
-    }));
+    }), scaleRefused);
   };
   /** Stop and restart are safe and frequent and act at once; force release goes through its approval card. */
   const lifecycle = async (i, op) => {
@@ -5317,7 +5390,10 @@ function cluster() {
   };
   const paintInstances = (rows) => {
     const needle = search.value.trim().toLowerCase();
-    const shown = rows.filter((i) => (!filter.bucket || bucketOf(i) === filter.bucket) && (!filter.tenant || i.tenant === filter.tenant)
+    // The tenant filter applies only while its chip is on screen to show and clear it.
+    const tenants = new Set(rows.map((i) => i.tenant));
+    const tenant = tenants.size > 1 && tenants.has(filter.tenant) ? filter.tenant : '';
+    const shown = rows.filter((i) => (!filter.bucket || bucketOf(i) === filter.bucket) && (!tenant || i.tenant === tenant)
       && (!needle || [i.app, i.tenant, i.node, i.pod].some((f) => f && f.toLowerCase().includes(needle))));
     const volumes = Map.groupBy(view.volumes, (v) => v.app);
     repaint('instances', [shown, shown.map(stuck), [...ops], [...nextWake], view.volumes], () => (shown.length === 0

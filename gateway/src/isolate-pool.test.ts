@@ -8,6 +8,7 @@ import { IsolateRuntime, pick, StatefulSetPool, type RunnerPool, type RunnerRef 
 import { KubeClient, type Pod } from './kube.ts';
 import { CURRENT, register, tempStore, until } from './lifecycle.fakes.ts';
 import { appName, DEFAULT_POLICY, DEFAULT_TENANT, newAppId, type AppId, type BundleId, type ReleaseNumber, type ReplicaId, type RunSpec } from './model.ts';
+import type { Listed } from './runner.ts';
 import { AppGuard, Unavailable } from './runtimes.ts';
 
 async function listen(t: TestContext, handler: Parameters<typeof createServer>[1]): Promise<string> {
@@ -20,21 +21,28 @@ async function listen(t: TestContext, handler: Parameters<typeof createServer>[1
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 
-/** A runner that starts every app at once and reports no events; `starts` names the apps it was asked to start. */
+/** A runner that starts every app at once, lists the workers it runs and reports no events; `starts` names the apps it was asked to start. */
 async function fakeRunner(t: TestContext, id: string) {
   const startedAt = Math.floor(Math.random() * 1e12);
   const starts: string[] = [];
+  const running = new Map<string, Listed>();
   const url = await listen(t, (q, s) => {
     q.resume();
-    const path = new URL(q.url!, 'http://runner').pathname;
+    const { pathname: path, searchParams } = new URL(q.url!, 'http://runner');
+    const app = path.split('/')[2];
     const json = (body: unknown) => s.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(body));
     if (q.method === 'POST') {
-      starts.push(path.split('/')[2]);
-      return json({ worker: `${startedAt}:${starts.length}`, port: 1, heapMb: 1024, offheapMb: 1024 });
+      starts.push(app);
+      const worker = `${startedAt}:${starts.length}`;
+      running.set(worker, { app, release: 1, spec: '', worker, state: 'listening', port: 1, since: 0 });
+      return json({ worker, port: 1, heapMb: 1024, offheapMb: 1024 });
     }
-    if (q.method === 'DELETE') return s.writeHead(204).end();
+    if (q.method === 'DELETE') {
+      for (const [worker, listed] of running) if (listed.app === app && (searchParams.get('worker') ?? worker) === worker) running.delete(worker);
+      return s.writeHead(204).end();
+    }
     if (path === '/events') return json({ startedAt, seq: 0, events: [] });
-    if (path === '/instances') return json([]);
+    if (path === '/instances') return json([...running.values()]);
     json({ ok: true, startedAt });
   });
   const ref: RunnerRef = { id, url, ready: true };
