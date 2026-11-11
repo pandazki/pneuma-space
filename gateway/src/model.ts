@@ -910,6 +910,10 @@ export interface StoreOps {
 
   instanceLog(app: AppId): Promise<InstanceLog | null>;
   putInstanceLog(log: InstanceLog): Promise<void>;
+  /** The apps with a log row; purge cleanup reads it to find what no mirror holds (ADR 0020 item 8). */
+  loggedApps(): Promise<AppId[]>;
+  /** Purge cleanup, idempotent (ADR 0020 item 8). */
+  deleteInstanceLog(app: AppId): Promise<void>;
 }
 
 /** Hides the platform library: SQLite on a single host, PostgreSQL on a cluster (ADR 0025). */
