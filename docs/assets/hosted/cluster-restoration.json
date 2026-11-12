@@ -1,0 +1,72 @@
+{
+  "workloads": [
+    {
+      "kind": "Deployment",
+      "name": "pneuma-space-coturn",
+      "specEqual": true,
+      "replicas": 0
+    },
+    {
+      "kind": "Deployment",
+      "name": "pneuma-space-gateway",
+      "specEqual": true,
+      "replicas": 0
+    },
+    {
+      "kind": "Deployment",
+      "name": "pneuma-space-registry",
+      "specEqual": true,
+      "replicas": 0
+    },
+    {
+      "kind": "StatefulSet",
+      "name": "pneuma-space-postgres",
+      "specEqual": true,
+      "replicas": 0
+    },
+    {
+      "kind": "StatefulSet",
+      "name": "pneuma-space-redis",
+      "specEqual": true,
+      "replicas": 0
+    },
+    {
+      "kind": "StatefulSet",
+      "name": "pneuma-space-runner",
+      "specEqual": true,
+      "replicas": 0
+    },
+    {
+      "kind": "StatefulSet",
+      "name": "pneuma-space-rustfs",
+      "specEqual": true,
+      "replicas": 0
+    },
+    {
+      "kind": "StatefulSet",
+      "name": "pneuma-space-store",
+      "specEqual": true,
+      "replicas": 0
+    }
+  ],
+  "configMapRestored": true,
+  "identitySecretRestored": true,
+  "temporarySecretRemoved": true,
+  "originalClaims": 10,
+  "preservedClaims": 10,
+  "extraClaims": [],
+  "remainingPods": {
+    "pneuma-space": 0,
+    "pneuma-space-apps": 0
+  },
+  "retainedTestDatabases": [
+    "release_gates_20261112",
+    "release_baseline_20261112"
+  ],
+  "originalSchemaMigration": {
+    "before": 2,
+    "after": 3,
+    "dataComparison": "cluster-original-records.json"
+  },
+  "defaultContextUnchanged": true
+}

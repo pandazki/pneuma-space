@@ -44,3 +44,16 @@ The [Kubernetes overlay](kubernetes/kustomization.yaml) extends the [existing de
 The overlay includes an ingress example that routes the exact control host to port 8081 and app hosts to port 8080, preserving the original Host header. Match `PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT` to its object host. Use the control origin for the CLI API too. Configure TLS for the separate control and app sites required by the identity contract. Hosted identity handles browser login itself; the upstream JWT proxy configuration belongs to `upstream` mode.
 
 Run `npm run test:k8s` with `PNEUMA_SPACE_TEST_KUBECONTEXT` naming the operator's existing cluster, then check hosted sign-in, logout and request-log aggregation across replicas. The test command never creates a cluster. Local Compose results do not satisfy these cluster checks.
+
+For a development cluster with hosted loopback identities, forward the control and ingress ports of two distinct gateway Pods to `39081/39080` and `40081/40080`. Keep the Service forward at the configured control and app origins. Run:
+
+```sh
+PNEUMA_SPACE_HOSTED_TEST_CONTROL=http://localhost:38081 \
+PNEUMA_SPACE_HOSTED_TEST_APPS='http://*.apps.localhost:38080' \
+PNEUMA_SPACE_HOSTED_TEST_REPLICAS='{"first":{"controlPort":39081,"ingressPort":39080},"second":{"controlPort":40081,"ingressPort":40080}}' \
+npm run test:hosted:replicas
+```
+
+The checks require distinct gateway process IDs, preserve the configured Host and Origin, and send each admission to a specific replica. They cover shared login handshakes, concurrent grant redemption, immediate logout and credential revocation, and request-log aggregation. Without the replica configuration, these checks report skips.
+
+To run the original hosted checks on this cluster, set `PNEUMA_SPACE_HOSTED_TEST_REGISTRY` to its registry host and run `npm run test:hosted` with the same origins. The suite builds and pushes its own fixture image. Forward the object store at its configured public endpoint. The provisioning-pause option remains specific to the Compose development stack.

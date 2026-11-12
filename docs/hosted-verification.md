@@ -4,6 +4,8 @@ Verified locally on 2026-11-12 at runtime revision `c091c43`. Host checks used N
 
 The full hosted profile works on Compose. This is a functional result within [ADR 0030](adr/0030-additive-hosted-platform.md), not completion of the [public SaaS release gates](acceptance.md#full-platform-saas) or [G14](../REQUIREMENTS-M3.md#目标).
 
+The later [cluster verification](hosted-cluster-verification.md) adds actual Kubernetes and cross-replica results, including the peer DNS correction. Its [release plan](hosted-release-plan.md) records remaining cloud deployment decisions.
+
 ## Automated runs
 
 | Run | Result |
