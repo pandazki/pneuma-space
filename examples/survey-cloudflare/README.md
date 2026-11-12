@@ -1,5 +1,7 @@
 # Cloudflare survey adaptation
 
+The [real Cloudflare verification record](verification.md) separates completed checks from remaining gates.
+
 This maintained example runs the survey in a Node container while keeping answers in D1. Its fixed `SurveyStore` operations replace the original survey's SQLite calls. The original survey and the platform app contract remain unchanged. See [the app contract](../../docs/app-contract.md) for the platform's runtime and capability rules. This example does not implement the platform SQL URL, files capability, generic runtime or provider, and it does not establish hostile tenant isolation.
 
 The owner builds a CSV in the browser. A browser with a short-lived ticket uploads and downloads it directly from a private R2 bucket. The Worker handles export metadata and R2 HEAD only. This changes the original nightly export to an owner-initiated export. The **Download CSV locally** action works without R2 signing credentials. **Save export** and **Download saved export** report unavailable until bucket-scoped S3 signing credentials are installed.

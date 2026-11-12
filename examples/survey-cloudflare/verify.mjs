@@ -177,7 +177,7 @@ try {
   const r2 = Object.values(exports).every((x) => x.status === 'passed') ? 'passed' : 'incomplete';
   const result = { at: new Date().toISOString(), base, lifecycle: 'passed', r2, node, exports, observations };
   if (process.env.PNEUMA_SPACE_VERIFY_EVIDENCE) await writeFile(process.env.PNEUMA_SPACE_VERIFY_EVIDENCE, JSON.stringify(result, null, 2) + '\n');
-  console.log(JSON.stringify({ lifecycle: 'passed', r2, requests: observations.length }));
+  console.log(JSON.stringify({ lifecycle: 'passed', r2, observations: observations.length }));
   if (r2 !== 'passed') process.exitCode = 2;
 } catch (error) {
   if (process.env.PNEUMA_SPACE_VERIFY_EVIDENCE) await writeFile(process.env.PNEUMA_SPACE_VERIFY_EVIDENCE, JSON.stringify({ at: new Date().toISOString(), base, lifecycle: 'failed', r2: 'incomplete', error: error.message, node, exports, observations }, null, 2) + '\n');
