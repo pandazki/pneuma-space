@@ -430,6 +430,7 @@ export class PlatformRegistry implements Registry {
       const existing = await tx.hostedIdentity(identity.provider, identity.subject);
       if (!existing && count >= signup.limit) throw new Conflict('new account signup capacity reached');
       const account = { ...(existing ?? hostedAccountIds(identity.provider, identity.subject)), name: identity.name };
+      if (!existing && (await tx.user(account.user) || await tx.tenant(account.tenant))) throw new Conflict('hosted account identifiers are already in use');
       const now = Date.now();
       await tx.putUser({ id: account.user, name: identity.name, groups: [], firstSeen: now, lastSeen: now });
       if (!existing) {

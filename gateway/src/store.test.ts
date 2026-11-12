@@ -85,3 +85,26 @@ test('step 6 makes an already migrated default tenant unlimited', async () => {
   assert.deepEqual((await store.tenant(DEFAULT_TENANT))?.quota, { apps: null, awake: null, cpu_millis: null, memory_mb: null, storage_gb: null });
   await store.close();
 });
+
+
+test('AC-SAAS-12 hosted migration preserves existing application state and token permissions', async () => {
+  const file = path();
+  const old = new DatabaseSync(file);
+  for (const step of MIGRATIONS.slice(0, -1)) old.exec(step);
+  old.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1};
+    INSERT INTO app (name, id, owner, status, current, policy_override, access) VALUES ('existing', 'stable-id', 'user:ann', 'registered', 1, '{}', 'public');
+    INSERT INTO release (app, number, image, manifest, bundle, release_key, published_at) VALUES ('stable-id', 1, 'image-id', '{}', NULL, 'key', 1);
+    INSERT INTO binding (app, kind, provider, state, resource) VALUES ('stable-id', 'kv', 'redis', 'active', '{"prefix":"kept"}');
+    INSERT INTO token (id, subject, hash, created_at) VALUES ('legacy', 'service:ci', 'legacy-hash', 1);`);
+  const snapshot = ['app', 'release', 'binding', 'token'].map((table) => old.prepare(`SELECT * FROM ${table}`).all());
+  old.close();
+  const store = new SqliteStore(file);
+  const migrated = new DatabaseSync(file);
+  for (const [index, table] of ['app', 'release', 'binding', 'token'].entries()) {
+    const rows = migrated.prepare(`SELECT * FROM ${table}`).all().map(({ restrictions, ...row }) => row);
+    assert.deepEqual(rows, snapshot[index].map((row) => ({ ...row })));
+  }
+  assert.equal((await store.token('legacy-hash'))?.restrictions, undefined);
+  migrated.close();
+  await store.close();
+});

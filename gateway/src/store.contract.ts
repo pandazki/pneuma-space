@@ -1,7 +1,7 @@
 // The Store contract, run against every Store (ADR 0025 item 2).
 
 import assert from 'node:assert/strict';
-import { PlatformRegistry } from './registry.ts';
+import { PlatformRegistry, hostedAccountIds } from './registry.ts';
 import { FakeRuntime, FakeBundles } from './registry.fakes.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { after, before, describe, test } from 'node:test';
@@ -87,6 +87,17 @@ export function storeContract(name: string, open: OpenStore): void {
       assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
       for (const result of results) if (result.status === 'rejected') assert.match(result.reason.message, /capacity/);
       assert.equal(await store.hostedSignupCount(), count + 1);
+    });
+
+    test('AC-SAAS-12 signup never overwrites an existing tenant with the derived name', async () => {
+      const registry = await hostedRegistry();
+      const identity = { provider: 'test', subject: 'collision', name: 'New' };
+      const ids = hostedAccountIds(identity.provider, identity.subject);
+      const tenant = { name: ids.tenant, display: 'Existing', quota: DEFAULT_QUOTA, createdAt: 1 };
+      await store.putTenant(tenant);
+      await assert.rejects(registry.registerHostedIdentity(identity, { limit: 100, quota: DEFAULT_QUOTA }), /already in use/);
+      assert.deepEqual(await store.tenant(ids.tenant), tenant);
+      assert.equal(await store.user(ids.user), null);
     });
 
     test('AC-SAAS-3 persisted login state is consumed once across concurrent transactions', async () => {
