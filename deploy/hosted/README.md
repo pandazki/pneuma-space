@@ -27,6 +27,8 @@ Open the app's address printed by the CLI. The browser signs in separately from 
 
 ## Verify locally
 
+The [verification record](../../docs/hosted-verification.md) distinguishes local functional checks from release gates.
+
 After starting the stack, run `npm run test:hosted`. It uses actual development sign-ins and removes only its own random test applications and credentials. Enable the RTC profile first and set `PNEUMA_SPACE_HOSTED_TEST_RTC=true` to include its ICE configuration check. Set `PNEUMA_SPACE_HOSTED_TEST_PAUSE_OBJECTS=true` to test revocation while provisioning; this briefly pauses the development object service and resumes it before checking the result. Use this option only when no one else is using the development stack. Full TURN and original application checks remain in `npm run test:acceptance`.
 
 ## Configure a trusted hosted deployment
