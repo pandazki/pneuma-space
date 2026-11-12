@@ -53,7 +53,7 @@ export function storeContract(name: string, open: OpenStore): void {
 
     async function hostedRegistry() {
       const runtime = new FakeRuntime();
-      return PlatformRegistry.open({ store, runtime, guard: runtime, infra: runtime, bundles: new FakeBundles(), providers: [], defaultAccess: 'tenant' });
+      return PlatformRegistry.open({ store, runtime, guard: runtime, infra: runtime, bundles: new FakeBundles(), providers: [], probe: async () => false, defaultAccess: 'tenant' });
     }
 
     test('AC-SAAS-1 concurrent registrations keep one account and update its display name', async () => {

@@ -1,5 +1,4 @@
 import { argon2Sync, createCipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
-import { promises as dns } from 'node:dns';
 import { Readable } from 'node:stream';
 import {
   CAPABILITIES, Conflict, FILES_DIR, InputError, NotFound, RESERVED_SEGMENT, RUNTIMES,
@@ -51,14 +50,8 @@ export function providerConfig(env: Readonly<Record<string, string | undefined>>
 }
 
 type Storage = Pick<Runtime, 'destroyStorage'>;
-/** True when a profiled Compose service is on the network. */
+/** True when the deployment's optional service is ready. */
 export type ServiceProbe = (service: 'postgres' | 'coturn' | NonNullable<(typeof RUNTIMES)[RuntimeKind]['service']>) => Promise<boolean>;
-
-// Docker's resolver forwards unknown names upstream and waits about 5 s; a 500 ms single try answers within 1 s (spike S2).
-const resolver = new dns.Resolver({ timeout: 500, tries: 1 });
-/** A Compose service's address, or null when the network has no such name. */
-export const addressOnNetwork = (service: string): Promise<string | null> => resolver.resolve4(service).then(([address]) => address ?? null, () => null);
-export const resolvesOnNetwork: ServiceProbe = async (service) => (await addressOnNetwork(service)) !== null;
 type ProviderProbe = (service: 'postgres' | 'coturn') => Promise<boolean>;
 
 async function requireService(probe: ProviderProbe, service: 'postgres' | 'coturn', profile: string, kind: ResourceKind): Promise<void> {
@@ -332,7 +325,7 @@ class CoturnProvider implements CapabilityProvider {
 
 export type Providers = { readonly [N in ProviderName]: CapabilityProvider };
 
-export function createProviders(storage: Storage, config: ProviderConfig, probe: ProviderProbe = resolvesOnNetwork): Providers {
+export function createProviders(storage: Storage, config: ProviderConfig, probe: ProviderProbe): Providers {
   const providers: Providers = {
     volume: new StorageProvider('files', 'volume', storage, 'pneuma-space-files-', FILES_DIR, { PNEUMA_SPACE_FILES_DIR: '{dir}' }),
     sqlite: new StorageProvider('db', 'sqlite', storage, 'pneuma-space-db-', '/pneuma/db', { PNEUMA_SPACE_DB_URL: 'sqlite://{dir}/app.sqlite3' }),

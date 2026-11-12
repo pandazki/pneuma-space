@@ -25,7 +25,7 @@ async function platform(nodes: Record<string, string> = {}) {
   };
   const runtime = new Runtimes({ runtimes: [new Lifecycle(driver, { specFor, instances })], specFor, instances });
   registry = await PlatformRegistry.open({
-    store, runtime, guard: w.runtime, infra: w.runtime, bundles: w.bundles, providers: [...w.providers.values()], nodeOf: (app) => instances.row(app)?.node ?? null,
+    store, runtime, guard: w.runtime, infra: w.runtime, bundles: w.bundles, providers: [...w.providers.values()], probe: async (service) => w.services.has(service), nodeOf: (app) => instances.row(app)?.node ?? null,
   });
   const awake = async (name: string) => {
     const release = await registry!.publish({ name: appName(name), image: 'example:1', manifest: parseManifest({ contract: 1, capabilities: {} }), bundle: null, owner: subject('user:ann') });

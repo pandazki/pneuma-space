@@ -36,7 +36,7 @@ async function admin(runtime?: Runtimes, overrides: Partial<AdminDeps> = {}) {
   });
   const up = async () => 'up' as const;
   const off = async () => 'off' as const;
-  const infra = new DockerInfra({ docker: new Docker('/nonexistent.sock'), probes: { redis: up, object: up, postgres: off, coturn: off, runner: off }, volumes: async () => [] });
+  const infra = new DockerInfra({ docker: new Docker('/nonexistent.sock'), network: 'pneuma-space', probes: () => ({ redis: up, object: up, postgres: off, coturn: off, runner: off }), volumes: async () => [] });
   const nodes = new NodeView({
     infra,
     apps: () => registry.listing(),

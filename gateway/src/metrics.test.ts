@@ -308,7 +308,7 @@ test('a Compose service is probed at the address the network gives, never by get
   assert.equal(lookup.mock.callCount(), 0);
 });
 
-test('a Compose service the network does not name is down, and a profile one is off', async () => {
+test('a Compose service without a running container is down, and a profile one is off', async () => {
   const nowhere = async () => null;
   assert.deepEqual([await networkProbe('redis', 6379, nowhere)(), await profileProbe('postgres', 5432, nowhere)()], ['down', 'off']);
 });

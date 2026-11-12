@@ -211,7 +211,7 @@ test('runSpec, which every acquire reads, makes no store read', async () => {
       return typeof value === 'function' ? (...args: unknown[]) => (reads++, value.apply(target, args)) : value;
     },
   });
-  const registry = await PlatformRegistry.open({ store: counting, runtime: w.runtime, guard: w.runtime, infra: w.runtime, bundles: w.bundles, providers: [...w.providers.values()] });
+  const registry = await PlatformRegistry.open({ store: counting, runtime: w.runtime, guard: w.runtime, infra: w.runtime, bundles: w.bundles, providers: [...w.providers.values()], probe: async (service) => w.services.has(service) });
   const { app } = await publish(registry, { kv: {} });
   reads = 0;
   for (let i = 0; i < 3; i++) assert.equal(registry.runSpec(app)?.release, 1);
@@ -233,7 +233,7 @@ test('the listing carries the sleepsAt the Runtime answers', async () => {
   const w = world();
   const { store } = await w.open();
   const runtime = Object.assign(new FakeRuntime(), { sleepsAt: () => 1_800_000_000_000 });
-  const registry = await PlatformRegistry.open({ store, runtime, guard: runtime, infra: runtime, bundles: w.bundles, providers: [...w.providers.values()] });
+  const registry = await PlatformRegistry.open({ store, runtime, guard: runtime, infra: runtime, bundles: w.bundles, providers: [...w.providers.values()], probe: async (service) => w.services.has(service) });
   await publish(registry, {});
   assert.equal((await registry.listing())[0].sleepsAt, 1_800_000_000_000);
 });
@@ -285,7 +285,7 @@ test('a refresh that read an older app version than the view holds is not applie
     },
   }) as Store;
   const registry = await PlatformRegistry.open({
-    store: reads, runtime: w.runtime, guard: w.runtime, infra: w.runtime, bundles: w.bundles, providers: [...w.providers.values()],
+    store: reads, runtime: w.runtime, guard: w.runtime, infra: w.runtime, bundles: w.bundles, providers: [...w.providers.values()], probe: async (service) => w.services.has(service),
   });
   await publish(registry, {});
   const older = await store.app(survey);
@@ -351,7 +351,7 @@ test('AC-SAAS-6 hosted default access changes new apps only', async () => {
   const w = world();
   const { store, registry } = await w.open();
   await publish(registry, {});
-  const hosted = await PlatformRegistry.open({ store, runtime: w.runtime, guard: w.runtime, infra: w.runtime, bundles: w.bundles, providers: [], defaultAccess: 'tenant' });
+  const hosted = await PlatformRegistry.open({ store, runtime: w.runtime, guard: w.runtime, infra: w.runtime, bundles: w.bundles, providers: [], probe: async () => false, defaultAccess: 'tenant' });
   await hosted.publish({ name: appName('private-app'), image: 'example:1', manifest: parseManifest({ contract: 1, capabilities: {} }), bundle: null, owner: ann });
   assert.equal((await store.app(appName('private-app')))?.access, 'tenant');
   assert.equal((await store.app(survey))?.access, 'org');

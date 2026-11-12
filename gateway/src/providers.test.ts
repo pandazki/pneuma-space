@@ -365,21 +365,36 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
   });
 
   describe('profile detection on the compose network', () => {
-    const probe = () => {
+    const probe = (network = project) => {
       const script = `
         import { createProviders, providerConfig } from '/src/providers.ts';
-        const p = createProviders({ destroyStorage: async () => {} }, providerConfig({ PNEUMA_SPACE_RTC_SECRET: 's' }));
+        import { Docker } from '/src/docker.ts';
+        import { DockerInfra } from '/src/infra.ts';
+        import { profileProbe } from '/src/metrics.ts';
+        const infra = new DockerInfra({ docker: new Docker(), network: '${network}', probes: () => probes, volumes: async () => [] });
+        const address = (service) => infra.serviceAddress(service);
+        const probes = { postgres: profileProbe('postgres', 5432, address), coturn: profileProbe('coturn', 3478, address) };
+        const p = createProviders({ destroyStorage: async () => {} }, providerConfig({ PNEUMA_SPACE_RTC_SECRET: 's' }), async (service) => (await probes[service]()) === 'up');
         for (const name of ['postgres', 'coturn']) {
           const t = Date.now();
           const outcome = await p[name].ensure('${newAppId()}', null).then(() => 'up', (e) => e.constructor.name);
-          console.log(name, outcome, Date.now() - t);
+          console.log(name, outcome, Date.now() - t, await probes[name]());
         }`;
-      return docker('run', '--rm', '--network', project, '-v', `${join(root, 'gateway/src')}:/src:ro`, '-v', `${join(root, 'shared')}:/shared:ro`, 'node:24-alpine',
+      return docker('run', '--rm', '--network', project, '-v', '/var/run/docker.sock:/var/run/docker.sock', '-v', `${join(root, 'gateway/src')}:/src:ro`, '-v', `${join(root, 'shared')}:/shared:ro`, 'node:24-alpine',
         'node', '--input-type=module', '-e', script).trim().split('\n').map((line) => line.split(' '));
     };
 
     test('ensure finds postgres and coturn when their profiles are up', () => {
       assert.deepEqual(probe().map(([name, outcome]) => [name, outcome]), [['postgres', 'up'], ['coturn', 'up']]);
+    });
+
+    test('services on a network with only a matching prefix cannot enable a profile', () => {
+      assert.deepEqual(probe(project.slice(0, -1)).map(([name, outcome]) => [name, outcome]), [['postgres', 'Conflict'], ['coturn', 'Conflict']]);
+    });
+
+    test('stopped profile services refuse ensure and are off', () => {
+      compose('stop', 'postgres', 'coturn');
+      assert.deepEqual(probe().map(([name, outcome, , status]) => [name, outcome, status]), [['postgres', 'Conflict', 'off'], ['coturn', 'Conflict', 'off']]);
     });
 
     test('ensure throws Conflict within 1.5 s when their profiles are down', () => {

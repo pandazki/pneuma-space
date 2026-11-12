@@ -293,7 +293,6 @@ test('a worker another gateway started that has not listened yet is stopped by t
   for (const end = Date.now() + 15_000; !(await stopped()); await sleep(100)) assert.ok(Date.now() < end, 'the untracked worker is stopped');
 });
 
-// A stopped compose service has no name on the platform network; `.invalid` never resolves (RFC 6761).
 test('destroyStorage without the runner fails as Unavailable and keeps the directory; with it the directory is gone', async (t) => {
   const storage = [{ id: 'pneuma-space-files-s1', target: '/data/files', env: { PNEUMA_SPACE_FILES_DIR: '{dir}' } }];
   const { app, runtime, start } = await fixture(t, {}, storage);
@@ -301,7 +300,12 @@ test('destroyStorage without the runner fails as Unavailable and keeps the direc
   const dir = await (await fetch(`http://${lease.address}/files`)).text();
   runtime.release(lease);
   await runtime.retire(app);
-  await assert.rejects(start('http://runner.invalid:8082').destroyStorage(app, storage[0].id), Unavailable);
+  const offline = createServer().listen(0, '127.0.0.1');
+  await once(offline, 'listening');
+  const { port } = offline.address() as AddressInfo;
+  offline.close();
+  await once(offline, 'close');
+  await assert.rejects(start(`http://127.0.0.1:${port}`).destroyStorage(app, storage[0].id), Unavailable);
   assert.equal(existsSync(dir), true);
   await runtime.destroyStorage(app, storage[0].id);
   assert.equal(existsSync(dir), false);
