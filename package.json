@@ -16,6 +16,7 @@
     "test:docker": "node --test gateway/src/runtime.test.ts gateway/src/providers.test.ts gateway/src/pg.test.ts gateway/src/store-pg.test.ts",
     "test:k8s": "node --test 'gateway/src/*.smoke.test.ts'",
     "test:acceptance": "node --test tests/acceptance",
-    "test:hosted": "node --test tests/hosted"
+    "test:hosted": "node --test tests/hosted",
+    "test:hosted:replicas": "node --test tests/hosted/replicas.test.ts"
   }
 }
