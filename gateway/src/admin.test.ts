@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test } from 'node:test';
-import { startAdmin } from './admin.ts';
+import { startAdmin, type AdminDeps } from './admin.ts';
 import { Docker } from './docker.ts';
 import { EventLog } from './events.ts';
 import { DockerInfra } from './infra.ts';
@@ -15,7 +16,7 @@ import { RequestLog } from './requests.ts';
 import { Runtimes } from './runtimes.ts';
 import { world } from './registry.fakes.ts';
 
-async function admin(runtime?: Runtimes) {
+async function admin(runtime?: Runtimes, overrides: Partial<AdminDeps> = {}) {
   const w = world();
   const { registry, store } = await w.open();
   const metrics = new Metrics({
@@ -48,7 +49,7 @@ async function admin(runtime?: Runtimes) {
   const logs = { logs: (app: AppId, tail: number) => w.runtime.logs(app, tail), healthOf: () => [] };
   const server = await startAdmin({
     registry, bundles: w.bundles, runtime: runtime ?? logs, guard: w.runtime, metrics, nodes, infra, scaleMax: 10, requests, replica: 'r1' as ReplicaId, store, ingressPort: 18080,
-    providers: [...w.providers.values()],
+    providers: [...w.providers.values()], ...overrides,
   }, { port: 0 });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const call = async (method: string, path: string, body?: unknown) => {
@@ -258,7 +259,7 @@ test('a handler that throws writes error with the message', async (t) => {
   assert.equal((await call('POST', '/api/apps/survey/unquarantine')).status, 500);
   assert.deepEqual((await audit(store, 'survey')).at(-1), {
     actor: 'local', actorTenant: null, tenant: DEFAULT_TENANT, action: 'app.unquarantine', targetKind: 'app', target: 'survey',
-    result: 'error', details: { error: 'guard unreachable' },
+    result: 'error', details: { error: 'guard unreachable', appId: (await store.app(appName('survey')))!.id },
   });
 });
 
@@ -322,4 +323,58 @@ test('a per-app cpu_millis or memory_mb above the tenant\'s total answers 400', 
     call('PUT', '/api/apps/one/policy', { cpu_millis: 2000, memory_mb: 1024 }),
   ]);
   assert.deepEqual(statuses.map((r) => r.status), [400, 400, 200]);
+});
+
+
+test('hosted admin refuses an unauthenticated dependency configuration (AC-SAAS-4)', async () => {
+  await assert.rejects(admin(undefined, { hosted: { controlOrigin: 'https://control.test', identityPaths: [] } }), /requires authentication/);
+});
+
+function hostedFetch(url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<{ status: number; json: () => unknown }> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(url, { method: init.method, headers: init.headers }, (res) => {
+      let body = '';
+      res.setEncoding('utf8').on('data', (chunk) => { body += chunk; }).on('end', () => resolve({ status: res.statusCode!, json: () => JSON.parse(body) }));
+    });
+    req.on('error', reject).end(init.body);
+  });
+}
+
+function hostedAdmin() {
+  return admin(undefined, {
+    hosted: { controlOrigin: 'https://control.test', identityPaths: [] },
+    upstream: {
+      identity: { identify: async () => ({ via: 'hosted', subject: subject('user:ana'), name: 'Ana', sessionHash: 'hash', csrf: 'csrf', origin: 'https://control.test' }), challenge: () => ({ status: 401 }), serve: async () => {} },
+      authority: { callerOf: async () => ({ actor: { via: 'hosted', subject: subject('user:ana'), name: 'Ana' }, platformAdmin: true, roles: new Map(), viaToken: false, authentication: { kind: 'hosted', sessionHash: 'hash', csrf: 'csrf', origin: 'https://control.test' } }) },
+    },
+  });
+}
+
+test('hosted control writes require exact Origin and the session CSRF (AC-SAAS-4)', async (t) => {
+  const { server, base } = await hostedAdmin();
+  t.after(() => server.close());
+  for (const headers of [{}, { origin: 'https://control.test' }, { origin: 'https://other.test', 'x-pneuma-space-csrf': 'csrf' }]) {
+    const response = await hostedFetch(base + '/api/policy', { method: 'PUT', headers: { host: 'control.test', ...headers }, body: JSON.stringify({ idle_seconds: 10 }) });
+    assert.equal(response.status, 403);
+  }
+  const accepted = await hostedFetch(base + '/api/policy', { method: 'PUT', headers: { host: 'control.test', origin: 'https://control.test', 'x-pneuma-space-csrf': 'csrf' }, body: JSON.stringify({ idle_seconds: 10 }) });
+  assert.equal(accepted.status, 200);
+  const me = (await hostedFetch(base + '/api/me', { headers: { host: 'control.test' } })).json() as Record<string, unknown>;
+  assert.equal(me.csrf, 'csrf');
+  assert.equal(me.hosted, true);
+  assert.equal(JSON.stringify(me).includes('hash'), false);
+});
+
+
+test('hosted purge requires the exact typed app name (AC-SAAS-11)', async (t) => {
+  const { server, base, registry } = await hostedAdmin();
+  t.after(() => server.close());
+  const name = appName('purge-confirm');
+  await registry.publish({ name, image: 'example:1', manifest: parseManifest(kvApp.manifest), bundle: null, owner: subject('user:ana') });
+  await registry.remove(name);
+  const send = (confirm: string) => hostedFetch(base + `/api/apps/${name}/purge`, { method: 'POST', headers: { host: 'control.test', origin: 'https://control.test', 'x-pneuma-space-csrf': 'csrf' }, body: JSON.stringify({ confirm }) });
+  assert.equal((await send('different')).status, 400);
+  assert.equal(registry.view(name)?.status, 'removed');
+  assert.equal((await send(name)).status, 200);
+  assert.equal(registry.view(name), null);
 });

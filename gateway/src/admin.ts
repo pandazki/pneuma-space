@@ -6,7 +6,7 @@ import type { Metrics } from './metrics.ts';
 import type { NodeView } from './nodes.ts';
 import type { Runtimes } from './runtimes.ts';
 import { gather, peerSources, RING, seqIn, type RequestLog, type Source } from './requests.ts';
-import { appActions, can, LOCAL_CALLER, reach, type Action, type Authority } from './authz.ts';
+import { appActions, can, freshCaller, LOCAL_CALLER, reach, type Action, type Authority } from './authz.ts';
 import type { Answer, Identity } from './identity.ts';
 import {
   ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, LOGOUT_PATH, NotFound, QuotaExceeded, RUNTIME_KINDS, RUNTIMES, USAGE_COUNTERS,
@@ -33,6 +33,7 @@ export type AdminDeps = {
   readonly store: Pick<StoreOps, 'usage' | 'insertAudit' | 'audit' | 'tenant' | 'tenants' | 'quotaUsed' | 'memberships' | 'user' | 'tokens' | 'app' | 'appsWithCurrent' | 'release' | 'bindings'>;
   readonly providers: readonly Pick<CapabilityProvider, 'name' | 'location'>[];
   readonly ingressPort: number;
+  readonly hosted?: { readonly controlOrigin: string; readonly identityPaths: readonly string[] };
   readonly consoleFile?: string | URL;
   /** The console-audience provider and the Authority; absent under `local`, where every request is LOCAL_CALLER (ADR 0022 item 4). */
   readonly upstream?: { readonly identity: Pick<Identity, 'identify' | 'challenge' | 'serve'>; readonly authority: Pick<Authority, 'callerOf'> };
@@ -50,7 +51,7 @@ class Forbidden extends Error {}
 type Body = Readonly<Record<string, unknown>>;
 type Ctx = { readonly request: IncomingMessage; readonly query: URLSearchParams; readonly params: readonly string[]; readonly body: Body; readonly caller: Caller };
 /** What `can` checks against: the target's tenant, the app's owner (on a first publish the owner it will get) or the token's issuer, and the 404 text for an app hidden from the caller. */
-type Scope = { readonly tenant: TenantName | null; readonly holder?: Subject | 'local' | null; readonly hidden?: string };
+type Scope = { readonly tenant: TenantName | null; readonly holder?: Subject | 'local' | null; readonly appId?: AppId; readonly hidden?: string };
 /** A string result is sent as text/plain, anything else as JSON. */
 type Handler = (ctx: Ctx, scope: Scope) => Promise<unknown> | unknown;
 type Target = { readonly kind: AuditRecord['targetKind']; readonly id: string; readonly tenant: TenantName | null };
@@ -171,7 +172,7 @@ function firstTenant({ body, caller }: Ctx): TenantName {
   throw new InputError(`tenant is required on a first publish${mine.length ? `; you are in ${mine.join(', ')}` : ''}`);
 }
 
-function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scaleMax, requests, replica, peers, store, ingressPort, upstream, providers }: AdminDeps): Route[] {
+function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scaleMax, requests, replica, peers, store, ingressPort, upstream, hosted, providers }: AdminDeps): Route[] {
   const app = (name: string | undefined) => appName(name!);
   const found = <T>(value: T | null, name: string | undefined): T => {
     if (value === null) throw new NotFound(`no app named "${name}"`);
@@ -180,7 +181,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
   const at = (path: string) => new RegExp(`^${path.replace(/<[a-z]+>/g, '([^/]+)')}$`);
   const onApp = (name: string | undefined): Scope => {
     const view = registry.view(app(name));
-    return { tenant: view?.tenant ?? null, holder: view?.owner ?? null, hidden: `no app named "${name}"` };
+    return { appId: view?.app, tenant: view?.tenant ?? null, holder: view?.owner ?? null, hidden: `no app named "${name}"` };
   };
   const onTenant = ({ params: [tenant] }: Ctx): Scope => ({ tenant: tenantName(tenant!) });
   /** `?tenant=` of the records rows; without it only a platform admin passes. */
@@ -214,10 +215,10 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
 
   const table: Route[] = [
     {
-      method: 'GET', path: at(ADMIN_PATHS.me), action: 'me', handle: ({ caller: { actor, roles, platformAdmin } }) => {
+      method: 'GET', path: at(ADMIN_PATHS.me), action: 'me', handle: ({ caller: { actor, roles, platformAdmin, authentication } }) => {
         if (actor.via === 'local') return { local: true, platformAdmin: true };
-        const name = actor.via === 'upstream' ? actor.name : actor.subject.slice(actor.subject.indexOf(':') + 1);
-        return { subject: actor.subject, name, roles: Object.fromEntries(roles), platformAdmin };
+        const name = actor.via === 'upstream' || actor.via === 'hosted' ? actor.name : actor.subject.slice(actor.subject.indexOf(':') + 1);
+        return { ...(hosted && { hosted: true, csrf: authentication?.kind === 'hosted' ? authentication.csrf : null }), subject: actor.subject, name, roles: Object.fromEntries(roles), platformAdmin };
       },
     },
     {
@@ -230,8 +231,8 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
     },
     {
       method: 'GET', path: at(ADMIN_PATHS.apps), action: 'apps.list', handle: async ({ caller, query }) => {
-        const all = await registry.listing();
-        if (!caller.platformAdmin) return all.filter((a) => can(caller, 'app.read', a.tenant, registry.view(a.name)?.owner ?? null) === true);
+        const all = (await registry.listing()).map((entry) => hosted ? { ...entry, id: registry.view(entry.name)?.app } : entry);
+        if (!caller.platformAdmin) return all.filter((a) => can(caller, 'app.read', a.tenant, registry.view(a.name)?.owner ?? null, registry.view(a.name)?.app) === true);
         const tenant = query.get('tenant');
         return tenant ? all.filter((a) => a.tenant === tenantName(tenant)) : all;
       },
@@ -280,7 +281,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
         }
         if (tenant !== null) {
           const t = tenantName(tenant);
-          return { tenant, step: 3600, ...window, buckets: byStart(await store.usage({ step: 3600, tenant: t, ...readable(caller, t), ...window })) };
+          return { tenant, step: 3600, ...window, buckets: byStart((await store.usage({ step: 3600, tenant: t, ...readable(caller, t), ...window })).filter((row) => !caller.tokenRestrictions?.appIds || caller.tokenRestrictions.appIds.includes(row.app as AppId))) };
         }
         throw new InputError('app or tenant is required');
       },
@@ -290,7 +291,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
         const rows = await store.usage({ step: 3600, ...usageWindow(query), ...(scope.tenant !== null && { tenant: scope.tenant }), ...readable(caller, scope.tenant) });
         const apps = new Map<AppId, { tenant: string | null; counts: Record<string, number> }>();
         for (const b of rows) {
-          if (b.app === '*') continue;
+          if (b.app === '*' || (caller.tokenRestrictions?.appIds && !caller.tokenRestrictions.appIds.includes(b.app))) continue;
           const entry = apps.get(b.app) ?? { tenant: b.tenant, counts: zero() };
           for (const c of USAGE_COUNTERS) entry.counts[c] += b[c];
           apps.set(b.app, entry);
@@ -300,7 +301,12 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
           .slice(0, wholeParam(query, 'limit', 50, 1, 1000));
       },
     },
-    { method: 'GET', path: at(ADMIN_PATHS.audit), action: 'records', scope: onQuery, handle: ({ query, caller }, scope) => store.audit({ ...auditFilter(query), ...readable(caller, scope.tenant) }) },
+    { method: 'GET', path: at(ADMIN_PATHS.audit), action: 'records', scope: onQuery, handle: async ({ query, caller }, scope) => {
+      const rows = await store.audit({ ...auditFilter(query), ...readable(caller, scope.tenant) });
+      const appIds = caller.tokenRestrictions?.appIds;
+      if (!appIds) return rows;
+      return rows.filter((row) => row.targetKind === 'app' && typeof row.details.appId === 'string' && appIds.includes(row.details.appId as AppId));
+    } },
     {
       method: 'GET', path: at(ADMIN_PATHS.requests), action: 'platform.read', handle: async ({ query, request }) => {
         const cursor = query.get('after') ?? '';
@@ -322,7 +328,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
         const [rows, bindings] = await Promise.all([store.appsWithCurrent(), store.bindings()]);
         const byApp = Map.groupBy(bindings, (b) => b.app);
         return {
-          apps: rows.filter(({ app: row }) => (scope.tenant === null || row.tenant === scope.tenant) && can(caller, 'app.read', row.tenant, row.owner) === true)
+          apps: rows.filter(({ app: row }) => (scope.tenant === null || row.tenant === scope.tenant) && can(caller, 'app.read', row.tenant, row.owner, row.id) === true)
             .map(({ app: row, release }) => inventory(row, release, byApp.get(row.id) ?? [])),
         };
       },
@@ -346,6 +352,12 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
         bundle: optional(ctx.body.bundle, 'bundle', bundleId),
         owner: firstOwner(ctx),
         tenant: scope.tenant ?? DEFAULT_TENANT,
+        authorize: async (tx, current) => {
+          const caller = await freshCaller(ctx.caller, tx);
+          if (!caller) throw new Forbidden('credential expired or revoked during publish');
+          const verdict = can(caller, current ? 'app.release' : 'apps.create', current?.tenant ?? scope.tenant, current?.owner ?? firstOwner(ctx), current?.id);
+          if (verdict !== true) throw new Forbidden('publish is no longer authorized');
+        },
       }),
     },
     { method: 'POST', path: at(ADMIN_PATHS.bundles), action: 'bundles.upload', handle: async ({ request }) => ({ bundle: await bundles.put(request) }) },
@@ -388,8 +400,12 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
     appRoute('POST', ADMIN_PATHS.kill('<name>'), 'app.kill', async ({ params: [name] }) => (await registry.kill(app(name)), { instance: 'asleep' }), {
       audit: onAppAudit('app.kill'),
     }),
-    appRoute('POST', ADMIN_PATHS.purge('<name>'), 'app.purge', async ({ params: [name] }) => (await registry.purge(app(name)), { status: 'purged' }), {
-      audit: onAppAudit('app.purge'),
+    appRoute('POST', ADMIN_PATHS.purge('<name>'), 'app.purge', async ({ params: [name], body }) => {
+      if (hosted && body.confirm !== name) throw new InputError('type the app name to confirm purge');
+      await registry.purge(app(name));
+      return { status: 'purged' };
+    }, {
+      ...(hosted && { json: true as const }), audit: onAppAudit('app.purge'),
     }),
     { method: 'GET', path: at(ADMIN_PATHS.tenants), action: 'tenants', handle: () => store.tenants() },
     {
@@ -465,13 +481,16 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
       handle: ({ body, caller }, scope) => {
         const label = optional(body.label, 'label', (raw) => raw);
         const issuer = subjectOf(caller.actor) ?? 'local';
+        if (body.restrictions !== undefined && (typeof body.restrictions !== 'object' || body.restrictions === null || Array.isArray(body.restrictions))) throw new InputError('restrictions must be an object');
+        const given = (body.restrictions ?? {}) as Record<string, unknown>;
+        const restrictions = hosted || body.restrictions !== undefined ? { expiresAt: given.expiresAt ?? Date.now() + 30 * 86400_000, scopes: given.scopes ?? ['read', 'publish', 'invoke', 'remove'], appIds: given.appIds ?? null } as import('./hosted-model.ts').TokenRestrictions : undefined;
         if (body.kind === 'service') {
           if (typeof body.name !== 'string' || !SERVICE_NAME.test(body.name)) throw new InputError(`name must match ${SERVICE_NAME.source}`);
-          return registry.issueTenantToken(scope.tenant!, subject(`service:${scope.tenant}.${body.name}`), label ?? body.name, issuer);
+          return registry.issueTenantToken(scope.tenant!, subject(`service:${scope.tenant}.${body.name}`), label ?? body.name, issuer, restrictions);
         }
         if (body.kind !== 'personal') throw new InputError('kind must be service or personal');
         if (issuer === 'local' || !issuer.startsWith('user:')) throw new InputError('a personal token is issued to a signed-in user');
-        return registry.issueTenantToken(scope.tenant!, issuer, label ?? 'personal', issuer);
+        return registry.issueTenantToken(scope.tenant!, issuer, label ?? 'personal', issuer, restrictions);
       },
     },
     {
@@ -534,7 +553,7 @@ async function audited(store: AdminDeps['store'], audit: Audit, ctx: Ctx, scope:
     targetKind: target.kind,
     target: target.id,
     result,
-    details: { ...who.details, ...details },
+    details: { ...who.details, ...details, ...(scope.appId && { appId: scope.appId }) },
   });
   const settle = (result: AuditResult, details: Record<string, unknown>) =>
     row(result, details).catch((error: Error) => emit('audit-failed', null, { action, target: target.id, result, error: error.message }));
@@ -555,7 +574,7 @@ function authorize(route: Route, ctx: Ctx, scope: Scope): void {
   if (caller.actor.via === 'upstream' && !READS.has(request.method ?? '') && request.headers['sec-fetch-site'] !== 'same-origin') {
     throw new Forbidden('a signed-in write needs Sec-Fetch-Site: same-origin');
   }
-  const verdict = can(caller, typeof route.action === 'string' ? route.action : route.action(ctx), scope.tenant, scope.holder ?? null);
+  const verdict = can(caller, typeof route.action === 'string' ? route.action : route.action(ctx), scope.tenant, scope.holder ?? null, scope.appId);
   if (verdict === true) return;
   if (verdict.status === 404) throw new NotFound(scope.hidden ?? 'not found');
   throw new Forbidden(verdict.reason);
@@ -567,21 +586,28 @@ function answer(response: ServerResponse, reply: Answer, why: string): void {
 }
 
 export function createAdmin(deps: AdminDeps): Server {
+  if (deps.hosted && !deps.upstream) throw new InputError('hosted admin requires authentication');
   const table = routes(deps);
   const consoleFile = deps.consoleFile ?? new URL('./console.html', import.meta.url);
   const callerOf = async (request: IncomingMessage, response: ServerResponse): Promise<Caller | null> => {
     if (!deps.upstream) return LOCAL_CALLER;
     const auth = await deps.upstream.identity.identify(request);
+    if (deps.hosted && typeof auth !== 'string' && auth.via !== 'hosted' && auth.via !== 'token') {
+      send(response, 401, { error: 'hosted authentication required' });
+      return null;
+    }
     if (typeof auth !== 'string') return deps.upstream.authority.callerOf(auth);
     answer(response, deps.upstream.identity.challenge(request, auth), auth);
     return null;
   };
   return createServer(async (request, response) => {
+    if (deps.hosted) response.setHeader('cache-control', 'no-store');
     const url = new URL(request.url ?? '/', 'http://admin');
     const path = url.pathname;
     try {
       if (path === ADMIN_PATHS.healthz && READS.has(request.method ?? '')) return void response.writeHead(200).end();
-      if (path === LOGOUT_PATH && deps.upstream) return await deps.upstream.identity.serve(request, response);
+      if (deps.hosted && request.headers.host !== new URL(deps.hosted.controlOrigin).host) return send(response, 400, { error: 'invalid control host' });
+      if ((path === LOGOUT_PATH || deps.hosted?.identityPaths.includes(path)) && deps.upstream) return await deps.upstream.identity.serve(request, response);
       if (request.method === 'GET' && path === '/') {
         const page = await readFile(consoleFile).catch(() => null);
         if (page) return void ((await callerOf(request, response)) && response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page));
@@ -591,6 +617,9 @@ export function createAdmin(deps: AdminDeps): Server {
         if (!match || route.method !== request.method) continue;
         const caller = await callerOf(request, response);
         if (!caller) return;
+        if (deps.hosted && caller.authentication?.kind === 'hosted' && !READS.has(request.method ?? '')) {
+          if (request.headers.origin !== deps.hosted.controlOrigin || request.headers['x-pneuma-space-csrf'] !== caller.authentication.csrf || !caller.authentication.csrf) throw new Forbidden('a hosted write requires the control origin and session CSRF');
+        }
         let pending: unknown = null;
         const body = route.json ? await readJson(request).catch((error: unknown) => ((pending = error), {})) : {};
         const ctx: Ctx = { request, query: url.searchParams, params: match.slice(1).map((p) => decodeURIComponent(p)), body, caller };

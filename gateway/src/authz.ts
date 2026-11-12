@@ -1,5 +1,6 @@
+import type { TokenScope } from './hosted-model.ts';
 import type { Auth } from './identity.ts';
-import { DEFAULT_TENANT, InputError, type Access, type Caller, type Membership, type Role, type Store, type Subject, type TenantName, type Token } from './model.ts';
+import { DEFAULT_TENANT, InputError, type Access, type AppId, type Caller, type Membership, type Role, type Store, type StoreOps, type Subject, type TenantName, type Token } from './model.ts';
 
 /** `PNEUMA_SPACE_PLATFORM_ADMINS`; decided per request, never stored (ADR 0022 item 1). */
 export type PlatformAdmins = { readonly users: ReadonlySet<string>; readonly groups: ReadonlySet<string> };
@@ -25,13 +26,15 @@ export class Authority {
   readonly #store: Pick<Store, 'token' | 'memberships'>;
   readonly #admins: PlatformAdmins;
   readonly #now: () => number;
+  readonly #cacheMs: number;
   readonly #tokens = new Map<string, Cached<Token>>();
   readonly #memberships = new Map<string, Cached<readonly Membership[]>>();
 
-  constructor(store: Pick<Store, 'token' | 'memberships' | 'onChange'>, admins: PlatformAdmins, now: () => number = Date.now) {
+  constructor(store: Pick<Store, 'token' | 'memberships' | 'onChange'>, admins: PlatformAdmins, now: () => number = Date.now, cacheMs = CACHE_MS) {
     this.#store = store;
     this.#admins = admins;
     this.#now = now;
+    this.#cacheMs = cacheMs;
     store.onChange((change) => {
       if (change.kind !== 'tenant') return;
       for (const [hash, cached] of this.#tokens) if (cached.value.tenant === change.name) this.#tokens.delete(hash);
@@ -44,7 +47,7 @@ export class Authority {
     const cached = this.#tokens.get(hash);
     if (cached && cached.until > this.#now()) return cached.value;
     const token = await this.#store.token(hash);
-    if (token) this.#tokens.set(hash, { value: token, until: this.#now() + CACHE_MS });
+    if (token && this.#cacheMs > 0) this.#tokens.set(hash, { value: token, until: this.#now() + this.#cacheMs });
     else this.#tokens.delete(hash);
     return token;
   }
@@ -53,7 +56,7 @@ export class Authority {
     const cached = this.#memberships.get(user);
     if (cached && cached.until > this.#now()) return cached.value;
     const rows = await this.#store.memberships({ user });
-    this.#memberships.set(user, { value: rows, until: this.#now() + CACHE_MS });
+    if (this.#cacheMs > 0) this.#memberships.set(user, { value: rows, until: this.#now() + this.#cacheMs });
     return rows;
   }
 
@@ -61,6 +64,16 @@ export class Authority {
     switch (auth.via) {
       case 'local':
         return LOCAL_CALLER;
+      case 'hosted': {
+        const id = auth.subject.slice('user:'.length);
+        return {
+          actor: { via: 'hosted', subject: auth.subject, name: auth.name },
+          platformAdmin: this.#admins.users.has(id),
+          roles: new Map((await this.memberships(id)).map((m) => [m.tenant, m.role])),
+          viaToken: false,
+          authentication: { kind: 'hosted', sessionHash: auth.sessionHash, csrf: auth.csrf, origin: auth.origin },
+        };
+      }
       case 'upstream': {
         const id = auth.subject.slice('user:'.length);
         return {
@@ -77,6 +90,8 @@ export class Authority {
           platformAdmin: false,
           roles: new Map([[token.tenant, 'member']]),
           viaToken: true,
+          authentication: { kind: 'token', hash: token.hash },
+          ...(token.restrictions && { tokenRestrictions: token.restrictions }),
         };
       }
     }
@@ -146,8 +161,16 @@ export function reach(caller: Caller, tenant: TenantName): 'all' | Subject | nul
 }
 
 /** `tenant` is the target app's or tenant's; null where the row has no target, for an app that does not exist, and for `records` without `?tenant=`, which then needs a platform admin. */
-export function can(caller: Caller, action: Action, tenant: TenantName | null, holder: Subject | 'local' | null = null): true | Denial {
+export function can(caller: Caller, action: Action, tenant: TenantName | null, holder: Subject | 'local' | null = null, appId?: AppId): true | Denial {
   const rule: Rule = ACTIONS[action];
+  const restriction = caller.tokenRestrictions;
+  if (restriction) {
+    const required: TokenScope | undefined = action === 'apps.create' || action === 'app.release' || action === 'bundles.upload' ? 'publish'
+      : action === 'app.remove' ? 'remove' : ['app.policy', 'app.access', 'app.owner'].includes(action) ? 'manage'
+        : ['health', 'apps.list', 'app.read', 'tenant.read', 'records'].includes(action) ? 'read' : undefined;
+    if (restriction.expiresAt <= Date.now() || (required && !restriction.scopes.includes(required))) return { status: 403, reason: 'token does not grant this action' };
+    if (restriction.appIds !== null && ((appId !== undefined && !restriction.appIds.includes(appId)) || action === 'apps.create' || action === 'tenant.read')) return { status: 404 };
+  }
   if (caller.viaToken && !rule.token) return { status: 403, reason: `${action} accepts a signed-in user, not a token` };
   if (caller.platformAdmin) return true;
   switch (rule.need) {
@@ -174,14 +197,29 @@ export function can(caller: Caller, action: Action, tenant: TenantName | null, h
 }
 
 /** The app actions `can` grants the caller on one app, so the console offers only those (ADR 0022 item 5). */
-export function appActions(caller: Caller, app: { readonly tenant: TenantName; readonly owner: Subject }): Action[] {
-  return (Object.keys(ACTIONS) as Action[]).filter((action) => action.startsWith('app.') && can(caller, action, app.tenant, app.owner) === true);
+export function appActions(caller: Caller, app: { readonly id?: AppId; readonly tenant: TenantName; readonly owner: Subject }): Action[] {
+  return (Object.keys(ACTIONS) as Action[]).filter((action) => action.startsWith('app.') && can(caller, action, app.tenant, app.owner, app.id) === true);
 }
 
 /** ADR 0022 item 6; `caller` is null when the request carries no valid credential. */
-export function allows(caller: Caller | null, access: Access, tenant: TenantName): 'ok' | 'challenge' | 'forbidden' {
+export function allows(caller: Caller | null, access: Access, tenant: TenantName, appId?: AppId): 'ok' | 'challenge' | 'forbidden' {
+  if (caller?.tokenRestrictions && (caller.tokenRestrictions.expiresAt <= Date.now() || !caller.tokenRestrictions.scopes.includes('invoke') || (caller.tokenRestrictions.appIds !== null && (appId === undefined || !caller.tokenRestrictions.appIds.includes(appId))))) return 'forbidden';
   if (access === 'public') return 'ok';
   if (caller === null) return 'challenge';
   if (access === 'org' || caller.platformAdmin || caller.roles.has(tenant)) return 'ok';
   return 'forbidden';
+}
+
+export async function freshCaller(caller: Caller, tx: StoreOps): Promise<Caller | null> {
+  const auth = caller.authentication;
+  if (!auth) return caller;
+  if (auth.kind === 'token') {
+    const token = await tx.token(auth.hash);
+    if (!token || token.revokedAt !== null || (token.restrictions && token.restrictions.expiresAt <= Date.now())) return null;
+    if (token.subject.startsWith('user:') && !(await tx.memberships({ user: token.subject.slice(5) })).some((m) => m.tenant === token.tenant)) return null;
+    return { ...caller, tokenRestrictions: token.restrictions, roles: new Map([[token.tenant, 'member']]) };
+  }
+  const session = await tx.hostedAuth(auth.sessionHash);
+  if (!session || session.expiresAt <= Date.now() || session.data.kind !== 'control' || session.data.origin !== auth.origin || !('subject' in caller.actor) || caller.actor.subject !== `user:${session.data.user}`) return null;
+  return { ...caller, roles: new Map((await tx.memberships({ user: session.data.user })).map((m) => [m.tenant, m.role])) };
 }

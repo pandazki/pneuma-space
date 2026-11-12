@@ -62,10 +62,10 @@ function view(name: string, access: Access, kinds: CapabilityKind[] = []): Route
 const VIEWS = new Map([view('open', 'public'), view('org', 'org'), view('team', 'tenant'), view('who', 'org', ['identity']), view('full', 'org')].map((v) => [v.name as string, v]));
 
 const app = http.createServer((req, res) => {
-  if (req.url === '/cookie') return void res.writeHead(200, { 'set-cookie': ['a=1; Domain=apps.test; Path=/', 'b=2; path=/; domain=.apps.test; HttpOnly'] }).end('ok');
+  if (req.url === '/cookie') return void res.writeHead(200, { 'set-cookie': ['a=1; Domain=apps.test; Path=/', 'b=2; path=/; domain=.apps.test; HttpOnly', '__Host-pneuma-space-control=evil; Path=/', 'pneuma-space-app=evil; Path=/'] }).end('ok');
   res.end(JSON.stringify({ url: req.url, headers: req.headers }));
 }).on('upgrade', (_req, socket: net.Socket) => {
-  socket.end('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSet-Cookie: a=1; Domain=apps.test; Path=/\r\n\r\n');
+  socket.end('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSet-Cookie: a=1; Domain=apps.test; Path=/\r\nSet-Cookie: __Host-pneuma-space-app=evil; Path=/\r\n\r\n');
 });
 
 let ingress: Ingress;
@@ -208,4 +208,72 @@ test('another tenant\'s service token may call a trigger of an org app but not o
   const call = (name: string) => request(`${name}.apps.test`, '/_pneuma-space/trigger/report', CALLERS['another tenant\'s token'], 'POST');
   assert.equal((await call('org')).status, 202);
   assert.equal((await call('team')).status, 403);
+});
+
+
+test('platform bearer and reserved cookies never reach app code (AC-SAAS-13)', async () => {
+  const got = await echo('org.apps.test', { authorization: `Bearer ${serviceSecret}`, cookie: '__Host-pneuma-space-app=secret; pneuma-space-control=secret; theme=dark' });
+  assert.equal(got.headers.authorization, undefined);
+  assert.equal(got.headers.cookie, 'theme=dark');
+});
+
+test('Connection nomination cannot remove an injected platform identity (AC-SAAS-13)', async () => {
+  const got = await echo('who.apps.test', { 'x-upstream-jwt': jwt('ana'), connection: 'X-Pneuma-Space-Subject' });
+  assert.equal(got.headers['x-pneuma-space-subject'], 'user:ana');
+});
+
+test('public static and dynamic paths enforce a supplied token action scope before execution (AC-SAAS-7)', async () => {
+  const secret = randomBytes(32).toString('base64url');
+  const hash = createHash('sha256').update(secret).digest('hex');
+  TOKENS.set(hash, { id: 'restricted', tenant: TEAM, subject: `service:${TEAM}.ci` as Subject, label: 'restricted', hash, createdBy: 'user:ana' as Subject, createdAt: Date.now(), revokedAt: null, restrictions: { expiresAt: Date.now() + 60000, scopes: ['read'], appIds: null } });
+  const before = acquired;
+  for (const path of ['/app.js', '/echo']) {
+    const got = await request('open.apps.test', path, { authorization: `Bearer ${secret}` });
+    assert.equal(got.status, 403);
+    assert.equal(got.body.includes('console.log'), false);
+  }
+  assert.equal(acquired, before);
+});
+
+function restrictedSecret(scopes: import('./hosted-model.ts').TokenScope[], appIds: AppId[] | null): string {
+  const secret = randomBytes(32).toString('base64url');
+  const hash = createHash('sha256').update(secret).digest('hex');
+  TOKENS.set(hash, { id: hash, tenant: TEAM, subject: `service:${TEAM}.ci` as Subject, label: 'restricted', hash, createdBy: 'user:ana' as Subject, createdAt: Date.now(), revokedAt: null, restrictions: { expiresAt: Date.now() + 60000, scopes, appIds } });
+  return secret;
+}
+
+test('WebSocket admission refuses a read-only token before acquiring a runtime (AC-SAAS-7)', async () => {
+  const secret = restrictedSecret(['read'], null);
+  const before = acquired;
+  const socket = net.connect(port, '127.0.0.1');
+  socket.write(`GET / HTTP/1.1\r\nHost: open.apps.test\r\nAuthorization: Bearer ${secret}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n`);
+  const [head] = await once(socket, 'data');
+  socket.destroy();
+  assert.match(String(head), /^HTTP\/1\.1 403 /);
+  assert.equal(acquired, before);
+});
+
+test('trigger admission requires invoke scope even on a public app (AC-SAAS-7)', async () => {
+  const got = await request('open.apps.test', '/_pneuma-space/trigger/report', { authorization: `Bearer ${restrictedSecret(['read'], null)}` }, 'POST');
+  assert.equal(got.status, 403);
+});
+
+test('reusing an app name does not transfer a scoped credential to the new AppId (AC-SAAS-7)', async (t) => {
+  const original = VIEWS.get('open')!;
+  const secret = restrictedSecret(['invoke'], [original.app]);
+  assert.equal((await request('open.apps.test', '/app.js', { authorization: `Bearer ${secret}` })).status, 200);
+  VIEWS.set('open', { ...original, app: 'replacement' as AppId });
+  t.after(() => VIEWS.set('open', original));
+  assert.equal((await request('open.apps.test', '/app.js', { authorization: `Bearer ${secret}` })).status, 403);
+});
+
+test('hosted app-session writes require the exact app Origin (AC-SAAS-4)', async (t) => {
+  const previous = identity;
+  identity = {
+    identify: async () => ({ via: 'hosted', subject: 'user:ana' as Subject, name: 'Ana', sessionHash: 'hash', csrf: null, origin: 'https://open.apps.test' }),
+    challenge: () => ({ status: 401 }), serve: async () => {}, authenticate: async () => ({ subject: 'user:ana' as Subject, name: 'Ana' }),
+  };
+  t.after(() => { identity = previous; });
+  for (const headers of [{}, { origin: 'https://other.apps.test' }]) assert.equal((await request('open.apps.test', '/echo', headers, 'POST')).status, 403);
+  assert.equal((await request('open.apps.test', '/echo', { origin: 'https://open.apps.test' }, 'POST')).status, 200);
 });
