@@ -18,7 +18,7 @@ import { inClusterClient } from './kube.ts';
 import { NodeView, type RunnerHealth } from './nodes.ts';
 import { KubeInfra } from './kube-infra.ts';
 import { planeOf, podConfig, PodRuntime } from './pods.ts';
-import { createProviders, providerConfig, resolvesOnNetwork, S3BundleStore } from './providers.ts';
+import { createProviders, providerConfig, S3BundleStore, type ServiceProbe } from './providers.ts';
 import { PlatformRegistry } from './registry.ts';
 import { IsolateRuntime, RUNNER_PORT, StatefulSetPool, StaticPool } from './isolate.ts';
 import { canConnect, DockerRuntime } from './runtime.ts';
@@ -78,13 +78,6 @@ await instances.ready();
 await instances.start();
 const specFor = (app: AppId) => registry.runSpec(app);
 const guard = new AppGuard({ instances, specFor, series });
-const probes: Readonly<Record<ServiceName, Probe>> = {
-  redis: setup.pods ? tcpProbe('redis', 6379) : networkProbe('redis', 6379),
-  object: httpProbe(`${config.object.endpoint}/health`),
-  postgres: setup.pods ? tcpProbe('postgres', config.postgres.port) : profileProbe('postgres', 5432),
-  coturn: setup.pods ? tcpProbe('coturn', 3478) : profileProbe('coturn', 3478),
-  runner: setup.pods ? async () => ((await runnerUp()) ? 'up' : 'down') : profileProbe('runner', RUNNER_PORT),
-};
 /** What the state inventory lists as volumes, at the nominal single-host size. */
 const volumes = async (): Promise<VolumeSample[]> => (await store.bindings()).flatMap((binding) => {
   const name = providers.find((p) => p.name === binding.provider)?.location(binding.resource).volume;
@@ -110,7 +103,7 @@ const { infra, container, pool } = setup.pods
   : await (async () => {
     const docker = new Docker();
     return {
-      infra: new DockerInfra({ docker, probes, volumes }), container: new DockerRuntime({ docker, network, specFor, instances, guard }),
+      infra: new DockerInfra({ docker, network, probes: () => probes, volumes }), container: new DockerRuntime({ docker, network, specFor, instances, guard }),
       pool: new StaticPool(`http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`),
     };
   })();
@@ -120,11 +113,24 @@ const isolate = new IsolateRuntime({
   hasRun: async (app) => (await store.releases(app)).some((release) => release.runtime === 'isolate'), instances, guard,
 });
 const runtime = new Runtimes({ runtimes: [container, isolate], specFor, instances });
-// A Kubernetes Service name resolves whether or not a Pod serves it, so the cluster probes by connecting.
-const SERVICE_PORTS = { postgres: config.postgres.port, coturn: 3478 } as const;
-const providerProbe = setup.pods ? (service: keyof typeof SERVICE_PORTS) => canConnect(service, SERVICE_PORTS[service]) : resolvesOnNetwork;
-// The runner is the pool's business on both planes: a ready runner, not a name that resolves.
-const runnerUp = async (): Promise<boolean> => pool.runners().some((r) => r.ready);
+const probes: Readonly<Record<ServiceName, Probe>> = (() => {
+  const object = httpProbe(`${config.object.endpoint}/health`);
+  if (infra instanceof DockerInfra) {
+    const address = (service: string) => infra.serviceAddress(service);
+    return {
+      redis: networkProbe('redis', 6379, address), object,
+      postgres: profileProbe('postgres', config.postgres.port, address),
+      coturn: profileProbe('coturn', 3478, address),
+      runner: profileProbe('runner', RUNNER_PORT, address),
+    };
+  }
+  return {
+    redis: tcpProbe('redis', 6379), object,
+    postgres: tcpProbe('postgres', config.postgres.port), coturn: tcpProbe('coturn', 3478),
+    runner: async () => pool.runners().some((runner) => runner.ready) ? 'up' : 'down',
+  };
+})();
+const providerProbe: ServiceProbe = async (service) => (await probes[service]()) === 'up';
 const providers = Object.values(createProviders(runtime, config, providerProbe));
 // The registry reads each current release's bundle index from the object store. After a host restart Docker starts every
 // service on its own restart policy, without depends_on, so the store may not answer yet: wait for it rather than exit.
@@ -133,7 +139,7 @@ const registry = await PlatformRegistry.open({
   store, runtime, guard, infra, bundles, providers, statsSource: async () => metrics.stats(),
   defaultAccess: setup.hosted ? 'tenant' : 'org',
   addressing: setup.addressing, volumeGb: config.volumeGb, nodeOf: (app) => nodes.nodeOf(app),
-  probe: (service) => (service === RUNTIMES.isolate.service && setup.pods ? runnerUp() : providerProbe(service as 'postgres' | 'coturn')),
+  probe: providerProbe,
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica, policy: () => registry.policy() });
 const authority = new Authority(store, setup.admins, Date.now, setup.hosted ? 0 : undefined);
