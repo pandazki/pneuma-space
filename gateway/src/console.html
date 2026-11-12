@@ -187,11 +187,12 @@ input:focus, textarea:focus, .lbtn:focus-visible { box-shadow: 0 0 0 2px var(--a
 .bar { height: 4px; border-radius: 2px; background: var(--inset); box-shadow: 0 0 0 1px var(--line); margin-top: 10px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--accent); }
 .bar i.hot { background: var(--orange); }
-.form { display: grid; gap: 16px; }
+.form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.form small { overflow-wrap: anywhere; }
 .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
-.field { display: grid; gap: 6px; align-content: start; }
+.field { display: grid; gap: 6px; align-content: start; min-width: 0; }
 .field > span { font-size: 12.5px; font-weight: 500; }
-.field small { font-size: 12px; color: var(--ink-3); }
+.field small { font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
 .field small.err, .msg.err { color: var(--red); }
 .msg { font-size: 12.5px; color: var(--green); white-space: pre-wrap; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
