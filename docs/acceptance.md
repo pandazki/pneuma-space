@@ -128,6 +128,27 @@ Checks for the organization edition (`REQUIREMENTS-M2.md`, stories US-O-1 to US-
 | AC-STORE-7 | `PNEUMA_SPACE_STORE_URL` with `sslmode=verify-full` connects with the right CA and fails to start with a wrong one. |
 | AC-STORE-8 | `package.json` declares no `dependencies`. |
 
+## Full platform SaaS
+
+These rows cover [the additive SaaS baseline](../REQUIREMENTS-M3.md) and [ADR 0030](adr/0030-additive-hosted-platform.md). Run the original M1 rows on Compose and the M2 rows on the configured operator cluster as regression gates. Neither the Fetch profile checks below nor local identity tests establish public hostile-workload isolation.
+
+| ID | Acceptance |
+| --- | --- |
+| AC-SAAS-1 | Concurrent first sign-ins for one verified immutable identity create one user, one personal tenant and one owner membership; retries and provider display-name changes reuse them. |
+| AC-SAAS-2 | At signup capacity a new identity is refused without a partial account, while an existing identity signs in. |
+| AC-SAAS-3 | Hosted login uses a browser-bound, expiring, single-use handshake; an invalid callback creates no session. |
+| AC-SAAS-4 | Control writes require exact Origin and session CSRF; logout rejects the next control or derived app-session admission on every replica. |
+| AC-SAAS-5 | A private-app grant is single-use and bound to AppId, exact origin and browser nonce; successful redemption removes the code from the URL. |
+| AC-SAAS-6 | Another account cannot list, manage or visit a new private application; denied static, container, isolate and WebSocket requests do not execute app code or return static bytes. |
+| AC-SAAS-7 | Credentials enforce expiry, revocation, action and immutable AppId restrictions on management, listings, diagnostics and every app admission path; token secrets and hashes never appear in read responses. |
+| AC-SAAS-8 | Revocation while publication is preparing prevents activation; the prior release and persistent state remain usable. |
+| AC-SAAS-9 | Contract-1 container, isolate and static apps use every original capability under hosted identity; the relevant original story checks pass without rewriting app code. |
+| AC-SAAS-10 | The operator sees the original Overview, Realtime, Topology, Host/Cluster, Team and Projects views, including real telemetry, logs and actions; new accounts receive no platform-admin privilege. |
+| AC-SAAS-11 | At 1440 and 390 px in English and Chinese, the original console completes sign-in, credential issue/revoke, app navigation and typed purge confirmation without overflow or inaccessible controls. |
+| AC-SAAS-12 | Existing SQLite and PostgreSQL data migrate without changing application IDs, releases, bindings, access settings or legacy token permissions. |
+| AC-SAAS-13 | Hosted app code receives no platform cookies or credentials and cannot set platform-reserved response cookies, including on WebSocket responses. |
+| AC-SAAS-14 | Hosted production configuration refuses local test identities, insecure origins and overlapping control/app sites; local test login is available only in explicitly enabled loopback development mode. |
+
 ## Cloud profile (contract 2)
 
 These rows cover [US-C-1 through US-C-7](user-stories.md#云端首版) and the [cloud contract](app-contract.md#cloud-profile-contract-2). Run the cloud group on the local Workers engine and repeat account/domain-dependent cases on an explicitly configured staging deployment. Local results do not establish production isolation or OAuth availability. Unchanged M1/M2 rows still apply to their existing deployment profiles.
