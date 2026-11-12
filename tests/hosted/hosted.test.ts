@@ -351,3 +351,41 @@ test('AC-SAAS-7 public static admission still enforces a supplied credential sco
   assert.equal(denied.status, 403);
   assert.doesNotMatch(denied.text, /static-site-index/);
 });
+
+test('AC-SAAS-8 revocation during real provisioning keeps the prior release and files', {
+  skip: process.env.PNEUMA_SPACE_HOSTED_TEST_PAUSE_OBJECTS !== 'true' && 'enable the temporary object-service pause on the hosted development stack',
+  timeout: 60_000,
+}, async (t) => {
+  assert.equal(control.origin, 'http://localhost:58081');
+  const app = await deploy(t, alice, container({ files: {} }));
+  const token = await credential(t, alice);
+  assert.equal((await visit(app, token.token, '/files/saved', 'PUT', 'kept')).status, 200);
+  const prior = record(record(json(await admin(alice, 'GET', `/api/apps/${app.name}`))).app).current;
+  const objects = 'pneuma-space-hosted-rustfs-1';
+  const manifest = { contract: 1, capabilities: { files: {}, kv: {}, object: {} } };
+  execFileSync('docker', ['pause', objects], { stdio: 'pipe' });
+  let publishing: Promise<import('./harness.ts').Reply> | undefined;
+  let completed: import('./harness.ts').Reply | undefined;
+  try {
+    publishing = call(new URL(`/api/apps/${app.name}/release`, control), 'PUT', {
+      ...bearer(token.token), 'content-type': 'application/json',
+    }, JSON.stringify({ image, bundle: null, manifest })).then((reply) => { completed = reply; return reply; });
+    await waitFor(async () => {
+      if (completed) throw new Error(`publish finished before the barrier: ${completed.status} ${completed.text}`);
+      const detail = record(json(await admin(alice, 'GET', `/api/apps/${app.name}`)));
+      return rows(detail.bindings).some((binding) => binding.kind === 'kv');
+    }, 'KV provisioned before blocked object provisioning', 10_000);
+    const revoked = await admin(alice, 'DELETE', `/api/tenants/${alice.tenant}/tokens/${token.id}`);
+    assert.equal(revoked.status, 200, revoked.text);
+  } finally {
+    execFileSync('docker', ['unpause', objects], { stdio: 'pipe' });
+  }
+  assert.ok(publishing);
+  const denied = await publishing;
+  assert.equal(denied.status, 403, denied.text);
+  const detail = record(json(await admin(alice, 'GET', `/api/apps/${app.name}`)));
+  assert.equal(record(detail.app).current, prior);
+  assert.equal(rows(detail.releases).length, 1);
+  const replacement = await credential(t, alice);
+  assert.equal(record(json(await visit(app, replacement.token, '/files/saved'))).value, 'kept');
+});
