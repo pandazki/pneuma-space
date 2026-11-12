@@ -1,0 +1,19 @@
+{
+  "original_workloads_restored": 8,
+  "all_replicas_zero": true,
+  "configuration_and_identity_restored": true,
+  "volumes": [
+    {
+      "namespace": "pneuma-space",
+      "preserved_claims": 7
+    },
+    {
+      "namespace": "pneuma-space-apps",
+      "preserved_claims": 3
+    }
+  ],
+  "extra_claims": 0,
+  "platform_pods": 0,
+  "app_pods": 0,
+  "test_tls_resources_removed": true
+}

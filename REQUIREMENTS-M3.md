@@ -34,6 +34,8 @@ SaaS 增加个人私有空间和自助注册。既有团队、应用访问范围
 
 [ADR 0030](docs/adr/0030-additive-hosted-platform.md) 恢复的是原平台的托管账户与功能。本次 Compose/Kubernetes 实现不完成 G14 的 Cloudflare 首发与第二后端恢复，也不证明恶意租户隔离。这些目标保留，公开发布须通过对应验收。
 
+已批准的组合部署及入口兼容性单元见 [ADR 0032](docs/adr/0032-hybrid-origin-tls.md)。
+
 ## 迁移范围
 
 契约 1 的状态清单与存储备份继续按 [M2 运营要求](REQUIREMENTS-M2.md#运营) 工作。Fetch 实验的制品及记录导出只覆盖其已支持的数据。源数据保留到用户另行清除，不能把记录导出当成文件卷、SQL、KV 和对象存储的完整备份。

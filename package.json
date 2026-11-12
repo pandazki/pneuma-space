@@ -17,6 +17,7 @@
     "test:k8s": "node --test 'gateway/src/*.smoke.test.ts'",
     "test:acceptance": "node --test tests/acceptance",
     "test:hosted": "node --test tests/hosted",
+    "test:hosted:tls": "node deploy/hosted/verify-tls.ts",
     "test:hosted:replicas": "node --test tests/hosted/replicas.test.ts"
   }
 }

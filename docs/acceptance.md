@@ -148,6 +148,7 @@ These rows cover [the additive SaaS baseline](../REQUIREMENTS-M3.md) and [ADR 00
 | AC-SAAS-12 | Existing SQLite and PostgreSQL data migrate without changing application IDs, releases, bindings, access settings or legacy token permissions. |
 | AC-SAAS-13 | Hosted app code receives no platform cookies or credentials and cannot set platform-reserved response cookies, including on WebSocket responses. |
 | AC-SAAS-14 | Hosted production configuration refuses local test identities, insecure origins and overlapping control/app sites; local test login is available only in explicitly enabled loopback development mode. |
+| AC-SAAS-18 | The origin TLS deployment preserves external Host and Origin, rejects unknown hosts, streams a request above 100 MiB and a response after 125 seconds, delivers SSE before a 125-second silent interval ends, and retains private static HEAD/Range, CLI bundle publication and direct object transfers. Repeat AC-SAAS-4 through 13 through TLS. |
 
 Public release also requires the following checks on the actual deployment. Local hosted checks do not satisfy them.
 

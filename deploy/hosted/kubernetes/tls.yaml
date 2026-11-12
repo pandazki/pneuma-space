@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pneuma-space-tls
+  namespace: pneuma-space
+  labels: { pneuma-space.role: tls }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { pneuma-space.role: tls }
+  template:
+    metadata:
+      labels: { pneuma-space.role: tls }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: tls
+          image: caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
+          ports:
+            - { name: https, containerPort: 443 }
+          envFrom:
+            - configMapRef: { name: pneuma-space-gateway }
+          env:
+            - { name: PNEUMA_SPACE_CONTROL_UPSTREAM, value: "pneuma-space-gateway:8081" }
+            - { name: PNEUMA_SPACE_APPS_UPSTREAM, value: "pneuma-space-gateway:8080" }
+            - { name: PNEUMA_SPACE_OBJECTS_UPSTREAM, value: "rustfs:9000" }
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          readinessProbe:
+            tcpSocket: { port: https }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+              add: [NET_BIND_SERVICE]
+          volumeMounts:
+            - { name: state, mountPath: /data }
+            - { name: config, mountPath: /etc/caddy, readOnly: true }
+            - { name: control, mountPath: /certs/control, readOnly: true }
+            - { name: apps, mountPath: /certs/apps, readOnly: true }
+            - { name: objects, mountPath: /certs/objects, readOnly: true }
+      volumes:
+        - name: state
+          emptyDir: {}
+        - name: config
+          configMap: { name: pneuma-space-tls }
+        - name: control
+          secret: { secretName: pneuma-space-control-tls }
+        - name: apps
+          secret: { secretName: pneuma-space-apps-tls }
+        - name: objects
+          secret: { secretName: pneuma-space-objects-tls }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pneuma-space-tls
+  namespace: pneuma-space
+spec:
+  type: LoadBalancer
+  selector: { pneuma-space.role: tls }
+  ports:
+    - { name: https, port: 443, targetPort: https }
