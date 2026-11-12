@@ -3,6 +3,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Readable } from 'node:stream';
+import type { HostedAccount, HostedActor, HostedSignup, HostedStoreOps, TokenRestrictions, VerifiedHostedIdentity } from './hosted-model.ts';
 
 import {
   Conflict, InputError, ManifestError, type AppId, type AppName, type Brand, type BundleId, type CronExpr, type DeliveryId,
@@ -270,6 +271,7 @@ export type Token = {
   readonly createdBy: Subject | 'local';
   readonly createdAt: number;
   readonly revokedAt: number | null;
+  readonly restrictions?: TokenRestrictions;
 };
 
 // Tenants and quotas (ADR 0022, 0023)
@@ -321,6 +323,7 @@ export type Membership = { readonly tenant: TenantName; readonly user: string; r
 
 /** Who did it, as the audit row and the admin boundary record it (ADR 0022 item 7). */
 export type Actor =
+  | HostedActor
   | { readonly via: 'upstream'; readonly subject: Subject; readonly name: string }
   | { readonly via: 'token'; readonly subject: Subject; readonly token: string; readonly createdBy: Subject | 'local' }
   | { readonly via: 'local' };
@@ -330,6 +333,8 @@ export type Caller = {
   readonly platformAdmin: boolean;
   readonly roles: ReadonlyMap<TenantName, Role>;
   readonly viaToken: boolean;
+  readonly authentication?: { readonly kind: 'hosted'; readonly sessionHash: string; readonly csrf: string | null; readonly origin: string } | { readonly kind: 'token'; readonly hash: string };
+  readonly tokenRestrictions?: TokenRestrictions;
 };
 
 export type BundleFile = { readonly size: number; readonly etag: string; readonly contentType: string };
@@ -407,6 +412,7 @@ export type RouteView = {
 };
 
 export type PublishRequest = {
+  readonly authorize?: (tx: StoreOps, app: App | null) => Promise<void>;
   readonly name: AppName;
   /** Image reference; the Registry resolves it to an id. Null for a static-only manifest. */
   readonly image: string | null;
@@ -645,7 +651,7 @@ export function parseChange(key: string): Change | null {
 // Protocols
 
 /** The platform library's rows; one writer per table is a convention the Registry and Scheduler keep, not a type. */
-export interface StoreOps {
+export interface StoreOps extends HostedStoreOps {
   app(name: AppName): Promise<App | null>;
   apps(): Promise<App[]>;
   /** Every app with its current release, in one read; the Registry's resync (ADR 0025 item 5). */
@@ -1011,7 +1017,8 @@ export interface Registry {
   /** `force` lets a platform admin leave a tenant without an admin; otherwise demoting or removing the last one is a Conflict. */
   setMember(tenant: TenantName, user: string, role: Role, force: boolean): Promise<void>;
   removeMember(tenant: TenantName, user: string, force: boolean): Promise<void>;
-  issueTenantToken(tenant: TenantName, subject: Subject, label: string, createdBy: Subject | 'local'): Promise<IssuedToken>;
+  issueTenantToken(tenant: TenantName, subject: Subject, label: string, createdBy: Subject | 'local', restrictions?: TokenRestrictions): Promise<IssuedToken>;
+  registerHostedIdentity(identity: VerifiedHostedIdentity, signup: HostedSignup): Promise<HostedAccount>;
   revokeToken(tenant: TenantName, id: string): Promise<void>;
   setAccess(name: AppName, access: Access): Promise<void>;
   /** Retires the instance, then moves the row, so quota, labels and tokens switch at once (ADR 0022 item 3). */

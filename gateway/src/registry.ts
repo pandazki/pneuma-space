@@ -1,8 +1,8 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import {
   CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_QUOTA, DEFAULT_TENANT, GLOBAL_ONLY_POLICY, InputError, NotFound, QUOTA_RESOURCES, QuotaExceeded, RUNTIMES,
-  admits, declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider, subject,
+  admits, appName, declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider, subject, tenantName,
   type Access, type App, type AppDetail, type AppId, type AppName, type AppSummary, type Binding, type BindingState,
   type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type Change, type CapabilityProvider, type Guard, type Infra, type IssuedToken,
   type Manifest, type Policy, type PolicyOverride, type PolicyPatch, type ProviderName, type Quota, type QuotaUsage, type Role,
@@ -10,6 +10,7 @@ import {
   type RunSpec, type Runtime, type RuntimeKind, type SchedulerView, type Store, type StoreOps, type Subject, type Tenant, type TenantName,
   type Traffic, type Trigger, type TriggerName,
 } from './model.ts';
+import { TOKEN_SCOPES, type HostedAccount, type HostedSignup, type TokenRestrictions, type VerifiedHostedIdentity } from './hosted-model.ts';
 import { address, PATH_ADDRESSING, type Addressing } from './address.ts';
 import { emit, quotaRefused, type QuotaRefused } from './events.ts';
 import { issueToken } from './identity.ts';
@@ -17,6 +18,7 @@ import { resolvesOnNetwork, type ServiceProbe } from './providers.ts';
 
 export type RegistryDeps = {
   readonly store: Store;
+  readonly defaultAccess?: Access;
   readonly runtime: Pick<Runtime, 'retire' | 'kill' | 'acquire' | 'release' | 'state' | 'since' | 'leases' | 'sleepsAt'>;
   readonly guard: Pick<Guard, 'quarantine'>;
   readonly infra: Pick<Infra, 'resolveImage'>;
@@ -43,6 +45,11 @@ const PROVISIONED: ReadonlySet<ProviderName> = new Set(['volume', 'sqlite']);
 const SIGHTING_MS = 5 * 60_000;
 
 const log = emit;
+
+export function hostedAccountIds(provider: string, externalSubject: string): Pick<HostedAccount, 'user' | 'tenant'> {
+  const digest = createHash('sha256').update(JSON.stringify([provider, externalSubject])).digest('hex').slice(0, 48);
+  return { user: `hosted-${digest}`, tenant: tenantName(`personal-${digest.slice(0, 31)}`) };
+}
 
 const isResourceKind = (kind: CapabilityKind): kind is ResourceKind => CAPABILITIES[kind].class === 'resource';
 
@@ -97,6 +104,7 @@ function triggersOf(app: AppId, manifest: Manifest): Trigger[] {
 
 export class PlatformRegistry implements Registry {
   readonly #store: Store;
+  readonly #defaultAccess: Access;
   readonly #runtime: RegistryDeps['runtime'];
   readonly #guard: RegistryDeps['guard'];
   readonly #infra: RegistryDeps['infra'];
@@ -120,6 +128,7 @@ export class PlatformRegistry implements Registry {
 
   private constructor(deps: RegistryDeps, policy: Policy) {
     this.#store = deps.store;
+    this.#defaultAccess = deps.defaultAccess ?? 'org';
     this.#runtime = deps.runtime;
     this.#guard = deps.guard;
     this.#infra = deps.infra;
@@ -183,7 +192,7 @@ export class PlatformRegistry implements Registry {
     });
   }
 
-  async #publish({ name, image: reference, manifest, bundle, owner, tenant = DEFAULT_TENANT }: PublishRequest): Promise<Release> {
+  async #publish({ name, image: reference, manifest, bundle, owner, tenant = DEFAULT_TENANT, authorize }: PublishRequest): Promise<Release> {
     const kinds = declaredKinds(manifest);
     const needsRuntime = kinds.some((k) => CAPABILITIES[k].needsRuntime);
     const runtime: RuntimeKind | null = manifest.runtime ?? (reference !== null ? 'container' : bundle !== null && needsRuntime ? 'isolate' : null);
@@ -201,7 +210,11 @@ export class PlatformRegistry implements Registry {
     if (bundle !== null && !this.#indexes.has(bundle)) this.#indexes.set(bundle, await this.#bundles.index(bundle));
     const key = releaseKey(image, manifest, bundle);
 
-    let app = await this.#store.app(name);
+    let app = await this.#store.transaction(async (tx) => {
+      const app = await tx.app(name);
+      await authorize?.(tx, app);
+      return app;
+    });
     if (app?.status === 'purging') throw new Conflict(`app "${name}" is being purged; publish again once purge finishes`);
     const current = app && (await currentRelease(this.#store, app));
     if (app?.status === 'registered' && current?.releaseKey === key) return current;
@@ -221,8 +234,9 @@ export class PlatformRegistry implements Registry {
 
     if (!app) {
       if (owner === null) throw new InputError(`owner is required on the first publish of "${name}"; pass user:<name> or service:<name>`);
-      const created: App = { name, id: newAppId(), tenant, access: 'org', owner, status: 'registered', current: null, policyOverride: pinned, registeredAt: Date.now() };
+      const created: App = { name, id: newAppId(), tenant, access: this.#defaultAccess, owner, status: 'registered', current: null, policyOverride: pinned, registeredAt: Date.now() };
       await this.#store.transaction(async (tx) => {
+        await authorize?.(tx, await tx.app(name));
         await this.#admit(tx, tenant, { apps: 1, ...storage });
         await tx.putApp(created);
       });
@@ -231,14 +245,19 @@ export class PlatformRegistry implements Registry {
       log('app-created', name, { id: app.id });
     } else {
       const { tenant: own } = app;
-      if (volumes > 0) await this.#store.transaction((tx) => this.#admit(tx, own, storage));
-      if (pinned !== override) await this.#updateApp(name, (fresh) => ({ ...fresh, policyOverride: pinned }));
+      await this.#store.transaction(async (tx) => {
+        const fresh = (await tx.app(name))!;
+        await authorize?.(tx, fresh);
+        if (volumes > 0) await this.#admit(tx, own, storage);
+        if (pinned !== override) await tx.putApp({ ...fresh, policyOverride: pinned });
+      });
     }
 
     for (const provider of providers) await this.#ensure(app.id, provider);
 
     const { next, release, suspended } = await this.#store.transaction(async (tx) => {
       const fresh = (await tx.app(name))!;
+      await authorize?.(tx, fresh);
       const reused = current?.releaseKey === key ? current : null;
       const release: Release = reused ?? {
         app: fresh.id,
@@ -376,11 +395,23 @@ export class PlatformRegistry implements Registry {
     return this.issueTenantToken(DEFAULT_TENANT, subject(`service:${name}`), name, 'local');
   }
 
-  async issueTenantToken(tenant: TenantName, who: Subject, label: string, createdBy: Subject | 'local'): Promise<IssuedToken> {
-    await this.#mustTenant(this.#store, tenant);
+  async issueTenantToken(tenant: TenantName, who: Subject, label: string, createdBy: Subject | 'local', restrictions?: TokenRestrictions): Promise<IssuedToken> {
+    const now = Date.now();
+    if (restrictions) {
+      if (!Number.isSafeInteger(restrictions.expiresAt) || restrictions.expiresAt <= now || restrictions.expiresAt > now + 365 * 86400_000) throw new InputError('token expiry must be within the next 365 days');
+      if (!Array.isArray(restrictions.scopes) || restrictions.scopes.length === 0 || restrictions.scopes.some((scope) => !TOKEN_SCOPES.includes(scope))) throw new InputError('token scopes must name at least one supported action');
+      if (restrictions.appIds !== null && (!Array.isArray(restrictions.appIds) || restrictions.appIds.length === 0)) throw new InputError('token appIds must be null or a nonempty list');
+    }
     const { token, hash } = issueToken(who);
     const id = randomBytes(8).toString('hex');
-    await this.#store.putToken({ id, tenant, subject: who, label, hash, createdBy, createdAt: Date.now(), revokedAt: null });
+    await this.#store.transaction(async (tx) => {
+      await this.#mustTenant(tx, tenant);
+      if (restrictions?.appIds) {
+        const owned = new Set((await tx.apps()).filter((app) => app.tenant === tenant).map((app) => app.id));
+        if (restrictions.appIds.some((id) => !owned.has(id))) throw new InputError('token appIds must belong to its tenant');
+      }
+      await tx.putToken({ id, tenant, subject: who, label, hash, createdBy, createdAt: now, revokedAt: null, ...(restrictions ? { restrictions } : {}) });
+    });
     log('token', null, { tenant, subject: who });
     return { id, token, subject: who };
   }
@@ -390,6 +421,25 @@ export class PlatformRegistry implements Registry {
     if (!(await this.#store.tokens(tenant)).some((t) => t.id === id)) throw new NotFound(`no token "${id}" in tenant "${tenant}"`);
     await this.#store.revokeToken(id, Date.now());
     log('token-revoked', null, { tenant, token: id });
+  }
+
+  async registerHostedIdentity(identity: VerifiedHostedIdentity, signup: HostedSignup): Promise<HostedAccount> {
+    if (!identity.provider || !identity.subject || !Number.isSafeInteger(signup.limit) || signup.limit < 0) throw new InputError('invalid hosted identity or signup limit');
+    return this.#store.exclusive(appName('hosted-signup'), () => this.#store.transaction(async (tx) => {
+      const count = await tx.hostedSignupCount('update');
+      const existing = await tx.hostedIdentity(identity.provider, identity.subject);
+      if (!existing && count >= signup.limit) throw new Conflict('new account signup capacity reached');
+      const account = { ...(existing ?? hostedAccountIds(identity.provider, identity.subject)), name: identity.name };
+      const now = Date.now();
+      await tx.putUser({ id: account.user, name: identity.name, groups: [], firstSeen: now, lastSeen: now });
+      if (!existing) {
+        await tx.putTenant({ name: account.tenant, display: identity.name, quota: signup.quota, createdAt: now });
+        await tx.putMembership({ tenant: account.tenant, user: account.user, role: 'admin' });
+        await tx.setHostedSignupCount(count + 1);
+      }
+      await tx.putHostedIdentity({ ...account, provider: identity.provider, externalSubject: identity.subject });
+      return { user: account.user, tenant: account.tenant, name: account.name };
+    }));
   }
 
   async createTenant(name: TenantName, display: string, admins: readonly string[]): Promise<Tenant> {

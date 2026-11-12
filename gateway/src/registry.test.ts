@@ -325,3 +325,34 @@ test('storage_gb counts only bindings a publish would create, and only files and
   await assert.rejects(publishIn(registry, 'two', { db: {} }), (error: unknown) =>
     error instanceof QuotaExceeded && JSON.stringify(error.refusal) === JSON.stringify({ resource: 'storage_gb', used: 2, limit: 2, ask: 1 }));
 });
+
+test('AC-SAAS-8 revocation during preparation leaves the previous release active', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  const first = await publish(registry, { kv: {} });
+  const provider = w.providers.get('redis')!;
+  const ensure = provider.ensure.bind(provider);
+  let authorized = true;
+  provider.ensure = async (...args) => {
+    const resource = await ensure(...args);
+    authorized = false;
+    return resource;
+  };
+  await assert.rejects(registry.publish({
+    name: survey, image: 'example:2', manifest: parseManifest({ contract: 1, capabilities: { kv: {} } }), bundle: null, owner: ann,
+    authorize: async () => { if (!authorized) throw new Conflict('credential revoked'); },
+  }), /credential revoked/);
+  assert.equal((await store.app(survey))?.current, first.number);
+  assert.equal((await store.releases(first.app)).length, 1);
+  assert.equal((await store.bindings(first.app))[0].state, 'active');
+});
+
+test('AC-SAAS-6 hosted default access changes new apps only', async () => {
+  const w = world();
+  const { store, registry } = await w.open();
+  await publish(registry, {});
+  const hosted = await PlatformRegistry.open({ store, runtime: w.runtime, guard: w.runtime, infra: w.runtime, bundles: w.bundles, providers: [], defaultAccess: 'tenant' });
+  await hosted.publish({ name: appName('private-app'), image: 'example:1', manifest: parseManifest({ contract: 1, capabilities: {} }), bundle: null, owner: ann });
+  assert.equal((await store.app(appName('private-app')))?.access, 'tenant');
+  assert.equal((await store.app(survey))?.access, 'org');
+});

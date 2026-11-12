@@ -18,7 +18,7 @@ export type HostedAuthData =
   | (SessionBase & { readonly kind: 'control'; readonly csrf: string })
   | (SessionBase & { readonly kind: 'app'; readonly appId: AppId; readonly parent: string })
   | (SessionBase & { readonly kind: 'grant'; readonly appId: AppId; readonly parent: string; readonly nonceHash: string; readonly returnPath: string })
-  | { readonly kind: 'login'; readonly user: ''; readonly cookieHash: string };
+  | { readonly kind: 'login'; readonly user: ''; readonly cookieHash: string; readonly returnPath: string; readonly verifier: string };
 export type HostedAuthRecord = {
   readonly hash: string;
   readonly createdAt: number;
@@ -32,7 +32,7 @@ export interface HostedStoreOps {
   hostedSignupCount(lock?: RowLock): Promise<number>;
   setHostedSignupCount(count: number): Promise<void>;
   hostedAuth(hash: string, lock?: RowLock): Promise<HostedAuthRecord | null>;
-  hostedAuthFor(user: string): Promise<HostedAuthRecord[]>;
+  hostedAuthFor(user: string, lock?: RowLock): Promise<HostedAuthRecord[]>;
   putHostedAuth(record: HostedAuthRecord): Promise<void>;
   deleteHostedAuth(hash: string): Promise<boolean>;
   sweepHostedAuth(before: number): Promise<number>;
