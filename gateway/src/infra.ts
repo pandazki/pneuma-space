@@ -7,7 +7,8 @@ const SERVICES: Readonly<Record<ServiceName, string>> = { redis: 'redis', object
 
 export type DockerInfraOptions = {
   readonly docker: Docker;
-  readonly probes: Readonly<Record<ServiceName, Probe>>;
+  readonly network: string;
+  readonly probes: () => Readonly<Record<ServiceName, Probe>>;
   /** The volumes the state inventory lists. */
   readonly volumes: () => Promise<VolumeSample[]>;
 };
@@ -24,6 +25,18 @@ export class DockerInfra implements Infra {
     return this.#options.docker.imageId(reference);
   }
 
+  async serviceAddress(service: string): Promise<string | null> {
+    const { docker, network } = this.#options;
+    const label = 'com.docker.compose.service';
+    const containers = await docker.list({ network: [network], label: [`${label}=${service}`], status: ['running'] });
+    for (const container of containers) {
+      if (container.State !== 'running' || container.Labels[label] !== service) continue;
+      const address = container.NetworkSettings.Networks[network]?.IPAddress;
+      if (address) return address;
+    }
+    return null;
+  }
+
   async nodes(): Promise<null> {
     return null;
   }
@@ -33,7 +46,7 @@ export class DockerInfra implements Infra {
     const service = (name: string, status: 'up' | 'down' | 'off'): Workload => ({
       name, role: name, kind: 'service', desired: status === 'off' ? 0 : 1, ready: status === 'up' ? 1 : 0, scalable: false, image: null, pods: [],
     });
-    const probed = await Promise.all(Object.entries(this.#options.probes).map(async ([key, probe]) => service(SERVICES[key as ServiceName], await probe())));
+    const probed = await Promise.all(Object.entries(this.#options.probes()).map(async ([key, probe]) => service(SERVICES[key as ServiceName], await probe())));
     return [service('gateway', 'up'), ...probed];
   }
 

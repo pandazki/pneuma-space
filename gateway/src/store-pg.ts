@@ -101,6 +101,16 @@ export const PG_MIGRATIONS = [
    ${['app', 'release', 'trigger', 'binding', 'policy', 'instance', 'guard', 'tenant', 'membership', 'token'].map(changed).join('\n   ')}`,
   // ADR 0026 item 2: the cluster view marks the leading gateway from its heartbeat.
   'ALTER TABLE replica ADD COLUMN leads INTEGER NOT NULL DEFAULT 0',
+  `ALTER TABLE token ADD COLUMN restrictions TEXT;
+   CREATE TABLE hosted_identity (
+     provider TEXT NOT NULL, external_subject TEXT NOT NULL, user_id TEXT NOT NULL UNIQUE,
+     tenant TEXT NOT NULL UNIQUE, name TEXT NOT NULL, PRIMARY KEY (provider, external_subject));
+   CREATE TABLE hosted_signup (id INTEGER PRIMARY KEY CHECK (id = 1), count BIGINT NOT NULL);
+   INSERT INTO hosted_signup (id, count) VALUES (1, 0);
+   CREATE TABLE hosted_auth (
+     hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at BIGINT NOT NULL, expires_at BIGINT NOT NULL, data TEXT NOT NULL);
+   CREATE INDEX hosted_auth_user ON hosted_auth (user_id, created_at);
+   CREATE INDEX hosted_auth_expiry ON hosted_auth (expires_at);`,
 ];
 
 /** Runs every step not yet recorded, each in its own transaction, under a lock so replicas that start together migrate once. */

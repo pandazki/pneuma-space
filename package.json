@@ -9,11 +9,13 @@
     "appctl": "cli/appctl.ts"
   },
   "scripts": {
+    "dev:hosted": "node deploy/hosted/dev.ts",
     "test": "npm run test:unit && npm run test:runner && npm run test:docker",
     "test:unit": "node --test 'gateway/src/!(runner|isolate|runtime|providers|pg|store-pg|*.smoke).test.ts' 'cli/*.test.ts'",
     "test:runner": "node --test gateway/src/runner.test.ts gateway/src/isolate.test.ts",
     "test:docker": "node --test gateway/src/runtime.test.ts gateway/src/providers.test.ts gateway/src/pg.test.ts gateway/src/store-pg.test.ts",
     "test:k8s": "node --test 'gateway/src/*.smoke.test.ts'",
-    "test:acceptance": "node --test tests/acceptance"
+    "test:acceptance": "node --test tests/acceptance",
+    "test:hosted": "node --test tests/hosted"
   }
 }

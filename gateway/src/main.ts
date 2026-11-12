@@ -5,18 +5,20 @@ import { startAdmin } from './admin.ts';
 import { Docker } from './docker.ts';
 import { emit, events } from './events.ts';
 import { Instances } from './instances.ts';
-import { Authority, parsePlatformAdmins } from './authz.ts';
+import { allows, Authority, parsePlatformAdmins } from './authz.ts';
 import { loadOrCreateSecret, LocalIdentity, parseIdentityEnv, UpstreamIdentity, type Identity } from './identity.ts';
+import { HostedIdentity, HOSTED_COOKIE_NAMES, HOSTED_IDENTITY_PATHS } from './identity-hosted.ts';
+import { HostedSessions } from './hosted-sessions.ts';
 import { JwtVerifier } from './jwt.ts';
 import { Ingress } from './ingress.ts';
 import { hostSample, httpProbe, Metrics, networkProbe, profileProbe, serveMetrics, Series, tcpProbe, untilUp, type Probe, type ServiceName } from './metrics.ts';
-import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId, type VolumeSample } from './model.ts';
+import { ADMIN_PORT, INGRESS_PORT, InputError, RUNTIMES, appName, type AppId, type ReplicaId, type VolumeSample } from './model.ts';
 import { DockerInfra } from './infra.ts';
 import { inClusterClient } from './kube.ts';
 import { NodeView, type RunnerHealth } from './nodes.ts';
 import { KubeInfra } from './kube-infra.ts';
 import { planeOf, podConfig, PodRuntime } from './pods.ts';
-import { createProviders, providerConfig, resolvesOnNetwork, S3BundleStore } from './providers.ts';
+import { createProviders, providerConfig, S3BundleStore, type ServiceProbe } from './providers.ts';
 import { PlatformRegistry } from './registry.ts';
 import { IsolateRuntime, RUNNER_PORT, StatefulSetPool, StaticPool } from './isolate.ts';
 import { canConnect, DockerRuntime } from './runtime.ts';
@@ -40,9 +42,12 @@ const setup = (() => {
     const admins = parsePlatformAdmins(process.env.PNEUMA_SPACE_PLATFORM_ADMINS);
     const upstream = identity.kind === 'upstream' ? { ...identity.options, verifier: new JwtVerifier(identity.jwt), audiences: identity.jwt.audiences } : null;
     const consoleIdentity = identity.kind === 'upstream' && upstream ? { ...upstream, audiences: identity.consoleAudiences } : null;
+    const hosted = identity.kind === 'hosted' ? identity.options : null;
+    const signupLimit = Number(process.env.PNEUMA_SPACE_HOSTED_SIGNUP_LIMIT || 20);
+    if (hosted && (!Number.isSafeInteger(signupLimit) || signupLimit < 0)) throw new Error('PNEUMA_SPACE_HOSTED_SIGNUP_LIMIT must be a nonnegative integer');
     const scaleMax = Number(process.env.PNEUMA_SPACE_SCALE_MAX || 10);
     if (!Number.isInteger(scaleMax) || scaleMax < 1) throw new Error(`PNEUMA_SPACE_SCALE_MAX must be a whole number of at least 1, got "${process.env.PNEUMA_SPACE_SCALE_MAX}"`);
-    return { pods, admins, upstream, consoleIdentity, scaleMax, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
+    return { pods, admins, upstream, consoleIdentity, hosted, signupLimit, scaleMax, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
   } catch (error) {
     console.error(`pneuma-space: ${(error as Error).message}`);
     process.exit(1);
@@ -73,13 +78,6 @@ await instances.ready();
 await instances.start();
 const specFor = (app: AppId) => registry.runSpec(app);
 const guard = new AppGuard({ instances, specFor, series });
-const probes: Readonly<Record<ServiceName, Probe>> = {
-  redis: setup.pods ? tcpProbe('redis', 6379) : networkProbe('redis', 6379),
-  object: httpProbe(`${config.object.endpoint}/health`),
-  postgres: setup.pods ? tcpProbe('postgres', config.postgres.port) : profileProbe('postgres', 5432),
-  coturn: setup.pods ? tcpProbe('coturn', 3478) : profileProbe('coturn', 3478),
-  runner: setup.pods ? async () => ((await runnerUp()) ? 'up' : 'down') : profileProbe('runner', RUNNER_PORT),
-};
 /** What the state inventory lists as volumes, at the nominal single-host size. */
 const volumes = async (): Promise<VolumeSample[]> => (await store.bindings()).flatMap((binding) => {
   const name = providers.find((p) => p.name === binding.provider)?.location(binding.resource).volume;
@@ -105,7 +103,7 @@ const { infra, container, pool } = setup.pods
   : await (async () => {
     const docker = new Docker();
     return {
-      infra: new DockerInfra({ docker, probes, volumes }), container: new DockerRuntime({ docker, network, specFor, instances, guard }),
+      infra: new DockerInfra({ docker, network, probes: () => probes, volumes }), container: new DockerRuntime({ docker, network, specFor, instances, guard }),
       pool: new StaticPool(`http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`),
     };
   })();
@@ -115,28 +113,59 @@ const isolate = new IsolateRuntime({
   hasRun: async (app) => (await store.releases(app)).some((release) => release.runtime === 'isolate'), instances, guard,
 });
 const runtime = new Runtimes({ runtimes: [container, isolate], specFor, instances });
-// A Kubernetes Service name resolves whether or not a Pod serves it, so the cluster probes by connecting.
-const SERVICE_PORTS = { postgres: config.postgres.port, coturn: 3478 } as const;
-const providerProbe = setup.pods ? (service: keyof typeof SERVICE_PORTS) => canConnect(service, SERVICE_PORTS[service]) : resolvesOnNetwork;
-// The runner is the pool's business on both planes: a ready runner, not a name that resolves.
-const runnerUp = async (): Promise<boolean> => pool.runners().some((r) => r.ready);
+const probes: Readonly<Record<ServiceName, Probe>> = (() => {
+  const object = httpProbe(`${config.object.endpoint}/health`);
+  if (infra instanceof DockerInfra) {
+    const address = (service: string) => infra.serviceAddress(service);
+    return {
+      redis: networkProbe('redis', 6379, address), object,
+      postgres: profileProbe('postgres', config.postgres.port, address),
+      coturn: profileProbe('coturn', 3478, address),
+      runner: profileProbe('runner', RUNNER_PORT, address),
+    };
+  }
+  return {
+    redis: tcpProbe('redis', 6379), object,
+    postgres: tcpProbe('postgres', config.postgres.port), coturn: tcpProbe('coturn', 3478),
+    runner: async () => pool.runners().some((runner) => runner.ready) ? 'up' : 'down',
+  };
+})();
+const providerProbe: ServiceProbe = async (service) => (await probes[service]()) === 'up';
 const providers = Object.values(createProviders(runtime, config, providerProbe));
 // The registry reads each current release's bundle index from the object store. After a host restart Docker starts every
 // service on its own restart policy, without depends_on, so the store may not answer yet: wait for it rather than exit.
 if (!(await untilUp(() => bundles.answers(), { waiting: () => log('object-wait', { endpoint: config.object.endpoint }) }))) log('object-unready', { endpoint: config.object.endpoint });
 const registry = await PlatformRegistry.open({
   store, runtime, guard, infra, bundles, providers, statsSource: async () => metrics.stats(),
+  defaultAccess: setup.hosted ? 'tenant' : 'org',
   addressing: setup.addressing, volumeGb: config.volumeGb, nodeOf: (app) => nodes.nodeOf(app),
-  probe: (service) => (service === RUNTIMES.isolate.service && setup.pods ? runnerUp() : providerProbe(service as 'postgres' | 'coturn')),
+  probe: providerProbe,
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica, policy: () => registry.policy() });
-const authority = new Authority(store, setup.admins);
-const identity: Identity = setup.upstream
-  ? new UpstreamIdentity(setup.upstream, authority, registry)
-  : new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), authority, setup.addressing.mode);
+const authority = new Authority(store, setup.admins, Date.now, setup.hosted ? 0 : undefined);
+const identity: Identity = setup.hosted
+  ? new HostedIdentity(setup.hosted, new HostedSessions(store), {
+    tokens: authority,
+    register: (verified) => registry.registerHostedIdentity(verified, {
+      limit: setup.signupLimit,
+      quota: { apps: 5, awake: 2, cpu_millis: 2000, memory_mb: 1024, storage_gb: 5 },
+    }),
+    app: async (name) => {
+      try { return await store.app(appName(name)); }
+      catch (error) { if (error instanceof InputError) return null; throw error; }
+    },
+    authorizeApp: async (auth, app) => allows(await authority.callerOf(auth), app.access, app.tenant, app.id) === 'ok',
+  })
+  : setup.upstream
+    ? new UpstreamIdentity(setup.upstream, authority, registry)
+    : new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), authority, setup.addressing.mode);
+const credentialPolicy = setup.hosted
+  ? { header: 'authorization', stripCookies: HOSTED_COOKIE_NAMES }
+  : setup.upstream && { header: setup.upstream.header, stripCookies: setup.upstream.stripCookies };
 const ingress = new Ingress({
   registry, runtime, identity, authority, addressing: setup.addressing, bundles, scheduler,
-  upstream: setup.upstream && { header: setup.upstream.header, stripCookies: setup.upstream.stripCookies }, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
+  upstream: credentialPolicy, hosted: !!setup.hosted, identityPaths: setup.hosted ? HOSTED_IDENTITY_PATHS : undefined,
+  stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
   series,
 });
 
@@ -187,12 +216,14 @@ await instances.onLeader((leading) => {
 });
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
 // The console audience keeps a JWT leaked from an app request from replaying on the admin API (ADR 0021 item 1).
-const upstream = setup.consoleIdentity ? { identity: new UpstreamIdentity(setup.consoleIdentity, authority, registry), authority } : undefined;
+const upstream = setup.hosted ? { identity, authority }
+  : setup.consoleIdentity ? { identity: new UpstreamIdentity(setup.consoleIdentity, authority, registry), authority } : undefined;
 const peers = process.env.PNEUMA_SPACE_PEERS
-  ? { host: process.env.PNEUMA_SPACE_PEERS, forward: ['authorization', ...(setup.upstream ? [setup.upstream.header] : [])] }
+  ? { host: process.env.PNEUMA_SPACE_PEERS, forward: ['authorization', ...(setup.hosted ? ['cookie', 'host'] : setup.upstream ? [setup.upstream.header] : [])] }
   : undefined;
 const admin = await startAdmin({
   registry, bundles, runtime, guard, metrics, nodes, infra, scaleMax: setup.scaleMax, requests, replica, peers, store, ingressPort, upstream, providers,
+  hosted: setup.hosted ? { controlOrigin: setup.hosted.controlOrigin, identityPaths: HOSTED_IDENTITY_PATHS } : undefined,
 }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const exporter = await serveMetrics(process.env.PNEUMA_SPACE_METRICS_PORT, () => metrics.prometheus());
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));

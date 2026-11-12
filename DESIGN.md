@@ -1,4 +1,4 @@
-# 总体设计（M1、M2）
+# 总体设计（M1、M2、M3）
 
 PneumaSpace 把有状态的 web 应用部署到一台可信机器上，M2 起也部署到一个组织的 K8s 集群上。应用声明需要的能力，平台提供并注入；地址稳定，计算按需启动、闲置停止，数据只在清除时删除。目标、能力清单、应用类型、范围、验收数字和信任边界在 `REQUIREMENTS.md` 和 `REQUIREMENTS-M2.md`。应用看到的协议在 `docs/app-contract.md`。每个关键决定的理由在 `docs/adr/`。本文只写模型和结构。
 
@@ -55,7 +55,7 @@ Provider 不知道应用用哪种运行时：`inject` 给出的存储绑定是�
 | `ws` | ingress | Ingress | | | | |
 | `cron` | schedule | Scheduler（Trigger 行是 Release 的一部分，随它由 Registry 写） | | | | |
 | `identity` | ingress | IdentityProvider | | | | |
-| `rtc` | resource | 无每 App 资源；TURN 共享密钥是部署环境变量 `PNEUMA_SPACE_RTC_SECRET`，coturn 和网关都读它 | 检查 `coturn` 服务名可解析（Compose 的 profile 未开时不可解析，发布 409） | `stun:<host>:3478` 和 `turn:<host>:3478?transport=udp`，`<host>` 取部署环境变量 `PNEUMA_SPACE_RTC_PUBLIC_HOST`（默认 `127.0.0.1`），加该密钥 | 无 | 无 |
+| `rtc` | resource | 无每 App 资源；TURN 共享密钥是部署环境变量 `PNEUMA_SPACE_RTC_SECRET`，coturn 和网关都读它 | 检查 `coturn` 服务名可解析（Compose 的 profile 未开时不可解析，发布 409）；此判断由 [ADR 0031](docs/adr/0031-compose-service-presence.md) 修订 | `stun:<host>:3478` 和 `turn:<host>:3478?transport=udp`，`<host>` 取部署环境变量 `PNEUMA_SPACE_RTC_PUBLIC_HOST`（默认 `127.0.0.1`），加该密钥 | 无 | 无 |
 
 每个操作可重复执行。`ensure` 对已存在的 Binding 也会执行，收敛后端漂移并把 `suspended` 置回 `active`；没有单独的 resume。`db` 的 PostgreSQL Provider 用网关的线协议客户端 `pg.ts`，`kv` Provider 用网关内一个最小的 RESP 客户端，以管理角色直接连服务供应，两个平面相同，没有供应任务（ADR 0025 第 9 条）；`object` Provider 和 BundleStore 用 `node:crypto` 签名的 HTTP 直接调用对象服务的 S3 和管理接口（ADR 0013）。网关不用 npm 驱动。平台库和平台密钥在命名卷 `gateway-data`（挂载为网关的 `/data`）；后端数据在 `rustfs-data`、`redis-data`（AOF）、`postgres-data`，以及每 App 的 `pneuma-space-files-<id>`、`pneuma-space-db-<id>`；这些卷在平台重启和 `docker compose down` 后都保留。`<id>` 是 `App.id`。K8s 平面上每 App 的卷是应用命名空间里同名的 ReadWriteOnce PVC，首次唤醒时创建，`remove` 不碰，`purge` 删除（ADR 0019 第 7 条）。
 
@@ -207,3 +207,65 @@ M2 的接缝已经落定：身份在 ADR 0021，多节点在 ADR 0019、0020、0
 不做构建服务和镜像仓库；不经网关服务对象字节；不做 TLS、公网暴露、管理端口认证（回环绑定即信任边界）；不做容器资源限制；不做回滚命令；不做静态站点的 SPA 回退；不承诺 exactly-once 触发；一个 App 只有一个容器；不做备份和后端间迁移；不做应用间认证（容器共享网络是 Docker 的事实，不是平台承诺，应用之间可以伪造身份头）；不签名身份头；不持久化观测数据，不做每应用分时统计和每容器资源用量（M2 的热力图和配额）；平台模型里没有 Agent、LLM、模板选择器或宿主集成，它们在 `templates/` 和文档里。
 
 M2 不做的事在 `REQUIREMENTS-M2.md` 的"M2 不做"一节。
+
+## 5 M3 云入口
+
+[ADR 0027](docs/adr/0027-hosted-fetch-profile.md) 和 [ADR 0028](docs/adr/0028-personal-tenants-and-private-origins.md) 明确引入契约 2。本节保留该独立 Fetch 实验的结构，完整 SaaS 按 [ADR 0030](docs/adr/0030-additive-hosted-platform.md) 和第 6 节实施。第 1、2 节继续描述进程版。调用者看到的形式在 [应用契约](docs/app-contract.md#cloud-profile-contract-2)。
+
+### 5.1 组成与拥有者
+
+`cloud/core` 包含与宿主无关的账户、Registry、记录和 FetchRuntime。`cloud/adapters/cloudflare` 连接托管执行、对象存储和事务存储；`cloud/adapters/local` 提供同一契约的本地实现。HTTP 边界负责解析和授权，应用执行只能经 FetchRuntime。云厂商类型只出现在适配器和组合入口。
+
+租户、用户、成员、应用、版本、令牌与 Binding 的概念沿用第 1.2 节，唯一写者仍为 Registry。云端增加以下状态。
+
+| 状态 | 键 | 唯一写者 | 含义 |
+| --- | --- | --- | --- |
+| IdentityLink | 提供者及不可变主体的散列 | Accounts | 内部用户、个人租户与注册意图，先保存后建立租户 |
+| SignupAdmission | 身份键 | Accounts | 新注册的容量预留，重试复用，既有账户不再预留 |
+| Session | 随机秘密的散列 | Sessions | 租户、用户、作用源、到期与父会话 |
+| AppGrant | 随机码的散列 | Sessions | 应用登录的一次性交换，含 nonce 散列与精确目标源 |
+| Operation | 租户及幂等键 | Registry | 输入摘要、命令序号、准备中或终态及可恢复阶段 |
+| Records | AppId 及记录键 | RecordsProvider | JSON 值、版本及应用级的单调版本计数 |
+| ResourceState | AppId | RecordsProvider | 生命周期命令序号、访问世代和 active/suspended/purged 状态 |
+| ArtifactKeys | AppId 及制品摘要 | ArtifactStore | 已登记键和拒绝迟到写入的清除终态，见 [ADR 0029](docs/adr/0029-terminal-artifact-fences.md) |
+| 云用量与审计 | 租户、时间及操作 | 管理与准入边界 | 操作计数和结果，不存秘密或请求体 |
+
+Registry 持有资源的期望状态，Provider 持有资源已执行的状态。记录操作与世代检查在同一个资源事务中完成。清除保留终态标记，低序号的迟到命令不能重新创建同一个 AppId。普通发布不轮换仍 active 的数据世代；下线、恢复和清除使旧句柄失效。
+
+### 5.2 执行与发布
+
+路由由租户与应用名定位。准入原子检查凭据、应用状态和配额，返回限定于当前 AppId、版本及期限的调用权。静态文件也先准入。动态请求经 FetchRuntime 调用指定的不可变制品，数据句柄仅覆盖该应用。
+
+发布先保存命令及容量预留，再保存和检查制品、收敛资源，最后按命令序号提交 current。并发的不同发布得到冲突。下线提高命令序号，使旧发布无法提交。失败发布保留原 current；同一幂等键可重试未完成阶段。发布的源代码由制品存储拥有，应用记录由资源拥有，两者不混入租户元数据。
+
+下线先拒绝新准入，再等待资源暂停。清除只从 removed 开始，先使资源进入终态，随后清除制品和 Registry 的应用记录。所有外部效果在事务之外，带持久操作身份。重试不依赖原进程仍然存活。
+
+### 5.3 替换点
+
+| 端口 | 承诺 | 首个实现 |
+| --- | --- | --- |
+| IdentityProvider | 已验证的不可变外部身份 | GitHub OAuth |
+| AccountsStore | 身份映射及幂等注册容量预留 | 按身份分片的 Durable Objects，独立开户容量对象 |
+| TenantStore | 同一租户内的原子读改写 | 每租户 SQLite Durable Object |
+| ArtifactStore | 按 AppId 与摘要保存不可变制品 | 私有 R2 bucket |
+| ExecutionHost | 检查及调用固定 Fetch ABI，落实资源与网络限制 | Dynamic Workers |
+| RecordsResource | 有界记录事务、生命周期条件更新、导出和空目标恢复 | 每应用 SQLite Durable Object |
+
+本地适配器不改变业务规则，生产隔离承诺不延伸到本地进程。账户备份和应用导出不含云资源句柄，迁移后重新建立物理绑定。
+
+## 6 完整平台的托管身份
+
+[ADR 0030](docs/adr/0030-additive-hosted-platform.md) 在第 1、2 节的平台上增加 `HostedIdentity` 和 `HostedSessions`。组合根按身份模式选择认证实现，运行时、Provider、调度器、观测组件和控制台继续共用。`hosted-config.ts` 解析配置，具体参数由 [应用契约](docs/app-contract.md#hosted-identity) 定义。
+
+| 状态 | 键 | 唯一写者 |
+| --- | --- | --- |
+| 外部身份映射 | 提供者、不可变外部主体 | Registry，在开户事务内与用户、个人租户和首个管理员成员关系一起写入 |
+| 开户计数 | 单行 | Registry，开户锁及事务内更新，既有身份不重复占用 |
+| 托管认证记录 | 随机秘密的散列 | HostedSessions，值按控制台会话、应用会话、一次性授权码、登录握手区分 |
+| 令牌限制 | 原 Token 行的可空限制字段 | Registry，空值保留旧令牌语义 |
+
+上述数据通过 Store 的共享 SQL 操作持久化，两个存储实现只增加迁移。HostedSessions 消费授权码与创建应用会话在同一事务内完成。派生会话每次准入检查父会话。Registry 在发布激活事务内调用管理边界的授权检查，检查只能通过该事务读取状态。
+
+Authority 从托管身份生成原有 Caller，权限继续由 `can` 和 `allows` 决定。托管模式的令牌和成员关系不使用副本内的延迟缓存。管理端必须配置认证依赖和精确控制源；入口的身份模式、凭据过滤及应用访问检查一起组合。副本间的实时请求查询转发调用者会话和原控制 Host。
+
+控制台仍为 `gateway/src/console.html`。托管模式增加会话 CSRF、令牌限制和清除名称确认，原有页面保持角色边界。Fetch 实验自己的账户和数据不自动并入完整平台。

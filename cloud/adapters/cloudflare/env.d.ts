@@ -1,0 +1,53 @@
+interface __BaseEnv_CloudflareEnv {
+	PNEUMA_SPACE_ARTIFACTS: R2Bucket;
+	PNEUMA_SPACE_LOADER: WorkerLoader;
+	PNEUMA_SPACE_CONTROL_ORIGIN: "https://space.deepaste.ai";
+	PNEUMA_SPACE_APPS_DOMAIN: "REPLACE_WITH_SEPARATE_APP_DOMAIN";
+	PNEUMA_SPACE_GITHUB_CLIENT_ID: "REPLACE_WITH_GITHUB_CLIENT_ID";
+	PNEUMA_SPACE_ENABLED: "false";
+	PNEUMA_SPACE_GITHUB_CLIENT_SECRET: string;
+	PNEUMA_SPACE_SESSION_KEY: string;
+	PNEUMA_SPACE_ACCOUNTS: DurableObjectNamespace<import("./worker").AccountsObject>;
+	PNEUMA_SPACE_CAPACITY: DurableObjectNamespace<import("./worker").CapacityObject>;
+	PNEUMA_SPACE_TENANTS: DurableObjectNamespace<import("./worker").TenantObject>;
+	PNEUMA_SPACE_RECORDS: DurableObjectNamespace<import("./worker").RecordsObject>;
+	PNEUMA_SPACE_ARTIFACT_INDEX: DurableObjectNamespace<import("./worker").ArtifactIndexObject>;
+}
+declare namespace Cloudflare {
+	interface GlobalProps {
+		mainModule: typeof import("./worker");
+		durableNamespaces: "AccountsObject" | "CapacityObject" | "TenantObject" | "RecordsObject" | "ArtifactIndexObject";
+	}
+	interface Env extends __BaseEnv_CloudflareEnv {}
+}
+interface CloudflareEnv extends __BaseEnv_CloudflareEnv {}
+type StringifyValues<EnvType extends Record<string, unknown>> = {
+	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
+};
+declare namespace NodeJS {
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "PNEUMA_SPACE_CONTROL_ORIGIN" | "PNEUMA_SPACE_APPS_DOMAIN" | "PNEUMA_SPACE_GITHUB_CLIENT_ID" | "PNEUMA_SPACE_ENABLED" | "PNEUMA_SPACE_GITHUB_CLIENT_SECRET" | "PNEUMA_SPACE_SESSION_KEY">> {}
+}
+declare module "*.html" {
+	const value: string;
+	export default value;
+}
+declare module "*.txt" {
+	const value: string;
+	export default value;
+}
+declare module "*.sql" {
+	const value: string;
+	export default value;
+}
+declare module "*.bin" {
+	const value: ArrayBuffer;
+	export default value;
+}
+declare module "*.wasm" {
+	const value: WebAssembly.Module;
+	export default value;
+}
+declare module "*.wasm?module" {
+	const value: WebAssembly.Module;
+	export default value;
+}

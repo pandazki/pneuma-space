@@ -35,14 +35,17 @@ const DOMAIN_ATTRIBUTE = /;\s*domain\s*(=[^;]*)?(?=;|$)/gi;
 
 /** An app's cookies stay on its own host: `Domain` goes from every `Set-Cookie` (ADR 0021 item 6). */
 function hostOnly(raw: string[]): string[] {
-  for (let i = 0; i < raw.length; i += 2) if (raw[i].toLowerCase() === 'set-cookie') raw[i + 1] = raw[i + 1].replace(DOMAIN_ATTRIBUTE, '');
+  for (let i = raw.length - 2; i >= 0; i -= 2) if (raw[i].toLowerCase() === 'set-cookie') {
+    if (/^\s*(?:(?:__Host-)?pneuma-space-|pneuma_space_session\s*=)/i.test(raw[i + 1])) raw.splice(i, 2);
+    else raw[i + 1] = raw[i + 1].replace(DOMAIN_ATTRIBUTE, '');
+  }
   return raw;
 }
 
 /** The same for a raw response head, which the WebSocket path relays as bytes. */
 function hostOnlyHead(head: Buffer): Buffer {
   const text = head.toString('latin1');
-  const out = text.replace(/^set-cookie:[^\r\n]*/gim, (line) => line.replace(DOMAIN_ATTRIBUTE, ''));
+  const out = text.replace(/^set-cookie:\s*(?:(?:__Host-)?pneuma-space-|pneuma_space_session\s*=)[^\r\n]*\r\n/gim, '').replace(/^set-cookie:[^\r\n]*/gim, (line) => line.replace(DOMAIN_ATTRIBUTE, ''));
   return out === text ? head : Buffer.from(out, 'latin1');
 }
 

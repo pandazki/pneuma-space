@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Addressing } from './address.ts';
+import { parseHostedEnv, type HostedConfig } from './hosted-config.ts';
 import type { Authority } from './authz.ts';
 import { emit } from './events.ts';
 import { JwtError, type JwtConfig, type JwtVerifier } from './jwt.ts';
@@ -42,6 +43,7 @@ function sha256(text: string): string {
 
 /** One request's credential, read at most once and reused for access, identity headers and triggers (ADR 0022 item 6). */
 export type Auth =
+  | { readonly via: 'hosted'; readonly subject: Subject; readonly name: string; readonly sessionHash: string; readonly csrf: string | null; readonly origin: string }
   | { readonly via: 'local'; readonly subject: Subject; readonly name: string }
   | { readonly via: 'upstream'; readonly subject: Subject; readonly name: string; readonly groups: readonly string[] }
   | { readonly via: 'token'; readonly subject: Subject; readonly name: string; readonly token: Token };
@@ -162,6 +164,7 @@ export class LocalIdentity implements Identity {
 
 /** What `main.ts` builds the provider from; `upstream` without a required key throws, so the gateway exits before it listens. */
 export type IdentitySetup =
+  | { readonly kind: 'hosted'; readonly options: HostedConfig }
   | { readonly kind: 'local' }
   | {
     readonly kind: 'upstream';
@@ -173,7 +176,8 @@ export type IdentitySetup =
 export function parseIdentityEnv(env: NodeJS.ProcessEnv): IdentitySetup {
   const kind = env.PNEUMA_SPACE_IDENTITY?.trim() || 'local';
   if (kind === 'local') return { kind };
-  if (kind !== 'upstream') throw new Error(`PNEUMA_SPACE_IDENTITY must be local or upstream, got "${kind}"`);
+  if (kind === 'hosted') return { kind, options: parseHostedEnv(env) };
+  if (kind !== 'upstream') throw new Error(`PNEUMA_SPACE_IDENTITY must be local, upstream or hosted, got "${kind}"`);
   const required = (key: string) => {
     const value = env[key]?.trim();
     if (!value) throw new Error(`${key} is required when PNEUMA_SPACE_IDENTITY=upstream`);

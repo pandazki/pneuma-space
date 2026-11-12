@@ -1,3 +1,4 @@
+import type { HostedAuthRecord, HostedIdentityLink } from './hosted-model.ts';
 // The platform library's DML and row mapping, shared by SqliteStore and PgStore (ADR 0025 item 2). Placeholders are `$n`.
 
 import {
@@ -92,6 +93,7 @@ const toToken = (r: Row): Token => ({
   createdBy: r.created_by as Token['createdBy'],
   createdAt: num(r.created_at),
   revokedAt: numOrNull(r.revoked_at),
+  ...(r.restrictions == null ? {} : { restrictions: json(r.restrictions) }),
 });
 
 const toTenant = (r: Row): Tenant => ({ name: r.name as TenantName, display: r.display as string, quota: json(r.quota), createdAt: num(r.created_at) });
@@ -286,6 +288,49 @@ export class SqlOps implements StoreOps {
     this.#touch({ kind: 'policy' });
   }
 
+  async hostedIdentity(provider: string, externalSubject: string): Promise<HostedIdentityLink | null> {
+    const row = await this.#one('SELECT * FROM hosted_identity WHERE provider = $1 AND external_subject = $2', [provider, externalSubject]);
+    return row ? { provider, externalSubject, user: row.user_id as string, tenant: row.tenant as TenantName, name: row.name as string } : null;
+  }
+
+  async putHostedIdentity(identity: HostedIdentityLink): Promise<void> {
+    await this.#s.run(`INSERT INTO hosted_identity (provider, external_subject, user_id, tenant, name) VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (provider, external_subject) DO UPDATE SET name = excluded.name`,
+    [identity.provider, identity.externalSubject, identity.user, identity.tenant, identity.name]);
+  }
+
+  async hostedSignupCount(lock?: RowLock): Promise<number> {
+    const row = await this.#one(`SELECT count FROM hosted_signup WHERE id = 1${lock ? this.#s.dialect.lock[lock] : ''}`, []);
+    return num(row!.count);
+  }
+
+  async setHostedSignupCount(count: number): Promise<void> {
+    await this.#s.run('UPDATE hosted_signup SET count = $1 WHERE id = 1', [count]);
+  }
+
+  async hostedAuth(hash: string, lock?: RowLock): Promise<HostedAuthRecord | null> {
+    const row = await this.#one(`SELECT * FROM hosted_auth WHERE hash = $1${lock ? this.#s.dialect.lock[lock] : ''}`, [hash]);
+    return row ? { hash, createdAt: num(row.created_at), expiresAt: num(row.expires_at), data: json(row.data) } : null;
+  }
+
+  async hostedAuthFor(user: string, lock?: RowLock): Promise<HostedAuthRecord[]> {
+    return (await this.#s.all(`SELECT * FROM hosted_auth WHERE user_id = $1 ORDER BY created_at, hash${lock ? this.#s.dialect.lock[lock] : ''}`, [user]))
+      .map((row) => ({ hash: row.hash as string, createdAt: num(row.created_at), expiresAt: num(row.expires_at), data: json(row.data) }));
+  }
+
+  async putHostedAuth(record: HostedAuthRecord): Promise<void> {
+    await this.#s.run('INSERT INTO hosted_auth (hash, user_id, created_at, expires_at, data) VALUES ($1, $2, $3, $4, $5)',
+      [record.hash, record.data.user, record.createdAt, record.expiresAt, JSON.stringify(record.data)]);
+  }
+
+  async deleteHostedAuth(hash: string): Promise<boolean> {
+    return (await this.#s.run('DELETE FROM hosted_auth WHERE hash = $1', [hash])).changes > 0;
+  }
+
+  async sweepHostedAuth(before: number): Promise<number> {
+    return (await this.#s.run('DELETE FROM hosted_auth WHERE hash IN (SELECT hash FROM hosted_auth WHERE expires_at <= $1 ORDER BY expires_at, hash LIMIT 500)', [before])).changes;
+  }
+
   async token(hash: string) {
     const row = await this.#one('SELECT * FROM token WHERE hash = $1', [hash]);
     return row ? toToken(row) : null;
@@ -297,8 +342,8 @@ export class SqlOps implements StoreOps {
 
   async putToken(t: Token) {
     await this.#s.run(
-      `INSERT INTO token (id, tenant, subject, label, hash, created_by, created_at, revoked_at) VALUES (${placeholders(8)})`,
-      [t.id, t.tenant, t.subject, t.label, t.hash, t.createdBy, t.createdAt, t.revokedAt],
+      `INSERT INTO token (id, tenant, subject, label, hash, created_by, created_at, revoked_at, restrictions) VALUES (${placeholders(9)})`,
+      [t.id, t.tenant, t.subject, t.label, t.hash, t.createdBy, t.createdAt, t.revokedAt, t.restrictions ? JSON.stringify(t.restrictions) : null],
     );
     this.#touch({ kind: 'tenant', name: t.tenant });
   }

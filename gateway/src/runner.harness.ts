@@ -145,7 +145,7 @@ export type RunnerProcess = {
 export async function startRunner(t: TestContext, env: Record<string, string> = {}, data = tempDir(t, 'pneuma-space-runner-')): Promise<RunnerProcess> {
   const child = spawn(process.execPath, [
     '--disable-warning=ExperimentalWarning', '--disable-warning=SecurityWarning',
-    '--permission', `--allow-fs-read=${data}`, `--allow-fs-read=${SRC}`, `--allow-fs-write=${data}`, '--allow-worker', ...NET, join(SRC, 'runner.ts'),
+    '--permission', `--allow-fs-read=${data}`, `--allow-fs-read=${SRC}`, `--allow-fs-read=${join(SRC, '../../shared')}`, `--allow-fs-write=${data}`, '--allow-worker', ...NET, join(SRC, 'runner.ts'),
   ], { env: { ...process.env, PNEUMA_SPACE_DATA: data, PNEUMA_SPACE_RUNNER_PORT: '0', ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
   const exited = new Promise<string | number | null>((ok) => child.once('exit', (code, signal) => ok(signal ?? code)));
   const stop = async () => {

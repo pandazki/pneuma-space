@@ -127,3 +127,65 @@ Checks for the organization edition (`REQUIREMENTS-M2.md`, stories US-O-1 to US-
 | AC-STORE-6 | Two replicas start against an empty database at once; the schema is applied once and both serve. |
 | AC-STORE-7 | `PNEUMA_SPACE_STORE_URL` with `sslmode=verify-full` connects with the right CA and fails to start with a wrong one. |
 | AC-STORE-8 | `package.json` declares no `dependencies`. |
+
+## Full platform SaaS
+
+These rows cover [the additive SaaS baseline](../REQUIREMENTS-M3.md) and [ADR 0030](adr/0030-additive-hosted-platform.md). Run the original M1 rows on Compose and the M2 rows on the configured operator cluster as regression gates. Neither the Fetch profile checks below nor local identity tests establish public hostile-workload isolation.
+
+| ID | Acceptance |
+| --- | --- |
+| AC-SAAS-1 | Concurrent first sign-ins for one verified immutable identity create one user, one personal tenant and one owner membership; retries and provider display-name changes reuse them. |
+| AC-SAAS-2 | At signup capacity a new identity is refused without a partial account, while an existing identity signs in. |
+| AC-SAAS-3 | Hosted login uses a browser-bound, expiring, single-use handshake; an invalid callback creates no session. |
+| AC-SAAS-4 | Control writes require exact Origin and session CSRF; logout rejects the next control or derived app-session admission on every replica. |
+| AC-SAAS-5 | A private-app grant is single-use and bound to AppId, exact origin and browser nonce; successful redemption removes the code from the URL. |
+| AC-SAAS-6 | Another account cannot list, manage or visit a new private application; denied static, container, isolate and WebSocket requests do not execute app code or return static bytes. |
+| AC-SAAS-7 | Credentials enforce expiry, revocation, action and immutable AppId restrictions on management, listings, diagnostics and every app admission path; token secrets and hashes never appear in read responses. |
+| AC-SAAS-8 | Revocation while publication is preparing prevents activation; the prior release and persistent state remain usable. |
+| AC-SAAS-9 | Contract-1 container, isolate and static apps use every original capability under hosted identity; the relevant original story checks pass without rewriting app code. |
+| AC-SAAS-10 | The operator sees the original Overview, Realtime, Topology, Host/Cluster, Team and Projects views, including real telemetry, logs and actions; new accounts receive no platform-admin privilege. |
+| AC-SAAS-11 | At 1440 and 390 px in English and Chinese, the original console completes sign-in, credential issue/revoke, app navigation and typed purge confirmation without overflow or inaccessible controls. |
+| AC-SAAS-12 | Existing SQLite and PostgreSQL data migrate without changing application IDs, releases, bindings, access settings or legacy token permissions. |
+| AC-SAAS-13 | Hosted app code receives no platform cookies or credentials and cannot set platform-reserved response cookies, including on WebSocket responses. |
+| AC-SAAS-14 | Hosted production configuration refuses local test identities, insecure origins and overlapping control/app sites; local test login is available only in explicitly enabled loopback development mode. |
+
+Public release also requires the following checks on the actual deployment. Local hosted checks do not satisfy them.
+
+| ID | Pass condition |
+| --- | --- |
+| AC-SAAS-15 | Deliberately hostile contract-1 container and isolate applications cannot read another app’s memory or state, reach platform control sockets or the platform store, obtain platform credentials, or cross into another account through network or browser-origin attacks. Repeat after sleep, release replacement and removal. |
+| AC-SAAS-16 | Exhausting compute, memory, processes, storage or request capacity in one account is refused at its limits while another account and the control plane remain usable; billable resource use is bounded and visible. |
+| AC-SAAS-17 | On the required Cloudflare deployment, every supported contract-1 runtime and capability passes its original acceptance rows; an export restores application artifacts, persistent state and account ownership on a second adapter, with the source data retained. |
+
+## Cloud profile (contract 2)
+
+These rows cover [US-C-1 through US-C-7](user-stories.md#云端首版) and the [cloud contract](app-contract.md#cloud-profile-contract-2). Run the cloud group on the local Workers engine and repeat account/domain-dependent cases on an explicitly configured staging deployment. Local results do not establish production isolation or OAuth availability. Unchanged M1/M2 rows still apply to their existing deployment profiles.
+
+| ID | Acceptance |
+| --- | --- |
+| AC-C-1 | Twenty concurrent registrations for one verified immutable external identity, including retry after the directory intent was saved, return the same user and tenant with exactly one owner membership. |
+| AC-C-2 | At the registration capacity limit, a new identity is refused without another tenant; an existing identity still signs in. |
+| AC-C-3 | A token is shown once, its persisted value is a hash, and expired or revoked tokens fail the next admission. |
+| AC-C-4 | A token's action and AppId restrictions apply to list, read, publish, invoke, remove and export; tokens cannot issue tokens or purge. |
+| AC-C-5 | A second account cannot list, manage or invoke the first account's app; denied dynamic and static requests execute no app code and expose no file. |
+| AC-C-6 | Browser control writes require exact Origin and the session's CSRF value; logout invalidates derived app sessions on their next admission. |
+| AC-C-7 | A private app login grant is one-use, expires, and fails for a different origin, AppId or browser nonce. The successful redirect removes the code from the URL. |
+| AC-C-8 | Application code receives neither platform cookies nor Bearer secrets, cannot replace reserved identity headers through Connection nomination, and cannot set a platform or parent-domain session cookie. |
+| AC-C-9 | Invalid or failed artifact preparation leaves the current release unchanged; replaying a successful idempotency key returns its original release. |
+| AC-C-10 | Two different publications of one app cannot both own its pending command; removal during a blocked preparation prevents that old publication from activating. |
+| AC-C-11 | App and artifact capacity reservations remain within limits during concurrent publication; retry after a lost response does not reserve twice. |
+| AC-C-12 | Two commits using the same expected revision yield one success; a failed check in a multi-key commit changes no key. |
+| AC-C-13 | Records count and byte limits are enforced in the same transaction as writes, including concurrent commits. |
+| AC-C-14 | Record values and revisions survive runtime eviction, republish, remove and resume. |
+| AC-C-15 | Purge is refused for an active app; completed purge deletes its records, and delayed data handles or lifecycle commands cannot recreate them. Reusing the name allocates another AppId. |
+| AC-C-16 | Export a removed app and restore it through the separate local storage adapter; the same Fetch module reads identical records and revisions. |
+| AC-C-17 | A malformed, oversized or checksum-invalid archive creates no target; importing over an existing target is refused. |
+| AC-C-18 | App attempts to use fetch, raw sockets, another app's resource or a platform binding fail in the deployed runtime. |
+| AC-C-19 | Invocation request, response, deadline and operation limits stop excess work; quota refusal happens before code execution and does not consume another app's budget. |
+| AC-C-20 | Two apps with identical source do not share mutable module state; a reused app receives fresh invocation context and cannot reuse an earlier invocation's data capability. |
+| AC-C-21 | At 1440 and 390 px, in English and Chinese, a browser completes registration, token creation/revocation, app navigation, remove and typed purge confirmation without overflow or inaccessible controls. |
+| AC-C-22 | Production configuration rejects missing identity secrets, insecure control origins or overlapping control/app sites; the development identity is absent from the production bundle. |
+| AC-C-23 | Unsupported runtime, capability, ABI or artifact path is rejected before resource changes. |
+| AC-C-24 | After credentials are revoked while publication is preparing, activation fails and the last active release remains available. |
+
+Cloud release evidence must also name the actual account entitlements, compatibility configuration, test domains and runtime version. Paid-plan enrollment, DNS changes and identity-provider setup are operator configuration, not consequences inferred from passing local tests.

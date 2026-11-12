@@ -187,11 +187,12 @@ input:focus, textarea:focus, .lbtn:focus-visible { box-shadow: 0 0 0 2px var(--a
 .bar { height: 4px; border-radius: 2px; background: var(--inset); box-shadow: 0 0 0 1px var(--line); margin-top: 10px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--accent); }
 .bar i.hot { background: var(--orange); }
-.form { display: grid; gap: 16px; }
+.form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.form small { overflow-wrap: anywhere; }
 .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
-.field { display: grid; gap: 6px; align-content: start; }
+.field { display: grid; gap: 6px; align-content: start; min-width: 0; }
 .field > span { font-size: 12.5px; font-weight: 500; }
-.field small { font-size: 12px; color: var(--ink-3); }
+.field small { font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
 .field small.err, .msg.err { color: var(--red); }
 .msg { font-size: 12.5px; color: var(--green); white-space: pre-wrap; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -845,7 +846,7 @@ input.lim-in { width: 96px; height: 22px; padding: 0 6px; border-radius: 6px; te
 .prow .av { width: 28px; height: 28px; border-radius: 50%; background: var(--accent-tint); color: var(--accent-ink); font: 600 12px/28px var(--font); text-align: center; }
 .pwho { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
 .pwho b { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
-.pwho .mono { font-size: 11.5px; }
+.pwho .mono { font-size: 11.5px; overflow-wrap: anywhere; min-width: 0; }
 .pmeta { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
 .addrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 12px; padding: 12px; }
 .addrow input { flex: 1 1 200px; max-width: 320px; }
@@ -888,7 +889,8 @@ dialog .msg.err { margin: -8px 0 16px; }
   section { padding: 24px 20px; }
   .frame:has(> .topbar:not([hidden])) { grid-template-rows: auto auto 1fr; }
   .topbar { position: static; padding: 12px 20px 0; justify-content: flex-end; }
-  .topbar .lbtn { max-width: 150px; }
+  .topbar .lbtn, .topbar > .chip { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+  .topbar .who, .topbar > .btn { flex-shrink: 0; }
   .who .chip, .topbar .sep { display: none; }
   .split { grid-template-columns: minmax(0, 1fr); }
   .ifilter input[type="search"] { flex-basis: 100%; }
@@ -926,7 +928,7 @@ dialog .msg.err { margin: -8px 0 16px; }
 <script>
 const I18N = {
   zh: {
-    'm.seen': '最近', 'm.roleOf': '{id} 的角色', 'm.group.admin': '管理员', 'm.group.member': '成员', 'm.removeItem': '移出租户…', 'm.removeNote': '他签发的个人令牌一并失效', 'tk.by': '签发人', 'tk.revokeItem': '吊销…', 'tk.revokeNote': '30 秒内在每个副本失效', 'tk.revokedN.one': '已吊销 {n} 个', 'tk.revokedN.other': '已吊销 {n} 个', 'q.used': '已用 {n}', 'q.edit': '修改上限…', 'q.editNote': '超出的部分不会被收回，只挡新的', 'q.editTitle': '修改 {tenant} 的配额', 'q.editBody': '留空表示不限。降到已用量以下不会停掉已有的应用或实例，只拒绝新的发布和唤醒。', 'q.save': '保存配额', 'team.youAdmin': '你是管理员', 'team.youMember': '你是成员', 'tn.open': '打开 {name} 的团队页', 'tn.adminsAre': '管理员', 'tn.createdAgo': '{ago}创建', 'tn.members.one': '{n} 名成员', 'tn.members.other': '{n} 名成员', 'tn.new': '新建租户', 
+    'm.seen': '最近', 'm.roleOf': '{id} 的角色', 'm.group.admin': '管理员', 'm.group.member': '成员', 'm.removeItem': '移出租户…', 'm.removeNote': '他签发的个人令牌一并失效', 'tk.by': '签发人', 'tk.revokeItem': '吊销…', 'tk.revokeNote': '30 秒内在每个副本失效', 'tk.revokeNote.hosted': '立即拒绝新的请求', 'tk.inactiveN.one': '已失效 {n} 个', 'tk.inactiveN.other': '已失效 {n} 个', 'q.used': '已用 {n}', 'q.edit': '修改上限…', 'q.editNote': '超出的部分不会被收回，只挡新的', 'q.editTitle': '修改 {tenant} 的配额', 'q.editBody': '留空表示不限。降到已用量以下不会停掉已有的应用或实例，只拒绝新的发布和唤醒。', 'q.save': '保存配额', 'team.youAdmin': '你是管理员', 'team.youMember': '你是成员', 'tn.open': '打开 {name} 的团队页', 'tn.adminsAre': '管理员', 'tn.createdAgo': '{ago}创建', 'tn.members.one': '{n} 名成员', 'tn.members.other': '{n} 名成员', 'tn.new': '新建租户',
     'd.liftTitle': '解除 {name} 的隔离？', 'd.olderDeliveries.one': '更早的 {n} 次', 'd.olderDeliveries.other': '更早的 {n} 次', 'd.liftBody': '失败计数清零，下一次请求重新唤醒它。原因没修好会再次被隔离。', 'ac.title': '谁能打开 {name}', 'ac.save': '保存访问范围', 'd.liftNote': '下一次请求重新唤醒', 'ac.change': '更改访问…', 'd.removeItem': '移除…', 'd.removeNote': '地址 404，数据保留', 'd.purgeItem': '清除数据…', 'd.purgeNote': '删除全部数据，无法撤销', 'd.att.failed.one': '{n} 次投递失败', 'd.att.failed.other': '{n} 次投递失败', 'd.att.toDeliveries': '看投递', 'd.att.errors': '24 小时错误率 {pct}', 'd.att.errorsWhy': '{requests} 次请求里 {errors} 次错误', 'd.toLogs': '跳到日志', 'd.att.slow': '最近一次唤醒用了 {ms}，超过 3 秒门槛', 'd.att.slowWhy': '{at} 唤醒；看启动日志，或调大就绪超时', 'd.att.removed': '已移除：地址返回 404', 'd.att.removedWhy': '卷、数据库、键前缀和 bucket 都还在。再次发布即恢复，只有清除才删除。', 'd.bundle': '静态包', 'empty.releases': '还没有发布。', 'd.olderReleases.one': '更早的 {n} 个版本', 'd.olderReleases.other': '更早的 {n} 个版本', 'd.scheduledFor': '计划 {at}', 'd.attempts.one': '尝试 {n} 次', 'd.attempts.other': '尝试 {n} 次', 'd.nextAttempt': '下次尝试 {ago}', 'sec.data': '数据', 'sec.dataDesc': '每种能力的数据由哪个提供方持有、放在哪里。移除不动它们，只有清除删除。',
     'ap.search': '搜索应用或租户', 'ap.req24': '24 小时请求', 'ap.staticLine': '静态站点，请求直接返回文件，不唤醒', 'apps.filter': '按名称筛选', 'ap.b.awake': '醒着', 'ap.b.asleep': '睡眠', 'ap.b.quarantined': '隔离', 'ap.b.removed': '已移除', 'ap.in.awake': '醒着', 'ap.in.asleep': '睡眠', 'ap.in.waking': '唤醒中', 'ap.in.draining': '排空中', 'ap.in.stopping': '停止中', 'ap.never': '还没唤醒过', 'ap.quarantined': '隔离中 · {reason}', 'ap.sparkTip': '{requests} 请求 · {errors} 错误', 'ap.sparkLabel': '24 小时 {requests} 次请求，{errors} 次错误', 'ap.errors.one': '{n} 次错误', 'ap.errors.other': '{n} 次错误', 'ap.lastAccess': '最近访问', 'ap.removedNote': '地址返回 404，数据保留', 'ap.awakeN': '醒着 {n}', 'ap.groupRequests': '24 小时 {n} 次请求',
     'tp.lane.container.sub.k8s': 'Kubernetes · 每应用一个 Pod', 'tp.engine.container.k8s': 'Kubernetes', 'tp.unprobed.k8s': '随集群，不探测',
@@ -1133,7 +1135,7 @@ const I18N = {
     'team.title': '团队', 'team.sub': '{tenant} 的成员和令牌。', 'team.subAll': '平台上的每个租户：谁快到配额、谁闲着、谁在管。',
     'team.none': '你还不属于任何租户。请租户管理员按你的 id（{id}）添加你。',
     'sec.members': '成员', 'sec.membersRead': '这个租户的成员和角色。租户管理员负责添加和移除。', 'sec.membersDesc': '按 id 添加，对方不必已经登录过。每个租户至少保留一个管理员。',
-    'm.never': '从未登录', 'm.you': '你', 'm.add': '添加成员', 'm.id': '用户 id', 'm.idHint': '上游身份里的用户 id，不带 user:。',
+    'm.never': '从未登录', 'm.you': '你', 'm.add': '添加成员', 'm.id': '用户 id', 'm.idHint': '上游身份里的用户 id，不带 user:。', 'm.idHint.hosted': '对方团队页显示的用户 id，不带 user:。',
     'm.added': '{id} 已加入，角色是{role}。', 'm.roleSaved': '{id} 的角色改为{role}。', 'm.remove': '移除',
     'm.removeTitle': '从 {tenant} 移除 {id}？', 'm.removeBody': '他在这个租户签发的个人令牌随之失效。30 秒内在每个副本生效。',
     'sec.tokens': '令牌', 'sec.tokensDesc': '服务令牌给自动化，个人令牌给你自己的 appctl。权限不超过成员，明文只显示一次。',
@@ -1144,6 +1146,13 @@ const I18N = {
     'tk.secretTitle': '现在复制这个令牌，它不会再显示', 'tk.secretFor': '主体 {subject}', 'tk.copy': '复制', 'tk.copied': '已复制', 'tk.done': '我已保存',
     'tk.revoke': '吊销', 'tk.revokeTitle': '吊销 {label}？', 'tk.revokeBody': '用它的请求 30 秒内在每个副本开始被拒绝。无法撤销。',
     'tk.revoked': '已吊销',
+    'tk.expired': '已到期', 'tk.expires': '到期', 'tk.expiry': '有效期', 'tk.days': '{n} 天',
+    'tk.scopes': '允许的操作', 'tk.scope.read': '读取与诊断', 'tk.scope.publish': '发布', 'tk.scope.invoke': '访问与触发', 'tk.scope.remove': '移除', 'tk.scope.manage': '修改配置',
+    'tk.apps': '应用范围', 'tk.allApps': '全部应用', 'tk.selectedApps': '所选应用', 'tk.futureApps': '包括之后创建的应用。', 'tk.chooseApps': '至少选择一个应用。', 'tk.chooseScopes': '至少选择一种操作。', 'tk.appsN': '{n} 个应用',
+    'tk.revokeBodyHosted': '吊销后，使用它的新请求立即被拒绝。已经准入的请求可继续结束。',
+    'top.signOutBody': '退出控制台，并使这个会话登录的应用在下一次请求时重新验证身份。', 'd.confirmName': '输入 {name} 确认清除',
+    'ac.org.hosted': '全部账户', 'ac.org.desc.hosted': '平台上任何已登录账户都能访问，包括其他租户。',
+    'ac.public.desc.hosted': '无需登录即可访问；应用声明了必需身份时仍要求登录。',
     'empty.members': '还没有成员。', 'empty.tokens': '还没有令牌。', 'empty.tenants': '还没有租户。',
     'sec.tenants': '租户', 'sec.tenantsDesc': '离配额最近的在前。点卡片切换到这个租户，管理它的成员、令牌和配额。', 'sec.newTenant': '新建租户', 'sec.newTenantDesc': '首批管理员按 id 填写，可以还没登录过。',
     'tn.name': '名称', 'tn.nameHint': '小写字母、数字和 -。', 'tn.display': '显示名（可选）', 'tn.admins': '首批管理员', 'tn.adminsHint': '用户 id，用逗号或空格分隔。',
@@ -1208,7 +1217,7 @@ const I18N = {
     'empty.cl.instances': '没有醒着的实例。', 'empty.cl.volumes': '没有应用卷。',
   },
   en: {
-    'm.seen': 'seen', 'm.roleOf': 'Role of {id}', 'm.group.admin': 'Admins', 'm.group.member': 'Members', 'm.removeItem': 'Remove from tenant…', 'm.removeNote': 'Their personal tokens stop working too', 'tk.by': 'by', 'tk.revokeItem': 'Revoke…', 'tk.revokeNote': 'Stops working on every replica within 30 s', 'tk.revokedN.one': '{n} revoked', 'tk.revokedN.other': '{n} revoked', 'q.used': '{n} used', 'q.edit': 'Change limits…', 'q.editNote': 'Usage above a new limit is not taken back', 'q.editTitle': 'Change the quota of {tenant}', 'q.editBody': 'Empty means unlimited. A limit below current use stops no app or instance; it refuses new publishes and wakes.', 'q.save': 'Save quota', 'team.youAdmin': 'You are an admin', 'team.youMember': 'You are a member', 'tn.open': 'Open the team page of {name}', 'tn.adminsAre': 'Admins', 'tn.createdAgo': 'created {ago}', 'tn.members.one': '{n} member', 'tn.members.other': '{n} members', 'tn.new': 'New tenant', 
+    'm.seen': 'seen', 'm.roleOf': 'Role of {id}', 'm.group.admin': 'Admins', 'm.group.member': 'Members', 'm.removeItem': 'Remove from tenant…', 'm.removeNote': 'Their personal tokens stop working too', 'tk.by': 'by', 'tk.revokeItem': 'Revoke…', 'tk.revokeNote': 'Stops working on every replica within 30 s', 'tk.revokeNote.hosted': 'New requests are refused immediately', 'tk.inactiveN.one': '{n} inactive', 'tk.inactiveN.other': '{n} inactive', 'q.used': '{n} used', 'q.edit': 'Change limits…', 'q.editNote': 'Usage above a new limit is not taken back', 'q.editTitle': 'Change the quota of {tenant}', 'q.editBody': 'Empty means unlimited. A limit below current use stops no app or instance; it refuses new publishes and wakes.', 'q.save': 'Save quota', 'team.youAdmin': 'You are an admin', 'team.youMember': 'You are a member', 'tn.open': 'Open the team page of {name}', 'tn.adminsAre': 'Admins', 'tn.createdAgo': 'created {ago}', 'tn.members.one': '{n} member', 'tn.members.other': '{n} members', 'tn.new': 'New tenant',
     'd.liftTitle': 'Lift the quarantine of {name}?', 'd.olderDeliveries.one': '{n} earlier', 'd.olderDeliveries.other': '{n} earlier', 'd.liftBody': 'The failure count resets and the next request wakes it. If the cause remains, it is quarantined again.', 'ac.title': 'Who can open {name}', 'ac.save': 'Save access', 'd.liftNote': 'the next request wakes it', 'ac.change': 'Change access…', 'd.removeItem': 'Remove…', 'd.removeNote': 'address 404, data kept', 'd.purgeItem': 'Purge data…', 'd.purgeNote': 'deletes every byte, cannot be undone', 'd.att.failed.one': '{n} failed delivery', 'd.att.failed.other': '{n} failed deliveries', 'd.att.toDeliveries': 'See deliveries', 'd.att.errors': 'Error rate {pct} over 24 h', 'd.att.errorsWhy': '{errors} errors in {requests} requests', 'd.toLogs': 'Jump to logs', 'd.att.slow': 'The last wake took {ms}, over the 3 s gate', 'd.att.slowWhy': 'woke at {at}; check the start-up logs or raise the ready timeout', 'd.att.removed': 'Removed: the address answers 404', 'd.att.removedWhy': 'Volumes, databases, key prefixes and buckets are kept. Publishing again restores it; only purge deletes.', 'd.bundle': 'bundle', 'empty.releases': 'No release yet.', 'd.olderReleases.one': '{n} older release', 'd.olderReleases.other': '{n} older releases', 'd.scheduledFor': 'scheduled {at}', 'd.attempts.one': '{n} attempt', 'd.attempts.other': '{n} attempts', 'd.nextAttempt': 'next attempt {ago}', 'sec.data': 'Data', 'sec.dataDesc': 'Where each capability keeps its data and which provider holds it. Remove leaves it; only purge deletes it.',
     'ap.search': 'Search app or tenant', 'ap.req24': 'requests, 24 h', 'ap.staticLine': 'Static site: files answer without a wake', 'apps.filter': 'Filter by name', 'ap.b.awake': 'Awake', 'ap.b.asleep': 'Asleep', 'ap.b.quarantined': 'Quarantined', 'ap.b.removed': 'Removed', 'ap.in.awake': 'Awake for', 'ap.in.asleep': 'Asleep for', 'ap.in.waking': 'Waking for', 'ap.in.draining': 'Draining for', 'ap.in.stopping': 'Stopping for', 'ap.never': 'Never woken', 'ap.quarantined': 'Quarantined · {reason}', 'ap.sparkTip': '{requests} requests · {errors} errors', 'ap.sparkLabel': '{requests} requests and {errors} errors in 24 h', 'ap.errors.one': '{n} error', 'ap.errors.other': '{n} errors', 'ap.lastAccess': 'Last access', 'ap.removedNote': 'address answers 404, data kept', 'ap.awakeN': '{n} awake', 'ap.groupRequests': '{n} requests in 24 h',
     'tp.lane.container.sub.k8s': 'Kubernetes · one Pod per app', 'tp.engine.container.k8s': 'Kubernetes', 'tp.unprobed.k8s': 'with the cluster, not probed',
@@ -1415,7 +1424,7 @@ const I18N = {
     'team.title': 'Team', 'team.sub': 'Members and tokens of {tenant}.', 'team.subAll': 'Every tenant on the platform: who is near a quota, who is idle, who administers it.',
     'team.none': 'You are not in any tenant yet. Ask a tenant admin to add you by your id ({id}).',
     'sec.members': 'Members', 'sec.membersRead': 'The members of this tenant and their roles. A tenant admin adds and removes them.', 'sec.membersDesc': 'Add by id; the person need not have signed in yet. Every tenant keeps at least one admin.',
-    'm.never': 'Never signed in', 'm.you': 'you', 'm.add': 'Add member', 'm.id': 'User id', 'm.idHint': 'The user id from the upstream identity, without user:.',
+    'm.never': 'Never signed in', 'm.you': 'you', 'm.add': 'Add member', 'm.id': 'User id', 'm.idHint': 'The user id from the upstream identity, without user:.', 'm.idHint.hosted': 'The user id shown on their Team page, without user:.',
     'm.added': '{id} added as {role}.', 'm.roleSaved': '{id} is now {role}.', 'm.remove': 'Remove',
     'm.removeTitle': 'Remove {id} from {tenant}?', 'm.removeBody': 'Personal tokens they issued in this tenant stop working too. Every replica applies it within 30 s.',
     'sec.tokens': 'Tokens', 'sec.tokensDesc': 'Service tokens for automation, personal tokens for your own appctl. A token never exceeds member; its secret is shown once.',
@@ -1426,6 +1435,13 @@ const I18N = {
     'tk.secretTitle': 'Copy this token now; it will not be shown again', 'tk.secretFor': 'Subject {subject}', 'tk.copy': 'Copy', 'tk.copied': 'Copied', 'tk.done': 'I saved it',
     'tk.revoke': 'Revoke', 'tk.revokeTitle': 'Revoke {label}?', 'tk.revokeBody': 'Requests with it start failing on every replica within 30 s. This cannot be undone.',
     'tk.revoked': 'Revoked',
+    'tk.expired': 'Expired', 'tk.expires': 'Expires', 'tk.expiry': 'Valid for', 'tk.days': '{n} days',
+    'tk.scopes': 'Allowed actions', 'tk.scope.read': 'Read and diagnose', 'tk.scope.publish': 'Publish', 'tk.scope.invoke': 'Visit and trigger', 'tk.scope.remove': 'Remove', 'tk.scope.manage': 'Change settings',
+    'tk.apps': 'Application scope', 'tk.allApps': 'All applications', 'tk.selectedApps': 'Selected applications', 'tk.futureApps': 'Includes applications created later.', 'tk.chooseApps': 'Select at least one application.', 'tk.chooseScopes': 'Select at least one action.', 'tk.appsN': '{n} applications',
+    'tk.revokeBodyHosted': 'New requests with this token are refused immediately. Already admitted requests may finish.',
+    'top.signOutBody': 'Sign out of the console. Apps opened with this session require authentication on their next request.', 'd.confirmName': 'Type {name} to confirm deletion',
+    'ac.org.hosted': 'All accounts', 'ac.org.desc.hosted': 'Any signed-in account on the platform can visit, including other tenants.',
+    'ac.public.desc.hosted': 'No sign-in is needed unless the application requires identity.',
     'empty.members': 'No members yet.', 'empty.tokens': 'No tokens yet.', 'empty.tenants': 'No tenants yet.',
     'sec.tenants': 'Tenants', 'sec.tenantsDesc': 'Nearest a limit first. Click a card to switch to that tenant and manage its members, tokens and quota.', 'sec.newTenant': 'New tenant', 'sec.newTenantDesc': 'First admins by id; they need not have signed in yet.',
     'tn.name': 'Name', 'tn.nameHint': 'Lowercase letters, digits and -.', 'tn.display': 'Display name (optional)', 'tn.admins': 'First admins', 'tn.adminsHint': 'User ids, separated by commas or spaces.',
@@ -1572,9 +1588,11 @@ function svg(tag, attrs = {}, ...children) {
 }
 
 async function api(method, path, body, contentType = 'application/json') {
+  const headers = body === undefined ? {} : { 'content-type': contentType };
+  if (session?.me.hosted && !['GET', 'HEAD'].includes(method)) headers['X-Pneuma-Space-CSRF'] = session.me.csrf;
   const response = await fetch(path, {
     method,
-    headers: body === undefined ? {} : { 'content-type': contentType },
+    headers,
     body: body === undefined || contentType !== 'application/json' ? body : JSON.stringify(body),
   });
   const text = await response.text();
@@ -1725,18 +1743,22 @@ function fileField({ label, accept }) {
  * The approval card and the console's only confirmation: what will happen, in the reader's words, then Cancel and the
  * action. With `submit`, the card stays open on a refusal and shows it in place.
  */
-function approve({ title, body, facts = [], control = null, danger = false, action = null, submit = null }) {
+function approve({ title, body, facts = [], control = null, danger = false, action = null, submit = null, confirmText = null }) {
   return new Promise((resolve) => {
     const refusal = h('p', { class: 'msg err', role: 'alert', hidden: true });
     const ok = h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, value: 'ok' }, action ?? t('cl.continue'));
+    const confirmation = confirmText === null ? null : h('input', { autocomplete: 'off', spellcheck: 'false', oninput: () => { ok.disabled = confirmation.value !== confirmText; }, onkeydown: (event) => { if (event.key === 'Enter' && !ok.disabled) { event.preventDefault(); ok.click(); } } });
+    if (confirmation) ok.disabled = true;
     const dialog = h('dialog', { class: 'approval' },
       h('h3', {}, title), h('p', {}, body),
       facts.length ? h('ul', { class: 'facts' }, facts.map((f) => h('li', {}, f))) : null,
       control,
+      confirmation ? h('label', { class: 'field' }, h('span', {}, t('d.confirmName', { name: confirmText })), confirmation) : null,
       refusal,
       h('form', { method: 'dialog', class: 'actions', onsubmit: submit && (async (e) => {
         if (e.submitter?.value !== 'ok') return;
         e.preventDefault();
+        if (confirmation && confirmation.value !== confirmText) return;
         ok.disabled = true;
         refusal.hidden = true;
         try {
@@ -1745,7 +1767,7 @@ function approve({ title, body, facts = [], control = null, danger = false, acti
         } catch (error) {
           refusal.textContent = failText(error);
           refusal.hidden = false;
-          ok.disabled = false;
+          ok.disabled = confirmation !== null && confirmation.value !== confirmText;
         }
       }) },
         h('button', { class: 'btn', value: 'cancel', autofocus: true }, t('cancel')),
@@ -1817,6 +1839,7 @@ const onCluster = () => session?.plane === 'kubernetes';
 /** The key's `.k8s` wording on the kubernetes plane where the docker one names Docker or the host (ADR 0026 item 6). */
 const planeKey = (key) => (onCluster() && `${key}.k8s` in I18N[lang] ? `${key}.k8s` : key);
 const planeT = (key, vars) => t(planeKey(key), vars);
+const hostedT = (key, vars) => t(session?.me.hosted && `${key}.hosted` in I18N[lang] ? `${key}.hosted` : key, vars);
 const mayAdmin = (tenant) => isPlatformAdmin() || session.me.roles?.[tenant] === 'admin';
 const userId = () => session.me.subject.slice('user:'.length);
 const scoped = (apps) => (session.scope === ALL ? apps : apps.filter((a) => a.tenant === session.scope));
@@ -1853,7 +1876,11 @@ function topbar() {
       h('span', { class: 'av', 'aria-hidden': 'true' }, [...me.name][0]?.toUpperCase() ?? '?'),
       h('b', {}, me.name),
       me.platformAdmin ? h('span', { class: 'chip text' }, t('top.platformAdmin')) : null),
-    h('a', { class: 'btn ghost', href: '/_pneuma-space/logout' }, t('top.signOut')));
+    me.hosted
+      ? h('button', { class: 'btn ghost', type: 'button', onclick: async () => {
+        if (await approve({ title: t('top.signOut'), body: t('top.signOutBody'), action: t('top.signOut'), submit: () => api('POST', '/_pneuma-space/logout', {}) })) location.href = '/_pneuma-space/login';
+      } }, t('top.signOut'))
+      : h('a', { class: 'btn ghost', href: '/_pneuma-space/logout' }, t('top.signOut')));
 }
 
 // Views
@@ -3632,15 +3659,16 @@ async function detail(name) {
   const remove = () => op({ title: t('d.removeTitle', { name: app.name }), body: t('d.removeBody'), action: t('d.remove') }, post('remove'));
   const purge = () => op({
     title: t('d.purgeTitle', { name: app.name }), body: t('d.purgeBody'), danger: true, action: t('d.purge'),
+    confirmText: session.me.hosted ? app.name : null,
     facts: inventory.bindings.map((b) => [h('b', {}, b.kind), ' ', h('span', { class: 'mono' }, Object.values(b.location).join(' · ') || b.provider)]),
-  }, post('purge'), () => { location.hash = '#/apps'; });
+  }, () => api('POST', `${appPath(app.name)}/purge`, session.me.hosted ? { confirm: app.name } : undefined), () => { location.hash = '#/apps'; });
   const access = () => {
     let pick = app.access;
-    const note = h('span', {}, t(`ac.${pick}.desc`, { tenant: app.tenant }));
+    const note = h('span', {}, hostedT(`ac.${pick}.desc`, { tenant: app.tenant }));
     const control = h('div', { class: 'field' });
-    const paint = () => fill(control, segmented(ACCESS_LEVELS.map((x) => [x, t(`ac.${x}`)]), pick, (x) => {
+    const paint = () => fill(control, segmented(ACCESS_LEVELS.map((x) => [x, hostedT(`ac.${x}`)]), pick, (x) => {
       pick = x;
-      note.textContent = t(`ac.${x}.desc`, { tenant: app.tenant });
+      note.textContent = hostedT(`ac.${x}.desc`, { tenant: app.tenant });
       paint();
     }, t('ac.label')));
     paint();
@@ -3895,6 +3923,42 @@ async function publish(prefill) {
 // Team (ADR 0022 item 8): the chosen tenant's members and tokens; in the all-tenants view every tenant and a form to create one.
 
 const tokenKind = (token) => (token.subject.startsWith('service:') ? 'service' : 'personal');
+const tokenExpired = (token) => token.restrictions && token.restrictions.expiresAt <= Date.now();
+function credentialOptions(apps) {
+  const scopes = new Set(['read', 'publish', 'invoke', 'remove']);
+  const selected = new Set();
+  let days = 30, appMode = 'all';
+  const expiry = h('div');
+  const appScope = h('div');
+  const appChoices = h('div', { class: 'togs', hidden: true });
+  const hint = h('small', {}, t('tk.futureApps'));
+  const toggle = (label, value, values) => {
+    const button = h('button', { type: 'button', class: 'tog', 'aria-pressed': String(values.has(value)), onclick: () => {
+      values.has(value) ? values.delete(value) : values.add(value);
+      button.setAttribute('aria-pressed', String(values.has(value)));
+    } }, h('span', { class: 'ck', 'aria-hidden': 'true' }, '✓'), label);
+    return button;
+  };
+  const paintExpiry = () => fill(expiry, segmented([7, 30, 90].map((n) => [String(n), t('tk.days', { n })]), String(days), (value) => { days = Number(value); paintExpiry(); }, t('tk.expiry')));
+  const paintScope = () => fill(appScope, segmented([['all', t('tk.allApps')], ['selected', t('tk.selectedApps')]], appMode, (value) => {
+    appMode = value;
+    appChoices.hidden = value === 'all';
+    hint.textContent = t(value === 'all' ? 'tk.futureApps' : 'tk.chooseApps');
+    paintScope();
+  }, t('tk.apps')));
+  paintExpiry(); paintScope();
+  for (const app of apps) appChoices.append(toggle(app.name, app.id, selected));
+  return {
+    el: h('div', { class: 'stack' },
+      h('div', { class: 'field' }, h('span', {}, t('tk.scopes')), h('div', { class: 'togs' }, ['read', 'publish', 'invoke', 'remove', 'manage'].map((scope) => toggle(t(`tk.scope.${scope}`), scope, scopes)))),
+      h('div', { class: 'fields' }, h('div', { class: 'field' }, h('span', {}, t('tk.expiry')), expiry), h('div', { class: 'field' }, h('span', {}, t('tk.apps')), appScope, appChoices, hint))),
+    value() {
+      if (!scopes.size) throw new Error(t('tk.chooseScopes'));
+      if (appMode === 'selected' && !selected.size) throw new Error(t('tk.chooseApps'));
+      return { expiresAt: Date.now() + days * 86400000, scopes: [...scopes], appIds: appMode === 'all' ? null : [...selected] };
+    },
+  };
+}
 const say = (el, text, ok = false) => { el.className = ok ? 'msg' : 'msg err'; el.textContent = text; };
 const teamHead = (sub) => h('div', { class: 'head' }, h('div', { class: 'grow' }, h('h1', {}, t('team.title')), h('p', { class: 'sub' }, sub)));
 const youChip = (subject) => (subject === session.me.subject ? h('span', { class: 'chip text you' }, t('m.you')) : null);
@@ -3920,6 +3984,7 @@ async function team() {
   if (scope === null) return show(teamHead(''), h('section', {}, h('div', { class: 'card' }, h('div', { class: 'empty' }, t('team.none', { id: userId() })))));
   const admin = mayAdmin(scope);
   const base = `/api/tenants/${encodeURIComponent(scope)}`;
+  const credentials = session.me.hosted ? credentialOptions((await api('GET', '/api/apps')).filter((app) => app.tenant === scope)) : null;
   const members = h('div');
   const tokens = h('div');
   const quota = h('div');
@@ -3960,23 +4025,26 @@ async function team() {
   const loadTokens = async () => {
     const rows = (await api('GET', `${base}/tokens`)).sort((a, b) => b.createdAt - a.createdAt);
     const revoke = async (token) => {
-      if (!(await approve({ title: t('tk.revokeTitle', { label: token.label }), body: t('tk.revokeBody'), action: t('tk.revoke'), danger: true,
+      if (!(await approve({ title: t('tk.revokeTitle', { label: token.label }), body: t(session.me.hosted ? 'tk.revokeBodyHosted' : 'tk.revokeBody'), action: t('tk.revoke'), danger: true,
         submit: () => api('DELETE', `${base}/tokens/${encodeURIComponent(token.id)}`) }))) return;
       await loadTokens();
     };
-    const row = (token) => h('div', { class: `prow${token.revokedAt === null ? '' : ' gone'}` },
+    const row = (token) => h('div', { class: `prow${token.revokedAt === null && !tokenExpired(token) ? '' : ' gone'}` },
       h('span', { class: 'chip text' }, t(`tk.kind.${tokenKind(token)}`)),
-      h('div', { class: 'pwho' }, h('b', {}, token.label), h('span', { class: 'mono muted' }, token.subject)),
+      h('div', { class: 'pwho' }, h('b', {}, token.label), h('span', { class: 'mono muted' }, token.subject),
+        token.restrictions ? h('span', { class: 'chips' }, token.restrictions.scopes.map((scope) => h('span', { class: 'chip text' }, t(`tk.scope.${scope}`))),
+          h('span', { class: 'chip text' }, token.restrictions.appIds === null ? t('tk.allApps') : t('tk.appsN', { n: token.restrictions.appIds.length }))) : null),
       h('span', { class: 'pmeta' }, token.revokedAt === null
-        ? [t('tk.by'), ' ', h('span', { class: 'mono' }, token.createdBy.replace(/^user:/, '')), youChip(token.createdBy), ' · ', ago(token.createdAt)]
+        ? token.restrictions ? [t(tokenExpired(token) ? 'tk.expired' : 'tk.expires'), ' ', ago(token.restrictions.expiresAt)]
+          : [t('tk.by'), ' ', h('span', { class: 'mono' }, token.createdBy.replace(/^user:/, '')), youChip(token.createdBy), ' · ', ago(token.createdAt)]
         : [t('tk.revoked'), ' ', ago(token.revokedAt)]),
-      token.revokedAt === null && (admin || token.createdBy === session.me.subject)
-        ? moreMenu(t('cl.moreFor', { name: token.label }), [{ label: t('tk.revokeItem'), note: t('tk.revokeNote'), danger: true, onPick: () => revoke(token) }]) : null);
-    const active = rows.filter((x) => x.revokedAt === null);
-    const revoked = rows.filter((x) => x.revokedAt !== null);
+      token.revokedAt === null && !tokenExpired(token) && (admin || token.createdBy === session.me.subject)
+        ? moreMenu(t('cl.moreFor', { name: token.label }), [{ label: t('tk.revokeItem'), note: hostedT('tk.revokeNote'), danger: true, onPick: () => revoke(token) }]) : null);
+    const active = rows.filter((x) => x.revokedAt === null && !tokenExpired(x));
+    const revoked = rows.filter((x) => x.revokedAt !== null || tokenExpired(x));
     fill(tokens, rows.length === 0 ? h('div', { class: 'card' }, h('div', { class: 'empty' }, t('empty.tokens')))
       : h('div', { class: 'card plist' }, active.map(row),
-        revoked.length ? h('details', { class: 'more-rel' }, h('summary', {}, plural('tk.revokedN', revoked.length)), revoked.map(row)) : null));
+        revoked.length ? h('details', { class: 'more-rel' }, h('summary', {}, plural('tk.inactiveN', revoked.length)), revoked.map(row)) : null));
   };
 
   const loadQuota = async () => {
@@ -3992,7 +4060,7 @@ async function team() {
     fill(quotaMenu, moreMenu(t('cl.moreFor', { name: t('team.quota') }), [{ label: t('q.edit'), note: t('q.editNote'), onPick: edit }]));
   };
 
-  const id = h('input', { name: 'member', placeholder: t('m.id'), 'aria-label': t('m.id'), title: t('m.idHint'), autocomplete: 'off', spellcheck: 'false' });
+  const id = h('input', { name: 'member', placeholder: t('m.id'), 'aria-label': t('m.id'), title: hostedT('m.idHint'), autocomplete: 'off', spellcheck: 'false' });
   let role = 'member';
   const rolePick = h('span');
   const paintRole = () => fill(rolePick, segmented([['member', t('role.member')], ['admin', t('role.admin')]], role, (r) => { role = r; paintRole(); }, t('col.role')));
@@ -4010,7 +4078,7 @@ async function team() {
   } }, id, rolePick, h('button', { class: 'btn primary', type: 'submit' }, t('m.add')));
 
   const kinds = admin ? ['service', 'personal'] : ['personal'];
-  let kind = kinds[0];
+  let kind = session.me.hosted ? 'personal' : kinds[0];
   const name = h('input', { name: 'name', placeholder: 'deploy', pattern: '[a-z][a-z0-9\\-]{0,22}', maxlength: 23, autocomplete: 'off', spellcheck: 'false' });
   const label = h('input', { name: 'label', autocomplete: 'off' });
   const kindPick = h('span');
@@ -4046,6 +4114,7 @@ async function team() {
     say(tokenMsg, '', true);
     const body = { kind, ...(kind === 'service' && { name: name.value.trim() }), ...(label.value.trim() && { label: label.value.trim() }) };
     try {
+      if (credentials) body.restrictions = credentials.value();
       showSecret(await api('POST', `${base}/tokens`, body));
       name.value = label.value = '';
       await loadTokens();
@@ -4055,6 +4124,7 @@ async function team() {
       h('div', { class: 'field' }, h('span', {}, t('tk.kind')), kindPick, admin ? null : h('small', {}, t('tk.serviceAdmin'))),
       nameField,
       h('label', { class: 'field' }, h('span', {}, t('tk.label')), label)),
+    credentials?.el,
     h('div', { class: 'actions' }, h('button', { class: 'btn primary', type: 'submit' }, t('tk.issue')), personalNote),
     tokenMsg);
 

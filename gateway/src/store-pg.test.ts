@@ -136,6 +136,30 @@ describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () 
     await next?.release();
   });
 
+  test('AC-SAAS-12 hosted migration preserves existing application state and token permissions', async () => {
+    const admin = await Session.open(plain());
+    await admin.simple('CREATE DATABASE hosted_migration');
+    await admin.close();
+    const old = await Session.open(plain('hosted_migration'));
+    await old.simple('CREATE TABLE schema_migration (version INTEGER PRIMARY KEY, applied_at BIGINT NOT NULL)');
+    for (const [index, step] of PG_MIGRATIONS.slice(0, -1).entries()) {
+      await old.simple(`${step}; INSERT INTO schema_migration VALUES (${index + 1}, 0)`);
+    }
+    await old.simple(`INSERT INTO app (name, id, owner, status, current, policy_override, access) VALUES ('existing', 'stable-id', 'user:ann', 'registered', 1, '{}', 'public');
+      INSERT INTO release (app, number, image, manifest, bundle, release_key, published_at) VALUES ('stable-id', 1, 'image-id', '{}', NULL, 'key', 1);
+      INSERT INTO binding (app, kind, provider, state, resource) VALUES ('stable-id', 'kv', 'redis', 'active', '{"prefix":"kept"}');
+      INSERT INTO token (id, subject, hash, created_at) VALUES ('legacy', 'service:ci', 'legacy-hash', 1);`);
+    const tables = ['app', 'release', 'binding', 'token'];
+    const snapshot = await Promise.all(tables.map(async (table) => (await old.query(`SELECT * FROM ${table}`)).rows));
+    const store = await open({}, 'hosted_migration');
+    for (const [index, table] of tables.entries()) {
+      const rows = (await old.query(`SELECT * FROM ${table}`)).rows.map(({ restrictions, ...row }) => row);
+      assert.deepEqual(rows, snapshot[index]);
+    }
+    assert.equal((await store.token('legacy-hash'))?.restrictions, undefined);
+    await old.close();
+  });
+
   test('two stores opening an empty database at once apply the schema once (AC-STORE-6)', async () => {
     const admin = await Session.open(plain());
     await admin.simple('CREATE DATABASE migrated');

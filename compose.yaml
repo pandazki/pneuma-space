@@ -4,7 +4,9 @@ name: pneuma-space
 
 services:
   gateway:
-    build: ./gateway
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
     restart: unless-stopped
     # Every request and lifecycle event is a stdout line (ADR 0024 item 5); the log driver bounds what the host keeps.
     logging: { driver: json-file, options: { max-size: "50m", max-file: "5" } }
@@ -49,6 +51,13 @@ services:
       PNEUMA_SPACE_PLATFORM_ADMINS: ${PNEUMA_SPACE_PLATFORM_ADMINS:-}
       PNEUMA_SPACE_APPS_ORIGIN: ${PNEUMA_SPACE_APPS_ORIGIN:-}
       PNEUMA_SPACE_METRICS_PORT: ${PNEUMA_SPACE_METRICS_PORT:-}
+      PNEUMA_SPACE_HOSTED_CONTROL_ORIGIN: ${PNEUMA_SPACE_HOSTED_CONTROL_ORIGIN:-}
+      PNEUMA_SPACE_HOSTED_DEVELOPMENT: ${PNEUMA_SPACE_HOSTED_DEVELOPMENT:-}
+      PNEUMA_SPACE_HOSTED_DEVELOPMENT_USERS: ${PNEUMA_SPACE_HOSTED_DEVELOPMENT_USERS:-}
+      PNEUMA_SPACE_HOSTED_GITHUB_CLIENT_ID: ${PNEUMA_SPACE_HOSTED_GITHUB_CLIENT_ID:-}
+      PNEUMA_SPACE_HOSTED_GITHUB_CLIENT_SECRET: ${PNEUMA_SPACE_HOSTED_GITHUB_CLIENT_SECRET:-}
+      PNEUMA_SPACE_HOSTED_ALLOWED_SUBJECTS: ${PNEUMA_SPACE_HOSTED_ALLOWED_SUBJECTS:-}
+      PNEUMA_SPACE_HOSTED_SIGNUP_LIMIT: ${PNEUMA_SPACE_HOSTED_SIGNUP_LIMIT:-20}
     networks: [pneuma-space]
 
   rustfs:
@@ -96,7 +105,9 @@ services:
 
   # One process for every isolate app (ADR 0017). The OS caps are the backstop for what a worker's resourceLimits do not bound.
   runner:
-    build: ./gateway
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
     profiles: [isolate]
     restart: unless-stopped
     command:
@@ -106,6 +117,7 @@ services:
       - --permission
       - --allow-fs-read=/data
       - --allow-fs-read=/gateway
+      - --allow-fs-read=/shared
       - --allow-fs-write=/data
       - --allow-worker
       - src/runner.ts

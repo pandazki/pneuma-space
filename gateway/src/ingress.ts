@@ -26,6 +26,8 @@ export type IngressDeps = {
   readonly addressing: Addressing;
   /** Null under `local`. Otherwise access is enforced, and the identity header and these cookies never reach an app (ADR 0021 item 6, ADR 0022 item 6). */
   readonly upstream: Upstream | null;
+  readonly hosted?: boolean;
+  readonly identityPaths?: readonly string[];
   readonly bundles: Pick<BundleStore, 'open'>;
   readonly scheduler: Pick<Scheduler, 'invoke'>;
   /** The stored last access per app, loaded at startup (INV-7); counts start at zero in every process. */
@@ -77,8 +79,7 @@ function encodeName(name: string): string {
 }
 
 function withoutCookies(header: string, names: readonly string[]): string {
-  if (names.length === 0) return header;
-  return header.split(';').map((pair) => pair.trim()).filter((pair) => pair !== '' && !names.includes(pair.split('=')[0]!.trim())).join('; ');
+  return header.split(';').map((pair) => pair.trim()).filter((pair) => pair !== '' && !names.includes(pair.split('=')[0]!.trim()) && !/^(?:(?:__Host-)?pneuma-space-|pneuma_space_session$)/i.test(pair.split('=')[0]!.trim())).join('; ');
 }
 
 /** Inbound headers minus every X-Pneuma-Space-*, X-Forwarded-Prefix and upstream credential, plus the ones the platform sets (INV-5). */
@@ -89,6 +90,8 @@ function forwardedHeaders(req: IncomingMessage, view: RouteView, who: Principal 
     // CGI-style servers read X_Pneuma_Space_Subject as X-Pneuma-Space-Subject.
     const name = raw[i].toLowerCase().replaceAll('_', '-');
     let value = raw[i + 1];
+    if (name === 'connection') value = value.split(',').filter((part) => !part.trim().toLowerCase().replaceAll('_', '-').startsWith(RESERVED_HEADER_PREFIX)).join(',');
+    if (name === 'authorization' && /^Bearer\s/i.test(value)) continue;
     if (name.startsWith(RESERVED_HEADER_PREFIX) || name === HEADERS.prefix) continue;
     if (upstream && raw[i].toLowerCase() === upstream.header && carriesJwt(value)) continue;
     if (upstream && name === 'cookie' && (value = withoutCookies(value, upstream.stripCookies)) === '') continue;
@@ -248,10 +251,15 @@ export class Ingress {
 
   /** Step 5 (ADR 0022 item 6); `local` admits everything. */
   async #admit(req: IncomingMessage, view: RouteView, credential: Credential): Promise<Reply | null> {
-    if (this.#deps.upstream === null || view.access === 'public') return null;
+    if (this.#deps.upstream === null && !this.#deps.hosted) return null;
     const auth = await credential();
+    if (this.#deps.hosted && typeof auth !== 'string' && auth.via !== 'hosted' && auth.via !== 'token') return { status: 401, error: 'hosted authentication required' };
     const caller = typeof auth === 'string' ? null : await this.#deps.authority.callerOf(auth);
-    if (allows(caller, view.access, view.tenant) === 'ok') return null;
+    if (typeof auth !== 'string' && auth.via === 'hosted' && (!['GET', 'HEAD', 'OPTIONS'].includes(req.method ?? '') || req.headers.upgrade)) {
+      if (req.headers.origin !== auth.origin) return { status: 403, error: 'app session requires the exact app origin' };
+    }
+    if (typeof auth === 'string' && req.headers.authorization) return challenge(this.#deps.identity.challenge(req, auth));
+    if (allows(caller, view.access, view.tenant, view.app) === 'ok') return null;
     if (typeof auth === 'string') return challenge(this.#deps.identity.challenge(req, auth));
     return { status: 403, error: `this app admits members of tenant "${view.tenant}" only` };
   }
@@ -261,7 +269,7 @@ export class Ingress {
     const q = raw.indexOf('?');
     const pathname = q < 0 ? raw : raw.slice(0, q);
     const search = q < 0 ? '' : raw.slice(q);
-    if (!upgrade && (pathname === LOGIN_PATH || pathname === LOGOUT_PATH)) return { to: 'identity' };
+    if (!upgrade && (pathname === LOGIN_PATH || pathname === LOGOUT_PATH || this.#deps.identityPaths?.includes(pathname))) return { to: 'identity' };
 
     const located = this.#locate(req, pathname, search, trace);
     if ('to' in located) return located;
@@ -288,7 +296,7 @@ export class Ingress {
       const path = staticPath(view.bundle, rest, view.staticRoot);
       if (path !== null) {
         trace.kind = 'static';
-        return { to: 'static', view, path, shared: this.#deps.upstream === null || view.access === 'public' };
+        return { to: 'static', view, path, shared: (this.#deps.upstream === null || view.access === 'public') && req.headers.authorization === undefined };
       }
     }
     if (upgrade && !view.kinds.has('ws')) return reply(426, 'this app does not declare the "ws" capability');
@@ -370,7 +378,7 @@ export class Ingress {
       }
     } catch (error) {
       trace.error = String(error);
-      log('ingress-error', null, { url: req.url, error: String(error) });
+      log('ingress-error', null, { url: (req.url ?? '/').split('?')[0], error: String(error) });
       if (!res.headersSent) send(res, { status: 500, error: 'internal error; see the gateway log' });
       else res.destroy();
     }
@@ -410,7 +418,7 @@ export class Ingress {
       tunnel(req, socket, Buffer.concat([head, ...early]), upstream.socket, route.path, route.headers, upstream.hold, (answer) => { status = answer; });
     } catch (error) {
       trace.error = String(error);
-      log('ingress-error', null, { url: req.url, error: String(error) });
+      log('ingress-error', null, { url: (req.url ?? '/').split('?')[0], error: String(error) });
       socket.destroy();
     }
   }

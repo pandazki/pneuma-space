@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>PneumaSpace</title>
+<script>
+(() => {
+  const get = key => { try { return localStorage.getItem(key); } catch { return null; } };
+  document.documentElement.lang = (get('pneuma-space-lang') || navigator.language).startsWith('zh') ? 'zh' : 'en';
+  document.documentElement.dataset.theme = get('pneuma-space-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+})();
+</script>
+<style>
+:root {
+  --page: oklch(98.5% .001 286.376); --canvas: oklch(96.1% .002 247.84);
+  --surface: oklch(100% 0 0); --inset: oklch(97.9% .002 247.839); --field: oklch(96.1% .001 286.375);
+  --hover: oklch(97% .002 247.839); --hover-2: oklch(93.3% .003 247.86);
+  --ink: oklch(24.7% .006 258.361); --ink-2: oklch(45% .01 264.477); --ink-3: oklch(52% .009 264.505);
+  --line: oklch(94.6% .003 264.542); --line-strong: oklch(86% .005 258.326);
+  --accent: oklch(55.6% .187 255.617); --accent-ink: oklch(49% .187 255.617); --accent-tint: oklch(96% .019 252.878);
+  --green: oklch(48% .13 150.883); --green-tint: oklch(95.8% .017 159.118);
+  --orange: oklch(55% .14 49.902); --orange-tint: oklch(96.4% .021 67.581);
+  --red: oklch(53% .192 23.042); --red-tint: oklch(95.6% .017 17.462);
+  --on-accent: oklch(100% 0 0); --backdrop: oklch(20% .006 258.361 / .35);
+  --shadow: 0 0 0 1px var(--line), 0 1px 2px oklch(0% 0 0 / .05), 0 2px 6px oklch(0% 0 0 / .03);
+  --menu-shadow: 0 0 0 1px var(--line-strong), 0 8px 28px oklch(0% 0 0 / .12);
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --page: oklch(20.9% .004 264.477); --canvas: oklch(23.1% .004 264.487);
+  --surface: oklch(26% .006 271.191); --inset: oklch(24.3% .004 264.492); --field: oklch(29.3% .006 271.223);
+  --hover: oklch(28.9% .006 271.22); --hover-2: oklch(31.8% .007 274.747);
+  --ink: oklch(96.4% .002 247.839); --ink-2: oklch(78% .008 260.731); --ink-3: oklch(70% .01 264.484);
+  --line: oklch(30.8% .006 258.354); --line-strong: oklch(42% .007 264.474);
+  --accent: oklch(68% .173 253.301); --accent-ink: oklch(78.8% .113 248.33); --accent-tint: oklch(68% .173 253.301 / .16);
+  --green: oklch(70.5% .154 153.814); --green-tint: oklch(70.5% .154 153.814 / .14);
+  --orange: oklch(74.6% .156 55.642); --orange-tint: oklch(74.6% .156 55.642 / .14);
+  --red: oklch(72% .16 21.433); --red-tint: oklch(66.6% .18 21.433 / .14);
+  --on-accent: oklch(18% .03 255); --backdrop: oklch(0% 0 0 / .55);
+  --shadow: 0 0 0 1px var(--line), 0 1px 3px oklch(0% 0 0 / .18);
+  --menu-shadow: 0 0 0 1px var(--line-strong), 0 8px 28px oklch(0% 0 0 / .35);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--canvas); color: var(--ink); font: 13px/20px var(--font); -webkit-font-smoothing: antialiased; }
+button, input, textarea { font: inherit; color: inherit; }
+button, a, input, textarea { -webkit-tap-highlight-color: transparent; }
+button, a { touch-action: manipulation; }
+button { cursor: pointer; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+::selection { background: var(--accent-tint); color: var(--accent-ink); }
+input, textarea { caret-color: var(--accent); }
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+a { color: var(--accent-ink); text-decoration: none; text-underline-offset: 3px; }
+a:hover { text-decoration: underline; }
+h1 { margin: 0; font-size: 21px; line-height: 28px; font-weight: 600; letter-spacing: -.02em; text-wrap: balance; }
+h2 { margin: 0; font-size: 13px; line-height: 18px; font-weight: 600; }
+h3, p { margin: 0; }
+p { max-width: 70ch; }
+svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.frame { min-height: 100vh; max-width: 1504px; margin: auto; background: var(--page); box-shadow: var(--shadow); }
+.top { min-height: 80px; padding: 20px 32px; display: flex; align-items: center; gap: 16px; border-bottom: 1px dashed var(--line); }
+.brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); font-size: 15px; font-weight: 600; letter-spacing: -.02em; }
+.brand svg { width: 26px; height: 26px; color: var(--accent); }
+.top-end { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px; }
+.space-tag { max-width: 240px; display: flex; gap: 8px; align-items: center; min-width: 0; color: var(--ink-2); }
+.space-tag .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar { display: grid; place-items: center; height: 32px; width: 32px; border-radius: 50%; background: var(--accent-tint); color: var(--accent-ink); font-size: 12px; font-weight: 600; flex: none; }
+.seg { display: inline-flex; align-items: center; padding: 3px; gap: 2px; border-radius: 999px; background: var(--field); }
+.seg button { min-height: 28px; border: 0; border-radius: 999px; padding: 4px 10px; font-size: 12px; color: var(--ink-2); background: transparent; white-space: nowrap; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px oklch(0% 0 0 / .08); }
+.ibtn { width: 34px; height: 34px; border: 0; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; background: transparent; color: var(--ink-2); }
+.ibtn:hover { background: var(--hover-2); color: var(--ink); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; padding: 6px 14px; border: 0; border-radius: 999px; background: var(--hover-2); color: var(--ink); font-size: 12.5px; font-weight: 500; text-decoration: none; white-space: nowrap; }
+.btn:hover { background: var(--line-strong); text-decoration: none; }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { background: var(--accent-ink); }
+.btn.ghost { background: transparent; box-shadow: 0 0 0 1px var(--line-strong); }
+.btn.ghost:hover { background: var(--hover); }
+.btn.small { min-height: 28px; padding: 3px 10px; font-size: 12px; }
+.btn.danger { background: var(--red); color: var(--surface); }
+.mono { font: 11.5px/18px var(--mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.muted { color: var(--ink-3); }
+.secondary { color: var(--ink-2); }
+.sub { margin-top: 4px; font-size: 12.5px; color: var(--ink-3); }
+.chip { display: inline-flex; padding: 2px 7px; border-radius: 6px; box-shadow: 0 0 0 1px var(--line); background: var(--inset); color: var(--ink-2); font: 11px/18px var(--mono); }
+.chip.text { font-family: var(--font); }
+.st { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12px; white-space: nowrap; }
+.st::before { content: ''; width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--ink-3); }
+.st.green::before { background: var(--green); }
+.st.orange::before { background: var(--orange); }
+.st.red::before { background: var(--red); }
+.st.red { color: var(--red); }
+.heading { padding: 40px 32px 24px; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; }
+.heading > div { flex: 1; min-width: 0; }
+nav { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 32px 20px; }
+nav button { border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); padding: 7px 12px; font-size: 12.5px; display: inline-flex; align-items: center; gap: 8px; }
+nav button:hover { background: var(--hover); }
+nav button[aria-current="page"] { background: var(--hover-2); color: var(--ink); font-weight: 500; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 32px; padding: 0 32px 40px; }
+.main-column, .side-column { min-width: 0; }
+.side-column { padding-left: 28px; border-left: 1px dashed var(--line); }
+.section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.section-head > div { min-width: 0; }
+.group + .group, .block + .block { margin-top: 32px; }
+.group-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--ink-2); }
+.count { font: 11px var(--mono); color: var(--ink-3); }
+.rows { display: grid; gap: 8px; }
+.row { position: relative; padding: 16px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); min-width: 0; }
+.row-top { display: flex; align-items: flex-start; gap: 12px; }
+.row-info { flex: 1; min-width: 0; }
+.row-title { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.row-title.mono { font-family: var(--mono); font-size: 12px; }
+.row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 7px; font-size: 12px; color: var(--ink-3); }
+.row-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.row .outcome { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.outcome { display: flex; align-items: flex-start; gap: 12px; color: var(--green); font-size: 12px; }
+.outcome > span { flex: 1; }
+.outcome.error { color: var(--red); }
+.outcome button { flex: none; }
+.empty { padding: 32px 16px; color: var(--ink-3); text-align: center; box-shadow: 0 0 0 1px var(--line); border-radius: 12px; }
+.empty p { margin: 0 auto; }
+.empty .btn { margin-top: 16px; }
+.empty h2 { margin-bottom: 8px; color: var(--ink); }
+.menu { position: absolute; z-index: 20; top: 54px; right: 16px; width: 248px; padding: 6px; border-radius: 10px; background: var(--surface); box-shadow: var(--menu-shadow); }
+.menu button { display: block; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; }
+.menu button:hover, .menu button:focus-visible { background: var(--hover); outline-offset: -2px; }
+.menu button.danger { color: var(--red); }
+.menu button span { display: block; font-size: 12.5px; font-weight: 500; }
+.menu button small { display: block; margin-top: 2px; font-size: 11.5px; line-height: 17px; color: var(--ink-3); }
+.menu button.danger small { color: inherit; opacity: .85; }
+.usage { margin: 0; display: grid; }
+.usage > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px dashed var(--line); }
+.usage dt { color: var(--ink-2); font-size: 12px; }
+.usage dd { margin: 0; font: 12px var(--mono); white-space: nowrap; }
+.side-note { margin-top: 12px; color: var(--ink-3); font-size: 12px; }
+.steps { display: grid; gap: 16px; }
+.step { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; }
+.step-index { font: 11px/20px var(--mono); color: var(--ink-3); }
+.step p { font-size: 12px; color: var(--ink-2); }
+.step strong { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink); margin-bottom: 2px; }
+.code { margin: 10px 0 0; padding: 12px; border-radius: 8px; background: var(--field); font: 11px/18px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); }
+.code-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 12px; }
+.code-head + .code { margin-top: 6px; }
+.form { display: grid; gap: 20px; padding: 20px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); margin-bottom: 24px; }
+.field { display: grid; gap: 7px; min-width: 0; }
+.field > label, .field > legend { padding: 0; font-size: 12.5px; font-weight: 500; }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.field small { color: var(--ink-3); font-size: 12px; }
+input, textarea { width: 100%; min-width: 0; border: 0; border-radius: 8px; padding: 9px 10px; background: var(--field); box-shadow: 0 0 0 1px var(--line-strong); outline: none; }
+input:focus, textarea:focus { box-shadow: 0 0 0 2px var(--accent); }
+input[aria-invalid="true"] { box-shadow: 0 0 0 1px var(--red); }
+textarea { min-height: 96px; resize: vertical; font: 12px/20px var(--mono); }
+.choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.tog { border: 0; border-radius: 999px; min-height: 32px; padding: 5px 11px; background: var(--surface); box-shadow: 0 0 0 1px var(--line-strong); font-size: 12px; color: var(--ink-2); }
+.tog[aria-pressed="true"] { background: var(--accent-tint); color: var(--accent-ink); box-shadow: 0 0 0 1px var(--accent); }
+.tog .check { display: inline-block; width: 14px; margin-right: 4px; }
+.tog svg { width: 12px; height: 12px; vertical-align: -1px; }
+.form-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px; }
+.form-error { color: var(--red); font-size: 12px; }
+.notice { margin: 0 32px 24px; padding: 12px 16px; border-radius: 8px; background: var(--orange-tint); color: var(--orange); display: flex; align-items: center; gap: 12px; font-size: 12.5px; }
+.notice.error { background: var(--red-tint); color: var(--red); }
+.notice > span { flex: 1; }
+.skeleton { padding: 0 32px 40px; }
+.skeleton > div { height: 82px; margin-top: 12px; border-radius: 12px; background: var(--field); }
+.loading-line { color: var(--ink-3); display: flex; align-items: center; gap: 8px; }
+.spinner { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--line-strong); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.login { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); min-height: calc(100vh - 81px); }
+.login-copy { padding: 80px 64px; display: flex; flex-direction: column; justify-content: center; }
+.login-copy h1 { max-width: 450px; font-size: 36px; line-height: 44px; letter-spacing: -.035em; }
+.login-copy > p { margin-top: 20px; color: var(--ink-2); max-width: 42ch; font-size: 14px; line-height: 24px; }
+.login-points { display: grid; gap: 20px; margin-top: 40px; }
+.login-point { display: flex; align-items: flex-start; gap: 12px; }
+.login-point svg { margin-top: 1px; color: var(--ink-3); }
+.login-point strong { display: block; font-weight: 500; }
+.login-point small { display: block; color: var(--ink-3); margin-top: 2px; font-size: 12px; }
+.login-action { display: flex; flex-direction: column; justify-content: center; padding: 64px 48px; background: var(--inset); border-left: 1px dashed var(--line); }
+.login-action h2 { font-size: 18px; line-height: 25px; }
+.login-action p { color: var(--ink-3); margin-top: 10px; font-size: 12.5px; }
+.login-action .btn { align-self: flex-start; margin-top: 24px; }
+.login-foot { margin-top: 32px !important; font-size: 12px !important; }
+dialog { border: 0; border-radius: 16px; padding: 0; width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); color: var(--ink); background: var(--surface); box-shadow: var(--menu-shadow); }
+dialog::backdrop { background: var(--backdrop); }
+.dialog-content { padding: 24px; overflow-wrap: anywhere; }
+.dialog-content h2 { font-size: 18px; line-height: 26px; padding-right: 24px; }
+.dialog-content > p { margin-top: 12px; color: var(--ink-2); }
+.dialog-content .field { margin-top: 20px; }
+.dialog-actions { padding: 16px 24px 24px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.dialog-facts { margin: 20px 0 0; padding: 12px 0; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); display: grid; gap: 8px; }
+.dialog-facts > div { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.dialog-facts dt { width: 96px; color: var(--ink-3); font-size: 12px; }
+.dialog-facts dd { margin: 0; flex: 1; font-size: 12px; }
+.secret-note { display: flex; gap: 8px; align-items: flex-start; padding: 12px; border-radius: 8px; color: var(--orange); background: var(--orange-tint); margin-top: 20px; font-size: 12px; }
+.secret-area { margin-top: 16px; }
+.secret-area textarea { min-height: 112px; }
+.secret-area .btn { margin-top: 10px; }
+.footer { padding: 16px 32px; border-top: 1px dashed var(--line); display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--ink-3); font-size: 11.5px; }
+.footer > span:last-child { margin-left: auto; }
+@media (max-width: 1040px) { .workspace { grid-template-columns: minmax(0, 1fr) 260px; gap: 24px; } .side-column { padding-left: 24px; } .login-copy { padding: 64px 40px; } .login-action { padding: 48px 32px; } }
+@media (max-width: 800px) { .workspace { grid-template-columns: minmax(0, 1fr); gap: 32px; } .side-column { border-left: 0; padding-left: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; padding-top: 28px; border-top: 1px dashed var(--line); } .side-column .block + .block { margin-top: 0; } .login { grid-template-columns: minmax(0, 1fr); } .login-copy { padding: 48px 32px; } .login-action { border-left: 0; border-top: 1px dashed var(--line); padding: 40px 32px; } .login-copy h1 { font-size: 30px; line-height: 38px; } }
+@media (max-width: 560px) { .top { padding: 16px 20px; gap: 12px; flex-wrap: wrap; } .brand { font-size: 14px; } .brand svg { width: 24px; height: 24px; } .top-end { gap: 8px; } .space-tag { max-width: 140px; } .space-tag .mono { display: none; } .heading { padding: 28px 20px 20px; align-items: flex-start; } .heading .btn { align-self: flex-start; } nav { padding: 0 20px 20px; } .workspace { padding: 0 20px 28px; } .side-column { grid-template-columns: minmax(0, 1fr); gap: 28px; } .row { padding: 12px; } .row-top { flex-wrap: wrap; gap: 8px; } .row-info { flex-basis: calc(100% - 96px); } .row-actions { gap: 4px; } .row-meta { gap: 6px 10px; } .form { padding: 16px; } .notice { margin: 0 20px 20px; align-items: flex-start; } .skeleton { padding: 0 20px 28px; } .footer { padding: 16px 20px; } .footer > span:last-child { margin-left: 0; } .login-copy { padding: 40px 20px; } .login-action { padding: 32px 20px; } .login-copy h1 { font-size: 28px; line-height: 36px; } .dialog-content { padding: 20px; } .dialog-actions { padding: 16px 20px 20px; } .menu { right: 12px; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001ms !important; scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="frame">
+  <header class="top">
+    <a class="brand" href="/" aria-label="PneumaSpace"><svg viewBox="0 0 28 28" aria-hidden="true"><path d="M5 8.5 14 3l9 5.5v11L14 25l-9-5.5Z"/><path d="m5 8.5 9 5.5 9-5.5M14 14v11M9.5 5.8l9 5.5"/></svg><span>PneumaSpace</span></a>
+    <div class="top-end"><div id="space" class="space-tag" hidden></div><div id="language" class="seg" aria-label="Language"><button type="button" data-lang="en">EN</button><button type="button" data-lang="zh">中文</button></div><button id="theme" type="button" class="ibtn"></button><button id="logout" type="button" class="ibtn" hidden></button></div>
+  </header>
+  <main id="content" aria-busy="true"></main>
+  <footer class="footer"><span>PneumaSpace</span><span id="footer-text"></span></footer>
+</div>
+<dialog id="approval" aria-labelledby="approval-title"></dialog>
+<dialog id="secret" aria-labelledby="secret-title"></dialog>
+<script>
+'use strict';
+const icons = {
+  sun: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>',
+  moon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z"/></svg>',
+  logout: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v16h5m5-12 4 4-4 4m-6-4h12"/></svg>',
+  apps: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+  key: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="8" r="4"/><path d="m11 11 10 10m-3-3 3-3m-6 0 3-3"/></svg>',
+  arrow: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M7 7h10v10"/></svg>',
+  more: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>',
+  refresh: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10a8 8 0 1 0-1 7M20 4v6h-6"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></svg>',
+  check: '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="m3 7 2.5 2.5L11 4"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></svg>',
+  data: '<svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>',
+  terminal: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="m6 8 4 4-4 4m7 0h5"/></svg>',
+  github: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 20c-4.5 1.4-4.5-2.5-6-3m12 5v-3.9c0-1.2-.4-1.9-1-2.4 3.3-.4 6.7-1.6 6.7-7.2a5.6 5.6 0 0 0-1.5-3.9 5.2 5.2 0 0 0-.2-3.9S17.8.3 15 2.2a13.4 13.4 0 0 0-6 0C6.2.3 5 .7 5 .7a5.2 5.2 0 0 0-.2 3.9 5.6 5.6 0 0 0-1.5 3.9c0 5.6 3.4 6.8 6.7 7.2-.6.5-1 1.2-1 2.4V22"/></svg>'
+};
+const dictionaries = {
+  en: {
+    footer: 'Private apps. Persistent data.', theme: 'Change appearance', light: 'Use light appearance', dark: 'Use dark appearance', logout: 'Sign out',
+    heading: 'Your space', subtitle: 'Publish from your tools. Manage what stays here.', apps: 'Applications', tokens: 'Credentials', refresh: 'Refresh', loading: 'Loading your space…', retry: 'Try again',
+    loginHeading: 'A private home for the apps you build.', loginBody: 'Publish small web apps from your own development tools. Open them here, with their data saved between releases.',
+    privateTitle: 'Private to your account', privateBody: 'Sign in before any application or file is served.', savedTitle: 'Data stays with the app', savedBody: 'Publishing and removing an app keep its records.', toolsTitle: 'Use your own tools', toolsBody: 'A revocable credential connects your CLI to this space.',
+    loginTitle: 'Create your space', loginHint: 'Sign in to get a personal space and manage your applications.', github: 'Continue with GitHub', loginFoot: 'Your first sign-in creates a private space. Repository access is not requested.',
+    active: 'Available', removed: 'Removed', purging: 'Clearing', preparing: 'Preparing', failed: 'Publication failed', superseded: 'Superseded', pending: 'Publication', release: 'Release', unpublished: 'No active release', open: 'Open', more: 'More actions',
+    noAppsTitle: 'Your first app starts with a credential.', noApps: 'Create a credential, then publish a Fetch app from your computer.', createToken: 'Create credential', noRemoved: 'No removed applications.',
+    onboarding: 'Publish an application', onboardingHint: 'Build locally, then send a prepared app to your space.', step1: 'Create a credential', step1Body: 'Grant only the actions your tool needs.', step2: 'Configure your terminal', step2Body: 'Keep the credential in your local environment.', step3: 'Publish your app', step3Body: 'Use an app that follows the hosted Fetch contract.', command: 'Terminal', copy: 'Copy', copied: 'Copied', copyFailed: 'Copy is unavailable. Select and copy the text.', tokenPlaceholder: '<your-credential>',
+    usage: 'Today’s usage', usageHint: 'Daily counts reset at 00:00 UTC.', requests: 'Application requests', publications: 'Publish attempts', applicationSlots: 'Applications', artifacts: 'Saved releases', usageNote: 'These are operation and storage counts. They are not a monetary cost estimate.',
+    tokenHint: 'Give local tools scoped access. A secret is shown only when it is created.', noTokens: 'No credentials yet. Create one to publish from your tools.', activeTokens: 'Active credentials', inactiveTokens: 'Expired or revoked', revoked: 'Revoked', expired: 'Expired', expires: 'Expires', created: 'Created', allApps: 'All applications', selectedApps: 'Selected applications', futureApps: 'Includes applications created later.', selectAppsHint: 'Select at least one application.', selectAppsEmpty: 'Publish an application before limiting a credential to selected apps.',
+    label: 'Credential name', labelHint: 'A name that helps you recognize the tool using it.', labelPlaceholder: 'My laptop', scopes: 'Allowed actions', scopeHint: 'Turn off any action the tool does not need.', scope_read: 'Read apps', scope_publish: 'Publish', scope_invoke: 'Open apps', scope_remove: 'Remove', scope_export: 'Export',
+    appScope: 'Application scope', expiration: 'Expires after', days7: '7 days', days30: '30 days', days90: '90 days', cancel: 'Cancel', continue: 'Continue', creating: 'Creating…', busy: 'Working…', requiredLabel: 'Enter a credential name.', requiredScope: 'Choose at least one action.',
+    tokenCreated: 'Save this credential now', tokenCreatedBody: 'The secret will not be shown again. Store it in your local environment or password manager.', secretWarning: 'Anyone with this credential can perform its allowed actions until it expires or is revoked.', secretLabel: 'Credential secret', savedSecret: 'I have saved it', tokenCreatedOutcome: 'Credential created. The secret has been dismissed.',
+    remove: 'Remove application', removeNote: 'Stop access. Keep releases and records.', removeTitle: 'Remove {name}?', removeBody: 'The application will stop accepting requests. Its releases and records stay saved, and a later publication can make it available again.', removeSuccess: 'Application removed. Its data remains saved.',
+    purge: 'Permanently clear', purgeNote: 'Delete this removed app and its data.', purgeTitle: 'Permanently clear {name}?', purgeBody: 'This deletes the application, saved releases and records. This action cannot be undone.', confirmLabel: 'Type {name} to confirm', confirmHint: 'The name must match exactly.', purgeSuccess: 'Application and its saved data were cleared.',
+    revoke: 'Revoke credential', revokeNote: 'Reject new requests using this secret.', revokeTitle: 'Revoke {name}?', revokeBody: 'Tools using this credential will lose access on their next request. Your applications and data stay saved.', revokeSuccess: 'Credential revoked.',
+    export: 'Export application', exportNote: 'Download the saved app and records.', exportSuccess: 'Application archive downloaded.', object: 'Application', credential: 'Credential', status: 'Status', dismiss: 'Dismiss', logoutTitle: 'Sign out?', logoutBody: 'This signs out of the console and invalidates its application sessions. Your applications and credentials stay saved.', logoutSuccess: 'Signed out.',
+    error_forbidden: 'Access was refused. Sign in again or check this credential’s permissions.', error_unauthorized: 'Sign in to continue.', error_quota_exceeded: 'A space limit has been reached. Revoke unused credentials or reduce usage, then retry.', error_invalid_input: 'Some input is invalid. Check the fields and try again.', error_conflict: 'The application changed or another operation is running. Refresh and try again.', error_not_found: 'This application or credential is no longer available.', error_body_too_large: 'The request is too large.', error_internal_error: 'The request could not be completed. Try again.', error_network: 'Could not reach your space. Check your connection and retry.', error_disabled: 'Application access is currently paused by the operator.',
+    paused: 'Application access is paused. Management and saved data remain available.', never: 'Unknown', justNow: 'just now', secondAgo: '{n} sec ago', minuteAgo: '{n} min ago', hourAgo: '{n} hr ago', dayAgo: '{n} d ago', inSecond: 'in {n} sec', inMinute: 'in {n} min', inHour: 'in {n} hr', inDay: 'in {n} d', limitedTo: '{n} selected apps', noActions: 'No actions',
+  },
+  zh: {
+    footer: '私有应用，持久保存。', theme: '切换外观', light: '使用浅色外观', dark: '使用深色外观', logout: '退出登录',
+    heading: '我的空间', subtitle: '用自己的工具发布，在这里管理应用与数据。', apps: '应用', tokens: '凭据', refresh: '刷新', loading: '正在加载空间…', retry: '重试',
+    loginHeading: '为你开发的应用，留一个私有空间。', loginBody: '用自己的开发工具发布小型网页应用，在这里访问，数据随应用长期保存。',
+    privateTitle: '仅你的账户可访问', privateBody: '应用和文件都在登录验证后提供。', savedTitle: '数据随应用保留', savedBody: '重新发布和下线都保留应用记录。', toolsTitle: '继续使用自己的工具', toolsBody: '用可撤销凭据连接本地命令行与空间。',
+    loginTitle: '创建你的空间', loginHint: '登录后即可获得个人空间，管理自己的应用。', github: '使用 GitHub 继续', loginFoot: '首次登录创建私有空间，不请求代码仓库权限。',
+    active: '可访问', removed: '已下线', purging: '正在清除', preparing: '正在准备', failed: '发布失败', superseded: '已被替代', pending: '发布状态', release: '版本', unpublished: '尚无可用版本', open: '打开', more: '更多操作',
+    noAppsTitle: '从一份凭据开始发布应用。', noApps: '创建凭据后，即可从本地发布符合云端契约的应用。', createToken: '创建凭据', noRemoved: '没有已下线应用。',
+    onboarding: '发布一个应用', onboardingHint: '在本地完成构建，再将应用发布到空间。', step1: '创建凭据', step1Body: '只授予工具需要的操作权限。', step2: '配置本地终端', step2Body: '将凭据保存在本地环境变量中。', step3: '发布应用', step3Body: '使用符合云端 Fetch 契约的应用。', command: '终端命令', copy: '复制', copied: '已复制', copyFailed: '无法自动复制，请选中文字后复制。', tokenPlaceholder: '<你的凭据>',
+    usage: '今日用量', usageHint: '每日计数在协调世界时零点重置。', requests: '应用请求', publications: '发布尝试', applicationSlots: '应用数量', artifacts: '已保存版本', usageNote: '这里显示操作次数与存储量，不代表费用估算。',
+    tokenHint: '为本地工具授予限定权限，密钥仅在创建时显示一次。', noTokens: '还没有凭据。创建一份，即可从本地工具发布。', activeTokens: '有效凭据', inactiveTokens: '已过期或撤销', revoked: '已撤销', expired: '已过期', expires: '到期', created: '创建', allApps: '全部应用', selectedApps: '指定应用', futureApps: '也包括以后创建的应用。', selectAppsHint: '请至少选择一个应用。', selectAppsEmpty: '发布应用后，才能为凭据指定应用范围。',
+    label: '凭据名称', labelHint: '用便于识别的名称标记使用它的工具。', labelPlaceholder: '我的笔记本', scopes: '允许的操作', scopeHint: '关闭工具不需要的权限。', scope_read: '查看应用', scope_publish: '发布', scope_invoke: '访问应用', scope_remove: '下线', scope_export: '导出',
+    appScope: '应用范围', expiration: '有效期', days7: '7 天', days30: '30 天', days90: '90 天', cancel: '取消', continue: '继续', creating: '正在创建…', busy: '正在处理…', requiredLabel: '请输入凭据名称。', requiredScope: '请至少选择一项操作。',
+    tokenCreated: '现在保存这份凭据', tokenCreatedBody: '密钥不会再次显示，请将它保存在本地环境变量或密码管理器中。', secretWarning: '持有这份凭据的人可以在到期或撤销前执行它获准的操作。', secretLabel: '凭据密钥', savedSecret: '我已保存', tokenCreatedOutcome: '凭据已创建，密钥显示已关闭。',
+    remove: '下线应用', removeNote: '停止访问，保留版本和记录。', removeTitle: '下线 {name}？', removeBody: '应用将停止接受请求，已发布版本和记录继续保存，以后再次发布即可恢复访问。', removeSuccess: '应用已下线，数据继续保存。',
+    purge: '永久清除', purgeNote: '删除这个已下线应用及其数据。', purgeTitle: '永久清除 {name}？', purgeBody: '这会删除应用、已保存版本和记录，无法撤销。', confirmLabel: '输入 {name} 以确认', confirmHint: '应用名称必须完全一致。', purgeSuccess: '应用及其保存的数据已清除。',
+    revoke: '撤销凭据', revokeNote: '拒绝使用该密钥发起的新请求。', revokeTitle: '撤销 {name}？', revokeBody: '使用这份凭据的工具会在下次请求时失去权限，应用和数据继续保存。', revokeSuccess: '凭据已撤销。',
+    export: '导出应用', exportNote: '下载已保存的应用和记录。', exportSuccess: '应用归档已下载。', object: '应用', credential: '凭据', status: '状态', dismiss: '关闭提示', logoutTitle: '退出登录？', logoutBody: '退出控制台后，由此会话建立的应用登录也会失效，应用和凭据继续保存。', logoutSuccess: '已退出登录。',
+    error_forbidden: '访问被拒绝，请重新登录或检查凭据权限。', error_unauthorized: '请登录后继续。', error_quota_exceeded: '空间已达到用量上限，请撤销闲置凭据或减少用量后重试。', error_invalid_input: '输入内容有误，请检查后重试。', error_conflict: '应用已变化或有其他操作正在进行，请刷新后重试。', error_not_found: '该应用或凭据已不可用。', error_body_too_large: '请求内容过大。', error_internal_error: '请求未能完成，请重试。', error_network: '无法连接空间，请检查网络后重试。', error_disabled: '运营者已暂时停止应用访问。',
+    paused: '应用访问已暂停，仍可管理应用和已保存的数据。', never: '未知', justNow: '刚刚', secondAgo: '{n} 秒前', minuteAgo: '{n} 分钟前', hourAgo: '{n} 小时前', dayAgo: '{n} 天前', inSecond: '{n} 秒后', inMinute: '{n} 分钟后', inHour: '{n} 小时后', inDay: '{n} 天后', limitedTo: '{n} 个指定应用', noActions: '没有操作权限',
+  }
+};
+const state = { phase: 'loading', page: 'apps', profile: null, user: null, csrf: '', apps: [], tokens: [], usage: null, error: null, outcomes: new Map(), form: false, secret: '', menu: null, loading: false };
+const content = document.querySelector('#content');
+const approval = document.querySelector('#approval');
+const secretDialog = document.querySelector('#secret');
+const t = (key, values = {}) => Object.entries(values).reduce((text, [name, value]) => text.replaceAll('{' + name + '}', String(value)), dictionaries[document.documentElement.lang][key] || key);
+const node = (tag, className, text) => { const element = document.createElement(tag); if (className) element.className = className; if (text !== undefined) element.textContent = text; return element; };
+const icon = name => { const span = node('span'); span.innerHTML = icons[name] || ''; span.style.display = 'inline-flex'; return span; };
+const button = (text, onClick, className = 'btn') => { const element = node('button', className, text); element.type = 'button'; if (onClick) element.addEventListener('click', onClick); return element; };
+const iconButton = (name, title, onClick) => { const element = button('', onClick, 'ibtn'); element.append(icon(name)); element.title = title; element.setAttribute('aria-label', title); return element; };
+function store(key, value) { try { localStorage.setItem(key, value); } catch {} }
+function setPage(page) { if (state.secret) return; closeMenu(); state.page = page; state.form = false; render(); }
+function errorText(error) { return t('error_' + (error?.code || 'network')); }
+function dateText(value) { if (!Number.isFinite(value)) return t('never'); const seconds = Math.round((Date.now() - value) / 1000); const amount = Math.abs(seconds); if (amount < 5) return t('justNow'); const future = seconds < 0; const [unit, divisor] = amount < 60 ? ['Second', 1] : amount < 3600 ? ['Minute', 60] : amount < 86400 ? ['Hour', 3600] : ['Day', 86400]; return t(future ? 'in' + unit : unit.toLowerCase() + 'Ago', { n: Math.floor(amount / divisor) }); }
+function time(value) { const element = node('time', '', dateText(value)); element.dataset.time = String(value); if (Number.isFinite(value)) { element.dateTime = new Date(value).toISOString(); element.title = new Date(value).toLocaleString(document.documentElement.lang); } return element; }
+function bytes(value) { const number = Number(value) || 0; return number < 1024 ? `${number} B` : number < 1048576 ? `${(number / 1024).toFixed(1)} KiB` : `${(number / 1048576).toFixed(1)} MiB`; }
+function status(label, kind) { return node('span', 'st' + (kind ? ' ' + kind : ''), label); }
+async function api(path, options = {}) {
+  let response;
+  try { response = await fetch(path, { credentials: 'same-origin', ...options, headers: { ...(options.body ? { 'content-type': 'application/json' } : {}), ...(options.method && options.method !== 'GET' ? { 'x-pneuma-space-csrf': state.csrf } : {}), ...options.headers } }); }
+  catch { throw { code: 'network' }; }
+  if (!response.ok) { let body; try { body = await response.json(); } catch {} throw { code: body?.error || (response.status === 401 ? 'unauthorized' : 'internal_error'), status: response.status }; }
+  if (response.status === 204) return null;
+  return response.json();
+}
+async function load(initial = false) {
+  if (state.loading) return;
+  state.loading = true;
+  if (initial) { state.phase = 'loading'; render(); }
+  try {
+    state.profile = await api('/api/profile');
+    let me;
+    try { me = await api('/api/me'); }
+    catch (error) { if (error.status === 401 || error.status === 403) { state.phase = 'signedOut'; state.user = null; state.csrf = ''; state.error = null; render(); return; } throw error; }
+    state.user = me.user; state.csrf = me.csrf;
+    [state.apps, state.tokens, state.usage] = await Promise.all([api('/api/apps'), api('/api/tokens'), api('/api/usage')]);
+    state.phase = 'ready'; state.error = null;
+  } catch (error) { state.error = error; if (state.phase !== 'ready') state.phase = 'error'; }
+  finally { state.loading = false; render(); }
+}
+function chrome() {
+  document.querySelectorAll('[data-lang]').forEach(element => element.setAttribute('aria-pressed', String(element.dataset.lang === document.documentElement.lang)));
+  const theme = document.querySelector('#theme'); theme.replaceChildren(icon(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon')); theme.setAttribute('aria-label', t(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark')); theme.title = theme.getAttribute('aria-label');
+  document.querySelector('#footer-text').textContent = t('footer');
+  const logout = document.querySelector('#logout'); logout.hidden = !state.user; logout.replaceChildren(icon('logout')); logout.title = t('logout'); logout.setAttribute('aria-label', t('logout'));
+  const space = document.querySelector('#space'); space.hidden = !state.user; space.replaceChildren();
+  if (state.user) { space.append(node('span', 'mono', state.user.tenant)); const avatar = node('span', 'avatar', Array.from(state.user.name || '?').slice(0, 1).join('').toUpperCase()); avatar.title = state.user.name; space.append(avatar); }
+}
+function render() {
+  closeMenu(); chrome(); content.replaceChildren(); content.setAttribute('aria-busy', String(state.phase === 'loading'));
+  if (state.phase === 'loading') { const area = node('div', 'skeleton'); const line = node('div', 'loading-line'); line.style.height = 'auto'; line.style.background = 'none'; line.style.paddingTop = '40px'; line.setAttribute('role', 'status'); line.append(node('span', 'spinner'), node('span', '', t('loading'))); area.append(line, node('div'), node('div')); content.append(area); return; }
+  if (state.phase === 'signedOut') { renderLogin(); return; }
+  if (state.phase === 'error') { const heading = node('div', 'heading'); heading.append(node('h1', '', t('heading'))); content.append(heading, notice(errorText(state.error), true, () => load(true))); return; }
+  const heading = node('div', 'heading'); const intro = node('div'); intro.append(node('h1', '', t('heading')), node('p', 'sub', t('subtitle'))); heading.append(intro); const refresh = button(t('refresh'), () => load(), 'btn ghost'); refresh.prepend(icon('refresh')); refresh.disabled = state.loading; heading.append(refresh); content.append(heading);
+  const nav = node('nav'); nav.setAttribute('aria-label', t('heading')); for (const [page, glyph] of [['apps', 'apps'], ['tokens', 'key']]) { const item = button(t(page), () => setPage(page), ''); item.prepend(icon(glyph)); if (state.page === page) item.setAttribute('aria-current', 'page'); nav.append(item); } content.append(nav);
+  if (state.profile && !state.profile.enabled) content.append(notice(t('paused')));
+  if (state.error) content.append(notice(errorText(state.error), true, () => load()));
+  const workspace = node('div', 'workspace'); const main = node('div', 'main-column'); const side = node('aside', 'side-column'); workspace.append(main, side); content.append(workspace);
+  if (state.page === 'apps') renderApps(main); else renderTokens(main);
+  renderSide(side);
+}
+function notice(text, isError = false, retry) { const element = node('div', 'notice' + (isError ? ' error' : '')); element.setAttribute('role', isError ? 'alert' : 'status'); element.append(node('span', '', text)); if (retry) element.append(button(t('retry'), retry, 'btn ghost small')); return element; }
+function renderLogin() {
+  const login = node('div', 'login'); const copy = node('section', 'login-copy'); copy.append(node('h1', '', t('loginHeading')), node('p', '', t('loginBody')));
+  const points = node('div', 'login-points'); for (const [glyph, title, body] of [['lock', 'privateTitle', 'privateBody'], ['data', 'savedTitle', 'savedBody'], ['terminal', 'toolsTitle', 'toolsBody']]) { const point = node('div', 'login-point'); const text = node('div'); text.append(node('strong', '', t(title)), node('small', '', t(body))); point.append(icon(glyph), text); points.append(point); } copy.append(points);
+  const action = node('section', 'login-action'); action.append(node('h2', '', t('loginTitle')), node('p', '', t('loginHint'))); const link = node('a', 'btn primary', t('github')); link.href = '/auth/login'; link.prepend(icon('github')); action.append(link, node('p', 'login-foot', t('loginFoot'))); login.append(copy, action); content.append(login);
+}
+function sectionHead(title, hint, action) { const header = node('div', 'section-head'); const text = node('div'); text.append(node('h2', '', title)); if (hint) text.append(node('p', 'sub', hint)); header.append(text); if (action) header.append(action); return header; }
+function group(container, title, count) { const element = node('section', 'group'); const heading = node('div', 'group-heading'); heading.append(node('h2', '', title), node('span', 'count', String(count))); element.append(heading); const rows = node('div', 'rows'); element.append(rows); container.append(element); return rows; }
+function outcome(key) { const result = state.outcomes.get(key); if (!result) return null; const element = node('div', 'outcome' + (result.error ? ' error' : '')); element.setAttribute('role', result.error ? 'alert' : 'status'); element.append(node('span', '', result.error ? errorText(result.error) : t(result.key)), button(t('dismiss'), () => { state.outcomes.delete(key); render(); }, 'btn ghost small')); return element; }
+function renderApps(container) {
+  container.append(sectionHead(t('apps')));
+  const global = outcome('apps'); if (global) container.append(global);
+  if (!state.apps.length) { const empty = node('div', 'empty'); empty.append(node('h2', '', t('noAppsTitle')), node('p', '', t('noApps')), button(t('createToken'), () => { state.page = 'tokens'; state.form = true; render(); focusForm(); }, 'btn primary')); container.append(empty); return; }
+  const order = (left, right) => { const rank = app => app.status === 'purging' ? 0 : app.pending?.status === 'failed' ? 1 : app.pending ? 2 : 3; return rank(left) - rank(right) || left.name.localeCompare(right.name); };
+  const active = state.apps.filter(app => app.status === 'active').sort(order); const removed = state.apps.filter(app => app.status !== 'active').sort(order);
+  for (const [title, apps] of [[t('active'), active], [t('removed'), removed]]) {
+    if (!apps.length) continue;
+    const rows = group(container, title, apps.length);
+    for (const app of apps) {
+      const row = node('article', 'row'); const top = node('div', 'row-top'); const info = node('div', 'row-info');
+      if (app.status === 'active') { const link = node('a', 'row-title mono', app.name); link.href = appUrl(app); link.target = '_blank'; link.rel = 'noopener noreferrer'; info.append(link); } else info.append(node('h3', 'row-title mono', app.name));
+      const meta = node('div', 'row-meta'); meta.append(status(t(app.status), app.status === 'active' ? 'green' : app.status === 'purging' ? 'orange' : ''));
+      if (app.current) { meta.append(node('span', '', t('release') + ' ' + app.current.number), time(app.current.createdAt)); } else meta.append(node('span', '', t('unpublished')));
+      if (app.pending) meta.append(status(t(app.pending.status), app.pending.status === 'failed' ? 'red' : 'orange'));
+      info.append(meta); const actions = node('div', 'row-actions');
+      if (app.status === 'active') { const open = node('a', 'btn ghost small', t('open')); open.href = appUrl(app); open.target = '_blank'; open.rel = 'noopener noreferrer'; open.append(icon('arrow')); actions.append(open); }
+      const entries = [];
+      if (app.status === 'removed' && app.current) entries.push({ label: t('export'), note: t('exportNote'), action: () => exportApp(app) });
+      if (app.status === 'active') entries.push({ label: t('remove'), note: t('removeNote'), danger: true, action: () => approve('remove', app) });
+      if (app.status === 'removed' || app.status === 'purging') entries.push({ label: t('purge'), note: t('purgeNote'), danger: true, action: () => approve('purge', app) });
+      if (entries.length) actions.append(menuButton(row, app.name, entries));
+      top.append(info, actions); row.append(top); const message = outcome('app:' + app.id); if (message) row.append(message); rows.append(row);
+    }
+  }
+}
+function appUrl(app) { const scheme = new URL(state.profile.controlOrigin || location.origin).protocol; return `${scheme}//${app.name}--${state.user.tenant}.${state.profile.appsDomain}/`; }
+function closeMenu(focus = false) { if (!state.menu) return; const current = state.menu; state.menu = null; current.menu.remove(); current.button.setAttribute('aria-expanded', 'false'); if (focus && current.button.isConnected) current.button.focus(); }
+function menuButton(row, name, entries) {
+  const trigger = iconButton('more', t('more') + ' · ' + name, () => { if (state.menu?.button === trigger) { closeMenu(); return; } closeMenu(); const menu = node('div', 'menu'); menu.setAttribute('role', 'menu'); const buttons = entries.map(entry => { const item = button('', () => { closeMenu(); entry.action(); }, entry.danger ? 'danger' : ''); item.setAttribute('role', 'menuitem'); item.append(node('span', '', entry.label), node('small', '', entry.note)); menu.append(item); return item; }); row.append(menu); state.menu = { menu, button: trigger }; trigger.setAttribute('aria-expanded', 'true'); buttons[0]?.focus(); menu.addEventListener('keydown', event => { const index = buttons.indexOf(document.activeElement); if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); buttons[(index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length].focus(); } else if (event.key === 'Home') { event.preventDefault(); buttons[0].focus(); } else if (event.key === 'End') { event.preventDefault(); buttons.at(-1).focus(); } else if (event.key === 'Escape') { event.preventDefault(); closeMenu(true); } else if (event.key === 'Tab') closeMenu(); }); });
+  trigger.setAttribute('aria-haspopup', 'menu'); trigger.setAttribute('aria-expanded', 'false'); trigger.addEventListener('keydown', event => { if (event.key === 'ArrowDown') { event.preventDefault(); trigger.click(); } }); return trigger;
+}
+function renderTokens(container) {
+  const create = button(t('createToken'), () => { state.form = !state.form; render(); if (state.form) focusForm(); }, 'btn primary');
+  container.append(sectionHead(t('tokens'), t('tokenHint'), state.form ? null : create));
+  const global = outcome('tokens'); if (global) container.append(global);
+  if (state.form) container.append(tokenForm());
+  if (!state.tokens.length) { const empty = node('div', 'empty'); empty.append(node('p', '', t('noTokens'))); container.append(empty); return; }
+  const active = state.tokens.filter(token => !token.revokedAt && token.expiresAt > Date.now()); const inactive = state.tokens.filter(token => token.revokedAt || token.expiresAt <= Date.now());
+  for (const [title, tokens] of [[t('activeTokens'), active], [t('inactiveTokens'), inactive]]) {
+    if (!tokens.length) continue;
+    const rows = group(container, title, tokens.length);
+    for (const token of [...tokens].sort((a, b) => title === t('activeTokens') ? a.expiresAt - b.expiresAt : b.createdAt - a.createdAt)) {
+      const row = node('article', 'row'); const top = node('div', 'row-top'); const info = node('div', 'row-info'); info.append(node('h3', 'row-title', token.label));
+      const meta = node('div', 'row-meta'); meta.append(status(t(token.revokedAt ? 'revoked' : token.expiresAt <= Date.now() ? 'expired' : 'active'), !token.revokedAt && token.expiresAt > Date.now() ? 'green' : ''));
+      const expiration = node('span'); expiration.append(t('expires') + ' ', time(token.expiresAt)); meta.append(expiration); info.append(meta);
+      const scopes = node('div', 'row-meta'); for (const action of token.scopes) scopes.append(node('span', 'chip text', t('scope_' + action))); info.append(scopes);
+      const scope = node('p', 'sub', token.appIds === null ? t('allApps') : t('limitedTo', { n: token.appIds.length })); info.append(scope); top.append(info);
+      if (!token.revokedAt && token.expiresAt > Date.now()) top.append(menuButton(row, token.label, [{ label: t('revoke'), note: t('revokeNote'), danger: true, action: () => approve('revoke', token) }]));
+      row.append(top); const message = outcome('token:' + token.id); if (message) row.append(message); rows.append(row);
+    }
+  }
+}
+function focusForm() { requestAnimationFrame(() => document.querySelector('#token-label')?.focus()); }
+function tokenForm() {
+  const form = node('form', 'form'); form.setAttribute('aria-label', t('createToken'));
+  const nameField = node('div', 'field'); const label = node('label', '', t('label')); label.htmlFor = 'token-label'; const input = node('input'); input.id = 'token-label'; input.name = 'label'; input.maxLength = 80; input.required = true; input.autocomplete = 'off'; input.placeholder = t('labelPlaceholder'); const labelHint = node('small', '', t('labelHint')); labelHint.id = 'token-label-hint'; input.setAttribute('aria-describedby', labelHint.id); nameField.append(label, input, labelHint);
+  const scopes = new Set(['read', 'publish', 'invoke', 'remove', 'export']); const scopesField = node('fieldset', 'field'); scopesField.append(node('legend', '', t('scopes'))); const scopeChoices = node('div', 'choices'); for (const action of scopes) { const item = button('', () => { scopes.has(action) ? scopes.delete(action) : scopes.add(action); updateToggle(item, scopes.has(action), t('scope_' + action)); }, 'tog'); updateToggle(item, true, t('scope_' + action)); scopeChoices.append(item); } scopesField.append(scopeChoices, node('small', '', t('scopeHint')));
+  let applicationScope = 'all'; const selected = new Set(); const appsField = node('fieldset', 'field'); appsField.append(node('legend', '', t('appScope'))); const appMode = node('div', 'seg'); const appChoices = node('div', 'choices'); const appHint = node('small', '', t('futureApps')); const modeButtons = [];
+  for (const mode of ['all', 'selected']) { const item = button(t(mode === 'all' ? 'allApps' : 'selectedApps'), () => { applicationScope = mode; modeButtons.forEach(([key, control]) => control.setAttribute('aria-pressed', String(key === mode))); appChoices.hidden = mode === 'all'; appHint.textContent = t(mode === 'all' ? 'futureApps' : state.apps.length ? 'selectAppsHint' : 'selectAppsEmpty'); }, ''); item.setAttribute('aria-pressed', String(mode === 'all')); appMode.append(item); modeButtons.push([mode, item]); }
+  appChoices.hidden = true; for (const app of state.apps) { const item = button('', () => { selected.has(app.id) ? selected.delete(app.id) : selected.add(app.id); updateToggle(item, selected.has(app.id), app.name); }, 'tog mono'); updateToggle(item, false, app.name); appChoices.append(item); } appsField.append(appMode, appChoices, appHint);
+  let days = 30; const expiryField = node('fieldset', 'field'); expiryField.append(node('legend', '', t('expiration'))); const expiryChoices = node('div', 'seg'); const expiryButtons = []; for (const value of [7, 30, 90]) { const item = button(t('days' + value), () => { days = value; expiryButtons.forEach(([number, control]) => control.setAttribute('aria-pressed', String(number === days))); }, ''); item.setAttribute('aria-pressed', String(value === days)); expiryChoices.append(item); expiryButtons.push([value, item]); } expiryField.append(expiryChoices);
+  const error = node('p', 'form-error'); error.setAttribute('role', 'alert'); const actions = node('div', 'form-actions'); const cancel = button(t('cancel'), () => { state.form = false; render(); }, 'btn ghost'); const submit = button(t('createToken'), null, 'btn primary'); submit.type = 'submit'; actions.append(cancel, submit); form.append(nameField, scopesField, appsField, expiryField, error, actions);
+  form.addEventListener('submit', async event => { event.preventDefault(); const name = input.value.trim(); if (!name) { error.textContent = t('requiredLabel'); input.setAttribute('aria-invalid', 'true'); input.focus(); return; } input.removeAttribute('aria-invalid'); if (!scopes.size) { error.textContent = t('requiredScope'); scopeChoices.querySelector('button').focus(); return; } if (applicationScope === 'selected' && !selected.size) { error.textContent = t('selectAppsHint'); return; }
+    submit.disabled = true; cancel.disabled = true; submit.textContent = t('creating'); error.textContent = '';
+    try { const result = await api('/api/tokens', { method: 'POST', body: JSON.stringify({ label: name, scopes: [...scopes], appIds: applicationScope === 'all' ? null : [...selected], expiresAt: Date.now() + days * 86400000 }) }); state.form = false; state.tokens.unshift(result.metadata); render(); revealSecret(result.token); }
+    catch (failure) { error.textContent = errorText(failure); submit.disabled = false; cancel.disabled = false; submit.textContent = t('createToken'); }
+  }); return form;
+}
+function updateToggle(control, pressed, label) { control.setAttribute('aria-pressed', String(pressed)); control.replaceChildren(); const mark = node('span', 'check'); if (pressed) mark.append(icon('check')); control.append(mark, document.createTextNode(label)); }
+function renderSide(container) {
+  const usageBlock = node('section', 'block'); usageBlock.append(sectionHead(t('usage'), t('usageHint'))); const list = node('dl', 'usage'); const usage = state.usage || {}; const limits = state.profile?.limits || {};
+  for (const [key, value] of [['requests', `${usage.requests ?? 0} / ${limits.requestsPerDay ?? '?'}`], ['publications', `${usage.publications ?? 0} / ${limits.publishesPerDay ?? '?'}`], ['applicationSlots', `${usage.apps ?? state.apps.length} / ${limits.apps ?? '?'}`], ['artifacts', bytes(usage.artifactBytes)]]) { const row = node('div'); row.append(node('dt', '', t(key)), node('dd', '', value)); list.append(row); } usageBlock.append(list, node('p', 'side-note', t('usageNote')));
+  const onboarding = node('section', 'block'); onboarding.append(sectionHead(t('onboarding'), t('onboardingHint'))); const steps = node('div', 'steps'); for (const index of [1, 2, 3]) { const step = node('div', 'step'); const text = node('div'); text.append(node('strong', '', t('step' + index)), node('p', '', t('step' + index + 'Body'))); if (index === 1) text.append(button(t('createToken'), () => { state.page = 'tokens'; state.form = true; render(); focusForm(); }, 'btn ghost small')); step.append(node('span', 'step-index', String(index)), text); steps.append(step); } onboarding.append(steps);
+  const command = `export PNEUMA_SPACE_ADMIN='${state.profile?.controlOrigin || location.origin}'\nexport PNEUMA_SPACE_TOKEN='${t('tokenPlaceholder')}'\nnode cloud/cli/appctl.ts publish my-app ./my-app`;
+  const codeHead = node('div', 'code-head'); codeHead.append(node('span', 'muted', t('command')), button(t('copy'), event => copyText(command, event.currentTarget), 'btn ghost small')); onboarding.append(codeHead, node('pre', 'code', command)); container.append(usageBlock, onboarding);
+}
+async function copyText(value, control) { try { await navigator.clipboard.writeText(value); control.textContent = t('copied'); } catch { control.textContent = t('copy'); let feedback = control.parentElement.querySelector('.copy-feedback'); if (!feedback) { feedback = node('p', 'copy-feedback side-note'); feedback.setAttribute('role', 'status'); control.parentElement.append(feedback); } feedback.textContent = t('copyFailed'); if (control.closest('.secret-area')) control.closest('.secret-area').querySelector('textarea').select(); } }
+function revealSecret(value) {
+  state.secret = value; secretDialog.replaceChildren(); const content = node('div', 'dialog-content'); const title = node('h2', '', t('tokenCreated')); title.id = 'secret-title'; content.append(title, node('p', '', t('tokenCreatedBody'))); const warning = node('div', 'secret-note'); warning.append(icon('lock'), node('span', '', t('secretWarning'))); content.append(warning);
+  const area = node('div', 'secret-area field'); const label = node('label', '', t('secretLabel')); label.htmlFor = 'secret-value'; const field = node('textarea', 'mono'); field.id = 'secret-value'; field.readOnly = true; field.value = value; field.spellcheck = false; field.autocomplete = 'off'; area.append(label, field, button(t('copy'), event => copyText(state.secret, event.currentTarget), 'btn ghost')); content.append(area);
+  const actions = node('div', 'dialog-actions'); actions.append(button(t('savedSecret'), () => { state.secret = ''; field.value = ''; secretDialog.close(); secretDialog.replaceChildren(); state.outcomes.set('tokens', { key: 'tokenCreatedOutcome' }); render(); requestAnimationFrame(() => document.querySelector('.section-head .btn')?.focus()); }, 'btn primary')); secretDialog.append(content, actions); secretDialog.showModal(); field.focus(); field.select();
+}
+function approve(kind, object) {
+  closeMenu(); const focus = document.activeElement; approval.replaceChildren(); const body = node('div', 'dialog-content'); const name = kind === 'logout' ? '' : object.label || object.name; const title = node('h2', '', t(kind + 'Title', { name })); title.id = 'approval-title'; body.append(title, node('p', '', t(kind + 'Body')));
+  if (object) { const facts = node('dl', 'dialog-facts'); const fact = node('div'); fact.append(node('dt', '', t(kind === 'revoke' ? 'credential' : 'object')), node('dd', kind === 'revoke' ? '' : 'mono', name)); facts.append(fact); if (object.status) { const row = node('div'); row.append(node('dt', '', t('status')), node('dd', '', t(object.status))); facts.append(row); } body.append(facts); }
+  let confirmation = null; if (kind === 'purge') { const field = node('div', 'field'); const label = node('label', '', t('confirmLabel', { name })); label.htmlFor = 'purge-confirm'; confirmation = node('input'); confirmation.id = 'purge-confirm'; confirmation.autocomplete = 'off'; confirmation.spellcheck = false; field.append(label, confirmation, node('small', '', t('confirmHint'))); body.append(field); }
+  const failure = node('p', 'form-error'); failure.setAttribute('role', 'alert'); body.append(failure); const actions = node('div', 'dialog-actions'); const cancel = button(t('cancel'), () => approval.close(), 'btn ghost'); const confirm = button(t(kind === 'logout' ? 'logout' : kind === 'remove' ? 'remove' : kind === 'purge' ? 'purge' : 'revoke'), async () => {
+    confirm.disabled = true; cancel.disabled = true; confirm.textContent = t('busy');
+    try {
+      if (kind === 'logout') { await api('/auth/logout', { method: 'POST', body: '{}' }); state.user = null; state.csrf = ''; state.phase = 'signedOut'; state.apps = []; state.tokens = []; state.usage = null; approval.close(); render(); return; }
+      if (kind === 'revoke') await api('/api/tokens/' + encodeURIComponent(object.id) + '/revoke', { method: 'POST', body: '{}' });
+      else await api('/api/apps/' + encodeURIComponent(object.name) + '/' + kind, { method: 'POST', body: JSON.stringify(kind === 'purge' ? { confirm: confirmation.value } : {}) });
+      state.outcomes.set(kind === 'purge' ? 'apps' : (kind === 'revoke' ? 'token:' : 'app:') + object.id, { key: kind + 'Success' }); approval.close(); await load();
+    } catch (error) { failure.textContent = errorText(error); confirm.disabled = kind === 'purge' && confirmation.value !== name; cancel.disabled = false; confirm.textContent = t(kind === 'logout' ? 'logout' : kind); }
+  }, 'btn danger');
+  if (confirmation) { confirm.disabled = true; confirmation.addEventListener('input', () => { confirm.disabled = confirmation.value !== name; }); }
+  actions.append(cancel, confirm); approval.append(body, actions); approval.addEventListener('close', () => { if (focus?.isConnected) focus.focus(); }, { once: true }); approval.showModal(); (confirmation || cancel).focus();
+}
+async function exportApp(app) {
+  try { const archive = await api('/api/apps/' + encodeURIComponent(app.name) + '/export'); const blob = new Blob([JSON.stringify(archive, null, 2) + '\n'], { type: 'application/json' }); const url = URL.createObjectURL(blob); const link = node('a'); link.href = url; link.download = app.name + '.pneuma-space.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); state.outcomes.set('app:' + app.id, { key: 'exportSuccess' }); }
+  catch (error) { state.outcomes.set('app:' + app.id, { error }); } render();
+}
+document.querySelectorAll('[data-lang]').forEach(control => control.addEventListener('click', () => { if (state.secret || approval.open) return; document.documentElement.lang = control.dataset.lang; store('pneuma-space-lang', control.dataset.lang); render(); }));
+document.querySelector('#theme').addEventListener('click', () => { const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = theme; store('pneuma-space-theme', theme); chrome(); });
+document.querySelector('#logout').addEventListener('click', () => approve('logout', null));
+document.querySelector('.brand').addEventListener('click', event => { if (state.user) { event.preventDefault(); setPage('apps'); } else if (state.secret) event.preventDefault(); });
+document.addEventListener('pointerdown', event => { if (state.menu && !state.menu.menu.contains(event.target) && !state.menu.button.contains(event.target)) closeMenu(); });
+secretDialog.addEventListener('cancel', event => { if (state.secret) event.preventDefault(); });
+window.addEventListener('beforeunload', event => { if (state.secret) { event.preventDefault(); event.returnValue = ''; } });
+setInterval(() => document.querySelectorAll('[data-time]').forEach(element => element.textContent = dateText(Number(element.dataset.time))), 1000);
+load(true);
+</script>
+</body>
+</html>

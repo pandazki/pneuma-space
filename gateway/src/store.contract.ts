@@ -1,6 +1,8 @@
 // The Store contract, run against every Store (ADR 0025 item 2).
 
 import assert from 'node:assert/strict';
+import { PlatformRegistry, hostedAccountIds } from './registry.ts';
+import { FakeRuntime, FakeBundles } from './registry.fakes.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { after, before, describe, test } from 'node:test';
 import {
@@ -48,6 +50,82 @@ export function storeContract(name: string, open: OpenStore): void {
       store = await open({ volumeGb: 2 });
     });
     after(() => store.close());
+
+    async function hostedRegistry() {
+      const runtime = new FakeRuntime();
+      return PlatformRegistry.open({ store, runtime, guard: runtime, infra: runtime, bundles: new FakeBundles(), providers: [], probe: async () => false, defaultAccess: 'tenant' });
+    }
+
+    test('AC-SAAS-1 concurrent registrations keep one account and update its display name', async () => {
+      const registry = await hostedRegistry();
+      const identity = { provider: 'test', subject: 'concurrent', name: 'First' };
+      const signup = { limit: 100, quota: DEFAULT_QUOTA };
+      const accounts = await Promise.all(Array.from({ length: 20 }, () => registry.registerHostedIdentity(identity, signup)));
+      assert(accounts.every((a) => a.user === accounts[0].user && a.tenant === accounts[0].tenant));
+      assert.deepEqual(await store.memberships({ user: accounts[0].user }), [{ user: accounts[0].user, tenant: accounts[0].tenant, role: 'admin' }]);
+      const renamed = await registry.registerHostedIdentity({ ...identity, name: 'Changed' }, signup);
+      assert.deepEqual(renamed, { ...accounts[0], name: 'Changed' });
+      assert.equal((await store.user(renamed.user))?.name, 'Changed');
+    });
+
+    test('AC-SAAS-2 signup capacity refuses new accounts without partial rows', async () => {
+      const registry = await hostedRegistry();
+      const count = await store.hostedSignupCount();
+      const before = await store.tenants();
+      await assert.rejects(registry.registerHostedIdentity({ provider: 'test', subject: 'refused', name: 'Refused' }, { limit: count, quota: DEFAULT_QUOTA }), /capacity/);
+      assert.deepEqual(await store.tenants(), before);
+      assert.equal(await store.hostedIdentity('test', 'refused'), null);
+      assert.equal((await registry.registerHostedIdentity({ provider: 'test', subject: 'concurrent', name: 'Again' }, { limit: 0, quota: DEFAULT_QUOTA })).name, 'Again');
+    });
+
+    test('AC-SAAS-2 concurrent new accounts cannot exceed the signup limit', async () => {
+      const registry = await hostedRegistry();
+      const count = await store.hostedSignupCount();
+      const results = await Promise.allSettled(Array.from({ length: 12 }, (_, i) => registry.registerHostedIdentity(
+        { provider: 'test', subject: `capacity-${i}`, name: 'Capacity' }, { limit: count + 1, quota: DEFAULT_QUOTA },
+      )));
+      assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+      for (const result of results) if (result.status === 'rejected') assert.match(result.reason.message, /capacity/);
+      assert.equal(await store.hostedSignupCount(), count + 1);
+    });
+
+    test('AC-SAAS-12 signup never overwrites an existing tenant with the derived name', async () => {
+      const registry = await hostedRegistry();
+      const identity = { provider: 'test', subject: 'collision', name: 'New' };
+      const ids = hostedAccountIds(identity.provider, identity.subject);
+      const tenant = { name: ids.tenant, display: 'Existing', quota: DEFAULT_QUOTA, createdAt: 1 };
+      await store.putTenant(tenant);
+      await assert.rejects(registry.registerHostedIdentity(identity, { limit: 100, quota: DEFAULT_QUOTA }), /already in use/);
+      assert.deepEqual(await store.tenant(ids.tenant), tenant);
+      assert.equal(await store.user(ids.user), null);
+    });
+
+    test('AC-SAAS-3 persisted login state is consumed once across concurrent transactions', async () => {
+      const record = { hash: 'hosted-login', createdAt: 1, expiresAt: 100, data: { kind: 'login' as const, user: '' as const, cookieHash: 'browser', returnPath: '/', verifier: 'pkce' } };
+      await store.putHostedAuth(record);
+      assert.deepEqual(await store.hostedAuth(record.hash), record);
+      const consumed = await Promise.all(Array.from({ length: 8 }, () => store.transaction(async (tx) => {
+        const held = await tx.hostedAuth(record.hash, 'update');
+        return held !== null && await tx.deleteHostedAuth(record.hash);
+      })));
+      assert.equal(consumed.filter(Boolean).length, 1);
+    });
+
+    test('AC-SAAS-7 credential restrictions round trip while legacy credentials stay unrestricted', async () => {
+      const registry = await hostedRegistry();
+      const issued = await registry.issueTenantToken(DEFAULT_TENANT, 'service:hosted-test' as Subject, 'hosted', 'local', { expiresAt: Date.now() + 60_000, scopes: ['read'], appIds: null });
+      const saved = (await store.tokens(DEFAULT_TENANT)).find((token) => token.id === issued.id)!;
+      assert.deepEqual(saved.restrictions?.scopes, ['read']);
+      assert.notEqual(saved.hash, issued.token);
+      const legacy = await registry.issueTenantToken(DEFAULT_TENANT, 'service:legacy-test' as Subject, 'legacy', 'local');
+      assert.equal((await store.tokens(DEFAULT_TENANT)).find((token) => token.id === legacy.id)?.restrictions, undefined);
+    });
+
+    test('AC-SAAS-7 issuance rejects an app outside the credential tenant', async () => {
+      const registry = await hostedRegistry();
+      await assert.rejects(registry.issueTenantToken(DEFAULT_TENANT, 'service:hosted-test' as Subject, 'hosted', 'local', { expiresAt: Date.now() + 60_000, scopes: ['read'], appIds: ['absent' as AppId] }), /belong/);
+    });
+
 
     test('a scheduled slot is stored once', async () => {
       const first = await store.insertDelivery(delivery('s1', { scheduledFor: 60_000 }));
