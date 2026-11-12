@@ -199,7 +199,7 @@ test('AC-SAAS-9 hosted object bytes transfer directly with original signed URLs'
   const downloaded = await call(string(get.url));
   assert.equal(downloaded.status, 200);
   assert.equal(downloaded.text, 'hosted-object');
-  assert.notEqual(new URL(string(get.url)).port, new URL(appOrigin(app.name)).port);
+  assert.notEqual(new URL(string(get.url)).origin, new URL(appOrigin(app.name)).origin);
 });
 
 test('AC-SAAS-9 hosted WebSockets retain original bidirectional messages', { timeout: 60_000 }, async (t) => {

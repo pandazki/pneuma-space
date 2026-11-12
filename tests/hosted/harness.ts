@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { request, type IncomingHttpHeaders } from 'node:http';
+import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type RequestOptions } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import type { Socket } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import type { TestContext } from 'node:test';
@@ -29,16 +30,31 @@ export function rows(value: unknown): Record<string, unknown>[] { assert.ok(Arra
 export const json = (reply: Reply): unknown => JSON.parse(reply.text);
 export const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 export const cookie = (reply: Reply, name: string): string => {
-  const entry = reply.headers['set-cookie']?.find((value) => value.startsWith(`${name}=`));
-  assert.ok(entry, `missing ${name} cookie from ${reply.status}`);
+  const secure = control.protocol === 'https:';
+  const key = secure ? `__Host-${name}` : name;
+  const entry = reply.headers['set-cookie']?.find((value) => value.startsWith(`${key}=`));
+  assert.ok(entry, `missing ${key} cookie from ${reply.status}`);
+  if (secure) {
+    assert.match(entry, /; Secure(?:;|$)/);
+    assert.match(entry, /; HttpOnly(?:;|$)/);
+    assert.match(entry, /; Path=\/(?:;|$)/);
+    assert.doesNotMatch(entry, /; Domain=/i);
+    assert.ok(!reply.headers['set-cookie']?.some((value) => value.startsWith(`${name}=`)));
+  }
   return entry.split(';')[0]!;
 };
+export function request(target: URL, options: RequestOptions, response?: (value: IncomingMessage) => void) {
+  assert.ok(['http:', 'https:'].includes(target.protocol));
+  const transport = target.protocol === 'https:' ? httpsRequest : httpRequest;
+  return transport({ host: '127.0.0.1', port: target.port || (target.protocol === 'https:' ? 443 : 80),
+    servername: target.hostname, path: target.pathname + target.search, ...options,
+    headers: { host: target.host, ...options.headers } }, response);
+}
 export function call(url: string | URL, method = 'GET', headers: Record<string, string> = {}, body?: string | Buffer, port?: number): Promise<Reply> {
   const target = new URL(url);
-  assert.equal(target.protocol, 'http:', 'the hosted test runner supports the loopback development stack');
   return new Promise((resolve, reject) => {
-    const req = request({ host: '127.0.0.1', port: port ?? (target.port || 80), path: target.pathname + target.search, method,
-      headers: { host: target.host, connection: 'close', ...headers }, signal: AbortSignal.timeout(30_000) }, (response) => {
+    const req = request(target, { ...(port && { port }), method,
+      headers: { connection: 'close', ...headers }, signal: AbortSignal.timeout(30_000) }, (response) => {
       const parts: Buffer[] = [];
       response.on('data', (part: Buffer) => parts.push(part));
       response.on('error', reject);
@@ -133,8 +149,8 @@ export async function waitFor<T>(probe: () => Promise<T | null | false>, label: 
 export async function websocket(app: App, headers: Record<string, string>): Promise<{ status: number; socket: Socket | null }> {
   const target = new URL(`${appOrigin(app.name)}/ws?mode=echo`);
   return new Promise((resolve, reject) => {
-    const req = request({ host: '127.0.0.1', port: target.port, path: target.pathname + target.search,
-      headers: { host: target.host, connection: 'Upgrade', upgrade: 'websocket', 'sec-websocket-version': '13', 'sec-websocket-key': randomBytes(16).toString('base64'), ...headers }, signal: AbortSignal.timeout(10_000) });
+    const req = request(target, {
+      headers: { connection: 'Upgrade', upgrade: 'websocket', 'sec-websocket-version': '13', 'sec-websocket-key': randomBytes(16).toString('base64'), ...headers }, signal: AbortSignal.timeout(10_000) });
     req.on('upgrade', (response, socket) => resolve({ status: response.statusCode ?? 0, socket }));
     req.on('response', (response) => { response.resume(); resolve({ status: response.statusCode ?? 0, socket: null }); });
     req.on('error', reject);
@@ -165,8 +181,8 @@ export async function echo(socket: Socket, value: string): Promise<string> {
 export function firstEvent(app: App, headers: Record<string, string>): Promise<string> {
   const target = new URL(appOrigin(app.name) + '/events');
   return new Promise((resolve, reject) => {
-    const req = request({ host: '127.0.0.1', port: target.port, path: target.pathname,
-      headers: { host: target.host, ...headers }, signal: AbortSignal.timeout(5000) }, (response) => {
+    const req = request(target, {
+      headers, signal: AbortSignal.timeout(5000) }, (response) => {
       if (response.statusCode !== 200) { response.resume(); reject(new Error(`SSE answered ${response.statusCode}`)); return; }
       let text = '';
       response.on('error', reject);
