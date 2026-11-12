@@ -1,4 +1,5 @@
 import { resolve4 } from 'node:dns/promises';
+import { get } from 'node:http';
 import type { AppId, ReplicaId } from './model.ts';
 
 export type RequestKind = 'request' | 'static' | 'ws' | 'trigger';
@@ -106,11 +107,26 @@ export async function peerSources(host: string, port: number, headers: Readonly<
   return addresses.map((address) => ({
     name: known.get(address) ?? address,
     page: async (cursor, limit) => {
-      const response = await fetch(`http://${address}:${port}/api/requests?local=1&limit=${limit}&after=${encodeURIComponent(cursor)}`, {
-        headers, signal: AbortSignal.timeout(PEER_TIMEOUT_MS),
+      // Node fetch replaces Host, which changes the origin of a forwarded hosted session.
+      const page = await new Promise<Page>((resolve, reject) => {
+        const request = get(`http://${address}:${port}/api/requests?local=1&limit=${limit}&after=${encodeURIComponent(cursor)}`, {
+          headers, signal: AbortSignal.timeout(PEER_TIMEOUT_MS),
+        }, (response) => {
+          if (response.statusCode !== 200) {
+            response.resume();
+            reject(new Error(`${address} answered ${response.statusCode}`));
+            return;
+          }
+          const chunks: Buffer[] = [];
+          response.on('data', (chunk: Buffer) => chunks.push(chunk));
+          response.on('error', reject);
+          response.on('end', () => {
+            try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Page); }
+            catch (error) { reject(error); }
+          });
+        });
+        request.on('error', reject);
       });
-      if (!response.ok) throw new Error(`${address} answered ${response.status}`);
-      const page = (await response.json()) as Page;
       known.set(address, page.replica);
       return page;
     },
