@@ -1,0 +1,71 @@
+{
+  "allComparedRowsPreserved": true,
+  "tables": [
+    {
+      "table": "app",
+      "rowsBefore": 10,
+      "rowsAfter": 10,
+      "equal": true,
+      "newColumns": []
+    },
+    {
+      "table": "release",
+      "rowsBefore": 11,
+      "rowsAfter": 11,
+      "equal": true,
+      "newColumns": []
+    },
+    {
+      "table": "binding",
+      "rowsBefore": 16,
+      "rowsAfter": 16,
+      "equal": true,
+      "newColumns": []
+    },
+    {
+      "table": "tenant",
+      "rowsBefore": 3,
+      "rowsAfter": 3,
+      "equal": true,
+      "newColumns": []
+    },
+    {
+      "table": "users",
+      "rowsBefore": 3,
+      "rowsAfter": 3,
+      "equal": true,
+      "newColumns": []
+    },
+    {
+      "table": "membership",
+      "rowsBefore": 3,
+      "rowsAfter": 3,
+      "equal": true,
+      "newColumns": []
+    },
+    {
+      "table": "token",
+      "rowsBefore": 3,
+      "rowsAfter": 3,
+      "equal": true,
+      "newColumns": [
+        "restrictions"
+      ]
+    },
+    {
+      "table": "policy",
+      "rowsBefore": 1,
+      "rowsAfter": 1,
+      "equal": true,
+      "newColumns": []
+    },
+    {
+      "table": "trigger",
+      "rowsBefore": 4,
+      "rowsAfter": 4,
+      "equal": true,
+      "newColumns": []
+    }
+  ],
+  "scope": "Original platform records, comparing columns present before the run. Runtime telemetry and additive schema changes are excluded."
+}
