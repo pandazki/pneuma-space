@@ -1,6 +1,6 @@
 # App contract
 
-Sections before [Cloud profile](#cloud-profile-contract-2) describe protocol version 1 for M1 and M2. The hosted service accepts the separate contract 2; it does not claim protocol-1 runtime compatibility.
+Sections before [Cloud profile](#cloud-profile-contract-2) describe protocol version 1 for M1, M2 and the full hosted platform. The separate Fetch experiment accepts contract 2 and does not claim protocol-1 runtime compatibility.
 
 What an app sees from PneumaSpace, and nothing else. The contract fixes protocols, not providers. `db` is a SQL connection URL, `kv` speaks the Redis protocol, `object` speaks S3, push is WebSocket and SSE. An app that follows this file runs on any PneumaSpace whichever database engine, Redis deployment, object store or runtime sits behind them. The one exception is SQL dialect: write the subset SQLite and PostgreSQL both accept. The platform model behind it is in `DESIGN.md` (Chinese). The example TypeScript SDK in `templates/` wraps this contract. Any language can do the same by reading environment variables and headers.
 
@@ -188,6 +188,41 @@ Policy fields: `idle_seconds`, `ready_timeout_seconds`, `drain_timeout_seconds`,
 Quota fields, each `null` for unlimited: `apps` (apps not being purged), `awake` (instances not asleep), `cpu_millis` and `memory_mb` (sums over those instances), `storage_gb` (the provisioned volume capacity of the tenant's `files` and SQLite bindings, checked when a publish adds one; databases and buckets are not counted).
 
 `GET /metrics` serves Prometheus text on its own port, `PNEUMA_SPACE_METRICS_PORT`, when the operator sets it (ADR 0024).
+
+### Hosted identity
+
+`PNEUMA_SPACE_IDENTITY=hosted` adds browser login to the original platform. Application manifests, protocols, runtimes, CLI and management pages remain the ones above. [ADR 0030](adr/0030-additive-hosted-platform.md) defines ownership and the deployment boundary.
+
+| Configuration | Meaning |
+| --- | --- |
+| `PNEUMA_SPACE_HOSTED_CONTROL_ORIGIN` | Exact control origin, with no path or trailing slash |
+| `PNEUMA_SPACE_APPS_ORIGIN` | Required app subdomains, such as `https://*.apps.example.net` |
+| `PNEUMA_SPACE_HOSTED_GITHUB_CLIENT_ID`, `PNEUMA_SPACE_HOSTED_GITHUB_CLIENT_SECRET` | GitHub OAuth application credentials; the callback is `<control origin>/_pneuma-space/auth/callback` |
+| `PNEUMA_SPACE_HOSTED_ALLOWED_SUBJECTS` | Comma-separated immutable GitHub numeric IDs admitted to a trusted hosted deployment |
+| `PNEUMA_SPACE_HOSTED_SIGNUP_LIMIT` | Maximum new personal accounts, default 20; existing accounts can still sign in at capacity |
+| `PNEUMA_SPACE_PLATFORM_ADMINS` | Existing explicit operator assignment using the user subject returned by `/api/me`; signup grants no platform administration |
+| `PNEUMA_SPACE_HOSTED_DEVELOPMENT` | `true` enables local test accounts only when both origins use loopback hosts; production uses `false` |
+| `PNEUMA_SPACE_HOSTED_DEVELOPMENT_USERS` | Local test-account names, default `alice,bob,operator`; forbidden in production |
+
+Production requires HTTPS and separate control/app sites. The startup check conservatively rejects domains with the same final two labels. New personal tenants start with quotas of 5 apps, 2 awake instances, 2000 CPU millis, 1024 MiB memory and 5 GiB provisioned storage. Operators change them through the existing quota API. New applications default to `access: tenant`. Existing access settings remain unchanged; `org` explicitly admits other signed-in accounts.
+
+Control sessions and app sessions use host-only HttpOnly cookies. Control writes require the exact control `Origin` and `X-Pneuma-Space-CSRF` from `/api/me`. Cookie-authenticated unsafe app requests and WebSocket upgrades require the exact app `Origin`. Bearer credentials are independent of cookies. Logout is `POST /_pneuma-space/logout`; it invalidates the control session and the next admission with a derived app session. Already-admitted requests can finish.
+
+The first private-app visit uses an expiring, single-use grant bound to AppId, app origin and a browser nonce. The callback removes the grant from the URL. Platform cookies, Bearer credentials and reserved incoming identity headers never reach app code; application responses cannot set reserved platform cookie names.
+
+`GET /api/me` adds `hosted: true` and the session's `csrf`. Hosted app list rows also include immutable `id`. Token creation at the existing tenant endpoint accepts `restrictions: {expiresAt, scopes, appIds}`. `expiresAt` is epoch milliseconds within 365 days, `scopes` is nonempty, and `appIds` is either `null` for the tenant or a nonempty list of its immutable app IDs. Hosted defaults are 30 days with `read`, `publish`, `invoke` and `remove`, across the tenant. Legacy tokens retain their prior permissions.
+
+| Scope | Allowed within the caller's existing rights |
+| --- | --- |
+| `read` | Application lists, detail, usage, audit, logs and state inventory |
+| `publish` | Bundle upload and publication; selected-app credentials cannot create another app |
+| `invoke` | Static and dynamic visits, WebSocket admission and triggers |
+| `remove` | Application removal, with data retained |
+| `manage` | Application policy, access and owner changes |
+
+Credentials never gain credential-management, purge or platform-operator rights. Selected-app credentials cannot read tenant-wide quota or team metadata. Aggregate diagnostics are filtered to their app IDs; historical audit rows without immutable app attribution are omitted for such credentials. Expiry and revocation apply at the next admission. Publication rechecks authorization before activation. Token read responses contain restrictions but never token secrets or hashes.
+
+Hosted purge requires `{confirm: <exact application name>}` as well as the existing removed-only and session authorization rules.
 
 ## Cloud profile (contract 2)
 

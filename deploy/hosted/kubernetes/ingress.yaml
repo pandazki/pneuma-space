@@ -1,0 +1,51 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pneuma-space-hosted
+  namespace: pneuma-space
+  labels:
+    app.kubernetes.io/part-of: pneuma-space
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "21600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "21600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [console.example.com]
+      secretName: pneuma-space-control-tls
+    - hosts: ["*.apps.example.net"]
+      secretName: pneuma-space-apps-tls
+    - hosts: [objects.example.net]
+      secretName: pneuma-space-objects-tls
+  rules:
+    - host: console.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pneuma-space-gateway
+                port:
+                  number: 8081
+    - host: "*.apps.example.net"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pneuma-space-gateway
+                port:
+                  number: 8080
+    - host: objects.example.net
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rustfs
+                port:
+                  number: 9000

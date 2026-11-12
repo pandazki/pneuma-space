@@ -149,6 +149,14 @@ These rows cover [the additive SaaS baseline](../REQUIREMENTS-M3.md) and [ADR 00
 | AC-SAAS-13 | Hosted app code receives no platform cookies or credentials and cannot set platform-reserved response cookies, including on WebSocket responses. |
 | AC-SAAS-14 | Hosted production configuration refuses local test identities, insecure origins and overlapping control/app sites; local test login is available only in explicitly enabled loopback development mode. |
 
+Public release also requires the following checks on the actual deployment. Local hosted checks do not satisfy them.
+
+| ID | Pass condition |
+| --- | --- |
+| AC-SAAS-15 | Deliberately hostile contract-1 container and isolate applications cannot read another app’s memory or state, reach platform control sockets or the platform store, obtain platform credentials, or cross into another account through network or browser-origin attacks. Repeat after sleep, release replacement and removal. |
+| AC-SAAS-16 | Exhausting compute, memory, processes, storage or request capacity in one account is refused at its limits while another account and the control plane remain usable; billable resource use is bounded and visible. |
+| AC-SAAS-17 | On the required Cloudflare deployment, every supported contract-1 runtime and capability passes its original acceptance rows; an export restores application artifacts, persistent state and account ownership on a second adapter, with the source data retained. |
+
 ## Cloud profile (contract 2)
 
 These rows cover [US-C-1 through US-C-7](user-stories.md#云端首版) and the [cloud contract](app-contract.md#cloud-profile-contract-2). Run the cloud group on the local Workers engine and repeat account/domain-dependent cases on an explicitly configured staging deployment. Local results do not establish production isolation or OAuth availability. Unchanged M1/M2 rows still apply to their existing deployment profiles.

@@ -210,7 +210,7 @@ M2 不做的事在 `REQUIREMENTS-M2.md` 的"M2 不做"一节。
 
 ## 5 M3 云入口
 
-[ADR 0027](docs/adr/0027-hosted-fetch-profile.md) 和 [ADR 0028](docs/adr/0028-personal-tenants-and-private-origins.md) 明确引入契约 2。第 1、2 节继续描述进程版。云端需求在 [REQUIREMENTS-M3.md](REQUIREMENTS-M3.md)，调用者看到的形式在 [应用契约](docs/app-contract.md#cloud-profile-contract-2)。
+[ADR 0027](docs/adr/0027-hosted-fetch-profile.md) 和 [ADR 0028](docs/adr/0028-personal-tenants-and-private-origins.md) 明确引入契约 2。本节保留该独立 Fetch 实验的结构，完整 SaaS 按 [ADR 0030](docs/adr/0030-additive-hosted-platform.md) 和第 6 节实施。第 1、2 节继续描述进程版。调用者看到的形式在 [应用契约](docs/app-contract.md#cloud-profile-contract-2)。
 
 ### 5.1 组成与拥有者
 
@@ -252,3 +252,20 @@ Registry 持有资源的期望状态，Provider 持有资源已执行的状态�
 | RecordsResource | 有界记录事务、生命周期条件更新、导出和空目标恢复 | 每应用 SQLite Durable Object |
 
 本地适配器不改变业务规则，生产隔离承诺不延伸到本地进程。账户备份和应用导出不含云资源句柄，迁移后重新建立物理绑定。
+
+## 6 完整平台的托管身份
+
+[ADR 0030](docs/adr/0030-additive-hosted-platform.md) 在第 1、2 节的平台上增加 `HostedIdentity` 和 `HostedSessions`。组合根按身份模式选择认证实现，运行时、Provider、调度器、观测组件和控制台继续共用。`hosted-config.ts` 解析配置，具体参数由 [应用契约](docs/app-contract.md#hosted-identity) 定义。
+
+| 状态 | 键 | 唯一写者 |
+| --- | --- | --- |
+| 外部身份映射 | 提供者、不可变外部主体 | Registry，在开户事务内与用户、个人租户和首个管理员成员关系一起写入 |
+| 开户计数 | 单行 | Registry，开户锁及事务内更新，既有身份不重复占用 |
+| 托管认证记录 | 随机秘密的散列 | HostedSessions，值按控制台会话、应用会话、一次性授权码、登录握手区分 |
+| 令牌限制 | 原 Token 行的可空限制字段 | Registry，空值保留旧令牌语义 |
+
+上述数据通过 Store 的共享 SQL 操作持久化，两个存储实现只增加迁移。HostedSessions 消费授权码与创建应用会话在同一事务内完成。派生会话每次准入检查父会话。Registry 在发布激活事务内调用管理边界的授权检查，检查只能通过该事务读取状态。
+
+Authority 从托管身份生成原有 Caller，权限继续由 `can` 和 `allows` 决定。托管模式的令牌和成员关系不使用副本内的延迟缓存。管理端必须配置认证依赖和精确控制源；入口的身份模式、凭据过滤及应用访问检查一起组合。副本间的实时请求查询转发调用者会话和原控制 Host。
+
+控制台仍为 `gateway/src/console.html`。托管模式增加会话 CSRF、令牌限制和清除名称确认，原有页面保持角色边界。Fetch 实验自己的账户和数据不自动并入完整平台。

@@ -5,12 +5,14 @@ import { startAdmin } from './admin.ts';
 import { Docker } from './docker.ts';
 import { emit, events } from './events.ts';
 import { Instances } from './instances.ts';
-import { Authority, parsePlatformAdmins } from './authz.ts';
+import { allows, Authority, parsePlatformAdmins } from './authz.ts';
 import { loadOrCreateSecret, LocalIdentity, parseIdentityEnv, UpstreamIdentity, type Identity } from './identity.ts';
+import { HostedIdentity, HOSTED_COOKIE_NAMES, HOSTED_IDENTITY_PATHS } from './identity-hosted.ts';
+import { HostedSessions } from './hosted-sessions.ts';
 import { JwtVerifier } from './jwt.ts';
 import { Ingress } from './ingress.ts';
 import { hostSample, httpProbe, Metrics, networkProbe, profileProbe, serveMetrics, Series, tcpProbe, untilUp, type Probe, type ServiceName } from './metrics.ts';
-import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId, type VolumeSample } from './model.ts';
+import { ADMIN_PORT, INGRESS_PORT, InputError, RUNTIMES, appName, type AppId, type ReplicaId, type VolumeSample } from './model.ts';
 import { DockerInfra } from './infra.ts';
 import { inClusterClient } from './kube.ts';
 import { NodeView, type RunnerHealth } from './nodes.ts';
@@ -40,9 +42,12 @@ const setup = (() => {
     const admins = parsePlatformAdmins(process.env.PNEUMA_SPACE_PLATFORM_ADMINS);
     const upstream = identity.kind === 'upstream' ? { ...identity.options, verifier: new JwtVerifier(identity.jwt), audiences: identity.jwt.audiences } : null;
     const consoleIdentity = identity.kind === 'upstream' && upstream ? { ...upstream, audiences: identity.consoleAudiences } : null;
+    const hosted = identity.kind === 'hosted' ? identity.options : null;
+    const signupLimit = Number(process.env.PNEUMA_SPACE_HOSTED_SIGNUP_LIMIT || 20);
+    if (hosted && (!Number.isSafeInteger(signupLimit) || signupLimit < 0)) throw new Error('PNEUMA_SPACE_HOSTED_SIGNUP_LIMIT must be a nonnegative integer');
     const scaleMax = Number(process.env.PNEUMA_SPACE_SCALE_MAX || 10);
     if (!Number.isInteger(scaleMax) || scaleMax < 1) throw new Error(`PNEUMA_SPACE_SCALE_MAX must be a whole number of at least 1, got "${process.env.PNEUMA_SPACE_SCALE_MAX}"`);
-    return { pods, admins, upstream, consoleIdentity, scaleMax, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
+    return { pods, admins, upstream, consoleIdentity, hosted, signupLimit, scaleMax, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
   } catch (error) {
     console.error(`pneuma-space: ${(error as Error).message}`);
     process.exit(1);
@@ -126,17 +131,35 @@ const providers = Object.values(createProviders(runtime, config, providerProbe))
 if (!(await untilUp(() => bundles.answers(), { waiting: () => log('object-wait', { endpoint: config.object.endpoint }) }))) log('object-unready', { endpoint: config.object.endpoint });
 const registry = await PlatformRegistry.open({
   store, runtime, guard, infra, bundles, providers, statsSource: async () => metrics.stats(),
+  defaultAccess: setup.hosted ? 'tenant' : 'org',
   addressing: setup.addressing, volumeGb: config.volumeGb, nodeOf: (app) => nodes.nodeOf(app),
   probe: (service) => (service === RUNTIMES.isolate.service && setup.pods ? runnerUp() : providerProbe(service as 'postgres' | 'coturn')),
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica, policy: () => registry.policy() });
-const authority = new Authority(store, setup.admins);
-const identity: Identity = setup.upstream
-  ? new UpstreamIdentity(setup.upstream, authority, registry)
-  : new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), authority, setup.addressing.mode);
+const authority = new Authority(store, setup.admins, Date.now, setup.hosted ? 0 : undefined);
+const identity: Identity = setup.hosted
+  ? new HostedIdentity(setup.hosted, new HostedSessions(store), {
+    tokens: authority,
+    register: (verified) => registry.registerHostedIdentity(verified, {
+      limit: setup.signupLimit,
+      quota: { apps: 5, awake: 2, cpu_millis: 2000, memory_mb: 1024, storage_gb: 5 },
+    }),
+    app: async (name) => {
+      try { return await store.app(appName(name)); }
+      catch (error) { if (error instanceof InputError) return null; throw error; }
+    },
+    authorizeApp: async (auth, app) => allows(await authority.callerOf(auth), app.access, app.tenant, app.id) === 'ok',
+  })
+  : setup.upstream
+    ? new UpstreamIdentity(setup.upstream, authority, registry)
+    : new LocalIdentity(loadOrCreateSecret(join(data, 'pneuma-space.secret')), authority, setup.addressing.mode);
+const credentialPolicy = setup.hosted
+  ? { header: 'authorization', stripCookies: HOSTED_COOKIE_NAMES }
+  : setup.upstream && { header: setup.upstream.header, stripCookies: setup.upstream.stripCookies };
 const ingress = new Ingress({
   registry, runtime, identity, authority, addressing: setup.addressing, bundles, scheduler,
-  upstream: setup.upstream && { header: setup.upstream.header, stripCookies: setup.upstream.stripCookies }, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
+  upstream: credentialPolicy, hosted: !!setup.hosted, identityPaths: setup.hosted ? HOSTED_IDENTITY_PATHS : undefined,
+  stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (app) => store.deleteStats(app),
   series,
 });
 
@@ -187,12 +210,14 @@ await instances.onLeader((leading) => {
 });
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
 // The console audience keeps a JWT leaked from an app request from replaying on the admin API (ADR 0021 item 1).
-const upstream = setup.consoleIdentity ? { identity: new UpstreamIdentity(setup.consoleIdentity, authority, registry), authority } : undefined;
+const upstream = setup.hosted ? { identity, authority }
+  : setup.consoleIdentity ? { identity: new UpstreamIdentity(setup.consoleIdentity, authority, registry), authority } : undefined;
 const peers = process.env.PNEUMA_SPACE_PEERS
-  ? { host: process.env.PNEUMA_SPACE_PEERS, forward: ['authorization', ...(setup.upstream ? [setup.upstream.header] : [])] }
+  ? { host: process.env.PNEUMA_SPACE_PEERS, forward: ['authorization', ...(setup.hosted ? ['cookie', 'host'] : setup.upstream ? [setup.upstream.header] : [])] }
   : undefined;
 const admin = await startAdmin({
   registry, bundles, runtime, guard, metrics, nodes, infra, scaleMax: setup.scaleMax, requests, replica, peers, store, ingressPort, upstream, providers,
+  hosted: setup.hosted ? { controlOrigin: setup.hosted.controlOrigin, identityPaths: HOSTED_IDENTITY_PATHS } : undefined,
 }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const exporter = await serveMetrics(process.env.PNEUMA_SPACE_METRICS_PORT, () => metrics.prometheus());
 const sample = () => metrics.sample().catch((error: Error) => log('sample-failed', { error: error.message }));
