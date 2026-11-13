@@ -1,0 +1,537 @@
+{
+  "at": "2026-11-13T06:21:36.586Z",
+  "base": "https://pneuma-space-survey-cf-20261112.ianepo.workers.dev",
+  "lifecycle": "passed",
+  "r2": "passed",
+  "node": {
+    "firstMeta": {
+      "boot": "b317e420-ce09-489a-8015-c2b3038eca95",
+      "image": "v1",
+      "uptimeMs": 535.054866
+    },
+    "warmMeta": {
+      "boot": "b317e420-ce09-489a-8015-c2b3038eca95",
+      "image": "v1",
+      "uptimeMs": 830.700388
+    },
+    "idleMeta": {
+      "boot": "e8e81fc6-e8c3-481c-be57-574f3fea87a8",
+      "image": "v1",
+      "uptimeMs": 522.919856
+    },
+    "killMeta": {
+      "boot": "32841e6e-28b9-4fe1-9bf4-b6b63a66e90f",
+      "image": "v1",
+      "uptimeMs": 537.350828
+    },
+    "v2Meta": {
+      "boot": "063ee158-6d55-406f-b8a4-4ab22a03f817",
+      "image": "v2",
+      "uptimeMs": 522.415816
+    }
+  },
+  "exports": {
+    "initial": {
+      "status": "passed",
+      "id": "cd2d71a1-d698-4c84-908e-6f28e5a65fcc",
+      "bytes": 150,
+      "sha256": "3c42cb5b8ff8a772867f4182bfe77ed2a19062b39288b6a6fa70d8bba8828489"
+    },
+    "idle": {
+      "status": "passed",
+      "id": "3f818a31-5eb6-49c2-a070-e6e26bdfe52f",
+      "bytes": 150,
+      "sha256": "74832f297108aa0419aaceafe4c49b2bfbbc25f8b517658f2cf2242a5b8e22dd"
+    },
+    "kill": {
+      "status": "passed",
+      "id": "b38af1a8-5ce5-421c-866d-13eafa2fa2e4",
+      "bytes": 153,
+      "sha256": "fd1ab8fb423b2d8845d745c86656c77fc277db8b397e36c840f683cca507b86d"
+    },
+    "v2": {
+      "status": "passed",
+      "id": "1815b19b-b76e-4bd5-a7a5-a40933e585a1",
+      "bytes": 153,
+      "sha256": "31a0e69200f6466c4ab1f1f43b38ffcbca5ef8257576f3533f0d76ccc336f327"
+    }
+  },
+  "observations": [
+    {
+      "label": "no-auth",
+      "status": 401,
+      "cfRay": "a59ba99afbccd790-NRT"
+    },
+    {
+      "label": "member-results",
+      "status": 403,
+      "cfRay": "a59ba99f0d45e81b-NRT"
+    },
+    {
+      "label": "member-ticket",
+      "status": 403,
+      "cfRay": "a59ba9a0eb59d790-NRT"
+    },
+    {
+      "label": "owner-control",
+      "status": 401,
+      "cfRay": "a59ba9a2bbe6e81b-NRT"
+    },
+    {
+      "label": "spoof-owner",
+      "status": 403,
+      "cfRay": "a59ba9a49ba2d790-NRT"
+    },
+    {
+      "label": "control-storage-probe",
+      "status": 200,
+      "cfRay": "a59ba9a63a3fe81b-NRT"
+    },
+    {
+      "label": "login-page",
+      "status": 200,
+      "cfRay": "a59ba9a94dadd790-NRT"
+    },
+    {
+      "label": "cookie-login",
+      "status": 303,
+      "cfRay": "a59ba9adb833d790-NRT"
+    },
+    {
+      "label": "language-choice",
+      "status": 303,
+      "cfRay": "a59ba9af7ce1e81b-NRT"
+    },
+    {
+      "label": "language-persisted",
+      "status": 200,
+      "cfRay": "a59ba9bbaa50d790-NRT"
+    },
+    {
+      "label": "cookie-csrf",
+      "status": 403,
+      "cfRay": "a59ba9c32d3cd790-NRT"
+    },
+    {
+      "label": "before-spoof",
+      "status": 200,
+      "cfRay": "a59ba9c4efdce81b-NRT"
+    },
+    {
+      "label": "spoof-subject",
+      "status": 303,
+      "cfRay": "a59ba9c73e8ad790-NRT"
+    },
+    {
+      "label": "member-saved",
+      "status": 200,
+      "cfRay": "a59ba9ca7a01e81b-NRT"
+    },
+    {
+      "label": "evil-origin",
+      "status": 403,
+      "cfRay": "a59ba9ccebd3d790-NRT"
+    },
+    {
+      "label": "oversized-answer",
+      "status": 413,
+      "cfRay": "a59ba9ce9b87e81b-NRT"
+    },
+    {
+      "label": "after-oversized",
+      "status": 200,
+      "cfRay": "a59ba9d04b78d790-NRT"
+    },
+    {
+      "label": "unknown-op",
+      "status": 404,
+      "cfRay": "a59ba9d36b2fd790-NRT"
+    },
+    {
+      "label": "control-image/v1",
+      "status": 200,
+      "cfRay": "a59ba9d52968e81b-NRT"
+    },
+    {
+      "label": "meta-first",
+      "status": 200,
+      "cfRay": "a59ba9dd5ba7d790-NRT"
+    },
+    {
+      "label": "meta-first-readiness",
+      "elapsedMs": 1140.778459000001,
+      "metadataUptimeMs": 535.054866
+    },
+    {
+      "label": "meta-warm",
+      "status": 200,
+      "cfRay": "a59ba9e46c03d790-NRT"
+    },
+    {
+      "label": "first",
+      "status": 303,
+      "cfRay": "a59ba9e64ffad790-NRT"
+    },
+    {
+      "label": "first-read",
+      "status": 200,
+      "cfRay": "a59ba9e8c8cee81b-NRT"
+    },
+    {
+      "label": "first-rows",
+      "status": 200,
+      "cfRay": "a59ba9ebacc1d790-NRT"
+    },
+    {
+      "label": "initial-availability",
+      "status": 200,
+      "cfRay": "a59ba9ee4a74d790-NRT"
+    },
+    {
+      "label": "initial-begin",
+      "status": 200,
+      "cfRay": "a59ba9f02ef2e81b-NRT"
+    },
+    {
+      "label": "initial-altered-key",
+      "status": 403,
+      "denial": "SignatureDoesNotMatch"
+    },
+    {
+      "label": "initial-wrong-method",
+      "status": 403,
+      "denial": "SignatureDoesNotMatch"
+    },
+    {
+      "label": "initial-complete",
+      "status": 200,
+      "cfRay": "a59baa134d54eb81-NRT"
+    },
+    {
+      "label": "initial-complete-repeat",
+      "status": 200,
+      "cfRay": "a59baa185bc1eb81-NRT"
+    },
+    {
+      "label": "initial-download",
+      "status": 200,
+      "cfRay": "a59baa1adef0eb81-NRT"
+    },
+    {
+      "label": "initial-unsigned",
+      "status": 400,
+      "denial": "InvalidArgument"
+    },
+    {
+      "label": "control-status",
+      "status": 200,
+      "cfRay": "a59bac56d8a580d8-NRT"
+    },
+    {
+      "label": "quiet-window",
+      "start": "2026-11-13T06:19:23.838Z",
+      "end": "2026-11-13T06:20:54.556Z",
+      "running": false,
+      "processAgeUpperBoundMs": {
+        "start": 10718.985347000002,
+        "end": 101433.929305
+      },
+      "metadataUptimeMs": 830.700388
+    },
+    {
+      "label": "meta-idle",
+      "status": 200,
+      "cfRay": "a59bac593a6680d8-NRT"
+    },
+    {
+      "label": "idle-persisted-read",
+      "status": 200,
+      "cfRay": "a59bac603f6380d8-NRT"
+    },
+    {
+      "label": "idle-persisted-rows",
+      "status": 200,
+      "cfRay": "a59bac64dabe80d8-NRT"
+    },
+    {
+      "label": "idle-old-download",
+      "status": 200,
+      "cfRay": "a59bac674c7180d8-NRT"
+    },
+    {
+      "label": "idle-write",
+      "status": 303,
+      "cfRay": "a59bac6e196380d8-NRT"
+    },
+    {
+      "label": "idle-write-read",
+      "status": 200,
+      "cfRay": "a59bac728a82ded5-NRT"
+    },
+    {
+      "label": "idle-write-rows",
+      "status": 200,
+      "cfRay": "a59bac754e1f80d8-NRT"
+    },
+    {
+      "label": "idle-availability",
+      "status": 200,
+      "cfRay": "a59bac77b82080d8-NRT"
+    },
+    {
+      "label": "idle-begin",
+      "status": 200,
+      "cfRay": "a59bac79dfd2ded5-NRT"
+    },
+    {
+      "label": "idle-altered-key",
+      "status": 403,
+      "denial": "SignatureDoesNotMatch"
+    },
+    {
+      "label": "idle-wrong-method",
+      "status": 403,
+      "denial": "SignatureDoesNotMatch"
+    },
+    {
+      "label": "idle-complete",
+      "status": 200,
+      "cfRay": "a59bac85da1580d8-NRT"
+    },
+    {
+      "label": "idle-complete-repeat",
+      "status": 200,
+      "cfRay": "a59bac8f293680d8-NRT"
+    },
+    {
+      "label": "idle-download",
+      "status": 200,
+      "cfRay": "a59bac91aad680d8-NRT"
+    },
+    {
+      "label": "idle-unsigned",
+      "status": 400,
+      "denial": "InvalidArgument"
+    },
+    {
+      "label": "control-kill",
+      "status": 200,
+      "cfRay": "a59baca609aa80d8-NRT"
+    },
+    {
+      "label": "meta-kill",
+      "status": 200,
+      "cfRay": "a59bacaf2c8efca3-NRT"
+    },
+    {
+      "label": "kill-persisted-read",
+      "status": 200,
+      "cfRay": "a59bacb60e4180d8-NRT"
+    },
+    {
+      "label": "kill-persisted-rows",
+      "status": 200,
+      "cfRay": "a59bacb9085880d8-NRT"
+    },
+    {
+      "label": "kill-old-download",
+      "status": 200,
+      "cfRay": "a59bacbbb9da80d8-NRT"
+    },
+    {
+      "label": "kill-write",
+      "status": 303,
+      "cfRay": "a59baccbebe980d8-NRT"
+    },
+    {
+      "label": "kill-write-read",
+      "status": 200,
+      "cfRay": "a59bacd60af08a62-NRT"
+    },
+    {
+      "label": "kill-write-rows",
+      "status": 200,
+      "cfRay": "a59bacd8fb2980d8-NRT"
+    },
+    {
+      "label": "kill-availability",
+      "status": 200,
+      "cfRay": "a59bacdb6ce580d8-NRT"
+    },
+    {
+      "label": "kill-begin",
+      "status": 200,
+      "cfRay": "a59bace02cdb8a62-NRT"
+    },
+    {
+      "label": "kill-altered-key",
+      "status": 403,
+      "denial": "SignatureDoesNotMatch"
+    },
+    {
+      "label": "kill-wrong-method",
+      "status": 403,
+      "denial": "SignatureDoesNotMatch"
+    },
+    {
+      "label": "kill-complete",
+      "status": 200,
+      "cfRay": "a59bacfd1d18ef1e-NRT"
+    },
+    {
+      "label": "kill-complete-repeat",
+      "status": 200,
+      "cfRay": "a59bad00cef2ef1e-NRT"
+    },
+    {
+      "label": "kill-download",
+      "status": 200,
+      "cfRay": "a59bad073f50ef1e-NRT"
+    },
+    {
+      "label": "kill-unsigned",
+      "status": 400,
+      "denial": "InvalidArgument"
+    },
+    {
+      "label": "control-image/v2",
+      "status": 200,
+      "cfRay": "a59bad182e43ef1e-NRT"
+    },
+    {
+      "label": "meta-v2",
+      "status": 200,
+      "cfRay": "a59bad232f5ffd4d-NRT"
+    },
+    {
+      "label": "v2-persisted-read",
+      "status": 200,
+      "cfRay": "a59bad2b49ffef1e-NRT"
+    },
+    {
+      "label": "v2-persisted-rows",
+      "status": 200,
+      "cfRay": "a59bad2e5aafef1e-NRT"
+    },
+    {
+      "label": "v2-old-download",
+      "status": 200,
+      "cfRay": "a59bad314a70ef1e-NRT"
+    },
+    {
+      "label": "v2-write",
+      "status": 303,
+      "cfRay": "a59bad37dbdeef1e-NRT"
+    },
+    {
+      "label": "v2-write-read",
+      "status": 200,
+      "cfRay": "a59bad3a5ea2fd4d-NRT"
+    },
+    {
+      "label": "v2-write-rows",
+      "status": 200,
+      "cfRay": "a59bad3d0bb7ef1e-NRT"
+    },
+    {
+      "label": "v2-availability",
+      "status": 200,
+      "cfRay": "a59bad427a9cef1e-NRT"
+    },
+    {
+      "label": "v2-begin",
+      "status": 200,
+      "cfRay": "a59bad46aaf2fd4d-NRT"
+    },
+    {
+      "label": "v2-altered-key",
+      "status": 403,
+      "denial": "SignatureDoesNotMatch"
+    },
+    {
+      "label": "v2-wrong-method",
+      "status": 403,
+      "denial": "SignatureDoesNotMatch"
+    },
+    {
+      "label": "v2-complete",
+      "status": 200,
+      "cfRay": "a59bad535ee2ef1e-NRT"
+    },
+    {
+      "label": "v2-complete-repeat",
+      "status": 200,
+      "cfRay": "a59bad56e920ef1e-NRT"
+    },
+    {
+      "label": "v2-download",
+      "status": 200,
+      "cfRay": "a59bad592f31ef1e-NRT"
+    },
+    {
+      "label": "v2-unsigned",
+      "status": 400,
+      "denial": "InvalidArgument"
+    }
+  ],
+  "sourceCommit": "3ee9dbb110707882f62bf9af5bac9c7590d46137",
+  "workerVersion": "c19ff9db-de4f-4fb7-a67c-b72b3b697cd4",
+  "exitCode": 0,
+  "credentialScope": {
+    "status": "active",
+    "issuedOn": "2026-11-13T06:13:34Z",
+    "expiresOn": "2026-11-19T16:00:00Z",
+    "resourceScope": [
+      "com.cloudflare.edge.r2.bucket.3fe29372540f8d26046ab314c2f06f89_default_pneuma-space-survey-cf-20261112"
+    ],
+    "permissionGroup": "Workers R2 Storage Bucket Item Write",
+    "provisionerType": "com.cloudflare.api.oauthtoken"
+  },
+  "corsProtocol": {
+    "at": "2026-11-13T06:23:33.780Z",
+    "status": "passed",
+    "surface": "Node HTTP client; no browser automation",
+    "exportId": "c97e4c06-6dd6-4384-a618-420bb3235b86",
+    "bytes": 153,
+    "sha256": "31a0e69200f6466c4ab1f1f43b38ffcbca5ef8257576f3533f0d76ccc336f327",
+    "checks": [
+      {
+        "label": "allowed-origin preflight",
+        "status": 204,
+        "allowOrigin": "https://pneuma-space-survey-cf-20261112.ianepo.workers.dev",
+        "allowMethods": "GET, PUT, HEAD",
+        "allowHeaders": "content-type"
+      },
+      {
+        "label": "foreign-origin preflight",
+        "status": 403,
+        "allowOrigin": null,
+        "allowMethods": null,
+        "allowHeaders": null
+      },
+      {
+        "label": "direct PUT with Origin",
+        "status": 200,
+        "allowOrigin": "https://pneuma-space-survey-cf-20261112.ianepo.workers.dev"
+      },
+      {
+        "label": "direct GET with Origin",
+        "status": 200,
+        "allowOrigin": "https://pneuma-space-survey-cf-20261112.ianepo.workers.dev"
+      }
+    ]
+  },
+  "browser": {
+    "visual": "unavailable",
+    "interactiveTransfer": "not verified"
+  },
+  "foreignFixtureAfter": [
+    {
+      "app": "other",
+      "subject": "cf-other-scope-probe",
+      "q1": "poor",
+      "q2": "remote",
+      "q3": "culture"
+    }
+  ]
+}
