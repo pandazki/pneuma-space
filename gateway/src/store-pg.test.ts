@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { changeKey, type AppName, type BundleId, type ImageId, type Leadership, type ReleaseNumber, type Subject } from './model.ts';
+import { changeKey, DEFAULT_TENANT, type AppName, type BundleId, type ImageId, type Leadership, type ReleaseNumber, type Subject } from './model.ts';
 import { Session, type PgOptions } from './pg.ts';
 import { replicaContract } from './registry.contract.ts';
 import { BUNDLE_REFERENCED } from './sql.ts';
@@ -40,6 +40,14 @@ function selfSigned(name: string): string {
 }
 
 const skip = !dockerUp && 'Docker is not available';
+
+/** The steps both main and the hosted stack held before either appended one: main then added release_bundle, the hosted stack its tables. */
+const BEFORE_MERGE = PG_MIGRATIONS.length - 2;
+
+async function migrated(session: Session, steps: number): Promise<void> {
+  await session.simple('CREATE TABLE schema_migration (version INTEGER PRIMARY KEY, applied_at BIGINT NOT NULL)');
+  for (const [index, step] of PG_MIGRATIONS.slice(0, steps).entries()) await session.simple(`${step}; INSERT INTO schema_migration VALUES (${index + 1}, 0)`);
+}
 
 before(async () => {
   if (skip) return;
@@ -164,6 +172,58 @@ describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () 
     for (const end = Date.now() + 5000; !next && Date.now() < end; await delay(100)) next = await b.leader();
     assert.equal(next?.held(), true);
     await next?.release();
+  });
+
+  test('AC-SAAS-12 hosted migration preserves existing application state and token permissions', async () => {
+    const admin = await Session.open(plain());
+    await admin.simple('CREATE DATABASE hosted_migration');
+    await admin.close();
+    const old = await Session.open(plain('hosted_migration'));
+    await migrated(old, BEFORE_MERGE);
+    await old.simple(`INSERT INTO app (name, id, owner, status, current, policy_override, access) VALUES ('existing', 'stable-id', 'user:ann', 'registered', 1, '{}', 'public');
+      INSERT INTO release (app, number, image, manifest, bundle, release_key, published_at) VALUES ('stable-id', 1, 'image-id', '{}', NULL, 'key', 1);
+      INSERT INTO binding (app, kind, provider, state, resource) VALUES ('stable-id', 'kv', 'redis', 'active', '{"prefix":"kept"}');
+      INSERT INTO token (id, subject, hash, created_at) VALUES ('legacy', 'service:ci', 'legacy-hash', 1);`);
+    const tables = ['app', 'release', 'binding', 'token'];
+    const snapshot = await Promise.all(tables.map(async (table) => (await old.query(`SELECT * FROM ${table}`)).rows));
+    const store = await open({}, 'hosted_migration');
+    for (const [index, table] of tables.entries()) {
+      const rows = (await old.query(`SELECT * FROM ${table}`)).rows.map(({ restrictions, ...row }) => row);
+      assert.deepEqual(rows, snapshot[index]);
+    }
+    assert.equal((await store.token('legacy-hash'))?.restrictions, undefined);
+    await old.close();
+  });
+
+  /** Migrates `database` as `before` leaves it, opens it with this gateway, and reads back what the merged schema holds. */
+  async function upgraded(database: string, before: (session: Session) => Promise<void>) {
+    const admin = await Session.open(plain());
+    await admin.simple(`CREATE DATABASE ${database}`);
+    await admin.close();
+    const old = await Session.open(plain(database));
+    await before(old);
+    const store = await open({}, database);
+    const restrictions = { expiresAt: 2, scopes: ['read' as const], appIds: null };
+    await store.putToken({ id: 'r', tenant: DEFAULT_TENANT, subject: 'service:ci' as Subject, label: 'ci', hash: 'h-r', createdBy: 'local', createdAt: 1, revokedAt: null, restrictions });
+    const { rows } = await old.query("SELECT (SELECT max(version) FROM schema_migration) AS version, (SELECT count(*) FROM pg_indexes WHERE indexname = 'release_bundle') AS indexes");
+    await old.close();
+    return [Number(rows[0].version), Number(rows[0].indexes), await store.hostedSignupCount(), (await store.token('h-r'))?.restrictions];
+  }
+
+  test('a database main migrated before the hosted stack merged gains the hosted tables', async () => {
+    const held = await upgraded('main_migrated', async (old) => {
+      await migrated(old, BEFORE_MERGE);
+      await old.simple(`CREATE INDEX release_bundle ON release (bundle); INSERT INTO schema_migration VALUES (${BEFORE_MERGE + 1}, 0)`);
+    });
+    assert.deepEqual(held, [PG_MIGRATIONS.length, 1, 0, { expiresAt: 2, scopes: ['read'], appIds: null }]);
+  });
+
+  test('a database the hosted stack migrated before main merged gains release_bundle and keeps its hosted rows', async () => {
+    const held = await upgraded('hosted_migrated', async (old) => {
+      await migrated(old, BEFORE_MERGE + 1);
+      await old.simple('UPDATE hosted_signup SET count = 3');
+    });
+    assert.deepEqual(held, [PG_MIGRATIONS.length, 1, 3, { expiresAt: 2, scopes: ['read'], appIds: null }]);
   });
 
   test('two stores opening an empty database at once apply the schema once (AC-STORE-6)', async () => {

@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "pneuma-space-cloud",
+  "main": "adapters/cloudflare/worker.ts",
+  "compatibility_date": "2026-11-11",
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "PNEUMA_SPACE_CONTROL_ORIGIN": "https://space.deepaste.ai",
+    "PNEUMA_SPACE_APPS_DOMAIN": "REPLACE_WITH_SEPARATE_APP_DOMAIN",
+    "PNEUMA_SPACE_GITHUB_CLIENT_ID": "REPLACE_WITH_GITHUB_CLIENT_ID",
+    "PNEUMA_SPACE_ENABLED": "false"
+  },
+  "secrets": {
+    "required": ["PNEUMA_SPACE_GITHUB_CLIENT_SECRET", "PNEUMA_SPACE_SESSION_KEY"]
+  },
+  "worker_loaders": [{ "binding": "PNEUMA_SPACE_LOADER" }],
+  "r2_buckets": [{ "binding": "PNEUMA_SPACE_ARTIFACTS", "bucket_name": "pneuma-space-artifacts" }],
+  "durable_objects": {
+    "bindings": [
+      { "name": "PNEUMA_SPACE_ACCOUNTS", "class_name": "AccountsObject" },
+      { "name": "PNEUMA_SPACE_CAPACITY", "class_name": "CapacityObject" },
+      { "name": "PNEUMA_SPACE_TENANTS", "class_name": "TenantObject" },
+      { "name": "PNEUMA_SPACE_RECORDS", "class_name": "RecordsObject" },
+      { "name": "PNEUMA_SPACE_ARTIFACT_INDEX", "class_name": "ArtifactIndexObject" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AccountsObject", "CapacityObject", "TenantObject", "RecordsObject", "ArtifactIndexObject"] }],
+  "rules": [{ "type": "Text", "globs": ["**/*.html"], "fallthrough": true }],
+  "limits": { "cpu_ms": 50 },
+  "observability": { "enabled": false }
+}

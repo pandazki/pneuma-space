@@ -211,6 +211,7 @@ test('init copies the template next to the CLI into a new dir and refuses a non-
   cpSync(join(repo, 'cli/appctl.ts'), join(root, 'cli/appctl.ts'));
   cpSync(join(repo, 'cli/scaffold.ts'), join(root, 'cli/scaffold.ts'));
   cpSync(join(repo, 'gateway/src/model.ts'), join(root, 'gateway/src/model.ts'));
+  cpSync(join(repo, 'shared'), join(root, 'shared'), { recursive: true });
   cpSync(join(repo, 'gateway/src/kube-infra.ts'), join(root, 'gateway/src/kube-infra.ts'));
   mkdirSync(join(root, 'templates/static'), { recursive: true });
   writeFileSync(join(root, 'templates/static/pneuma-space.json'), '{"contract":1}');

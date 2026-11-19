@@ -1,0 +1,9 @@
+at	commit	host	load1	runtime	metric	n	median_ms	max_ms
+2026-11-11T15:48:43.302Z	ee5ddf3	Apple M4 Max arm64	26.6	container	first	1	266.2	266.2
+2026-11-11T15:48:43.302Z	ee5ddf3	Apple M4 Max arm64	26.6	container	wake	5	198.8	243.9
+2026-11-11T15:48:43.302Z	ee5ddf3	Apple M4 Max arm64	26.6	container	warm	100	1.6	11.7
+2026-11-11T15:48:43.302Z	ee5ddf3	Apple M4 Max arm64	26.6	isolate	first	1	76.0	76.0
+2026-11-11T15:48:43.302Z	ee5ddf3	Apple M4 Max arm64	26.6	isolate	wake	5	74.6	84.3
+2026-11-11T15:48:43.302Z	ee5ddf3	Apple M4 Max arm64	26.6	isolate	warm	100	1.3	4.6
+2026-11-11T15:48:43.302Z	ee5ddf3	Apple M4 Max arm64	26.6	static	warm	20	1.1	3.3
+2026-11-11T15:48:43.302Z	ee5ddf3	Apple M4 Max arm64	26.6	gateway	list 1 apps	10	0.4	0.9

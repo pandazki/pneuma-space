@@ -1,0 +1,7 @@
+**
+!gateway/
+!gateway/Dockerfile
+!gateway/src/
+!gateway/src/**
+!shared/
+!shared/**

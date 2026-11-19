@@ -516,19 +516,24 @@ describe('providers against the real compose services', { skip: !dockerUp && 'Do
       const script = `
         import { createProviders, providerConfig } from '/src/providers.ts';
         import { admission, profileProbe } from '/src/metrics.ts';
-        const probe = admission({ postgres: profileProbe('postgres', 5432), coturn: profileProbe('coturn', 3478), runner: profileProbe('runner', 8082) });
-        const p = createProviders({ destroyStorage: async () => {} }, providerConfig({ PNEUMA_SPACE_RTC_SECRET: 's' }), probe);
+        const probes = { postgres: profileProbe('postgres', 5432), coturn: profileProbe('coturn', 3478), runner: profileProbe('runner', 8082) };
+        const p = createProviders({ destroyStorage: async () => {} }, providerConfig({ PNEUMA_SPACE_RTC_SECRET: 's' }), admission(probes));
         for (const name of ['postgres', 'coturn']) {
           const t = Date.now();
           const outcome = await p[name].ensure('${newAppId()}', null).then(() => 'up', (e) => e.constructor.name);
-          console.log(name, outcome, Date.now() - t);
+          console.log(name, outcome, Date.now() - t, await probes[name]());
         }`;
-      return docker('run', '--rm', '--network', project, '-v', `${join(root, 'gateway/src')}:/src:ro`, 'node:24-alpine',
+      return docker('run', '--rm', '--network', project, '-v', `${join(root, 'gateway/src')}:/src:ro`, '-v', `${join(root, 'shared')}:/shared:ro`, 'node:24-alpine',
         'node', '--input-type=module', '-e', script).trim().split('\n').map((line) => line.split(' '));
     };
 
     test('ensure finds postgres and coturn when their profiles are up', () => {
       assert.deepEqual(probe().map(([name, outcome]) => [name, outcome]), [['postgres', 'up'], ['coturn', 'up']]);
+    });
+
+    test('stopped profile services refuse ensure and are off', () => {
+      compose('stop', 'postgres', 'coturn');
+      assert.deepEqual(probe().map(([name, outcome, , status]) => [name, outcome, status]), [['postgres', 'Conflict', 'off'], ['coturn', 'Conflict', 'off']]);
     });
 
     test('ensure throws Conflict within 1.5 s when their profiles are down', () => {

@@ -327,3 +327,35 @@ test('the app detail names the app actions the caller may take', async () => {
   assert.deepEqual(await may('bob'), ['app.read', 'app.release', 'app.policy', 'app.access', 'app.owner', 'app.remove', 'app.stop']);
   assert.deepEqual(await may('ana'), ['app.read', 'app.release', 'app.policy', 'app.access', 'app.owner', 'app.remove', 'app.purge', 'app.stop']);
 });
+
+test('selected-app credentials filter list, state, usage and audit by immutable id (AC-SAAS-7)', async () => {
+  const id = registry.view(appName('bobs'))!.app;
+  const issued = await registry.issueTenantToken(A, subject(`service:${A}.scoped`), 'scoped', subject('user:ana'), { expiresAt: Date.now() + 60000, scopes: ['read'], appIds: [id] });
+  secrets.scoped = issued.token;
+  assert.deepEqual(await names('token:scoped', '/api/apps', (body: { name: string }[]) => body), ['bobs']);
+  assert.deepEqual(await names('token:scoped', `/api/state?tenant=${A}`, (body: { apps: { app: string }[] }) => body.apps), ['bobs']);
+  assert.deepEqual(await names('token:scoped', `/api/usage/apps?tenant=${A}`, (body: { app: string }[]) => body), ['bobs']);
+  const usage = (await call('token:scoped', 'GET', `/api/usage?tenant=${A}`)).body;
+  assert.equal(usage.buckets.reduce((n: number, row: { requests: number }) => n + row.requests, 0), 3);
+  const audit = (await call('token:scoped', 'GET', `/api/audit?tenant=${A}`)).body as AuditRecord[];
+  assert.ok(audit.length > 0);
+  assert.ok(audit.every((row) => row.target === 'bobs' && row.details.appId === id));
+  for (const path of ['/api/apps/dees', '/api/apps/dees/logs', '/api/apps/dees/state', `/api/tenants/${A}/quota`]) assert.equal((await call('token:scoped', 'GET', path)).status, 404);
+  assert.equal((await call('token:scoped', 'POST', '/api/apps/bobs/remove')).status, 403);
+});
+
+test('revocation during provider preparation prevents release activation (AC-SAAS-8)', async (t) => {
+  const issued = await registry.issueTenantToken(A, subject(`service:${A}.publishing`), 'publishing', subject('user:ana'), { expiresAt: Date.now() + 60000, scopes: ['publish'], appIds: null });
+  secrets.publishing = issued.token;
+  const previous = registry.view(appName('bobs'))!.release;
+  const provider = w.providers.get('redis')!;
+  const ensure = provider.ensure.bind(provider);
+  provider.ensure = async (...args) => {
+    await registry.revokeToken(A, issued.id);
+    return ensure(...args);
+  };
+  t.after(() => { provider.ensure = ensure; });
+  const got = await call('token:publishing', 'PUT', '/api/apps/bobs/release', { ...release, image: 'example:2' });
+  assert.equal(got.status, 403);
+  assert.equal(registry.view(appName('bobs'))!.release, previous);
+});

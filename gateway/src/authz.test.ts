@@ -29,7 +29,7 @@ test('a user in two tenants holds each role from their memberships', async () =>
 test('a service token is a member of its own tenant only', async () => {
   const t = token(`service:${A}.ci`, A);
   const caller = await authority.callerOf({ via: 'token', subject: t.subject, name: 'ci', token: t });
-  assert.deepEqual(caller, { actor: { via: 'token', subject: t.subject, token: 't1', createdBy: 'user:ana' }, platformAdmin: false, roles: new Map([[A, 'member']]), viaToken: true });
+  assert.deepEqual(caller, { actor: { via: 'token', subject: t.subject, token: 't1', createdBy: 'user:ana' }, platformAdmin: false, roles: new Map([[A, 'member']]), viaToken: true, authentication: { kind: 'token', hash: 'h' } });
 });
 
 test('platform admins listed by id and by group are platform admins in the browser', async () => {
@@ -124,3 +124,17 @@ for (const [access, who, expected] of ACCESS_CELLS) {
     assert.equal(allows(who, access, A), expected);
   });
 }
+
+
+test('scoped tokens intersect role permissions and immutable app ids (AC-SAAS-7)', () => {
+  const id = 'app-one' as import('./model.ts').AppId;
+  const other = 'app-two' as import('./model.ts').AppId;
+  const scoped: Caller = { ...tokenA, tokenRestrictions: { expiresAt: Date.now() + 60000, scopes: ['read', 'invoke'], appIds: [id] } };
+  assert.equal(can(scoped, 'app.read', A, mia, id), true);
+  assert.deepEqual(can(scoped, 'app.read', A, mia, other), { status: 404 });
+  assert.notEqual(can(scoped, 'app.release', A, mia, id), true);
+  assert.notEqual(can(scoped, 'tokens.issue.service', A), true);
+  assert.equal(allows(scoped, 'public', A, id), 'ok');
+  assert.equal(allows(scoped, 'public', A, other), 'forbidden');
+  assert.equal(allows({ ...scoped, tokenRestrictions: { ...scoped.tokenRestrictions!, scopes: ['read'] } }, 'public', A, id), 'forbidden');
+});

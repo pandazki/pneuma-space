@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["core/**/*.ts", "adapters/**/*.ts", "http/**/*.ts", "tests/**/*.ts", "cli/**/*.ts", "bench.ts", "../shared/**/*.ts"]
+}

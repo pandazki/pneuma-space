@@ -18,6 +18,17 @@ const LOCK = { migrate: 0, command: 1, leader: 2, bundle: 3 } as const;
 const UNLIMITED = JSON.stringify(Object.fromEntries(QUOTA_RESOURCES.map((resource) => [resource, null])));
 const changed = (table: string) => `CREATE TRIGGER ${table}_changed AFTER INSERT OR UPDATE OR DELETE ON ${table} FOR EACH ROW EXECUTE FUNCTION pneuma_space_changed();`;
 
+const HOSTED = `ALTER TABLE token ADD COLUMN IF NOT EXISTS restrictions TEXT;
+   CREATE TABLE IF NOT EXISTS hosted_identity (
+     provider TEXT NOT NULL, external_subject TEXT NOT NULL, user_id TEXT NOT NULL UNIQUE,
+     tenant TEXT NOT NULL UNIQUE, name TEXT NOT NULL, PRIMARY KEY (provider, external_subject));
+   CREATE TABLE IF NOT EXISTS hosted_signup (id INTEGER PRIMARY KEY CHECK (id = 1), count BIGINT NOT NULL);
+   INSERT INTO hosted_signup (id, count) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+   CREATE TABLE IF NOT EXISTS hosted_auth (
+     hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at BIGINT NOT NULL, expires_at BIGINT NOT NULL, data TEXT NOT NULL);
+   CREATE INDEX IF NOT EXISTS hosted_auth_user ON hosted_auth (user_id, created_at);
+   CREATE INDEX IF NOT EXISTS hosted_auth_expiry ON hosted_auth (expires_at)`;
+
 /** Append only; `schema_migration` records the steps applied. Step 1 is the whole M2 schema (ADR 0025 item 8). */
 export const PG_MIGRATIONS = [
   `CREATE TABLE app (
@@ -101,8 +112,11 @@ export const PG_MIGRATIONS = [
    ${['app', 'release', 'trigger', 'binding', 'policy', 'instance', 'guard', 'tenant', 'membership', 'token'].map(changed).join('\n   ')}`,
   // ADR 0026 item 2: the cluster view marks the leading gateway from its heartbeat.
   'ALTER TABLE replica ADD COLUMN leads INTEGER NOT NULL DEFAULT 0',
-  // ADR 0028: purge asks whether another app's release references a bundle.
-  'CREATE INDEX release_bundle ON release (bundle)',
+  // ADR 0036: hosted accounts, sessions and token restrictions.
+  HOSTED,
+  // ADR 0028: purge asks whether another app's release references a bundle. Before the hosted stack merged this index was the previous
+  // step, so a database migrated then counts the hosted step as applied without it: this step repeats both.
+  `CREATE INDEX IF NOT EXISTS release_bundle ON release (bundle); ${HOSTED}`,
 ];
 
 /** Runs every step not yet recorded, each in its own transaction, under a lock so replicas that start together migrate once. */

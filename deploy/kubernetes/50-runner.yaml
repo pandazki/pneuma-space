@@ -43,6 +43,7 @@ spec:
             - --permission
             - --allow-fs-read=/data
             - --allow-fs-read=/gateway
+            - --allow-fs-read=/shared
             - --allow-fs-write=/data
             - --allow-worker
             - src/runner.ts

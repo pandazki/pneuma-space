@@ -6,8 +6,25 @@ import { SQLITE, SqlOps, wrap, type Row, type Session } from './sql.ts';
 /** The migrated `default` tenant is unlimited (ADR 0022 item 4, ADR 0023 item 2). */
 const UNLIMITED = JSON.stringify(Object.fromEntries(QUOTA_RESOURCES.map((resource) => [resource, null])));
 
+/** A step that depends on what is already there is written against the library it runs on. */
+export type Migration = string | ((db: DatabaseSync) => string);
+export const sqlOf = (step: Migration, db: DatabaseSync): string => (typeof step === 'string' ? step : step(db));
+
+/** Repeatable; SQLite has no ADD COLUMN IF NOT EXISTS. */
+const hosted = (db: DatabaseSync): string => `
+  ${db.prepare("SELECT 1 FROM pragma_table_info('token') WHERE name = 'restrictions'").get() ? '' : 'ALTER TABLE token ADD COLUMN restrictions TEXT;'}
+  CREATE TABLE IF NOT EXISTS hosted_identity (
+    provider TEXT NOT NULL, external_subject TEXT NOT NULL, user_id TEXT NOT NULL UNIQUE,
+    tenant TEXT NOT NULL UNIQUE, name TEXT NOT NULL, PRIMARY KEY (provider, external_subject));
+  CREATE TABLE IF NOT EXISTS hosted_signup (id INTEGER PRIMARY KEY CHECK (id = 1), count INTEGER NOT NULL);
+  INSERT OR IGNORE INTO hosted_signup (id, count) VALUES (1, 0);
+  CREATE TABLE IF NOT EXISTS hosted_auth (
+    hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, data TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS hosted_auth_user ON hosted_auth (user_id, created_at);
+  CREATE INDEX IF NOT EXISTS hosted_auth_expiry ON hosted_auth (expires_at);`;
+
 /** Append only; `PRAGMA user_version` counts the steps applied. */
-export const MIGRATIONS = [
+export const MIGRATIONS: Migration[] = [
   `CREATE TABLE app (
      name TEXT PRIMARY KEY, id TEXT NOT NULL UNIQUE, owner TEXT NOT NULL, status TEXT NOT NULL,
      current INTEGER, policy_override TEXT NOT NULL);
@@ -86,8 +103,12 @@ export const MIGRATIONS = [
   'DROP TABLE storage_usage',
   // ADR 0026 item 2: the cluster view marks the leading gateway from its heartbeat.
   'ALTER TABLE replica ADD COLUMN leads INTEGER NOT NULL DEFAULT 0',
-  // ADR 0028: purge asks whether another app's release references a bundle. Repeatable: a gateway released before the constructor kept a newer version sets it back to before this step.
-  'CREATE INDEX IF NOT EXISTS release_bundle ON release (bundle)',
+  // ADR 0036: hosted accounts, sessions and token restrictions.
+  hosted,
+  // ADR 0028: purge asks whether another app's release references a bundle. Before the hosted stack merged this index was the previous step,
+  // so a library migrated then counts the hosted step as applied without it: this step repeats both. A gateway released before the
+  // constructor kept a newer version may also set the version back to before this step.
+  (db) => `CREATE INDEX IF NOT EXISTS release_bundle ON release (bundle); ${hosted(db)}`,
 ];
 
 /** `$n` placeholders become `?n`, which node:sqlite binds by position. */
@@ -166,7 +187,7 @@ export class SqliteStore implements Store {
     const { user_version: applied } = this.#db.prepare('PRAGMA user_version').get() as { user_version: number };
     this.#db.exec('BEGIN IMMEDIATE');
     try {
-      MIGRATIONS.slice(applied).forEach((step) => this.#db.exec(step));
+      MIGRATIONS.slice(applied).forEach((step) => this.#db.exec(sqlOf(step, this.#db)));
       // An older gateway on a newer library applies nothing and keeps its version, as PgStore does, so the newer one never reruns a step.
       if (applied < MIGRATIONS.length) this.#db.exec(`PRAGMA user_version = ${MIGRATIONS.length}`);
       this.#db.exec('COMMIT');

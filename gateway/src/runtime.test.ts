@@ -46,7 +46,7 @@ function outer(): void {
         Cmd: ['node', '--test', '--test-reporter=spec', '/gateway/src/runtime.test.ts'],
         Env: [`PNEUMA_SPACE_TEST_IMAGE=${image}`, `PNEUMA_SPACE_NETWORK=${network}`],
         Labels: labels,
-        HostConfig: { NetworkMode: network, Binds: ['/var/run/docker.sock:/var/run/docker.sock', `${resolve(import.meta.dirname, '..')}:/gateway:ro`] },
+        HostConfig: { NetworkMode: network, Binds: ['/var/run/docker.sock:/var/run/docker.sock', `${resolve(import.meta.dirname, '..')}:/gateway:ro`, `${resolve(import.meta.dirname, '../../shared')}:/shared:ro`] },
       });
       await call('POST', `/containers/${runner.Id}/start`);
       const { StatusCode } = await call('POST', `/containers/${runner.Id}/wait`);

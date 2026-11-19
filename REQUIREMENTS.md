@@ -35,7 +35,7 @@ M1 只服务一个可信的机器、可信的运营者和可信的应用镜像�
 | IDENTITY | 访问者身份注入 | 平台在服务端解析身份，以请求头注入；M1 提供者是本地桩 | M1 |
 | RTC | WebRTC 支持 | 平台提供 STUN 和 TURN，注入 ICE 配置；信令走应用自己的 WS；在 Compose profile 后面 | M1 |
 
-M2 和 M3 对这些能力的变化在 `REQUIREMENTS-M2.md`。
+组织版的变化在 [REQUIREMENTS-M2.md](REQUIREMENTS-M2.md)，云端首版的独立契约在 [REQUIREMENTS-M3.md](REQUIREMENTS-M3.md)。
 
 ## 应用类型
 
