@@ -10,15 +10,21 @@ import { Metrics, Series } from './metrics.ts';
 import { NodeView } from './nodes.ts';
 import {
   appName, DEFAULT_POLICY, DEFAULT_TENANT, parseManifest, subject, USAGE_COUNTERS,
-  type AppId, type AuditRecord, type HealthCheck, type ReplicaId, type Runtime, type RuntimeKind, type TenantName, type Usage,
+  type AppId, type AuditRecord, type HealthCheck, type Infra, type ReplicaId, type Runtime, type RuntimeKind, type TenantName, type Usage,
 } from './model.ts';
 import { RequestLog } from './requests.ts';
 import { Runtimes } from './runtimes.ts';
-import { world } from './registry.fakes.ts';
+import { fakeKubernetes, world } from './registry.fakes.ts';
 
-async function admin(runtime?: Runtimes, overrides: Partial<AdminDeps> = {}) {
+/** The admin API over a registry on a real store; `infra` is the plane's, the docker one by default, while images resolve from the fake table. */
+async function admin({ runtime, infra: plane, overrides = {} }: { runtime?: Runtimes; infra?: Infra; overrides?: Partial<AdminDeps> } = {}) {
   const w = world();
-  const { registry, store } = await w.open();
+  const up = async () => 'up' as const;
+  const off = async () => 'off' as const;
+  const infra = plane ?? new DockerInfra({ docker: new Docker('/nonexistent.sock'), probes: { redis: up, object: up, postgres: off, coturn: off, runner: off }, volumes: async () => [] });
+  const { registry, store } = await w.open({
+    infra: { resolveImage: (reference) => w.runtime.resolveImage(reference), removedBy: (name, replicas) => infra.removedBy(name, replicas), scale: (name, replicas) => infra.scale(name, replicas) },
+  });
   const metrics = new Metrics({
     events: new EventLog(() => {}),
     stats: () => [],
@@ -34,9 +40,6 @@ async function admin(runtime?: Runtimes, overrides: Partial<AdminDeps> = {}) {
     retries: () => 0,
     replica: 'r1' as ReplicaId,
   });
-  const up = async () => 'up' as const;
-  const off = async () => 'off' as const;
-  const infra = new DockerInfra({ docker: new Docker('/nonexistent.sock'), network: 'pneuma-space', probes: () => ({ redis: up, object: up, postgres: off, coturn: off, runner: off }), volumes: async () => [] });
   const nodes = new NodeView({
     infra,
     apps: () => registry.listing(),
@@ -119,6 +122,31 @@ test('scaling on the docker plane answers 409 and the audit lists cluster.scale 
   assert.deepEqual(rows.map((r) => [r.action, r.targetKind, r.result, r.details.replicas]).sort(), [['cluster.scale', 'workload', 'refused', 2], ['cluster.scale', 'workload', 'started', 2]]);
 });
 
+test('a runner scale-down that would remove an app\'s home answers 409 with the app and its replica, reaches no Kubernetes API and is audited as refused with the count (ADR 0032)', async (t) => {
+  const k8s = await fakeKubernetes(t, { 'pneuma-space-runner': 3 });
+  const { call, server, store, w } = await admin({ infra: k8s.infra });
+  t.after(() => server.close());
+  w.runtime.homed = [{ app: appName('notes'), home: 'pneuma-space-runner-2' }];
+  const refused = await call('PUT', '/api/cluster/workloads/pneuma-space-runner/scale', { replicas: 2 });
+  assert.equal(refused.status, 409);
+  assert.deepEqual(refused.body.stranded, { workload: 'pneuma-space-runner', replicas: 2, homes: [{ app: 'notes', home: 'pneuma-space-runner-2' }], more: 0 });
+  assert.deepEqual([k8s.seen, k8s.replicas['pneuma-space-runner']], [[], 3]);
+  const rows = await audit(store, 'pneuma-space-runner');
+  assert.deepEqual(rows.map((r) => [r.result, r.details.replicas]), [['started', 2], ['refused', 2]]);
+});
+
+test('on the kubernetes plane 0 and 11 replicas answer 400 and pneuma-space-postgres 409, none reaching Kubernetes (AC-OPS-12)', async (t) => {
+  const k8s = await fakeKubernetes(t, { 'pneuma-space-runner': 3 });
+  const { call, server } = await admin({ infra: k8s.infra });
+  t.after(() => server.close());
+  const statuses = [
+    await call('PUT', '/api/cluster/workloads/pneuma-space-runner/scale', { replicas: 0 }),
+    await call('PUT', '/api/cluster/workloads/pneuma-space-runner/scale', { replicas: 11 }),
+    await call('PUT', '/api/cluster/workloads/pneuma-space-postgres/scale', { replicas: 2 }),
+  ].map((r) => r.status);
+  assert.deepEqual([statuses, k8s.seen], [[400, 400, 409], []]);
+});
+
 test('input errors answer 400, unknown apps and images 404, conflicts 409', async (t) => {
   const { call, server } = await admin();
   t.after(() => server.close());
@@ -177,10 +205,18 @@ test('GET /api/requests answers the records after the cursor, named, without a D
   const id = (await store.app(appName('survey')))!.id as AppId;
   for (const path of ['/a', '/b', '/c']) requests.record({ app: id, kind: 'request', method: 'GET', path, status: 200, ms: 2, waitMs: 1, cold: false, subject: null, error: null });
   w.runtime.calls.length = 0;
-  const reply = await call('GET', '/api/requests?after=r1:1&limit=1');
+  const first = await call('GET', '/api/requests?after=&limit=1');
+  const reply = await call('GET', `/api/requests?after=${encodeURIComponent(first.body.cursor)}&limit=1`);
   assert.deepEqual(reply.body.records.map((r: { replica: string; seq: number; app: string; path: string }) => [r.replica, r.seq, r.app, r.path]), [['r1', 2, 'survey', '/b']]);
-  assert.equal(reply.body.cursor, 'r1:2');
+  assert.deepEqual(reply.body.reset, []);
   assert.deepEqual(w.runtime.calls, []);
+});
+
+test('GET /api/requests?local=1 tells a peer this replica restarted since its cursor (#18)', async (t) => {
+  const { call, server, requests } = await admin();
+  t.after(() => server.close());
+  const page = (await call('GET', `/api/requests?local=1&after=${encodeURIComponent(`r1:0@${requests.generation - 1}`)}`)).body;
+  assert.deepEqual([page.replica, page.generation, page.reset], ['r1', requests.generation, true]);
 });
 
 test('POST /api/apps/<name>/unquarantine lifts the quarantine the listing shows', async (t) => {
@@ -202,7 +238,7 @@ test('GET /api/health lists every runtime kind with its checks and the global po
   const runtimes = new Runtimes({
     runtimes: [reporting('container', ['exit', 'ready']), reporting('isolate', ['exit', 'ready', 'hang', 'memory'])], specFor: () => null, events: new EventLog(() => {}),
   });
-  const { call, server } = await admin(runtimes);
+  const { call, server } = await admin({ runtime: runtimes });
   t.after(() => server.close());
   const { body } = await call('GET', '/api/health');
   assert.deepEqual(body.runtimes, {
@@ -311,6 +347,18 @@ test('a first publish past the tenant\'s apps quota answers 409 with the quota f
   assert.deepEqual([refused.status, refused.body.quota], [409, { tenant: 'blue', resource: 'apps', used: 1, limit: 1, ask: 1 }]);
 });
 
+test('switching an app to SQLite past the tenant\'s storage_gb answers 409 with the quota field (#12)', async (t) => {
+  const { call, server } = await admin();
+  t.after(() => server.close());
+  await call('POST', '/api/tenants', { name: 'blue', admins: ['ann'] });
+  await call('PUT', '/api/tenants/blue/quota', { storage_gb: 0 });
+  await call('PUT', '/api/policy', { db_backend: 'postgres' });
+  await call('PUT', '/api/apps/one/release', { ...kvApp, manifest: { contract: 1, capabilities: { db: {} } }, tenant: 'blue' });
+  const refused = await call('PUT', '/api/apps/one/policy', { db_backend: 'sqlite' });
+  assert.deepEqual([refused.status, refused.body.quota], [409, { tenant: 'blue', resource: 'storage_gb', used: 0, limit: 0, ask: 1 }]);
+  assert.equal((await call('GET', '/api/tenants/blue/quota')).body.used.storage_gb, 0);
+});
+
 test('a per-app cpu_millis or memory_mb above the tenant\'s total answers 400', async (t) => {
   const { call, server } = await admin();
   t.after(() => server.close());
@@ -327,7 +375,7 @@ test('a per-app cpu_millis or memory_mb above the tenant\'s total answers 400', 
 
 
 test('hosted admin refuses an unauthenticated dependency configuration (AC-SAAS-4)', async () => {
-  await assert.rejects(admin(undefined, { hosted: { controlOrigin: 'https://control.test', identityPaths: [] } }), /requires authentication/);
+  await assert.rejects(admin({ overrides: { hosted: { controlOrigin: 'https://control.test', identityPaths: [] } } }), /requires authentication/);
 });
 
 function hostedFetch(url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<{ status: number; json: () => unknown }> {
@@ -341,13 +389,13 @@ function hostedFetch(url: string, init: { method?: string; headers?: Record<stri
 }
 
 function hostedAdmin() {
-  return admin(undefined, {
+  return admin({ overrides: {
     hosted: { controlOrigin: 'https://control.test', identityPaths: [] },
     upstream: {
       identity: { identify: async () => ({ via: 'hosted', subject: subject('user:ana'), name: 'Ana', sessionHash: 'hash', csrf: 'csrf', origin: 'https://control.test' }), challenge: () => ({ status: 401 }), serve: async () => {} },
       authority: { callerOf: async () => ({ actor: { via: 'hosted', subject: subject('user:ana'), name: 'Ana' }, platformAdmin: true, roles: new Map(), viaToken: false, authentication: { kind: 'hosted', sessionHash: 'hash', csrf: 'csrf', origin: 'https://control.test' } }) },
     },
-  });
+  } });
 }
 
 test('hosted control writes require exact Origin and the session CSRF (AC-SAAS-4)', async (t) => {

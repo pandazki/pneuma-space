@@ -1,6 +1,6 @@
 # Hosted origin TLS verification
 
-Verified on 2026-11-12 with Caddy 2.11.7, Node.js 24 gateway containers and a Node.js 25.1 test client. The [deployment decision](adr/0032-hybrid-origin-tls.md) defines this compatibility unit. [Run instructions](../deploy/hosted/README.md#verify-origin-tls) reproduce the Compose check.
+Verified on 2026-11-12 with Caddy 2.11.7, Node.js 24 gateway containers and a Node.js 25.1 test client. The [deployment decision](adr/0037-hybrid-origin-tls.md) defines this compatibility unit. [Run instructions](../deploy/hosted/README.md#verify-origin-tls) reproduce the Compose check.
 
 ## Results
 

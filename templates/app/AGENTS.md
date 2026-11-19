@@ -44,7 +44,7 @@ Plain TypeScript in `sdk/`, run by Node 24 with no build step. Its only packages
 
 | Call | File | What it does |
 | --- | --- | --- |
-| `serve(handler, {triggers})` | `serve.ts` | HTTP on `0.0.0.0`, port `PNEUMA_SPACE_PORT` (8000 when unset). `handler({req, res, url, prefix, identity})`; `url` is relative to your address; `identity` is `{subject, name, owner}` or `null`. `POST /_pneuma-space/trigger/<name>` calls `triggers[name](delivery)`; return means success (the app answers 2xx; an external caller of the trigger sees 202 from the platform), throw means retry. Exits cleanly on `SIGTERM` |
+| `serve(handler, {triggers})` | `serve.ts` | HTTP on `0.0.0.0`, port `PNEUMA_SPACE_PORT` (8000 when unset). `handler({req, res, url, prefix, identity})`; `url` is relative to your address; `identity` is `{subject, name, owner}` or `null`, with `name` already decoded from its header. `POST /_pneuma-space/trigger/<name>` calls `triggers[name](delivery)`; return means success (the app answers 2xx; an external caller of the trigger sees 202 from the platform), throw means retry. Exits cleanly on `SIGTERM` |
 | `body(req)` | `serve.ts` | The request body as a `Buffer`; a form is `new URLSearchParams((await body(req)).toString())` |
 | `db()` | `db.ts` | `query(sql, params)` returns rows, `exec(sql, params)` returns nothing; `?` placeholders on both engines |
 | `await kv()` | `kv.ts` | `redis` (node-redis client), `key(name)`, `channel(name)`, `publish(channel, text)`, `subscribe(channel, fn)`; the last two add the prefix. `subscribe` takes an exact channel, no patterns, and stays subscribed; `fn` receives the published string. For read-modify-write under concurrent writers use `redis.eval` or `WATCH`/`MULTI` |

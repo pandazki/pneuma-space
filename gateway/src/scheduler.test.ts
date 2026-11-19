@@ -7,6 +7,7 @@ import {
   DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS, NotFound, QuotaExceeded,
   type App, type AppId, type CronExpr, type Delivery, type DeliveryFilter, type Lease, type Replica, type ReplicaId, type SchedulerView, type Subject, type TenantName, type TriggerName,
 } from './model.ts';
+import { DEAD_MS } from './instances.ts';
 import { RING, requests } from './requests.ts';
 import { DeliveryScheduler, latestSlot, nextSlot, type SchedulerDeps } from './scheduler.ts';
 import { SqliteStore } from './store.ts';
@@ -58,9 +59,11 @@ function harness(triggers: Record<string, string | null> = { run: null }) {
       rows.push(d);
       return d;
     },
-    updateDelivery: async (d) => {
+    casDelivery: async (expected, d) => {
       if (state.failWrite) throw new Error('database is locked');
-      rows.splice(rows.findIndex((r) => r.id === d.id), 1, d);
+      const i = rows.findIndex((r) => r.id === expected.id && r.state === expected.state && r.replica === expected.replica && r.attempts === expected.attempts);
+      if (i >= 0) rows[i] = { ...rows[i], state: d.state, attempts: d.attempts, nextAttemptAt: d.nextAttemptAt };
+      return i >= 0;
     },
     claimDelivery: async (id, replica, attempts) => {
       if (state.failWrite) throw new Error('database is locked');
@@ -239,6 +242,116 @@ test('resume returns a delivering row to due and redelivers it with the same id'
   await scheduler.tick();
   scheduler.stop();
   assert.deepEqual([rows[0].state, received[0].headers['x-pneuma-space-delivery'], received[0].headers['x-pneuma-space-attempt']], ['done', id, '2']);
+});
+
+/**
+ * Replicas a and b over one SqliteStore and one fake clock; a heartbeat is a planted replica row. The upstream holds the first `hold`
+ * requests until `answers[i](status)` is called, so those attempts stay in flight as long as a test wants, and answers later ones 200 (ADR 0029).
+ */
+function twoReplicas(hold: number) {
+  received = [];
+  const answers: ((status: number) => void)[] = [];
+  handle = (_req, res) => {
+    const answer = (status: number) => void res.writeHead(status).end();
+    if (received.length <= hold) answers.push(answer);
+    else answer(200);
+  };
+  const store = new SqliteStore(':memory:');
+  const clock = { now: Date.now() };
+  const view: SchedulerView = { status: 'registered', publishedAt: T0, triggers: [{ app: APP, name: 'run' as TriggerName, schedule: null }], policy: DEFAULT_POLICY };
+  const runtime: SchedulerDeps['runtime'] = { acquire: async (app) => ({ app, address }), release: () => {}, state: () => 'asleep' };
+  const logged: string[] = [];
+  const replica = (id: string) => new DeliveryScheduler({
+    store, runtime, view: () => view, now: () => clock.now, log: (ev) => void logged.push(`${id} ${ev}`), replica: id as ReplicaId,
+  });
+  const beat = (id: string) => store.putReplica({ id: id as ReplicaId, startedAt: T0, seenAt: clock.now, leading: false });
+  const row = async (id: string) => (await store.deliveries({})).find((d) => d.id === id)!;
+  const arrived = async (n: number) => {
+    while (received.length < n) await new Promise((resolve) => setTimeout(resolve, 5));
+  };
+  return { store, clock, a: replica('a'), b: replica('b'), beat, row, arrived, answers, logged };
+}
+
+/** a leads and starts a delivery its upstream holds, then stops beating: it died mid-delivery. */
+async function diedMidDelivery(r: ReturnType<typeof twoReplicas>) {
+  await r.beat('a');
+  await r.beat('b');
+  const id = await r.a.invoke({ app: APP, trigger: 'run' as TriggerName, caller, idempotencyKey: null, body: new Uint8Array() });
+  const attempt = r.a.tick();
+  await r.arrived(1);
+  return { id, attempt };
+}
+
+const attempts = () => received.map((r) => [r.headers['x-pneuma-space-delivery'], r.headers['x-pneuma-space-attempt']]);
+
+/** b leads from now and ticks once a second until a second attempt arrives or `until`; returns the clock at that tick. */
+async function leadUntilRetried(r: ReturnType<typeof twoReplicas>, until: number): Promise<number> {
+  await r.beat('b');
+  await r.b.resume();
+  r.b.stop();
+  while (received.length < 2 && r.clock.now < until) {
+    r.clock.now += 1000;
+    await r.beat('b');
+    await r.b.tick();
+  }
+  return r.clock.now;
+}
+
+test('a delivery whose replica dies is attempted again within one reclaim period of its heartbeat expiring, though the new leader took the lead before (ADR 0029)', async () => {
+  const r = twoReplicas(1);
+  const { id, attempt } = await diedMidDelivery(r);
+  const expired = r.clock.now + DEAD_MS + 1;
+  r.clock.now += 2000;
+  const retriedAt = await leadUntilRetried(r, expired + 60_000);
+  assert.deepEqual(attempts(), [[id, '1'], [id, '2']]);
+  assert.ok(retriedAt <= expired + 5000, `retried ${retriedAt - expired} ms after the heartbeat expired`);
+  assert.deepEqual([(await r.row(id)).state, (await r.row(id)).attempts], ['done', 2]);
+  r.answers[0](500);
+  await attempt;
+});
+
+test('a delivery whose replica died before the new leader took the lead is attempted again on its first tick (ADR 0029)', async () => {
+  const r = twoReplicas(1);
+  const { id, attempt } = await diedMidDelivery(r);
+  r.clock.now += DEAD_MS + 1;
+  await leadUntilRetried(r, r.clock.now + 1000);
+  assert.deepEqual(attempts(), [[id, '1'], [id, '2']]);
+  r.answers[0](500);
+  await attempt;
+});
+
+/** a died mid-delivery, b reclaimed it and holds its own attempt; resolves once b's attempt reached the upstream. */
+async function reclaimed(r: ReturnType<typeof twoReplicas>) {
+  const { id, attempt } = await diedMidDelivery(r);
+  r.clock.now += DEAD_MS + 1;
+  await r.beat('b');
+  await r.b.resume();
+  r.b.stop();
+  const retry = r.b.tick();
+  await r.arrived(2);
+  return { id, attempt, retry, claim: await r.row(id) };
+}
+
+test("a dead replica's late 2xx leaves the new claim as it was and emits no delivery.done, and the new attempt's outcome is what is stored (ADR 0029)", async () => {
+  const r = twoReplicas(2);
+  const { id, attempt, retry, claim } = await reclaimed(r);
+  r.answers[0](200);
+  await attempt;
+  assert.deepEqual([await r.row(id), claim.replica, claim.attempts], [claim, 'b', 2]);
+  assert.deepEqual(r.logged.filter((line) => line.startsWith('a delivery.')), ['a delivery.due', 'a delivery.delivering']);
+  r.answers[1](503);
+  await retry;
+  assert.deepEqual([(await r.row(id)).state, (await r.row(id)).attempts], ['due', 2]);
+});
+
+test("a dead replica's late failure neither returns the new claim to due nor moves its backoff (ADR 0029)", async () => {
+  const r = twoReplicas(2);
+  const { id, attempt, retry, claim } = await reclaimed(r);
+  r.answers[0](500);
+  await attempt;
+  assert.deepEqual([await r.row(id), claim.state, claim.replica, claim.attempts], [claim, 'delivering', 'b', 2]);
+  r.answers[1](200);
+  await retry;
 });
 
 test("the leader's hourly tick sweeps done and cancelled deliveries past the event retention and keeps failed ones (INV-4)", async () => {
