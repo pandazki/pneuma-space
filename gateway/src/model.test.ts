@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  DEFAULT_POLICY, DEFAULT_QUOTA, ManifestError, InputError, QUOTA_RESOURCES, admits, appName, effectivePolicy, parseManifest, releaseKey,
+  DEFAULT_POLICY, DEFAULT_QUOTA, ManifestError, InputError, QUOTA_RESOURCES, Stranded, admits, appName, effectivePolicy, parseManifest, releaseKey,
   type BundleId, type ImageId,
 } from './model.ts';
 
@@ -80,4 +80,11 @@ test('contract 1 rejects the records capability', () => {
 
 test('contract 1 rejects the fetch runtime', () => {
   assert.throws(() => parseManifest({ contract: 1, runtime: 'fetch', capabilities: {} }), /runtime must be one of container, isolate/);
+});
+
+test('a refused runner scale lists the first ten apps by replica and counts the rest (ADR 0032 item 2)', () => {
+  const homes = Array.from({ length: 12 }, (_, i) => ({ app: appName(`app-${String(i).padStart(2, '0')}`), home: `pneuma-space-runner-${i < 6 ? 10 : 9}` }));
+  const refused = new Stranded('pneuma-space-runner', 9, homes);
+  assert.deepEqual([refused.homes.length, refused.more, refused.homes[0], refused.homes[9]], [10, 2, homes[6], homes[3]]);
+  assert.match(refused.message, /^scaling pneuma-space-runner to 9 replicas would remove the home runner of 12 apps: app-06 \(pneuma-space-runner-9\), .*app-03 \(pneuma-space-runner-10\) and 2 more\. /);
 });

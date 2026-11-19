@@ -5,8 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { changeKey, type AppName, type ImageId, type Leadership, type ReleaseNumber, type Subject } from './model.ts';
+import { changeKey, DEFAULT_TENANT, type AppName, type BundleId, type ImageId, type Leadership, type ReleaseNumber, type Subject } from './model.ts';
 import { Session, type PgOptions } from './pg.ts';
+import { replicaContract } from './registry.contract.ts';
+import { BUNDLE_REFERENCED } from './sql.ts';
 import { app, storeContract } from './store.contract.ts';
 import { PG_MIGRATIONS, PgStore, type PgStoreOptions } from './store-pg.ts';
 
@@ -39,6 +41,14 @@ function selfSigned(name: string): string {
 
 const skip = !dockerUp && 'Docker is not available';
 
+/** The steps both main and the hosted stack held before either appended one: main then added release_bundle, the hosted stack its tables. */
+const BEFORE_MERGE = PG_MIGRATIONS.length - 2;
+
+async function migrated(session: Session, steps: number): Promise<void> {
+  await session.simple('CREATE TABLE schema_migration (version INTEGER PRIMARY KEY, applied_at BIGINT NOT NULL)');
+  for (const [index, step] of PG_MIGRATIONS.slice(0, steps).entries()) await session.simple(`${step}; INSERT INTO schema_migration VALUES (${index + 1}, 0)`);
+}
+
 before(async () => {
   if (skip) return;
   selfSigned('server');
@@ -64,6 +74,7 @@ after(async () => {
 });
 
 if (!skip) storeContract('PostgreSQL', (options) => open(options));
+if (!skip) replicaContract('PostgreSQL', async () => [await open(), await open()]);
 
 describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () => {
   test('two stores on one database see each other\'s app change within 1 s', async () => {
@@ -119,6 +130,33 @@ describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () 
     assert.deepEqual(order, ['a start', 'a end', 'b']);
   });
 
+  test('exclusiveBundle on one bundle from commands on two stores runs one at a time', async () => {
+    const [a, b] = [await open(), await open()];
+    const order: string[] = [];
+    let entered!: () => void;
+    const inside = new Promise<void>((resolve) => (entered = resolve));
+    const first = a.exclusive('bundler-a' as AppName, () => a.exclusiveBundle('contended' as BundleId, async () => {
+      order.push('a start');
+      entered();
+      await delay(300);
+      order.push('a end');
+    }));
+    await inside;
+    await b.exclusive('bundler-b' as AppName, () => b.exclusiveBundle('contended' as BundleId, async () => void order.push('b')));
+    await first;
+    assert.deepEqual(order, ['a start', 'a end', 'b']);
+  });
+
+  test('the bundle reference query uses the release bundle index (#13)', async () => {
+    await open();
+    const s = await Session.open(plain());
+    await s.simple(`INSERT INTO release (app, number, manifest, bundle, release_key, published_at)
+      SELECT 'plan-app-' || n, 1, '{}', 'plan-bundle-' || n, 'k', 0 FROM generate_series(1, 5000) AS n; ANALYZE release`);
+    const { rows } = await s.query(`EXPLAIN ${BUNDLE_REFERENCED}`, ['plan-bundle-17', 'plan-app-18']);
+    await s.close();
+    assert.match(rows.map((r) => r['QUERY PLAN']).join('\n'), /release_bundle/);
+  });
+
   test('terminating the leader\'s session fires onLost within 5 s and the other store then leads', async () => {
     const [a, b] = [await open(), await open()];
     const tenure = await a.leader();
@@ -141,10 +179,7 @@ describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () 
     await admin.simple('CREATE DATABASE hosted_migration');
     await admin.close();
     const old = await Session.open(plain('hosted_migration'));
-    await old.simple('CREATE TABLE schema_migration (version INTEGER PRIMARY KEY, applied_at BIGINT NOT NULL)');
-    for (const [index, step] of PG_MIGRATIONS.slice(0, -1).entries()) {
-      await old.simple(`${step}; INSERT INTO schema_migration VALUES (${index + 1}, 0)`);
-    }
+    await migrated(old, BEFORE_MERGE);
     await old.simple(`INSERT INTO app (name, id, owner, status, current, policy_override, access) VALUES ('existing', 'stable-id', 'user:ann', 'registered', 1, '{}', 'public');
       INSERT INTO release (app, number, image, manifest, bundle, release_key, published_at) VALUES ('stable-id', 1, 'image-id', '{}', NULL, 'key', 1);
       INSERT INTO binding (app, kind, provider, state, resource) VALUES ('stable-id', 'kv', 'redis', 'active', '{"prefix":"kept"}');
@@ -158,6 +193,37 @@ describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () 
     }
     assert.equal((await store.token('legacy-hash'))?.restrictions, undefined);
     await old.close();
+  });
+
+  /** Migrates `database` as `before` leaves it, opens it with this gateway, and reads back what the merged schema holds. */
+  async function upgraded(database: string, before: (session: Session) => Promise<void>) {
+    const admin = await Session.open(plain());
+    await admin.simple(`CREATE DATABASE ${database}`);
+    await admin.close();
+    const old = await Session.open(plain(database));
+    await before(old);
+    const store = await open({}, database);
+    const restrictions = { expiresAt: 2, scopes: ['read' as const], appIds: null };
+    await store.putToken({ id: 'r', tenant: DEFAULT_TENANT, subject: 'service:ci' as Subject, label: 'ci', hash: 'h-r', createdBy: 'local', createdAt: 1, revokedAt: null, restrictions });
+    const { rows } = await old.query("SELECT (SELECT max(version) FROM schema_migration) AS version, (SELECT count(*) FROM pg_indexes WHERE indexname = 'release_bundle') AS indexes");
+    await old.close();
+    return [Number(rows[0].version), Number(rows[0].indexes), await store.hostedSignupCount(), (await store.token('h-r'))?.restrictions];
+  }
+
+  test('a database main migrated before the hosted stack merged gains the hosted tables', async () => {
+    const held = await upgraded('main_migrated', async (old) => {
+      await migrated(old, BEFORE_MERGE);
+      await old.simple(`CREATE INDEX release_bundle ON release (bundle); INSERT INTO schema_migration VALUES (${BEFORE_MERGE + 1}, 0)`);
+    });
+    assert.deepEqual(held, [PG_MIGRATIONS.length, 1, 0, { expiresAt: 2, scopes: ['read'], appIds: null }]);
+  });
+
+  test('a database the hosted stack migrated before main merged gains release_bundle and keeps its hosted rows', async () => {
+    const held = await upgraded('hosted_migrated', async (old) => {
+      await migrated(old, BEFORE_MERGE + 1);
+      await old.simple('UPDATE hosted_signup SET count = 3');
+    });
+    assert.deepEqual(held, [PG_MIGRATIONS.length, 1, 3, { expiresAt: 2, scopes: ['read'], appIds: null }]);
   });
 
   test('two stores opening an empty database at once apply the schema once (AC-STORE-6)', async () => {

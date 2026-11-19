@@ -33,6 +33,7 @@ const VIEWS = new Map([
   view('who', ['identity']),
   view('guest', ['identity'], { identity: { required: false } }),
   view('chat', ['ws']),
+  view('whochat', ['identity', 'ws']),
   view('mixed', ['static'], { bundle: { id: 'b'.repeat(64) as BundleId, files: { 'app.js': { size: APP_JS.length, etag: 'e1', contentType: 'text/javascript' } } } }),
   view('gone', [], { status: 'removed' }),
   view('counted', [], { tenant: 'acme' as TenantName, runtime: 'isolate' }),
@@ -45,8 +46,9 @@ const PRINCIPALS: Record<string, Principal> = {
 };
 
 // Upstream app: /echo returns what arrived, /range answers 206, /hold streams until `finish()`, /drop hangs up, WebSocket clients
-// form one room except at /refuse, which answers 500.
+// form one room except at /refuse, which answers 500; `upgraded` keeps the headers of the last upgrade request.
 let finish: () => void = () => {};
+let upgraded: http.IncomingHttpHeaders = {};
 const room = new Set<net.Socket>();
 const upstream = http.createServer((req, res) => {
   if (req.url?.startsWith('/echo')) return void res.end(JSON.stringify({ url: req.url, headers: req.headers }));
@@ -60,6 +62,7 @@ const upstream = http.createServer((req, res) => {
   if (req.url === '/drop') return void req.socket.destroy();
   res.writeHead(404).end();
 }).on('upgrade', (req, socket: net.Socket) => {
+  upgraded = req.headers;
   if (req.url === '/refuse') return void socket.end('HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\n\r\n');
   socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n');
   room.add(socket);
@@ -84,7 +87,11 @@ before(async () => {
   await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
   upstreamPort = (upstream.address() as net.AddressInfo).port;
   ingress = new Ingress({
-    registry: { view: (name) => VIEWS.get(name) ?? null, policy: () => DEFAULT_POLICY },
+    registry: {
+      view: (name) => VIEWS.get(name) ?? null,
+      nameOf: (id) => [...VIEWS.values()].find((view) => view.app === id)?.name ?? null,
+      policy: () => DEFAULT_POLICY,
+    },
     runtime: {
       async acquire(app, kind) {
         events.push(`acquire ${kind}`);
@@ -205,6 +212,47 @@ test('X-Pneuma-Space-Owner is set only for the owner (AC-FORM-3)', async () => {
   const other = JSON.parse((await request('/apps/who/echo', { headers: { authorization: 'Bearer bob', 'x-pneuma-space-owner': '1' } })).body);
   assert.equal(owner.headers['x-pneuma-space-owner'], '1');
   assert.equal(other.headers['x-pneuma-space-owner'], undefined);
+});
+
+const PLATFORM_HEADERS = ['x-pneuma-space-subject', 'x-pneuma-space-name', 'x-pneuma-space-owner', 'x-forwarded-prefix'] as const;
+const platformHeaders = (headers: http.IncomingHttpHeaders) => Object.fromEntries(PLATFORM_HEADERS.map((name) => [name, headers[name]]));
+const echoed = async (path: string, headers: http.OutgoingHttpHeaders) => JSON.parse((await request(path, { headers })).body).headers as http.IncomingHttpHeaders;
+
+test("a Connection header naming the platform's headers, one at a time or all, in any case or spelling, leaves them as a plain request has them (INV-5)", async () => {
+  const plain = platformHeaders(await echoed('/apps/who/echo', { authorization: 'Bearer alice' }));
+  const nominations = [...PLATFORM_HEADERS, PLATFORM_HEADERS.join(', '), 'X-PNEUMA-SPACE-SUBJECT, X-Pneuma-Space-Name, x-Pneuma-Space-OWNER, X-FORWARDED-PREFIX',
+    'X_Pneuma_Space_Subject, x_pneuma_space_name, X_Pneuma_Space_Owner, X_Forwarded_Prefix'];
+  for (const connection of nominations) {
+    assert.deepEqual(platformHeaders(await echoed('/apps/who/echo', { authorization: 'Bearer alice', connection })), plain, connection);
+  }
+  assert.deepEqual(Object.values(plain), ['user:alice', 'Alice', '1', '/apps/who']);
+});
+
+test("hop-by-hop headers and a header the client's Connection names never reach the app, and Connection: close still closes (RFC 9110 7.6.1)", async () => {
+  const got = await request('/apps/plain/echo', {
+    method: 'POST', body: 'x', headers: { connection: 'close, X-Foo', 'x-foo': '1', 'keep-alive': 'timeout=5', te: 'trailers', 'transfer-encoding': 'chunked', 'x-bar': '2' },
+  });
+  const { headers } = JSON.parse(got.body);
+  assert.deepEqual([headers['x-foo'], headers['keep-alive'], headers.te, headers['x-bar'], got.headers.connection], [undefined, undefined, undefined, '2', 'close']);
+});
+
+test("a WebSocket upgrade naming the platform's headers and a header of its own in Connection upgrades, with the platform's headers as HTTP has them and without its own (INV-5)", async () => {
+  const viaHttp = platformHeaders(await echoed('/apps/whochat/echo', { authorization: 'Bearer alice' }));
+  const socket = net.connect(port, '127.0.0.1');
+  socket.write(['GET /apps/whochat/ HTTP/1.1', 'Host: x', 'Authorization: Bearer alice', `Connection: Upgrade, ${PLATFORM_HEADERS.join(', ')}, X-Foo`, 'X-Foo: 1',
+    'Upgrade: websocket', 'Sec-WebSocket-Version: 13', 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==', '', ''].join('\r\n'));
+  const [head] = await once(socket, 'data');
+  socket.destroy();
+  assert.match(String(head), /^HTTP\/1\.1 101/);
+  assert.deepEqual(
+    [platformHeaders(upgraded), upgraded['x-foo'], upgraded.connection, upgraded.upgrade, upgraded['sec-websocket-key']],
+    [viaHttp, undefined, 'Upgrade', 'websocket', 'dGhlIHNhbXBsZSBub25jZQ=='],
+  );
+});
+
+test('a forged X-Pneuma-Space-Subject named in Connection is dropped and the platform\'s subject arrives (AC-FORM-2)', async () => {
+  const headers = await echoed('/apps/who/echo', { authorization: 'Bearer bob', connection: 'X-Pneuma-Space-Subject', 'x-pneuma-space-subject': 'user:alice' });
+  assert.equal(headers['x-pneuma-space-subject'], 'user:bob');
 });
 
 test('an unauthenticated caller of an identity app gets the provider\'s challenge', async () => {

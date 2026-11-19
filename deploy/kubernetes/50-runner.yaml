@@ -1,4 +1,4 @@
-# isolate runners (ADR 0019 item 8). Scale up only: an app whose home replica is removed stays unavailable.
+# isolate runners (ADR 0019 item 8). Scale through the platform API, which refuses to remove a replica an app is homed on (ADR 0032); kubectl scale does not check.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

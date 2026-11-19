@@ -109,6 +109,9 @@ const routes = {
   '/blank': () => { for (let i = 0; i < 1e5; i++) console.log(''); return 'printed'; },
   '/burst': () => { process.stdout.write(Buffer.alloc(64 * 2 ** 20, 10)); return 'written'; },
   '/exit': () => process.exit(3),
+  // A request held open until /unhold, however long the test needs it.
+  '/hold': () => new Promise((ok) => { globalThis.unhold = () => ok('held'); }),
+  '/unhold': () => { globalThis.unhold?.(); return 'released'; },
   '/files': () => { writeFileSync(env.PNEUMA_SPACE_FILES_DIR + '/kept', 'kept'); return env.PNEUMA_SPACE_FILES_DIR; },
 };
 console.log('fixture ready');
