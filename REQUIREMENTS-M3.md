@@ -1,6 +1,6 @@
 # 需求（M3 SaaS）
 
-状态：2026-11-12 修订。用户确认 SaaS 必须保留全部 M1、M2 应用能力和管理功能。此前的受限 Fetch 首版不能代表完整 SaaS，修正理由在 [ADR 0030](docs/adr/0030-additive-hosted-platform.md)。
+状态：2026-11-12 修订。用户确认 SaaS 必须保留全部 M1、M2 应用能力和管理功能。此前的受限 Fetch 首版不能代表完整 SaaS，修正理由在 [ADR 0036](docs/adr/0036-additive-hosted-platform.md)。
 
 ## 用户流程
 
@@ -32,9 +32,9 @@ SaaS 增加个人私有空间和自助注册。既有团队、应用访问范围
 
 ## 当前交付边界
 
-[ADR 0030](docs/adr/0030-additive-hosted-platform.md) 恢复的是原平台的托管账户与功能。本次 Compose/Kubernetes 实现不完成 G14 的 Cloudflare 首发与第二后端恢复，也不证明恶意租户隔离。这些目标保留，公开发布须通过对应验收。
+[ADR 0036](docs/adr/0036-additive-hosted-platform.md) 恢复的是原平台的托管账户与功能。本次 Compose/Kubernetes 实现不完成 G14 的 Cloudflare 首发与第二后端恢复，也不证明恶意租户隔离。这些目标保留，公开发布须通过对应验收。
 
-已批准的组合部署及入口兼容性单元见 [ADR 0032](docs/adr/0032-hybrid-origin-tls.md)。
+已批准的组合部署及入口兼容性单元见 [ADR 0037](docs/adr/0037-hybrid-origin-tls.md)。
 
 ## 迁移范围
 

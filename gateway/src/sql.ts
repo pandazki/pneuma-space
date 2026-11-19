@@ -3,7 +3,7 @@ import type { HostedAuthRecord, HostedIdentityLink } from './hosted-model.ts';
 
 import {
   DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS, USAGE_COUNTERS,
-  type App, type AppId, type AppName, type AuditFilter, type AuditRecord, type Binding, type Change, type Delivery, type DeliveryFilter,
+  type App, type AppId, type AppName, type AuditFilter, type AuditRecord, type Binding, type BundleId, type Change, type Delivery, type DeliveryFilter,
   type DeliveryId, type DeliveryState, type EventFilter, type EventRecord, type GuardRecord, type Instance, type InstanceLog, type LeaseTally, type Membership,
   type Policy, type QuotaUsage, type Release, type ReleaseNumber, type Replica, type ReplicaId, type RowLock, type Stats,
   type StoreOps, type Tenant, type TenantName, type Token, type Trigger, type TriggerName, type Usage, type UsageBucket, type UsageFilter,
@@ -60,6 +60,8 @@ const toRelease = (r: Row): Release => ({
 });
 
 const RELEASE_COLUMNS = ['number', 'image', 'manifest', 'bundle', 'runtime', 'release_key', 'published_at'] as const;
+/** Searches the `release_bundle` index on both engines. */
+export const BUNDLE_REFERENCED = 'SELECT 1 FROM release WHERE bundle = $1 AND app <> $2 LIMIT 1';
 
 const toBinding = (r: Row): Binding => ({
   app: r.app as AppId,
@@ -245,6 +247,10 @@ export class SqlOps implements StoreOps {
       [r.app, r.number, r.image, JSON.stringify(r.manifest), r.bundle, r.runtime, r.releaseKey, r.publishedAt],
     );
     await this.#touchApp(r.app);
+  }
+
+  async bundleReferenced(bundle: BundleId, except: AppId) {
+    return (await this.#s.all(BUNDLE_REFERENCED, [bundle, except])).length > 0;
   }
 
   async triggers() {
@@ -442,8 +448,12 @@ export class SqlOps implements StoreOps {
     });
   }
 
-  async updateDelivery(d: Delivery) {
-    await this.#s.run('UPDATE delivery SET state = $1, attempts = $2, next_attempt_at = $3 WHERE id = $4', [d.state, d.attempts, d.nextAttemptAt, d.id]);
+  async casDelivery(expected: Pick<Delivery, 'id' | 'state' | 'replica' | 'attempts'>, next: Delivery) {
+    const { changes } = await this.#s.run(
+      'UPDATE delivery SET state = $1, attempts = $2, next_attempt_at = $3 WHERE id = $4 AND state = $5 AND replica IS NOT DISTINCT FROM $6 AND attempts = $7',
+      [next.state, next.attempts, next.nextAttemptAt, expected.id, expected.state, expected.replica, expected.attempts],
+    );
+    return changes > 0;
   }
 
   async claimDelivery(id: DeliveryId, replica: ReplicaId, attempts: number) {
@@ -687,6 +697,14 @@ export class SqlOps implements StoreOps {
        ON CONFLICT (app) DO UPDATE SET release = excluded.release, ended_at = excluded.ended_at, reason = excluded.reason, tail = excluded.tail`,
       [l.app, l.release, l.endedAt, l.reason, l.tail],
     );
+  }
+
+  async loggedApps() {
+    return (await this.#s.all('SELECT app FROM instance_log ORDER BY app')).map((r) => r.app as AppId);
+  }
+
+  async deleteInstanceLog(app: AppId) {
+    await this.#s.run('DELETE FROM instance_log WHERE app = $1', [app]);
   }
 }
 

@@ -2,7 +2,7 @@
 
 2026-11-12。用户已批准组合部署并要求完整保留能力。没有创建云资源或启用付费产品。功能验收见[集群验证记录](hosted-cluster-verification.md)，发布条件仍以[验收表](acceptance.md#full-platform-saas)为准。
 
-组合部署决定与入口取舍见 [ADR 0032](adr/0032-hybrid-origin-tls.md)。首个交付单元使用 Cloudflare DNS-only 与源站 TLS，部署方法见[托管部署指南](../deploy/hosted/README.md#kubernetes)，结果见 [TLS 验证记录](hosted-tls-verification.md)。真实流量经过 Cloudflare 边缘的方案仍须单独验证。
+组合部署决定与入口取舍见 [ADR 0037](adr/0037-hybrid-origin-tls.md)。首个交付单元使用 Cloudflare DNS-only 与源站 TLS，部署方法见[托管部署指南](../deploy/hosted/README.md#kubernetes)，结果见 [TLS 验证记录](hosted-tls-verification.md)。真实流量经过 Cloudflare 边缘的方案仍须单独验证。
 
 ## 为什么暂不直接换成 Cloudflare Containers
 

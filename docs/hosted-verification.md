@@ -2,7 +2,7 @@
 
 Verified locally on 2026-11-12 at runtime revision `c091c43`. Host checks used Node 25.1.0; the Compose gateway used Node 24.22.2. The hosted stack used its own project, network, volumes and ports.
 
-The full hosted profile works on Compose. This is a functional result within [ADR 0030](adr/0030-additive-hosted-platform.md), not completion of the [public SaaS release gates](acceptance.md#full-platform-saas) or [G14](../REQUIREMENTS-M3.md#目标).
+The full hosted profile works on Compose. This is a functional result within [ADR 0036](adr/0036-additive-hosted-platform.md), not completion of the [public SaaS release gates](acceptance.md#full-platform-saas) or [G14](../REQUIREMENTS-M3.md#目标).
 
 The later [cluster verification](hosted-cluster-verification.md) adds actual Kubernetes and cross-replica results, including the peer DNS correction. Its [release plan](hosted-release-plan.md) records remaining cloud deployment decisions.
 
@@ -47,7 +47,7 @@ A hosted container using the original RTC fixture completed a real TURN relay ch
 
 ## Corrections and review
 
-The first run exposed service-presence failures on both this branch and unchanged main. [ADR 0031](adr/0031-compose-service-presence.md) records the cause and correction. The final Docker and acceptance runs above passed. A separate real-gateway check confirmed that replica request fan-out preserves the hosted control Host.
+The first run exposed service-presence failures on both this branch and unchanged main. [ADR 0030](adr/0030-compose-service-presence.md) records the cause and correction. The final Docker and acceptance runs above passed. A separate real-gateway check confirmed that replica request fan-out preserves the hosted control Host.
 
 Independent reviews covered hosted persistence, sessions, admission, publication authorization, integration and Compose service detection. They left no substantiated finding open in those scopes. The console review caught a member request to the platform-only tenant endpoint before deployment; the original roles-based loading was retained. Comment review removed two nonfunctional lines from generated Cloudflare declarations.
 

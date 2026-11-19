@@ -39,7 +39,7 @@ export const emit = events.emit;
 
 const QUOTA_EVENT_MS = 60_000;
 
-export type QuotaRefused = (refused: QuotaExceeded, app: string, action: 'publish' | 'wake') => void;
+export type QuotaRefused = (refused: QuotaExceeded, app: string, action: 'publish' | 'policy' | 'wake') => void;
 
 /** `quota-refused` at most once a minute per (tenant, resource) on this replica (ADR 0023 item 5). */
 export function quotaRefusals(log: Emit = emit, now: () => number = Date.now): QuotaRefused {
@@ -53,5 +53,5 @@ export function quotaRefusals(log: Emit = emit, now: () => number = Date.now): Q
   };
 }
 
-/** Shared by both admission points, publish and wake. */
+/** Shared by every admission: publish, a switch to SQLite, and wake. */
 export const quotaRefused = quotaRefusals();

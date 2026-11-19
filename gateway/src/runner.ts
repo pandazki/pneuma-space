@@ -423,7 +423,9 @@ async function route(request: IncomingMessage, url: URL): Promise<unknown> {
     await serial(app, async () => {
       const inst = instances.get(app);
       const worker = url.searchParams.get('worker');
-      if (inst && (worker === null || inst.worker === worker)) await stop(inst, Number(url.searchParams.get('drain') ?? 0));
+      // A stop naming an earlier worker leaves the current one, its code and its log alone (ADR 0027 item 2).
+      if (inst && worker !== null && inst.worker !== worker) return;
+      if (inst) await stop(inst, Number(url.searchParams.get('drain') ?? 0));
       if (url.searchParams.get('retire') !== '1') return;
       logs.delete(app);
       for (const name of await readdir(appDir(app)).catch(() => [] as string[])) if (isRelease(name)) await rm(join(appDir(app), name), { recursive: true, force: true });
