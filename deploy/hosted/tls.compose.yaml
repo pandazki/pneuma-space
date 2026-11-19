@@ -1,0 +1,20 @@
+services:
+  tls:
+    image: caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
+    depends_on:
+      gateway: { condition: service_healthy }
+    ports:
+      - "127.0.0.1:54443:54443"
+    environment:
+      PNEUMA_SPACE_HOSTED_CONTROL_ORIGIN: ${PNEUMA_SPACE_HOSTED_CONTROL_ORIGIN:?}
+      PNEUMA_SPACE_APPS_ORIGIN: ${PNEUMA_SPACE_APPS_ORIGIN:?}
+      PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT: ${PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT:?}
+      PNEUMA_SPACE_CONTROL_UPSTREAM: gateway:8081
+      PNEUMA_SPACE_APPS_UPSTREAM: gateway:8080
+      PNEUMA_SPACE_OBJECTS_UPSTREAM: rustfs:9000
+    volumes:
+      - ./deploy/hosted/kubernetes/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${PNEUMA_SPACE_TLS_TEST_CERTS:?}:/certs:ro
+    read_only: true
+    tmpfs: [/data]
+    networks: [pneuma-space]

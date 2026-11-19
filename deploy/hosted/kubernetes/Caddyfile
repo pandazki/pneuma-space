@@ -1,0 +1,43 @@
+{
+	admin off
+	auto_https off
+	persist_config off
+	log {
+		format filter {
+			wrap json
+			fields {
+				request delete
+			}
+		}
+	}
+	servers {
+		protocols h1 h2
+		strict_sni_host on
+	}
+}
+
+(forward) {
+	reverse_proxy {args[0]} {
+		header_up Host {hostport}
+		flush_interval 1ms
+		transport http {
+			compression off
+			network_proxy none
+		}
+	}
+}
+
+{$PNEUMA_SPACE_HOSTED_CONTROL_ORIGIN} {
+	tls /certs/control/tls.crt /certs/control/tls.key
+	import forward {$PNEUMA_SPACE_CONTROL_UPSTREAM}
+}
+
+{$PNEUMA_SPACE_APPS_ORIGIN} {
+	tls /certs/apps/tls.crt /certs/apps/tls.key
+	import forward {$PNEUMA_SPACE_APPS_UPSTREAM}
+}
+
+{$PNEUMA_SPACE_OBJECT_PUBLIC_ENDPOINT} {
+	tls /certs/objects/tls.crt /certs/objects/tls.key
+	import forward {$PNEUMA_SPACE_OBJECTS_UPSTREAM}
+}

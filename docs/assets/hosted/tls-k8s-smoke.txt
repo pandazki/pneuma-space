@@ -1,0 +1,23 @@
+Verified 2026-11-12. k8s-delivery.log
+
+✔ AC-OPS-11: the cluster view lists nodes, the gateway and runner with the leader marked, the awake instance and its claim; a tenant admin gets 403 (17265.149667ms)
+✔ AC-OPS-12: the runner scales up and back, keeping the removed replica's claim; bad counts are 400, postgres is 409, the audit has the count (18183.129875ms)
+✔ AC-OPS-14: stop leaves the app asleep with no Pod, the tenant admin may stop it, and restart wakes it under a new Pod (28352.306167ms)
+✔ AC-OPS-15: kill ends a wake stuck on a Pod that never gets ready: the Pod goes, the row is asleep, a tenant admin gets 403, the audit lists it (2165.781292ms)
+✔ AC-OPS-16: draining a node stops its instances only, and leaves the node schedulable flag and its platform Pods as they were (50841.9835ms)
+✔ Pods in pneuma-space-apps are listed with a resourceVersion (70.277125ms)
+✔ a created Pod arrives on the watch as ADDED (14.069333ms)
+✔ the running Pod log is read with tailLines (880.404375ms)
+✔ a deleted Pod arrives on the watch as DELETED (29.905917ms)
+✔ start creates the claim and the Pod and resolves with the Pod IP once it accepts TCP (948.548208ms)
+✔ logs reads the running Pod (9.044333ms)
+✔ sleep keeps the log tail and deletes the Pod, and the claim stays (12204.906208ms)
+✔ destroyStorage deletes the claim and resolves once it is gone (1015.775791ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 116909.830916

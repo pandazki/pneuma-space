@@ -1,0 +1,47 @@
+Verified 2026-11-12. k8s-tls-delivery.log
+
+✔ AC-SAAS-4 control writes require the exact Origin and CSRF (2200.121625ms)
+✔ AC-SAAS-5 private app grants are browser-bound and single-use (198.273792ms)
+✔ AC-SAAS-4 logout rejects the next control and derived app session admission (246.6355ms)
+✔ AC-SAAS-6 another account cannot list or visit a private container application (136.326042ms)
+✔ AC-SAAS-6 another account cannot visit a private static application (181.079709ms)
+✔ AC-SAAS-6 another account cannot visit a private isolate application (195.458083ms)
+✔ AC-SAAS-7 a selected-app credential filters reads and rejects another app (2692.141ms)
+✔ AC-SAAS-7 a read credential cannot invoke, publish, remove or issue credentials (153.067083ms)
+✔ AC-SAAS-7 credential revocation rejects the next admission (2848.53075ms)
+✔ AC-SAAS-7 credential expiry rejects the next admission (1700.800667ms)
+✔ AC-SAAS-7 credential metadata exposes neither secret nor hash (19.590459ms)
+✔ AC-SAAS-9 hosted container files and SQLite survive remove and republish (8476.377291ms)
+✔ AC-SAAS-9 hosted container PostgreSQL remains available through the original contract (3044.438125ms)
+✔ AC-SAAS-9 hosted container KV and pubsub remain available through the original contract (3056.645792ms)
+✔ AC-SAAS-9 hosted object bytes transfer directly with original signed URLs (3017.811541ms)
+✔ AC-SAAS-9 hosted WebSockets retain original bidirectional messages (3022.846291ms)
+✔ AC-SAAS-9 hosted on-demand triggers retain the original delivery contract (4053.707875ms)
+✔ AC-SAAS-9 hosted isolate files and SQLite retain the original application contract (783.705292ms)
+✔ AC-SAAS-10 operator monitoring remains available and signup grants no operator role (100.330667ms)
+✔ AC-SAAS-13 hosted application receives identity without platform credentials (4221.945292ms)
+✔ AC-SAAS-11 hosted purge requires the exact removed application name (104.760166ms)
+✔ AC-SAAS-9 hosted SSE delivers before the stream closes (742.978291ms)
+✔ AC-SAAS-13 hosted application cannot set reserved platform cookies (750.481417ms)
+✔ AC-SAAS-9 hosted scheduled triggers retain the original delivery contract (62935.11075ms)
+✔ AC-SAAS-9 hosted RTC injects the original ICE configuration (3042.9715ms)
+✔ AC-SAAS-4 application cookies require the exact Origin for writes and WebSockets (4031.31725ms)
+✔ AC-SAAS-7 a recreated name does not inherit an old AppId credential (3219.717667ms)
+✔ AC-SAAS-7 public static admission still enforces a supplied credential scope (206.749125ms)
+﹣ AC-SAAS-8 revocation during real provisioning keeps the prior release and files (0.311459ms) # enable the temporary object-service pause on the hosted development stack
+✔ AC-SAAS-18 mismatched TLS Host cannot reach a gateway route (2167.750875ms)
+✔ AC-SAAS-18 private static HEAD and Range retain authorization and cache policy (216.281958ms)
+✔ AC-SAAS-18 original CLI publishes a static bundle over trusted TLS (289.396792ms)
+✔ AC-SAAS-18 app request streams more than 100 MiB without byte changes (1049.68325ms)
+✔ AC-SAAS-18 /delayed survives 130 seconds without upstream bytes (130255.446667ms)
+✔ AC-SAAS-18 /gap survives 130 seconds without upstream bytes (130290.041625ms)
+﹣ AC-MEDIA-2 TLS object upload bypasses app and gateway byte paths (0.186666ms) # SKIP
+﹣ AC-MEDIA-4 TLS public object read leaves the app asleep (0.08125ms) # SKIP
+ℹ tests 37
+ℹ suites 0
+ℹ pass 34
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 3
+ℹ todo 0
+ℹ duration_ms 379945.849333
