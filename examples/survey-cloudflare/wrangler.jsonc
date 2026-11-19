@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "pneuma-space-survey-cf-20261112",
+  "account_id": "3fe29372540f8d26046ab314c2f06f89",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "PNEUMA_SPACE_OBJECT_BUCKET": "pneuma-space-survey-cf-20261112",
+    "PNEUMA_SPACE_MAX_REQUESTS": "2000",
+    "PNEUMA_SPACE_EXPIRES": "1795104000000"
+  },
+  "d1_databases": [{ "binding": "PNEUMA_SPACE_DB", "database_name": "pneuma-space-survey-cf-20261112", "database_id": "b6c49e7c-c8ea-40aa-8224-95afab74cbe8" }],
+  "r2_buckets": [{ "binding": "PNEUMA_SPACE_OBJECTS", "bucket_name": "pneuma-space-survey-cf-20261112" }],
+  "assets": { "directory": "./public", "binding": "PNEUMA_SPACE_ASSETS", "run_worker_first": true },
+  "containers": [{
+    "class_name": "SurveyContainer",
+    "name": "pneuma-space-survey-cf-20261112",
+    "scheduling_policy": "durable_object",
+    "images": {
+      "v1": { "dockerfile": "./Dockerfile", "build_vars": { "PNEUMA_SPACE_IMAGE": "v1" } },
+      "v2": { "dockerfile": "./Dockerfile", "build_vars": { "PNEUMA_SPACE_IMAGE": "v2" } }
+    }
+  }],
+  "durable_objects": { "bindings": [{ "name": "PNEUMA_SPACE_CONTAINER", "class_name": "SurveyContainer" }] },
+  "exports": { "SurveyContainer": { "type": "durable-object", "storage": "sqlite" } }
+}

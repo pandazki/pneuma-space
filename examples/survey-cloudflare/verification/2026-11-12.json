@@ -1,0 +1,357 @@
+{
+  "at": "2026-11-12T15:51:59.986Z",
+  "base": "https://pneuma-space-survey-cf-20261112.ianepo.workers.dev",
+  "lifecycle": "passed",
+  "r2": "incomplete",
+  "node": {
+    "firstMeta": {
+      "boot": "29d7e6b0-7c09-484e-b279-f59d712a5bf0",
+      "image": "v1",
+      "uptimeMs": 514.21371
+    },
+    "warmMeta": {
+      "boot": "29d7e6b0-7c09-484e-b279-f59d712a5bf0",
+      "image": "v1",
+      "uptimeMs": 846.72896
+    },
+    "idleMeta": {
+      "boot": "bc0ca0cf-dd92-4e40-ac99-8643ddad4fe8",
+      "image": "v1",
+      "uptimeMs": 516.881311
+    },
+    "killMeta": {
+      "boot": "65766849-a2ad-4f73-9d60-010417a22037",
+      "image": "v1",
+      "uptimeMs": 509.199069
+    },
+    "v2Meta": {
+      "boot": "0f0bfbdf-75a7-419c-b96b-6a317bf66320",
+      "image": "v2",
+      "uptimeMs": 521.775055
+    }
+  },
+  "exports": {
+    "initial": {
+      "status": "incomplete",
+      "reason": "Scoped R2 S3 signing credentials are not configured"
+    },
+    "idle": {
+      "status": "incomplete",
+      "reason": "Scoped R2 S3 signing credentials are not configured"
+    },
+    "kill": {
+      "status": "incomplete",
+      "reason": "Scoped R2 S3 signing credentials are not configured"
+    },
+    "v2": {
+      "status": "incomplete",
+      "reason": "Scoped R2 S3 signing credentials are not configured"
+    }
+  },
+  "observations": [
+    {
+      "label": "no-auth",
+      "status": 401,
+      "cfRay": "a596aef5d93062b1-NRT"
+    },
+    {
+      "label": "member-results",
+      "status": 403,
+      "cfRay": "a596aef7b8060d79-NRT"
+    },
+    {
+      "label": "member-ticket",
+      "status": 403,
+      "cfRay": "a596aef8af0d62b1-NRT"
+    },
+    {
+      "label": "owner-control",
+      "status": 401,
+      "cfRay": "a596aef98c1a0d79-NRT"
+    },
+    {
+      "label": "spoof-owner",
+      "status": 403,
+      "cfRay": "a596aefa5a6062b1-NRT"
+    },
+    {
+      "label": "control-storage-probe",
+      "status": 200,
+      "cfRay": "a596aefb3fd90d79-NRT"
+    },
+    {
+      "label": "login-page",
+      "status": 200,
+      "cfRay": "a596aefd383b62b1-NRT"
+    },
+    {
+      "label": "cookie-login",
+      "status": 303,
+      "cfRay": "a596aefdf9bb62b1-NRT"
+    },
+    {
+      "label": "language-choice",
+      "status": 303,
+      "cfRay": "a596aefedf950d79-NRT"
+    },
+    {
+      "label": "language-persisted",
+      "status": 200,
+      "cfRay": "a596afe7aac5f58b-NRT"
+    },
+    {
+      "label": "cookie-csrf",
+      "status": 403,
+      "cfRay": "a596afeb5ccef58b-NRT"
+    },
+    {
+      "label": "before-spoof",
+      "status": 200,
+      "cfRay": "a596afeffbfe0d79-NRT"
+    },
+    {
+      "label": "spoof-subject",
+      "status": 303,
+      "cfRay": "a596aff1481df58b-NRT"
+    },
+    {
+      "label": "member-saved",
+      "status": 200,
+      "cfRay": "a596affb8b890d79-NRT"
+    },
+    {
+      "label": "evil-origin",
+      "status": 403,
+      "cfRay": "a596b0023938f58b-NRT"
+    },
+    {
+      "label": "oversized-answer",
+      "status": 413,
+      "cfRay": "a596b0041da70d79-NRT"
+    },
+    {
+      "label": "after-oversized",
+      "status": 200,
+      "cfRay": "a596b004fab7f58b-NRT"
+    },
+    {
+      "label": "unknown-op",
+      "status": 404,
+      "cfRay": "a596b0074c2ef58b-NRT"
+    },
+    {
+      "label": "control-image/v1",
+      "status": 200,
+      "cfRay": "a596b008efc50d79-NRT"
+    },
+    {
+      "label": "meta-first",
+      "status": 200,
+      "cfRay": "a596b00abe43f58b-NRT"
+    },
+    {
+      "label": "meta-first-readiness",
+      "elapsedMs": 1080.1759170000005,
+      "metadataUptimeMs": 514.21371
+    },
+    {
+      "label": "meta-warm",
+      "status": 200,
+      "cfRay": "a596b0117a0bf58b-NRT"
+    },
+    {
+      "label": "first",
+      "status": 303,
+      "cfRay": "a596b0159c06f58b-NRT"
+    },
+    {
+      "label": "first-read",
+      "status": 200,
+      "cfRay": "a596b0181e7d0d79-NRT"
+    },
+    {
+      "label": "first-rows",
+      "status": 200,
+      "cfRay": "a596b019ee1cf58b-NRT"
+    },
+    {
+      "label": "initial-availability",
+      "status": 200,
+      "cfRay": "a596b01c0f32f58b-NRT"
+    },
+    {
+      "label": "control-status",
+      "status": 200,
+      "cfRay": "a596b25aded3f67d-NRT"
+    },
+    {
+      "label": "quiet-window",
+      "start": "2026-11-12T15:49:40.648Z",
+      "end": "2026-11-12T15:51:12.103Z",
+      "running": false,
+      "processAgeUpperBoundMs": {
+        "start": 3374.9837929999994,
+        "end": 94829.36358500001
+      },
+      "metadataUptimeMs": 846.72896
+    },
+    {
+      "label": "meta-idle",
+      "status": 200,
+      "cfRay": "a596b25cd888f67d-NRT"
+    },
+    {
+      "label": "idle-persisted-read",
+      "status": 200,
+      "cfRay": "a596b2693b38f67d-NRT"
+    },
+    {
+      "label": "idle-persisted-rows",
+      "status": 200,
+      "cfRay": "a596b26c9e44f67d-NRT"
+    },
+    {
+      "label": "idle-write",
+      "status": 303,
+      "cfRay": "a596b26f186ef67d-NRT"
+    },
+    {
+      "label": "idle-write-read",
+      "status": 200,
+      "cfRay": "a596b2723e028aa2-NRT"
+    },
+    {
+      "label": "idle-write-rows",
+      "status": 200,
+      "cfRay": "a596b2743d1bf67d-NRT"
+    },
+    {
+      "label": "idle-availability",
+      "status": 200,
+      "cfRay": "a596b276cf98f67d-NRT"
+    },
+    {
+      "label": "control-kill",
+      "status": 200,
+      "cfRay": "a596b278c995f67d-NRT"
+    },
+    {
+      "label": "meta-kill",
+      "status": 200,
+      "cfRay": "a596b27b3c1a8aa2-NRT"
+    },
+    {
+      "label": "kill-persisted-read",
+      "status": 200,
+      "cfRay": "a596b280f9aaf67d-NRT"
+    },
+    {
+      "label": "kill-persisted-rows",
+      "status": 200,
+      "cfRay": "a596b283fc7ef67d-NRT"
+    },
+    {
+      "label": "kill-write",
+      "status": 303,
+      "cfRay": "a596b288b8d0f67d-NRT"
+    },
+    {
+      "label": "kill-write-read",
+      "status": 200,
+      "cfRay": "a596b28c585b8aa2-NRT"
+    },
+    {
+      "label": "kill-write-rows",
+      "status": 200,
+      "cfRay": "a596b28e0debf67d-NRT"
+    },
+    {
+      "label": "kill-availability",
+      "status": 200,
+      "cfRay": "a596b292eaa0f67d-NRT"
+    },
+    {
+      "label": "control-image/v2",
+      "status": 200,
+      "cfRay": "a596b294ac38f67d-NRT"
+    },
+    {
+      "label": "meta-v2",
+      "status": 200,
+      "cfRay": "a596b2995aae8aa2-NRT"
+    },
+    {
+      "label": "v2-persisted-read",
+      "status": 200,
+      "cfRay": "a596b37e7f55d4cf-NRT"
+    },
+    {
+      "label": "v2-persisted-rows",
+      "status": 200,
+      "cfRay": "a596b380c8f3d4cf-NRT"
+    },
+    {
+      "label": "v2-write",
+      "status": 303,
+      "cfRay": "a596b3825a37d4cf-NRT"
+    },
+    {
+      "label": "v2-write-read",
+      "status": 200,
+      "cfRay": "a596b383db8a8aa2-NRT"
+    },
+    {
+      "label": "v2-write-rows",
+      "status": 200,
+      "cfRay": "a596b3857c58d4cf-NRT"
+    },
+    {
+      "label": "v2-availability",
+      "status": 200,
+      "cfRay": "a596b3870d55d4cf-NRT"
+    }
+  ],
+  "source": {
+    "sourceCommit": "af48c40905c6502725a59349629e958269df755c",
+    "sourceTree": "93ef9aad430e97fb0939337356a5d7f1a0ca3e1d",
+    "sameTreeAsDeployedRevision": "9f8aa89"
+  },
+  "workerVersion": "d2f95c3d-91d5-4a09-b13f-28d37aeb99a2",
+  "exitCode": 2,
+  "foreignFixtureAfter": [
+    {
+      "app": "other",
+      "subject": "cf-other-scope-probe",
+      "q1": "poor",
+      "q2": "remote",
+      "q3": "culture"
+    }
+  ],
+  "r2OperatorFixture": {
+    "bytes": 54,
+    "sha256": "0ac9df6dd5b1e14c81ed4dfdc4f44f829c2a5d15bf12fe7390aa8d4177e5558c",
+    "sameBeforeAndAfter": true,
+    "transport": "Wrangler operator API",
+    "unsignedDenial": {
+      "at": "2026-11-12T15:26:47.058Z",
+      "status": 400,
+      "code": "InvalidArgument",
+      "message": "Authorization",
+      "contentType": "application/xml"
+    }
+  },
+  "localSmoke": {
+    "at": "2026-11-12T15:13:23.212Z",
+    "surface": "existing Docker hosted stack",
+    "checks": [
+      "README init, publish, private app login and rendered greeting",
+      "existing private survey remains reachable",
+      "temporary smoke app removed then purged",
+      "temporary CLI credential revoked"
+    ]
+  },
+  "browser": {
+    "visual": "unavailable",
+    "cors": "not verified"
+  }
+}
