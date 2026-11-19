@@ -5,14 +5,15 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { EventLog } from './events.ts';
+import { EventLog, type Emit } from './events.ts';
 import { Instances } from './instances.ts';
 import { IsolateRuntime, StaticPool } from './isolate.ts';
-import { CURRENT, register, tempStore } from './lifecycle.fakes.ts';
+import { CURRENT, register, tempStore, withheld } from './lifecycle.fakes.ts';
 import {
   appName, DEFAULT_POLICY, DEFAULT_TENANT, newAppId, NotFound, type AppId, type BundleId, type Policy, type ReleaseNumber, type ReplicaId, type RunSpec, type StorageBinding,
+  type Store,
 } from './model.ts';
-import type { EventPage } from './runner.ts';
+import type { EventPage, Listed } from './runner.ts';
 import { serveBundle, startRunner, type RunnerProcess } from './runner.harness.ts';
 import { AppGuard, Runtimes, Unavailable } from './runtimes.ts';
 
@@ -78,8 +79,8 @@ async function fixture(t: TestContext, policy: Partial<Policy> = {}, storage: re
 }
 
 const answer = async (address: string) => (await fetch(`http://${address}/`)).text();
-async function until(what: string, condition: () => boolean, ms = 10_000): Promise<void> {
-  for (const end = Date.now() + ms; !condition(); await sleep(10)) assert.ok(Date.now() < end, `timed out waiting for ${what}`);
+async function until(what: string, condition: () => boolean | Promise<boolean>, ms = 10_000): Promise<void> {
+  for (const end = Date.now() + ms; !(await condition()); await sleep(10)) assert.ok(Date.now() < end, `timed out waiting for ${what}`);
 }
 
 test('concurrent acquires on a sleeping isolate app start one worker and get an address that answers', async (t) => {
@@ -270,17 +271,18 @@ const staleRunner = async (t: TestContext) => {
   return { runner, runtime, logged };
 };
 
-test('a gateway starts against a runner that lists a stale worker but fails to remove it, and logs it unreachable', async (t) => {
+test('a gateway starts against a runner that lists a worker no row names but fails to stop it, and logs the failed stop', async (t) => {
   const { runtime, logged } = await staleRunner(t);
   await runtime.reconcile();
-  assert.deepEqual(logged.filter((e) => e.ev === 'runner-unreachable').map((e) => e.worker), ['1:1']);
+  await until('a recovery pass', () => logged.some((e) => e.ev === 'runner-recovered'));
+  assert.deepEqual(logged.find((e) => e.ev === 'runner-recovered'), { ev: 'runner-recovered', runner: 'runner', stopped: 0, failed: 1 });
 });
 
-test('a stale worker whose removal failed at gateway start is removed by the recovery poll', async (t) => {
+test('a worker no row names whose stop failed at gateway start is stopped by the next recovery pass', async (t) => {
   const { runner, runtime, logged } = await staleRunner(t);
   await runtime.reconcile();
-  for (const end = Date.now() + 8000; runner.listed.length > 0; await sleep(100)) assert.ok(Date.now() < end, 'the stale worker is removed');
-  assert.deepEqual(logged.find((e) => e.ev === 'runner-recovered'), { ev: 'runner-recovered', runner: 'runner', stopped: 1, failed: 0 });
+  await until('a pass stops it', () => logged.some((e) => e.ev === 'runner-recovered' && e.stopped === 1 && e.failed === 0), 8000);
+  assert.deepEqual(runner.listed, []);
 });
 
 test('a worker another gateway started that has not listened yet is stopped by the recovery poll', async (t) => {
@@ -291,6 +293,216 @@ test('a worker another gateway started that has not listened yet is stopped by t
   await runtime.reconcile();
   const stopped = async () => (await runnerEvents()).some((e) => e.app === app && e.ev === 'exit' && e.reason === 'stopped');
   for (const end = Date.now() + 15_000; !(await stopped()); await sleep(100)) assert.ok(Date.now() < end, 'the untracked worker is stopped');
+});
+
+/** Forwards to `target`; after `drop()` the next event poll through it gets no answer. */
+async function controlProxy(t: TestContext, target: string) {
+  let dropping = false;
+  const server = createServer(async (q, s) => {
+    if (dropping && q.url!.startsWith('/events')) {
+      dropping = false;
+      return q.socket.destroy();
+    }
+    try {
+      const body = Buffer.concat(await Array.fromAsync(q as AsyncIterable<Buffer>));
+      const forwarded = await fetch(new URL(q.url!, target), { method: q.method, ...(body.length && { body, headers: { 'content-type': 'application/json' } }) });
+      const type = forwarded.headers.get('content-type');
+      s.writeHead(forwarded.status, type ? { 'content-type': type } : {}).end(Buffer.from(await forwarded.arrayBuffer()));
+    } catch {
+      q.socket.destroy();
+    }
+  }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, drop: () => void (dropping = true) };
+}
+
+/** Gateway replicas over one store and one runner, each with its own mirror, Guard and events. */
+async function replicas(t: TestContext, policy: Partial<Policy> = {}) {
+  const store = tempStore();
+  const specs = new Map<AppId, RunSpec>();
+  const specFor = (id: AppId) => specs.get(id) ?? null;
+  const publish = () => {
+    const app = newAppId();
+    const spec: RunSpec = {
+      app, name: appName(`fixture-${app}`), tenant: DEFAULT_TENANT, release: 1 as ReleaseNumber, runtime: { kind: 'isolate', bundle: 'b' as BundleId, entry: 'app.mjs' },
+      injection: { env: {}, storage: [], services: [] }, policy: { ...DEFAULT_POLICY, ...policy }, version: CURRENT,
+    };
+    register(store, spec);
+    specs.set(app, spec);
+    return app;
+  };
+  const bundleUrl = await serveBundle(t);
+  const runner = await startRunner(t);
+  const replica = (id: string, options: { url?: string; store?: Store; leader?: boolean } = {}) => {
+    const instances = new Instances(options.store ?? store, { replica: id as ReplicaId, leader: options.leader });
+    const events: Record<string, unknown>[] = [];
+    const log: Emit = (ev, app, extra) => void events.push({ ev, app, ...extra });
+    const guard = new AppGuard({ instances, specFor, log });
+    const runtime = new IsolateRuntime({ pool: new StaticPool(options.url ?? runner.url), bundleUrl: () => bundleUrl, specFor, hasRun: async () => true, instances, guard, log });
+    let closed = false;
+    const close = async () => {
+      if (closed) return;
+      closed = true;
+      runtime.close();
+      await instances.close();
+    };
+    t.after(close);
+    return { instances, runtime, events, close };
+  };
+  const workers = async () => (await (await fetch(`${runner.url}/instances`)).json()) as Listed[];
+  const startElsewhere = (app: AppId) => fetch(`${runner.url}/instances/${app}`, {
+    method: 'POST', body: JSON.stringify({ release: 1, spec: 'elsewhere', bundleUrl, entry: 'app.mjs', env: {}, storage: [], heapMb: 1024, readyMs: 8000 }),
+  }).then((r) => r.json() as Promise<{ worker: string }>);
+  return { store, publish, replica, runner, workers, startElsewhere };
+}
+
+const recovered = (events: readonly Record<string, unknown>[]) => events.filter((e) => e.ev === 'runner-recovered');
+
+test('a replica recovering from failed control calls 20 times stops no worker another replica holds (#8)', async (t) => {
+  const { publish, replica, runner, workers } = await replicas(t);
+  const [x, y] = [publish(), publish()];
+  const a = replica('replica-a');
+  const proxy = await controlProxy(t, runner.url);
+  const b = replica('replica-b', { url: proxy.url, leader: false });
+  await Promise.all([a.runtime.reconcile(), b.runtime.reconcile()]);
+  const [held, other] = [await a.runtime.acquire(x, 'request'), await b.runtime.acquire(y, 'request')];
+  const request = fetch(`http://${held.address}/hold`).then((r) => r.text());
+  const before = (await workers()).map((w) => w.worker).sort();
+  for (let round = 1; round <= 20; round++) {
+    proxy.drop();
+    await until(`recovery ${round}`, () => recovered(b.events).length === round, 15_000);
+  }
+  await fetch(`http://${held.address}/unhold`);
+  assert.deepEqual(
+    [await request, await answer(other.address), (await workers()).map((w) => w.worker).sort(), recovered(b.events).map((e) => e.stopped).filter(Boolean)],
+    ['held', `fixture-${y} 1`, before, []],
+  );
+});
+
+test('a worker no row names is stopped within the leader\'s recovery period, and only that worker (#8)', async (t) => {
+  const { publish, replica, workers, startElsewhere } = await replicas(t);
+  const app = publish();
+  const a = replica('replica-a');
+  await a.runtime.reconcile();
+  const { address } = await a.runtime.acquire(app, 'request');
+  const { worker } = await startElsewhere(newAppId());
+  await until('the stray worker is stopped', async () => !(await workers()).some((w) => w.worker === worker), 15_000);
+  assert.equal(await answer(address), `fixture-${app} 1`);
+});
+
+test('two replicas recovering at once stop a stray worker once between them, fail nothing and keep the rest (#8)', async (t) => {
+  const { publish, replica, runner, workers, startElsewhere } = await replicas(t);
+  const [x, y] = [publish(), publish()];
+  const [pa, pb] = [await controlProxy(t, runner.url), await controlProxy(t, runner.url)];
+  const a = replica('replica-a', { url: pa.url, leader: false });
+  const b = replica('replica-b', { url: pb.url, leader: false });
+  await Promise.all([a.runtime.reconcile(), b.runtime.reconcile()]);
+  const [one, two] = [await a.runtime.acquire(x, 'request'), await b.runtime.acquire(y, 'request')];
+  const { worker } = await startElsewhere(newAppId());
+  pa.drop();
+  pb.drop();
+  await until('both replicas recover', () => recovered(a.events).length > 0 && recovered(b.events).length > 0, 15_000);
+  const failed = [...recovered(a.events), ...recovered(b.events)].reduce((sum, e) => sum + (e.failed as number), 0);
+  assert.deepEqual(
+    [(await workers()).some((w) => w.worker === worker), failed, await answer(one.address), await answer(two.address)],
+    [false, 0, `fixture-${x} 1`, `fixture-${y} 1`],
+  );
+});
+
+/** Replica A wakes an app and dies; replica B, which never started or adopted the worker, then leads. */
+async function abandoned(t: TestContext) {
+  const fixed = await replicas(t, { idle_seconds: 600, restart_backoff_seconds: 0 });
+  const { store, publish, replica } = fixed;
+  const app = publish();
+  const a = replica('replica-a');
+  const lead = withheld(store);
+  const b = replica('replica-b', { store: lead.store });
+  await Promise.all([a.runtime.reconcile(), b.runtime.reconcile()]);
+  const lease = await a.runtime.acquire(app, 'request');
+  a.runtime.release(lease);
+  await until('replica b sees the instance awake', () => b.runtime.state(app) === 'awake');
+  await a.close();
+  // Past a poll interval, as a dead process polls no more.
+  await sleep(500);
+  lead.grant();
+  await b.instances.start();
+  await until('replica b leads', () => b.instances.leading);
+  return { ...fixed, app, lease, b };
+}
+
+const asleep = (store: Store, app: AppId) => async () => (await store.instance(app))?.state === 'asleep';
+
+test('a worker that exits after the replica that started it died goes asleep within a poll, with one failure and one crashed event (#9)', async (t) => {
+  const { store, app, lease, b } = await abandoned(t);
+  await fetch(`http://${lease.address}/exit`).catch(() => {});
+  await until('the row is asleep', asleep(store, app), 3000);
+  await sleep(500);
+  assert.deepEqual([(await store.guard(app))?.failures.length, b.events.filter((e) => e.ev === 'crashed').length], [1, 1]);
+});
+
+test('the next request after an abandoned worker exited wakes the app again (#9)', async (t) => {
+  const { store, app, lease, b } = await abandoned(t);
+  await fetch(`http://${lease.address}/exit`).catch(() => {});
+  await until('the row is asleep', asleep(store, app), 3000);
+  assert.equal(await answer((await b.runtime.acquire(app, 'request')).address), `fixture-${app} 1`);
+});
+
+test('a worker that exited while no replica followed it is found ended once a replica follows its row (#9)', async (t) => {
+  const { store, publish, replica } = await replicas(t, { idle_seconds: 600 });
+  const app = publish();
+  const a = replica('replica-a');
+  await a.runtime.reconcile();
+  const lease = await a.runtime.acquire(app, 'request');
+  a.runtime.release(lease);
+  await a.close();
+  await sleep(500);
+  await fetch(`http://${lease.address}/exit`).catch(() => {});
+  const b = replica('replica-b', { leader: false });
+  await b.runtime.reconcile();
+  await until('the row is asleep', asleep(store, app), 3000);
+  assert.deepEqual([(await store.guard(app))?.failures.length, b.events.find((e) => e.ev === 'crashed')?.reason], [1, 'worker exited with code 3']);
+});
+
+test('a worker that exited before a replica\'s cursor began is found ended through the runner\'s inventory (#9)', async (t) => {
+  const { store, publish, replica, runner } = await replicas(t, { idle_seconds: 600 });
+  const app = publish();
+  const a = replica('replica-a');
+  await a.runtime.reconcile();
+  const lease = await a.runtime.acquire(app, 'request');
+  a.runtime.release(lease);
+  await a.close();
+  await sleep(500);
+  await fetch(`http://${lease.address}/exit`).catch(() => {});
+  // The first poll fails, so the recovery that follows starts the cursor after the exit.
+  const proxy = await controlProxy(t, runner.url);
+  proxy.drop();
+  const b = replica('replica-b', { url: proxy.url, leader: false });
+  await b.runtime.reconcile();
+  await until('the row is asleep', asleep(store, app), 10_000);
+  assert.deepEqual([recovered(b.events).length, b.events.find((e) => e.ev === 'crashed')?.reason], [1, 'worker exited with code 3']);
+});
+
+test('a replica that takes the lead stops no worker a row names, whichever replica started it (#9)', async (t) => {
+  const { store, publish, replica, workers } = await replicas(t, { idle_seconds: 600 });
+  const [x, y] = [publish(), publish()];
+  const a = replica('replica-a');
+  const c = replica('replica-c', { leader: false });
+  const lead = withheld(store);
+  const b = replica('replica-b', { store: lead.store });
+  await Promise.all([a.runtime.reconcile(), b.runtime.reconcile(), c.runtime.reconcile()]);
+  const [one, two] = [await a.runtime.acquire(x, 'request'), await c.runtime.acquire(y, 'request')];
+  const before = (await workers()).map((w) => w.worker).sort();
+  await a.close();
+  lead.grant();
+  await b.instances.start();
+  await until('replica b leads', () => b.instances.leading);
+  // Longer than the leader's recovery period.
+  await sleep(6000);
+  assert.deepEqual([(await workers()).map((w) => w.worker).sort(), await answer(one.address), await answer(two.address)], [before, `fixture-${x} 1`, `fixture-${y} 1`]);
 });
 
 // A stopped compose service has no name on the platform network; `.invalid` never resolves (RFC 6761).

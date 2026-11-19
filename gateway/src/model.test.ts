@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import {
-  DEFAULT_POLICY, DEFAULT_QUOTA, ManifestError, InputError, QUOTA_RESOURCES, admits, appName, effectivePolicy, parseManifest, releaseKey,
+  DEFAULT_POLICY, DEFAULT_QUOTA, ManifestError, InputError, QUOTA_RESOURCES, Stranded, admits, appName, effectivePolicy, parseManifest, releaseKey,
   type BundleId, type ImageId,
 } from './model.ts';
 
@@ -85,4 +85,11 @@ test('model.ts refuses to load when CAPABILITIES lacks a kind', async () => {
   const path = join(mkdtempSync(join(tmpdir(), 'pneuma-space-model-')), 'model.ts');
   writeFileSync(path, mutated);
   await assert.rejects(import(pathToFileURL(path).href), /CAPABILITIES must cover exactly.*rtc/);
+});
+
+test('a refused runner scale lists the first ten apps by replica and counts the rest (ADR 0032 item 2)', () => {
+  const homes = Array.from({ length: 12 }, (_, i) => ({ app: appName(`app-${String(i).padStart(2, '0')}`), home: `pneuma-space-runner-${i < 6 ? 10 : 9}` }));
+  const refused = new Stranded('pneuma-space-runner', 9, homes);
+  assert.deepEqual([refused.homes.length, refused.more, refused.homes[0], refused.homes[9]], [10, 2, homes[6], homes[3]]);
+  assert.match(refused.message, /^scaling pneuma-space-runner to 9 replicas would remove the home runner of 12 apps: app-06 \(pneuma-space-runner-9\), .*app-03 \(pneuma-space-runner-10\) and 2 more\. /);
 });

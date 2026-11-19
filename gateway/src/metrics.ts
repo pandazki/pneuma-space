@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { availableParallelism, freemem, loadavg, totalmem } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { EventLog, LifecycleEvent } from './events.ts';
-import { addressOnNetwork } from './providers.ts';
+import { addressOnNetwork, type ServiceProbe } from './providers.ts';
 import type { RequestKind } from './requests.ts';
 import { canConnect } from './runtime.ts';
 import {
@@ -29,6 +29,8 @@ const RECENT_FAILURES = 20;
 const WAKE_BUCKETS = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 15] as const;
 export const EXPOSITION_TYPE = 'text/plain; version=0.0.4; charset=utf-8';
 
+/** One tenure as the leader: a new object each time a replica takes the lead, and when it did. */
+export type Term = { readonly since: number };
 export type ServiceName = 'redis' | 'object' | 'postgres' | 'coturn' | 'runner';
 export type ServiceStatus = 'up' | 'down' | 'off';
 export type Probe = () => Promise<ServiceStatus>;
@@ -52,8 +54,8 @@ export type MetricsDeps = {
   /** Store transactions rerun since start (ADR 0025). */
   readonly retries: () => number;
   readonly replica: ReplicaId;
-  /** Whether this replica leads now; only the leader accrues awake time and sweeps (ADR 0024 items 2 and 4). */
-  readonly leader?: () => boolean;
+  /** This replica's term as the leader, null while it follows; only the leader accrues awake time, sweeps and exports the fleet gauges (ADR 0024 items 2, 4 and 7). Absent: one term from the start. */
+  readonly term?: () => Term | null;
   readonly now?: () => number;
 };
 
@@ -188,7 +190,8 @@ export class Metrics {
   #tailAt = -Infinity;
   #tailing: Promise<void> | null = null;
   #counters = new Map<AppId, { readonly requests: number; readonly errors: number }>();
-  #awakeSampledAt: number | null = null;
+  readonly #always: Term;
+  #awakeSampled: { readonly term: Term; readonly at: number } | null = null;
   #sweptAt = -Infinity;
   #lastFlushAt: number | null = null;
   #rssBytes = process.memoryUsage.rss();
@@ -206,6 +209,7 @@ export class Metrics {
     this.#deps = deps;
     this.#now = deps.now ?? Date.now;
     this.#startedAt = this.#now();
+    this.#always = { since: this.#startedAt };
     this.#writer = `${deps.replica}@${this.#startedAt}` as ReplicaId;
     deps.events.onEvent((event) => this.#record(event));
   }
@@ -213,6 +217,7 @@ export class Metrics {
   /** The 10 s sampler; probes and store reads and writes happen only here. Each probe bounds its own wait. */
   async sample(): Promise<void> {
     const now = this.#now();
+    const term = this.#term();
     this.#absorbStats();
     const probe = async ([name, run]: [string, Probe]) => {
       const started = performance.now();
@@ -250,12 +255,12 @@ export class Metrics {
     };
     this.#host = host;
     this.#rssBytes = process.memoryUsage.rss();
-    if (this.#deps.leader?.() ?? true) this.#accrueAwake(apps, now);
+    this.#accrueAwake(apps, now, term);
     if (now - this.#eventsReadAt >= MINUTE) await this.#readEvents(now);
     await this.#flush(now);
-    if ((this.#deps.leader?.() ?? true) && now - this.#sweptAt >= HOUR) await this.#sweep(now);
+    if (term !== null && now - this.#sweptAt >= HOUR) await this.#sweep(now);
     this.#lastFlushAt = now;
-    if (this.#deps.leader?.() ?? true) {
+    if (term !== null) {
       const tenants = await this.#deps.store.tenants();
       this.#quota = await Promise.all(tenants.map(async (t) => ({ tenant: t.name, quota: t.quota, used: await this.#deps.store.quotaUsed(t.name) })));
     }
@@ -329,7 +334,7 @@ export class Metrics {
       gauge('pneuma_space_gateway_start_time_seconds', 'Start of this gateway process since the Unix epoch.', this.#startedAt / 1000),
       family('pneuma_space_store_retries_total', 'counter', 'Store transactions rerun after a serialization failure or deadlock.', [['pneuma_space_store_retries_total', this.#deps.retries()]]),
     ];
-    if (this.#deps.leader?.() ?? true) {
+    if (this.#term() !== null) {
       const quota = (name: string, help: string, value: (q: TenantQuota, resource: QuotaResource) => number | null) =>
         family(name, 'gauge', help, this.#quota.flatMap((q) => QUOTA_RESOURCES.flatMap((resource) => {
           const v = value(q, resource);
@@ -446,11 +451,18 @@ export class Metrics {
     this.#flushTimer?.unref?.();
   }
 
-  /** Every running instance adds the time since the previous sample, so the precision is one sampling interval. */
-  #accrueAwake(apps: readonly AppSummary[], now: number): void {
-    const since = this.#awakeSampledAt;
-    this.#awakeSampledAt = now;
-    if (since === null) return;
+  #term(): Term | null {
+    return this.#deps.term ? this.#deps.term() : this.#always;
+  }
+
+  /**
+   * While leading, every running instance adds the time since this term's previous sample, or since the term began: the precision is one
+   * sampling interval, a switch loses at most the old leader's last one, and no time another term covered is counted (#15).
+   */
+  #accrueAwake(apps: readonly AppSummary[], now: number, term: Term | null): void {
+    const since = term === null ? null : this.#awakeSampled?.term === term ? this.#awakeSampled.at : term.since;
+    this.#awakeSampled = term && { term, at: now };
+    if (since === null || now <= since) return;
     for (const a of apps) {
       const app = RUNNING.includes(a.instance) ? this.#deps.view(a.name)?.app : undefined;
       if (app) this.#count(app, 'awakeMs', now - since);
@@ -546,11 +558,14 @@ export async function untilUp(ready: () => Promise<boolean>, { everyMs = 500, fo
   }
 }
 
-/** A profile service that is not running has no DNS name on the platform network: off, not down. */
+/** A profile service that is not running is not on the platform network: off, not down (ADR 0030). */
 export const profileProbe = (service: 'postgres' | 'coturn' | 'runner', port: number, address = addressOnNetwork): Probe => async () => {
   const at = await address(service);
   return at === null ? 'off' : (await canConnect(at, port)) ? 'up' : 'down';
 };
+
+/** Publish admits a profile service only when the service strip's probe reads it up, so the two never disagree (ADR 0030). */
+export const admission = (probes: Readonly<Record<'postgres' | 'coturn' | 'runner', Probe>>): ServiceProbe => async (service) => (await probes[service]()) === 'up';
 
 export async function hostSample(dataDir: string): Promise<HostSample> {
   const fs = await statfs(dataDir).catch(() => null);

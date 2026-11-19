@@ -2,10 +2,11 @@
 
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { after, before, describe, test } from 'node:test';
+import { after, before, describe, test, type TestContext } from 'node:test';
+import { Instances } from './instances.ts';
 import {
   DEFAULT_POLICY, DEFAULT_QUOTA, DEFAULT_TENANT, IDEMPOTENCY_WINDOW_MS, USAGE_COUNTERS, changeKey,
-  type App, type AppId, type AppName, type Binding, type Delivery, type DeliveryId, type ImageId, type Instance, type ReleaseNumber, type ReplicaId, type Store,
+  type App, type AppId, type AppName, type Binding, type BundleId, type Delivery, type DeliveryId, type ImageId, type Instance, type ReleaseNumber, type ReplicaId, type Store,
   type Subject, type TenantName, type TriggerName, type Usage,
 } from './model.ts';
 
@@ -34,6 +35,19 @@ function instance(name: string, fields: Partial<Instance> = {}): Instance {
     address: null, node: null, home: null, since: 1, awakeAt: null, cpuMillis: 0, memoryMb: 0, ...fields,
   };
 }
+
+/** An app with an instance row, two replicas' lease tallies, a guard row and a full log row. */
+async function seeded(store: Store, name: string): Promise<AppId> {
+  const id = appId(name);
+  await store.putApp(app(name));
+  await store.insertInstance(instance(name));
+  for (const r of [replica, 'replica-b' as ReplicaId]) await store.putLeaseTally({ app: id, replica: r, epoch: 0, request: 1, channel: 0, trigger: 0, releasedAt: null });
+  await store.putGuard({ app: id, release: 1 as ReleaseNumber, failures: [1], quarantineReason: null, quarantinedAt: null });
+  await store.putInstanceLog({ app: id, release: 1 as ReleaseNumber, endedAt: 1, reason: 'crashed', tail: 'x'.repeat(65_536) });
+  return id;
+}
+
+const held = (store: Store, app: AppId) => Promise.all([store.instance(app), store.leaseTallies(app), store.guard(app), store.instanceLog(app)]);
 
 /** Waits until every expected key was announced, then a little longer so an extra one would show. */
 async function announced(seen: readonly string[], expected: readonly string[]): Promise<void> {
@@ -90,6 +104,37 @@ export function storeContract(name: string, open: OpenStore): void {
       finish();
       await Promise.all([first, second]);
       assert.deepEqual(order, ['x1 start', 'y', 'x1 end', 'x2']);
+    });
+
+    test('exclusiveBundle inside commands on two names runs work on one bundle one at a time and on another bundle meanwhile', async () => {
+      const order: string[] = [];
+      let started!: () => void;
+      let finish!: () => void;
+      const running = new Promise<void>((resolve) => (started = resolve));
+      const gate = new Promise<void>((resolve) => (finish = resolve));
+      const first = store.exclusive('p' as AppName, () => store.exclusiveBundle('b1' as BundleId, async () => {
+        order.push('p start');
+        started();
+        await gate;
+        order.push('p end');
+      }));
+      await running;
+      const second = store.exclusive('q' as AppName, () => store.exclusiveBundle('b1' as BundleId, async () => order.push('q')));
+      await store.exclusive('r' as AppName, () => store.exclusiveBundle('b2' as BundleId, async () => order.push('r')));
+      finish();
+      await Promise.all([first, second]);
+      assert.deepEqual(order, ['p start', 'r', 'p end', 'q']);
+    });
+
+    test('bundleReferenced answers for releases of apps other than the one named', async () => {
+      const release = (name: string, bundle: string) => store.putRelease({
+        app: appId(name), number: 1 as ReleaseNumber, image: null, manifest: { contract: 1, capabilities: {} }, bundle: bundle as BundleId, runtime: null, releaseKey: bundle, publishedAt: 0,
+      });
+      await release('ref-own', 'only-own');
+      await release('ref-own-2', 'shared');
+      await release('ref-other', 'shared');
+      const asked = [['only-own', 'ref-own'], ['shared', 'ref-own-2'], ['absent', 'ref-own']] as const;
+      assert.deepEqual(await Promise.all(asked.map(([bundle, app]) => store.bundleReferenced(bundle as BundleId, appId(app)))), [false, true, false]);
     });
 
     test('a transaction announces each key it wrote once, after commit, and nothing when it rolls back', async () => {
@@ -218,6 +263,26 @@ export function storeContract(name: string, open: OpenStore): void {
       assert.deepEqual((await store.deliveries({ state: 'delivering' })).find((d) => d.id === 'claimed')?.replica, replica);
     });
 
+    test("a write that ends an attempt lands only under that attempt's claim, not after another replica re-claimed the delivery (ADR 0029)", async () => {
+      const id = 'reclaimed' as DeliveryId;
+      const other = 'replica-b' as ReplicaId;
+      await store.insertDelivery(delivery(id, {}));
+      await store.claimDelivery(id, replica, 1);
+      const old = delivery(id, { state: 'delivering', replica, attempts: 1 });
+      await store.casDelivery(old, { ...old, state: 'due', nextAttemptAt: 5 });
+      await store.claimDelivery(id, other, 2);
+      const current = delivery(id, { state: 'delivering', replica: other, attempts: 2, nextAttemptAt: 5 });
+      assert.deepEqual([await store.casDelivery(old, { ...old, state: 'done' }), await store.casDelivery(current, { ...current, state: 'done' })], [false, true]);
+      const stored = (await store.deliveries({})).find((d) => d.id === id)!;
+      assert.deepEqual([stored.state, stored.replica, stored.attempts, stored.nextAttemptAt], ['done', other, 2, 5]);
+    });
+
+    test('a conditional write matches a delivery no replica has claimed yet (ADR 0029)', async () => {
+      const due = delivery('unclaimed', {});
+      await store.insertDelivery(due);
+      assert.equal(await store.casDelivery(due, { ...due, state: 'cancelled' }), true);
+    });
+
     test('lease tally round-trips per replica', async () => {
       const tally = { app: appId('leased'), replica, epoch: 4, request: 2, channel: 1, trigger: 0, releasedAt: 9 };
       await store.putLeaseTally(tally);
@@ -303,6 +368,51 @@ export function storeContract(name: string, open: OpenStore): void {
       await store.putInstanceLog(log);
       await store.putInstanceLog({ ...log, endedAt: 2, reason: 'retired' });
       assert.deepEqual(await store.instanceLog(log.app), { ...log, endedAt: 2, reason: 'retired' });
+    });
+
+    /** A store of its own: on SQLite its replicas meet no other test's rows, and they stop listening when the test ends. */
+    async function own(t: TestContext) {
+      const store = await open({ volumeGb: 2 });
+      const replicas: Instances[] = [];
+      t.after(async () => {
+        for (const instances of replicas) await instances.close();
+        await store.close();
+      });
+      const start = (id: string) => {
+        const instances = new Instances(store, { replica: id as ReplicaId, leader: false });
+        replicas.push(instances);
+        return instances.ready();
+      };
+      return { store, start };
+    }
+
+    test('a purge deletes the app\'s instance, lease tally, guard and log rows and leaves another app\'s (ADR 0020 item 8)', async (t) => {
+      const { store, start } = await own(t);
+      const [gone, kept] = [await seeded(store, 'purge-gone'), await seeded(store, 'purge-kept')];
+      await start('replica-a');
+      const before = await held(store, kept);
+      await store.deleteApp(gone);
+      for (let waited = 0; waited < 3000 && (await store.instanceLog(gone)) !== null; waited += 10) await sleep(10);
+      assert.deepEqual([await held(store, gone), await held(store, kept)], [[null, [], null, null], before]);
+    });
+
+    test('a replica that starts deletes the rows of apps the library no longer has, a lone log row included (ADR 0020 item 8)', async (t) => {
+      const { store, start } = await own(t);
+      const [gone, kept] = [await seeded(store, 'start-gone'), await seeded(store, 'start-kept')];
+      await store.deleteApp(gone);
+      await store.putInstanceLog({ app: appId('start-never'), release: 1 as ReleaseNumber, endedAt: 1, reason: 'retired', tail: 'x'.repeat(65_536) });
+      const before = await held(store, kept);
+      await start('replica-a');
+      assert.deepEqual([await held(store, gone), await held(store, appId('start-never')), await held(store, kept)], [[null, [], null, null], [null, [], null, null], before]);
+    });
+
+    test('two replicas that clean up the same purged app at once both succeed (ADR 0020 item 8)', async (t) => {
+      const { store, start } = await own(t);
+      const [gone, kept] = [await seeded(store, 'twice-gone'), await seeded(store, 'twice-kept')];
+      await store.deleteApp(gone);
+      const before = await held(store, kept);
+      await Promise.all([start('replica-a'), start('replica-b')]);
+      assert.deepEqual([await held(store, gone), await held(store, kept)], [[null, [], null, null], before]);
     });
   });
 }

@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { Ingress } from './ingress.ts';
 import { Series } from './metrics.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { Conflict, InputError, QuotaExceeded, appName, parseManifest, subject, tenantName, triggerName, type App, type AppId, type BundleId, type Capabilities, type Change, type Store, type StoreOps } from './model.ts';
+import {
+  Conflict, DEFAULT_TENANT, InputError, QuotaExceeded, appName, parseManifest, subject, tenantName, triggerName,
+  type App, type AppId, type BundleId, type Capabilities, type Change, type ReleaseNumber, type Store, type StoreOps,
+} from './model.ts';
 import { PlatformRegistry } from './registry.ts';
+import { replicaContract } from './registry.contract.ts';
 import { FakeRuntime, world } from './registry.fakes.ts';
+import { SqliteSession, SqliteStore } from './store.ts';
 import { DeliveryScheduler } from './scheduler.ts';
 
 const survey = appName('survey');
@@ -157,6 +163,47 @@ test('after purge, a stats flush and a scheduler reload leave no row of the app 
   await registry.purge(survey);
   await ingress.flush();
   assert.deepEqual([await store.stats(), await store.deliveries({ app })], [[], []]);
+});
+
+/** Ingress as main wires its Stats for `registry`, loaded from `store` now. */
+async function statsOn(registry: PlatformRegistry, store: Store) {
+  const ingress = new Ingress({
+    registry, stats: await store.stats(), flushStats: (stats) => store.putStats(stats), deleteStats: (id) => store.deleteStats(id),
+  } as never);
+  registry.onAppChanged((id) => void (registry.schedule(id) === null && ingress.forget(id)));
+  return ingress;
+}
+
+test('a purge through one replica leaves no Stats row once both replicas flush, and later flushes keep it gone (#19)', async () => {
+  const w = world();
+  const { store, registry: one } = await w.open();
+  const two = await w.replica(store);
+  const { app } = await publish(one, {});
+  const blog = await one.publish({ name: appName('blog'), image: 'example:1', manifest: parseManifest({ contract: 1, capabilities: {} }), bundle: null, owner: ann });
+  await store.putStats([app, blog.app].map((id) => ({ app: id, requests: 1, errors: 0, lastAccessAt: 1 })));
+  for (let waited = 0; two.view(appName('blog')) === null; waited += 5) {
+    assert.ok(waited < 2000, 'the other replica loaded blog');
+    await sleep(5);
+  }
+  const ingresses = [await statsOn(one, store), await statsOn(two, store)];
+  await one.remove(survey);
+  await one.purge(survey);
+  for (let waited = 0; two.view(survey) !== null; waited += 5) {
+    assert.ok(waited < 2000, 'the other replica dropped survey');
+    await sleep(5);
+  }
+  for (let round = 0; round < 3; round++) for (const ingress of ingresses) await ingress.flush();
+  assert.deepEqual((await store.stats()).map((s) => s.app), [blog.app]);
+});
+
+test('a Stats row whose app is gone is not loaded at startup and is deleted by the first flush (#19)', async () => {
+  const { store, registry } = await world().open();
+  const { app } = await publish(registry, {});
+  await store.putStats([app, 'a-gone' as AppId].map((id) => ({ app: id, requests: 1, errors: 0, lastAccessAt: 1 })));
+  const ingress = await statsOn(registry, store);
+  assert.deepEqual(ingress.snapshot().map((s) => s.app), [app]);
+  await ingress.flush();
+  assert.deepEqual((await store.stats()).map((s) => s.app), [app]);
 });
 
 test('purge deletes the bundles only its releases reference and keeps one shared with another app or not yet published', async () => {
@@ -324,4 +371,237 @@ test('storage_gb counts only bindings a publish would create, and only files and
   await publishIn(registry, 'one', { files: {}, db: {}, kv: {}, object: {} }, 'example:2');
   await assert.rejects(publishIn(registry, 'two', { db: {} }), (error: unknown) =>
     error instanceof QuotaExceeded && JSON.stringify(error.refusal) === JSON.stringify({ resource: 'storage_gb', used: 2, limit: 2, ask: 1 }));
+});
+
+replicaContract('SQLite', async () => {
+  const store = new SqliteStore(join(world().dir, 'replicas.sqlite3'));
+  return [store, store];
+});
+
+const green = tenantName('green');
+const files = parseManifest({ contract: 1, capabilities: { files: {} } });
+
+for (const crash of [false, true]) {
+  test(`${crash ? 'a gateway that dies before ensure' : 'a failed ensure'} leaves the storage binding counted; the next publish adopts it without asking again and purge frees it (#11)`, async () => {
+    const w = world();
+    let { registry, store } = await w.open();
+    await registry.createTenant(blue, 'Blue', ['ann']);
+    await registry.setQuota(blue, { storage_gb: 1 });
+    const volume = w.providers.get('volume')!;
+    if (crash) {
+      let entered!: () => void;
+      const ensuring = new Promise<void>((resolve) => (entered = resolve));
+      volume.ensure = () => (entered(), new Promise(() => {}));
+      void publishIn(registry, 'one', { files: {} });
+      await ensuring;
+      Reflect.deleteProperty(volume, 'ensure');
+      ({ registry, store } = await w.open());
+      await registry.resume();
+    } else {
+      volume.fail = 'ensure';
+      await assert.rejects(publishIn(registry, 'one', { files: {} }), /volume ensure failed/);
+    }
+    const { id } = (await store.app(appName('one')))!;
+    assert.deepEqual((await store.bindings(id)).map((b) => [b.provider, b.state]), [['volume', 'suspended']]);
+    assert.equal((await store.quotaUsed(blue)).storage_gb, 1);
+    await publishIn(registry, 'one', { files: {} });
+    assert.equal((await store.quotaUsed(blue)).storage_gb, 1);
+    await registry.remove(appName('one'));
+    await registry.purge(appName('one'));
+    assert.equal((await store.quotaUsed(blue)).storage_gb, 0);
+  });
+}
+
+test('refusals in a full tenant leave a republish there and a publish into another tenant at the same moment untouched (#11)', async () => {
+  const { registry } = await quotaWorld({ storage_gb: 1 });
+  await registry.createTenant(green, 'Green', ['ann']);
+  await registry.setQuota(green, { storage_gb: 1 });
+  await publishIn(registry, 'held', { files: {} });
+  const outcomes = await Promise.allSettled([
+    publishIn(registry, 'over', { files: {} }),
+    publishIn(registry, 'held', { files: {} }, 'example:2'),
+    registry.publish({ name: appName('elsewhere'), image: 'example:1', manifest: files, bundle: null, owner: ann, tenant: green }),
+  ]);
+  const seen = outcomes.map((o) => (o.status === 'fulfilled' ? 'published' : o.reason instanceof QuotaExceeded ? o.reason.refusal.resource : String(o.reason)));
+  assert.deepEqual(seen, ['storage_gb', 'published', 'published']);
+});
+
+test('switching db_backend to sqlite past storage_gb is refused with quota-refused and leaves the override and bindings as they were (#12)', async () => {
+  const refusals: unknown[] = [];
+  const { registry, store } = await world().open({ quotaRefused: (error, app, action) => refusals.push([error.refusal.resource, app, action]) });
+  await registry.setGlobalPolicy({ db_backend: 'postgres' });
+  await registry.createTenant(blue, 'Blue', ['ann']);
+  await registry.setQuota(blue, { storage_gb: 0 });
+  const { app } = await publishIn(registry, 'one', { db: {} });
+  const rows = async () => JSON.stringify([await store.app(appName('one')), await store.bindings(app)]);
+  const before = await rows();
+  await assert.rejects(registry.setAppPolicy(appName('one'), { db_backend: 'sqlite' }), (error) => error instanceof QuotaExceeded && error.refusal.resource === 'storage_gb');
+  assert.equal(await rows(), before);
+  assert.equal((await store.quotaUsed(blue)).storage_gb, 0);
+  assert.deepEqual(refusals, [['storage_gb', 'one', 'policy']]);
+});
+
+test('switching db_backend from postgres to sqlite and back and forth asks storage_gb for the first SQLite binding only (#12)', async () => {
+  const { registry, store } = await quotaWorld({ storage_gb: 1 });
+  await registry.setGlobalPolicy({ db_backend: 'postgres' });
+  await publishIn(registry, 'one', { db: {} });
+  const used: number[] = [];
+  for (const db_backend of ['sqlite', 'postgres', 'sqlite'] as const) {
+    await registry.setAppPolicy(appName('one'), { db_backend });
+    used.push((await store.quotaUsed(blue)).storage_gb);
+  }
+  assert.deepEqual(used, [1, 1, 1]);
+});
+
+function site(registry: PlatformRegistry, name: string, bundle: BundleId) {
+  return registry.publish({ name: appName(name), image: null, manifest: parseManifest({ contract: 1, capabilities: { static: { dir: 'dist' } } }), bundle, owner: ann });
+}
+
+test('the purge of the last app that references a bundle deletes it (#13)', async () => {
+  const w = world();
+  const { registry } = await w.open();
+  const shared = await w.bundles.put(Readable.from([Buffer.from('shared')]));
+  await site(registry, 'survey', shared);
+  await site(registry, 'blog', shared);
+  const kept: boolean[] = [];
+  for (const name of [survey, appName('blog')]) {
+    await registry.remove(name);
+    await registry.purge(name);
+    kept.push(w.bundles.stored.has(shared));
+  }
+  assert.deepEqual(kept, [true, false]);
+});
+
+test('a purge interrupted after its bundle delete finishes when rerun, and deleting the bundle again is fine (#13)', async () => {
+  const w = world();
+  const { registry } = await w.open();
+  const own = await w.bundles.put(Readable.from([Buffer.from('own')]));
+  await site(registry, 'survey', own);
+  await registry.remove(survey);
+  const remove = w.bundles.delete.bind(w.bundles);
+  let crashes = 2;
+  w.bundles.delete = async (id) => {
+    await remove(id);
+    if (crashes-- > 0) throw new Error('crashed after the delete');
+  };
+  await assert.rejects(registry.purge(survey), /crashed after the delete/);
+  const restarted = await w.open();
+  await restarted.registry.resume();
+  assert.equal((await restarted.store.app(survey))?.status, 'purging');
+  await restarted.registry.purge(survey);
+  assert.deepEqual([await restarted.store.app(survey), w.bundles.stored.has(own)], [null, false]);
+});
+
+test('purge issues the same SQL statements whether 10 or 1000 other apps have releases (#13)', async () => {
+  const statements = async (others: number) => {
+    const w = world();
+    const { store } = await w.open();
+    const manifest = parseManifest({ contract: 1, capabilities: { static: { dir: 'dist' } } });
+    await store.transaction(async (tx) => {
+      for (let i = 0; i < others; i++) {
+        const bundle = `other-${i}` as BundleId;
+        const id = `id-other-${i}` as AppId;
+        w.bundles.stored.add(bundle);
+        await tx.putApp({ name: appName(`other-${i}`), id, tenant: DEFAULT_TENANT, access: 'org', owner: ann, status: 'registered', current: 1 as ReleaseNumber, policyOverride: {}, registeredAt: 0, version: 1 });
+        await tx.putRelease({ app: id, number: 1 as ReleaseNumber, image: null, manifest, bundle, runtime: null, releaseKey: bundle, publishedAt: 0 });
+      }
+    });
+    const { registry } = await w.open();
+    await site(registry, 'survey', await w.bundles.put(Readable.from([Buffer.from('own')])));
+    await registry.remove(survey);
+    let count = 0;
+    const { all, run } = SqliteSession.prototype;
+    SqliteSession.prototype.all = function (...args) {
+      count++;
+      return all.apply(this, args);
+    };
+    SqliteSession.prototype.run = function (...args) {
+      count++;
+      return run.apply(this, args);
+    };
+    try {
+      await registry.purge(survey);
+    } finally {
+      Object.assign(SqliteSession.prototype, { all, run });
+    }
+    return count;
+  };
+  assert.equal(await statements(1000), await statements(10));
+});
+
+test('a replica that indexed a bundle another replica purged refuses a release against it (#13)', async () => {
+  const w = world();
+  const { store, registry: purger } = await w.open();
+  const stale = await w.replica(store);
+  const bundle = await w.bundles.put(Readable.from([Buffer.from('purged')]));
+  await site(purger, 'survey', bundle);
+  for (let waited = 0; stale.view(survey)?.bundle?.id !== bundle; waited += 5) {
+    assert.ok(waited < 2000, 'the other replica indexed the bundle');
+    await sleep(5);
+  }
+  await purger.remove(survey);
+  await purger.purge(survey);
+  await assert.rejects(site(stale, 'blog', bundle), (error) => error instanceof Conflict && /upload/.test(error.message));
+  const blog = await store.app(appName('blog'));
+  assert.deepEqual(blog ? (await store.releases(blog.id)).map((r) => r.bundle) : [], []);
+});
+
+function publishOn(registry: PlatformRegistry, runtime: 'container' | 'isolate', capabilities: Record<string, unknown>, code: BundleId) {
+  const manifest = parseManifest({ contract: 1, runtime, capabilities: capabilities as Capabilities });
+  return registry.publish({ name: survey, image: runtime === 'container' ? 'example:1' : null, manifest, bundle: runtime === 'isolate' ? code : null, owner: ann });
+}
+
+for (const [storage, capabilities] of [['files', { files: {} }], ['a SQLite database', { db: {} }]] as const) {
+  for (const [from, to] of [['container', 'isolate'], ['isolate', 'container']] as const) {
+    test(`a release moving an app with ${storage} from ${from} to ${to} is refused with 409 before anything changes (#14)`, async () => {
+      const w = world();
+      w.services.add('runner');
+      const { registry, store } = await w.open();
+      const code = await w.bundles.put(Readable.from([Buffer.from('app dir')]));
+      const { app } = await publishOn(registry, from, capabilities, code);
+      const state = async () => JSON.stringify([await store.app(survey), await store.releases(app), await store.bindings(app), registry.runSpec(app), w.calls]);
+      const before = await state();
+      await assert.rejects(publishOn(registry, to, capabilities, code), (error) =>
+        error instanceof Conflict && [`"${survey}"`, `"${from}"`, `"${to}"`, 'new name', 'purge'].every((part) => error.message.includes(part)));
+      assert.equal(await state(), before);
+      assert.deepEqual(w.runtime.calls.filter((call) => call.startsWith('retire')), []);
+    });
+  }
+}
+
+test('an app whose database is PostgreSQL, and one without storage, may change runtime (#14)', async () => {
+  const w = world();
+  w.services.add('runner');
+  const { registry } = await w.open();
+  await registry.setGlobalPolicy({ db_backend: 'postgres' });
+  const moved: unknown[] = [];
+  for (const capabilities of [{ db: {} }, { kv: {}, object: {} }]) {
+    const code = await w.bundles.put(Readable.from([Buffer.from(JSON.stringify(capabilities))]));
+    await publishOn(registry, 'container', capabilities, code);
+    moved.push((await publishOn(registry, 'isolate', capabilities, code)).runtime);
+    await registry.remove(survey);
+    await registry.purge(survey);
+  }
+  assert.deepEqual(moved, ['isolate', 'isolate']);
+});
+
+test('a static-only release in between does not let an app with files change runtime (#14)', async () => {
+  const w = world();
+  w.services.add('runner');
+  const { registry } = await w.open();
+  const code = await w.bundles.put(Readable.from([Buffer.from('app dir')]));
+  await publishOn(registry, 'container', { files: {} }, code);
+  await site(registry, 'survey', await w.bundles.put(Readable.from([Buffer.from('site')])));
+  await assert.rejects(publishOn(registry, 'isolate', { files: {} }, code), Conflict);
+});
+
+test('after remove and purge, the name of an app with files publishes under the other runtime (#14)', async () => {
+  const w = world();
+  w.services.add('runner');
+  const { registry } = await w.open();
+  const code = await w.bundles.put(Readable.from([Buffer.from('app dir')]));
+  await publishOn(registry, 'container', { files: {} }, code);
+  await registry.remove(survey);
+  await registry.purge(survey);
+  assert.equal((await publishOn(registry, 'isolate', { files: {} }, code)).runtime, 'isolate');
 });

@@ -25,17 +25,23 @@ export const RING = 1000;
 const PATH_MAX = 200;
 const PEER_TIMEOUT_MS = 1000;
 
+/** A replica's place in the cursor; `generation` is null in an entry written before ADR 0031 or by hand. */
+type Position = { readonly generation: number | null; readonly seq: number };
+
 /**
  * The request ring: seqs are contiguous, so slot `seq % RING` holds the record with that seq while it is still kept.
  * Each record is also one JSON line on stdout, the cluster log's copy (ADR 0024 item 5); `type` tells it from an event line.
+ * `generation` tells this process's seqs from those of an earlier start under the same replica name (ADR 0031).
  */
 export class RequestLog {
+  readonly generation: number;
   readonly #ring: RequestRecord[] = [];
   readonly #write: (line: string) => void;
   #seq = 0;
 
-  constructor(write: (line: string) => void = console.log) {
+  constructor(write: (line: string) => void = console.log, generation = Date.now()) {
     this.#write = write;
+    this.generation = generation;
   }
 
   record(entry: Omit<RequestRecord, 'seq' | 't'>): void {
@@ -45,12 +51,18 @@ export class RequestLog {
     this.#write(JSON.stringify({ type: 'request', ...record }));
   }
 
-  /** Oldest first: the kept records with a seq greater than `seq`, at most `limit`. A seq beyond the newest was issued before this process restarted, and starts over. */
+  /** Oldest first: the kept records with a seq greater than `seq`, at most `limit`. */
   after(seq: number, limit: number): RequestRecord[] {
-    const from = seq > this.#seq ? 0 : seq;
     const out: RequestRecord[] = [];
-    for (let s = Math.max(from + 1, this.#seq - RING + 1, 1); s <= this.#seq && out.length < limit; s++) out.push(this.#ring[s % RING]);
+    for (let s = Math.max(seq + 1, this.#seq - RING + 1, 1); s <= this.#seq && out.length < limit; s++) out.push(this.#ring[s % RING]);
     return out;
+  }
+
+  /** This replica's page for its entry in `cursor`: an entry of another generation, or past the newest seq, resets to the oldest record kept. */
+  page(cursor: string, replica: ReplicaId, limit: number): Omit<Page, 'records'> & { readonly records: RequestRecord[] } {
+    const at = parseCursor(cursor).get(replica);
+    const reset = at !== undefined && (at.generation !== this.generation || at.seq > this.#seq);
+    return { replica, generation: this.generation, reset, records: this.after(reset ? 0 : at?.seq ?? 0, limit) };
   }
 }
 
@@ -59,29 +71,32 @@ export const requests = new RequestLog();
 /** A record as the admin API answers it: the app by name while it has one. */
 export type NamedRecord = Omit<RequestRecord, 'app'> & { readonly app: string };
 export type ReplicaRecord = NamedRecord & { readonly replica: ReplicaId };
-/** One replica's records after its seq in the cursor. */
-export type Page = { readonly replica: ReplicaId; readonly records: readonly NamedRecord[] };
+/** One replica's records after its entry in the cursor; `reset` when that entry belongs to an earlier start of the replica. */
+export type Page = { readonly replica: ReplicaId; readonly generation: number; readonly reset: boolean; readonly records: readonly NamedRecord[] };
 /** `name` labels the source in `missing` when it does not answer. */
 export type Source = { readonly name: string; readonly page: (cursor: string, limit: number) => Promise<Page> };
-export type Feed = { readonly records: readonly ReplicaRecord[]; readonly cursor: string; readonly missing: readonly string[] };
+/** `reset` names the replicas that restarted since the cursor was issued. */
+export type Feed = { readonly records: readonly ReplicaRecord[]; readonly cursor: string; readonly missing: readonly string[]; readonly reset: readonly ReplicaId[] };
 
-/** `<replica>:<seq>,...`; an entry that does not parse is left out, so that replica starts from its oldest record. */
-function parseCursor(cursor: string): Map<string, number> {
-  const out = new Map<string, number>();
+/** `<replica>:<seq>@<generation>,...`; an entry that does not parse is left out, so that replica starts from its oldest record. */
+function parseCursor(cursor: string): Map<string, Position> {
+  const out = new Map<string, Position>();
   for (const entry of cursor.split(',')) {
     const at = entry.lastIndexOf(':');
-    const seq = Number(entry.slice(at + 1));
-    if (at > 0 && Number.isSafeInteger(seq) && seq >= 0) out.set(entry.slice(0, at), seq);
+    const [seqText, generationText] = entry.slice(at + 1).split('@');
+    const seq = Number(seqText);
+    const generation = Number(generationText);
+    if (at > 0 && Number.isSafeInteger(seq) && seq >= 0) out.set(entry.slice(0, at), { seq, generation: Number.isSafeInteger(generation) ? generation : null });
   }
   return out;
 }
 
-export const seqIn = (cursor: string, replica: ReplicaId): number => parseCursor(cursor).get(replica) ?? 0;
+const entry = (replica: string, { seq, generation }: Position) => (generation === null ? `${replica}:${seq}` : `${replica}:${seq}@${generation}`);
 
 /**
  * Merges every source's page by `t` and keeps the oldest `limit`, so each replica's part is a prefix of its page and
- * its cursor entry moves to the last record kept. While a source is missing the cursor keeps every entry it had, so the
- * source resumes where it stopped; otherwise it keeps only the replicas that answered.
+ * its cursor entry moves to the last record kept, in the generation that answered. While a source is missing the cursor
+ * keeps every entry it had, so the source resumes where it stopped; otherwise it keeps only the replicas that answered.
  */
 export async function gather(cursor: string, limit: number, sources: readonly Source[]): Promise<Feed> {
   const before = parseCursor(cursor);
@@ -91,9 +106,10 @@ export async function gather(cursor: string, limit: number, sources: readonly So
   const records = answered.flatMap((p) => p.records.map((r) => ({ ...r, replica: p.replica })))
     .sort((a, b) => a.t - b.t || a.seq - b.seq)
     .slice(0, limit);
-  const next = new Map(missing.length ? before : answered.map((p) => [p.replica, before.get(p.replica) ?? 0]));
-  for (const r of records) next.set(r.replica, r.seq);
-  return { records, cursor: [...next].map(([replica, seq]) => `${replica}:${seq}`).join(','), missing };
+  const next = new Map<string, Position>(missing.length ? before : []);
+  for (const p of answered) next.set(p.replica, { generation: p.generation, seq: p.reset ? 0 : before.get(p.replica)?.seq ?? 0 });
+  for (const r of records) next.set(r.replica, { ...next.get(r.replica)!, seq: r.seq });
+  return { records, cursor: [...next].map(([replica, at]) => entry(replica, at)).join(','), missing, reset: answered.filter((p) => p.reset).map((p) => p.replica) };
 }
 
 /**

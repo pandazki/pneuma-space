@@ -9,14 +9,14 @@ import { Authority, parsePlatformAdmins } from './authz.ts';
 import { loadOrCreateSecret, LocalIdentity, parseIdentityEnv, UpstreamIdentity, type Identity } from './identity.ts';
 import { JwtVerifier } from './jwt.ts';
 import { Ingress } from './ingress.ts';
-import { hostSample, httpProbe, Metrics, networkProbe, profileProbe, serveMetrics, Series, tcpProbe, untilUp, type Probe, type ServiceName } from './metrics.ts';
+import { admission, hostSample, httpProbe, Metrics, networkProbe, profileProbe, serveMetrics, Series, tcpProbe, untilUp, type Probe, type ServiceName } from './metrics.ts';
 import { ADMIN_PORT, INGRESS_PORT, RUNTIMES, type AppId, type ReplicaId, type VolumeSample } from './model.ts';
 import { DockerInfra } from './infra.ts';
 import { inClusterClient } from './kube.ts';
 import { NodeView, type RunnerHealth } from './nodes.ts';
 import { KubeInfra } from './kube-infra.ts';
 import { planeOf, podConfig, PodRuntime } from './pods.ts';
-import { createProviders, providerConfig, resolvesOnNetwork, S3BundleStore } from './providers.ts';
+import { createProviders, providerConfig, S3BundleStore } from './providers.ts';
 import { PlatformRegistry } from './registry.ts';
 import { IsolateRuntime, RUNNER_PORT, StatefulSetPool, StaticPool } from './isolate.ts';
 import { canConnect, DockerRuntime } from './runtime.ts';
@@ -73,13 +73,16 @@ await instances.ready();
 await instances.start();
 const specFor = (app: AppId) => registry.runSpec(app);
 const guard = new AppGuard({ instances, specFor, series });
+// A Kubernetes Service name resolves whether or not a Pod serves it, so the cluster connects; the runner there is the pool's ready Pods.
+// The compose runner pool always says ready, so the runner there is judged like any profile service (ADR 0030).
 const probes: Readonly<Record<ServiceName, Probe>> = {
   redis: setup.pods ? tcpProbe('redis', 6379) : networkProbe('redis', 6379),
   object: httpProbe(`${config.object.endpoint}/health`),
-  postgres: setup.pods ? tcpProbe('postgres', config.postgres.port) : profileProbe('postgres', 5432),
+  postgres: setup.pods ? tcpProbe('postgres', config.postgres.port) : profileProbe('postgres', config.postgres.port),
   coturn: setup.pods ? tcpProbe('coturn', 3478) : profileProbe('coturn', 3478),
-  runner: setup.pods ? async () => ((await runnerUp()) ? 'up' : 'down') : profileProbe('runner', RUNNER_PORT),
+  runner: setup.pods ? async () => (pool.runners().some((r) => r.ready) ? 'up' : 'down') : profileProbe('runner', RUNNER_PORT),
 };
+const admits = admission(probes);
 /** What the state inventory lists as volumes, at the nominal single-host size. */
 const volumes = async (): Promise<VolumeSample[]> => (await store.bindings()).flatMap((binding) => {
   const name = providers.find((p) => p.name === binding.provider)?.location(binding.resource).volume;
@@ -109,25 +112,19 @@ const { infra, container, pool } = setup.pods
       pool: new StaticPool(`http://${RUNTIMES.isolate.service}:${RUNNER_PORT}`),
     };
   })();
-const bundles = new S3BundleStore(config.object);
+const bundles = new S3BundleStore(config.object, (id, write) => store.exclusiveBundle(id, write));
 const isolate = new IsolateRuntime({
   pool, bundleUrl: (id) => bundles.presignTar(id), specFor,
   hasRun: async (app) => (await store.releases(app)).some((release) => release.runtime === 'isolate'), instances, guard,
 });
 const runtime = new Runtimes({ runtimes: [container, isolate], specFor, instances });
-// A Kubernetes Service name resolves whether or not a Pod serves it, so the cluster probes by connecting.
-const SERVICE_PORTS = { postgres: config.postgres.port, coturn: 3478 } as const;
-const providerProbe = setup.pods ? (service: keyof typeof SERVICE_PORTS) => canConnect(service, SERVICE_PORTS[service]) : resolvesOnNetwork;
-// The runner is the pool's business on both planes: a ready runner, not a name that resolves.
-const runnerUp = async (): Promise<boolean> => pool.runners().some((r) => r.ready);
-const providers = Object.values(createProviders(runtime, config, providerProbe));
+const providers = Object.values(createProviders(runtime, config, admits));
 // The registry reads each current release's bundle index from the object store. After a host restart Docker starts every
 // service on its own restart policy, without depends_on, so the store may not answer yet: wait for it rather than exit.
 if (!(await untilUp(() => bundles.answers(), { waiting: () => log('object-wait', { endpoint: config.object.endpoint }) }))) log('object-unready', { endpoint: config.object.endpoint });
 const registry = await PlatformRegistry.open({
   store, runtime, guard, infra, bundles, providers, statsSource: async () => metrics.stats(),
-  addressing: setup.addressing, volumeGb: config.volumeGb, nodeOf: (app) => nodes.nodeOf(app),
-  probe: (service) => (service === RUNTIMES.isolate.service && setup.pods ? runnerUp() : providerProbe(service as 'postgres' | 'coturn')),
+  addressing: setup.addressing, volumeGb: config.volumeGb, nodeOf: (app) => nodes.nodeOf(app), probe: admits,
 });
 const scheduler = new DeliveryScheduler({ store, runtime, view: (app) => registry.schedule(app), replica, policy: () => registry.policy() });
 const authority = new Authority(store, setup.admins);
@@ -154,7 +151,7 @@ const metrics = new Metrics({
   series,
   retries: () => (store instanceof PgStore ? store.retries : 0),
   replica,
-  leader: () => instances.leading,
+  term: () => instances.term,
 });
 
 const nodes = new NodeView({

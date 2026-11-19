@@ -12,14 +12,14 @@ import { hostLabel, type Addressing } from './address.ts';
 import { allows, type Authority } from './authz.ts';
 import { emit } from './events.ts';
 import { carriesJwt, type Answer, type Auth, type Failure, type Identity } from './identity.ts';
-import { connect, forward, tunnel, type Hold } from './proxy.ts';
+import { connect, forward, fromClient, tunnel, type Hold } from './proxy.ts';
 import type { Series } from './metrics.ts';
 import { requests, type RequestKind } from './requests.ts';
 import { Backoff, QUOTA_RETRY_SECONDS, Quarantined, Unavailable } from './runtimes.ts';
 import { serveStatic, staticPath } from './static.ts';
 
 export type IngressDeps = {
-  readonly registry: Pick<Registry, 'view' | 'policy'>;
+  readonly registry: Pick<Registry, 'view' | 'nameOf' | 'policy'>;
   readonly runtime: Pick<Runtime, 'acquire' | 'release' | 'channel' | 'state'>;
   readonly identity: Pick<Identity, 'identify' | 'challenge' | 'serve'>;
   readonly authority: Pick<Authority, 'callerOf'>;
@@ -28,7 +28,7 @@ export type IngressDeps = {
   readonly upstream: Upstream | null;
   readonly bundles: Pick<BundleStore, 'open'>;
   readonly scheduler: Pick<Scheduler, 'invoke'>;
-  /** The stored last access per app, loaded at startup (INV-7); counts start at zero in every process. */
+  /** The stored last access per app, loaded at startup for apps the registry holds (INV-7); counts start at zero in every process. */
   readonly stats: readonly Stats[];
   readonly flushStats: (stats: Traffic[]) => Promise<void>;
   readonly deleteStats: (app: AppId) => Promise<void>;
@@ -81,10 +81,10 @@ function withoutCookies(header: string, names: readonly string[]): string {
   return header.split(';').map((pair) => pair.trim()).filter((pair) => pair !== '' && !names.includes(pair.split('=')[0]!.trim())).join('; ');
 }
 
-/** Inbound headers minus every X-Pneuma-Space-*, X-Forwarded-Prefix and upstream credential, plus the ones the platform sets (INV-5). */
-function forwardedHeaders(req: IncomingMessage, view: RouteView, who: Principal | null, prefix: string, upstream: Upstream | null): string[] {
+/** The client's end-to-end headers minus every X-Pneuma-Space-*, X-Forwarded-Prefix and upstream credential, plus the ones the platform sets (INV-5). */
+function forwardedHeaders(req: IncomingMessage, view: RouteView, who: Principal | null, prefix: string, upstream: Upstream | null, upgrade: boolean): string[] {
   const out: string[] = [];
-  const raw = req.rawHeaders;
+  const raw = fromClient(req.rawHeaders, upgrade);
   for (let i = 0; i < raw.length; i += 2) {
     // CGI-style servers read X_Pneuma_Space_Subject as X-Pneuma-Space-Subject.
     const name = raw[i].toLowerCase().replaceAll('_', '-');
@@ -151,10 +151,15 @@ export class Ingress {
   readonly server: http.Server;
   readonly #deps: IngressDeps;
   readonly #stats = new Map<AppId, Counter>();
+  /** Apps without a RouteView here whose rows the next flush deletes. */
+  readonly #gone = new Set<AppId>();
 
   constructor(deps: IngressDeps) {
     this.#deps = deps;
-    for (const { app, lastAccessAt } of deps.stats) this.#stats.set(app, { requests: 0, errors: 0, lastAccessAt });
+    for (const { app, lastAccessAt } of deps.stats) {
+      if (this.#held(app)) this.#stats.set(app, { requests: 0, errors: 0, lastAccessAt });
+      else this.#gone.add(app);
+    }
     this.server = http.createServer({ requestTimeout: 0 }, (req, res) => void this.#request(req, res))
       .on('upgrade', (req: IncomingMessage, socket: net.Socket, head: Buffer) => void this.#upgrade(req, socket, head));
   }
@@ -177,11 +182,26 @@ export class Ingress {
     return [...this.#stats].map(([app, counter]) => ({ app, ...counter }));
   }
 
-  flush(): Promise<void> {
+  /** Writes only apps this replica still holds a RouteView for; every replica drops a purged app's view, so none writes its row back. */
+  async flush(): Promise<void> {
+    for (const app of this.#stats.keys()) {
+      if (this.#held(app)) continue;
+      this.#stats.delete(app);
+      this.#gone.add(app);
+    }
+    for (const app of this.#gone) {
+      await this.#deps.deleteStats(app);
+      this.#gone.delete(app);
+    }
     return this.#deps.flushStats(this.snapshot());
   }
 
-  /** For a purged app: its counter and row go, so no later flush brings the row back. */
+  #held(app: AppId): boolean {
+    const name = this.#deps.registry.nameOf(app);
+    return name !== null && this.#deps.registry.view(name)?.app === app;
+  }
+
+  /** For a purged app: its counter and row go now rather than at the next flush. */
   forget(app: AppId): Promise<void> {
     this.#stats.delete(app);
     return this.#deps.deleteStats(app);
@@ -302,7 +322,7 @@ export class Ingress {
     trace.subject = who?.subject ?? null;
     if (view.runtime === null) return reply(404, 'no file at this path');
     const prefix = this.#deps.addressing.mode === 'path' ? `${APPS_PATH}/${view.name}` : '';
-    return { to: 'app', view, path: rest + search, headers: forwardedHeaders(req, view, who, prefix, this.#deps.upstream) };
+    return { to: 'app', view, path: rest + search, headers: forwardedHeaders(req, view, who, prefix, this.#deps.upstream, upgrade) };
   }
 
   /** Step 8: acquire and connect; a connect failure precedes the request line, so it is retried once with a fresh lease. */

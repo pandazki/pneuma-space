@@ -4,13 +4,15 @@ import json
 import os
 import re
 import signal
+import socket
 import sqlite3
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 
 DICT = {
     'en': {
@@ -37,6 +39,11 @@ BADGE = '<div class="badge">pneuma-space-example-site</div>'
 THEME = "try{var t=localStorage.getItem('pneuma-space-theme')}catch(e){}document.documentElement.dataset.theme=t||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')"
 SUN = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></svg>'
 MOON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z"/></svg>'
+# The note form's 500 characters are at most 4,505 bytes percent-encoded.
+FORM_LIMIT = 8 * 1024
+# The most read at once, and the longest chunk-size or trailer line.
+PIECE = 4096
+CHUNK_SIZE = re.compile(rb'([0-9A-Fa-f]+)[ \t]*(?:;[^\r\n]*)?\r\n')
 
 
 def esc(value):
@@ -160,11 +167,81 @@ def home(prefix, lang, subject, name, owner, db, files_dir):
     return page(prefix, '/', lang, t('title'), body)
 
 
+def display_name(raw):
+    """X-Pneuma-Space-Name decoded as `decodeURIComponent` does: `+` stays a plus, unlike `unquote_plus`, and a value the
+    gateway could not have sent is kept as is."""
+    if re.search(r'%(?![0-9A-Fa-f]{2})', raw):
+        return raw
+    try:
+        return unquote(raw, errors='strict')
+    except UnicodeDecodeError:
+        return raw
+
+
 def pick_lang(headers):
     cookie = re.search(r'(?:^|;\s*)lang=(en|zh)(?:;|$)', headers.get('Cookie', ''))
     if cookie:
         return cookie.group(1)
     return 'zh' if re.match(r'\s*zh', headers.get('Accept-Language', ''), re.I) else 'en'
+
+
+class BadBody(Exception):
+    """A request body that cannot be read; `status` and the message go back to the client."""
+
+    def __init__(self, status, reason):
+        super().__init__(reason)
+        self.status = status
+
+
+def line(rfile):
+    text = rfile.readline(PIECE)
+    if not text.endswith(b'\n'):
+        raise BadBody(400, 'request body ended early' if len(text) < PIECE else 'malformed chunked body')
+    return text
+
+
+def exactly(rfile, size):
+    while size:
+        piece = rfile.read(min(size, PIECE))
+        if not piece:
+            raise BadBody(400, 'request body ended early')
+        size -= len(piece)
+        yield piece
+
+
+def body_pieces(rfile, headers):
+    """The request body under Content-Length or Transfer-Encoding: chunked, which http.server leaves undecoded; chunk
+    extensions and trailers are read and ignored."""
+    coding = headers.get('Transfer-Encoding')
+    if coding is None:
+        length = headers.get('Content-Length', '0')
+        if not re.fullmatch(r'[0-9]+', length):
+            raise BadBody(400, 'malformed Content-Length')
+        yield from exactly(rfile, int(length))
+        return
+    if coding.strip().lower() != 'chunked':
+        raise BadBody(501, 'only chunked Transfer-Encoding is supported')
+    while True:
+        match = CHUNK_SIZE.fullmatch(line(rfile))
+        if not match:
+            raise BadBody(400, 'malformed chunk size')
+        size = int(match.group(1), 16)
+        if size == 0:
+            break
+        yield from exactly(rfile, size)
+        if line(rfile) != b'\r\n':
+            raise BadBody(400, 'malformed chunked body')
+    while line(rfile) != b'\r\n':
+        pass
+
+
+def read_body(rfile, headers, limit):
+    body = b''
+    for piece in body_pieces(rfile, headers):
+        body += piece
+        if len(body) > limit:
+            raise BadBody(413, f'request body over {limit} bytes')
+    return body
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -175,7 +252,24 @@ class Handler(BaseHTTPRequestHandler):
         self.handle_request('GET')
 
     def do_POST(self):
-        self.handle_request('POST')
+        try:
+            self.handle_request('POST')
+        except BadBody as error:
+            self.reply(error.status, str(error).encode())
+            self.linger()
+
+    def linger(self):
+        """Closing with request bytes unread resets the connection, which can discard the reply before the client reads it,
+        so the client gets up to a second to stop sending."""
+        deadline = time.monotonic() + 1
+        try:
+            self.connection.shutdown(socket.SHUT_WR)
+            while (left := deadline - time.monotonic()) > 0:
+                self.connection.settimeout(left)
+                if not self.connection.recv(PIECE):
+                    break
+        except OSError:
+            pass
 
     def reply(self, status, body=b'', content_type='text/plain; charset=utf-8', headers=()):
         self.send_response(status)
@@ -188,11 +282,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_request(self, method):
         url = urlsplit(self.path)
-        form = parse_qs(self.rfile.read(int(self.headers.get('Content-Length') or 0)).decode()) if method == 'POST' else {}
-        prefix = self.headers.get('X-Forwarded-Prefix', '')
         if method == 'POST' and url.path == '/_pneuma-space/trigger/export':
+            # The export does not use the delivery's body, but a delivery cut off before its end is not a success.
+            for _ in body_pieces(self.rfile, self.headers):
+                pass
             export(self.db, self.files_dir)
             return self.reply(204)
+        form = parse_qs(read_body(self.rfile, self.headers, FORM_LIMIT).decode()) if method == 'POST' else {}
+        prefix = self.headers.get('X-Forwarded-Prefix', '')
         query = parse_qs(url.query)
         if method == 'GET' and query.get('lang', [''])[0] in DICT:
             lang = query.pop('lang')[0]
@@ -203,17 +300,16 @@ class Handler(BaseHTTPRequestHandler):
         subject = self.headers.get('X-Pneuma-Space-Subject')
         if not subject:
             return self.reply(401, DICT[lang]['signIn'].encode())
+        name = display_name(self.headers.get('X-Pneuma-Space-Name', subject))
         owner = self.headers.get('X-Pneuma-Space-Owner') == '1'
         route = f'{method} {url.path}'
         if route == 'GET /':
-            name = self.headers.get('X-Pneuma-Space-Name', subject)
             return self.reply(200, home(prefix, lang, subject, name, owner, self.db, self.files_dir).encode(), 'text/html; charset=utf-8')
         if route == 'POST /notes':
             text = form.get('body', [''])[0].strip()[:500]
             if text:
                 self.db.run('INSERT INTO note (id, subject, name, body, created_at) VALUES (?, ?, ?, ?, ?)',
-                            (str(uuid.uuid4()), subject, self.headers.get('X-Pneuma-Space-Name', subject), text,
-                             datetime.now(timezone.utc).isoformat(timespec='milliseconds')))
+                            (str(uuid.uuid4()), subject, name, text, datetime.now(timezone.utc).isoformat(timespec='milliseconds')))
             return self.reply(303, headers=(('Location', f'{prefix}/'),))
         if route == 'GET /notes.csv':
             if not owner:

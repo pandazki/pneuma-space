@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
-import { DEFAULT_TENANT, QUOTA_RESOURCES, changeKey, type AppName, type Change, type Leadership, type Store, type StoreOps } from './model.ts';
+import { DEFAULT_TENANT, QUOTA_RESOURCES, changeKey, type AppName, type BundleId, type Change, type Leadership, type Store, type StoreOps } from './model.ts';
 import { SQLITE, SqlOps, wrap, type Row, type Session } from './sql.ts';
 
 /** The migrated `default` tenant is unlimited (ADR 0022 item 4, ADR 0023 item 2). */
@@ -86,6 +86,8 @@ export const MIGRATIONS = [
   'DROP TABLE storage_usage',
   // ADR 0026 item 2: the cluster view marks the leading gateway from its heartbeat.
   'ALTER TABLE replica ADD COLUMN leads INTEGER NOT NULL DEFAULT 0',
+  // ADR 0028: purge asks whether another app's release references a bundle. Repeatable: a gateway released before the constructor kept a newer version sets it back to before this step.
+  'CREATE INDEX IF NOT EXISTS release_bundle ON release (bundle)',
 ];
 
 /** `$n` placeholders become `?n`, which node:sqlite binds by position. */
@@ -154,7 +156,7 @@ export class SqliteStore implements Store {
   readonly #session: SqliteSession;
   readonly #ops: SqlOps;
   readonly #inside = new AsyncLocalStorage<{ open: boolean }>();
-  readonly #locks = new Map<AppName, Promise<unknown>>();
+  readonly #locks = new Map<string, Promise<unknown>>();
   readonly #changeListeners: ((change: Change) => void)[] = [];
   #tail: Promise<unknown> = Promise.resolve();
 
@@ -165,7 +167,8 @@ export class SqliteStore implements Store {
     this.#db.exec('BEGIN IMMEDIATE');
     try {
       MIGRATIONS.slice(applied).forEach((step) => this.#db.exec(step));
-      this.#db.exec(`PRAGMA user_version = ${MIGRATIONS.length}`);
+      // An older gateway on a newer library applies nothing and keeps its version, as PgStore does, so the newer one never reruns a step.
+      if (applied < MIGRATIONS.length) this.#db.exec(`PRAGMA user_version = ${MIGRATIONS.length}`);
       this.#db.exec('COMMIT');
     } catch (error) {
       this.#db.exec('ROLLBACK');
@@ -194,10 +197,18 @@ export class SqliteStore implements Store {
   }
 
   exclusive<T>(name: AppName, fn: () => Promise<T>): Promise<T> {
-    const run = (this.#locks.get(name) ?? Promise.resolve()).then(fn);
+    return this.#serially(name, fn);
+  }
+
+  exclusiveBundle<T>(bundle: BundleId, fn: () => Promise<T>): Promise<T> {
+    return this.#serially(`bundle/${bundle}`, fn);
+  }
+
+  #serially<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const run = (this.#locks.get(key) ?? Promise.resolve()).then(fn);
     const tail = run.catch(() => undefined);
-    this.#locks.set(name, tail);
-    void tail.then(() => this.#locks.get(name) === tail && this.#locks.delete(name));
+    this.#locks.set(key, tail);
+    void tail.then(() => this.#locks.get(key) === tail && this.#locks.delete(key));
     return run;
   }
 
