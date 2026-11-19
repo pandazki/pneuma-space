@@ -1,0 +1,25 @@
+
+> test:k8s
+> node --test 'gateway/src/*.smoke.test.ts'
+
+✔ AC-OPS-11: the cluster view lists nodes, the gateway and runner with the leader marked, the awake instance and its claim; a tenant admin gets 403 (26325.608167ms)
+✔ AC-OPS-12: the runner scales up and back, keeping the removed replica's claim; bad counts are 400, postgres is 409, the audit has the count (18180.351875ms)
+✔ AC-OPS-14: stop leaves the app asleep with no Pod, the tenant admin may stop it, and restart wakes it under a new Pod (27440.731916ms)
+✔ AC-OPS-15: kill ends a wake stuck on a Pod that never gets ready: the Pod goes, the row is asleep, a tenant admin gets 403, the audit lists it (2159.007791ms)
+✔ AC-OPS-16: draining a node stops its instances only, and leaves the node schedulable flag and its platform Pods as they were (51811.063292ms)
+✔ Pods in pneuma-space-apps are listed with a resourceVersion (68.640958ms)
+✔ a created Pod arrives on the watch as ADDED (102.095375ms)
+✔ the running Pod log is read with tailLines (815.311ms)
+✔ a deleted Pod arrives on the watch as DELETED (89.229292ms)
+✔ start creates the claim and the Pod and resolves with the Pod IP once it accepts TCP (967.073917ms)
+✔ logs reads the running Pod (8.042625ms)
+✔ sleep keeps the log tail and deletes the Pod, and the claim stays (2036.9115ms)
+✔ destroyStorage deletes the claim and resolves once it is gone (1017.3315ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 126024.224625

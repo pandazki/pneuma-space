@@ -9,7 +9,7 @@ import type { TokenRestrictions } from '../../gateway/src/hosted-model.ts';
 
 export const control = new URL(process.env.PNEUMA_SPACE_HOSTED_TEST_CONTROL ?? 'http://localhost:58081');
 const apps = process.env.PNEUMA_SPACE_HOSTED_TEST_APPS ?? 'http://*.apps.localhost:58080';
-export const image = `pneuma-space-hosted-fixture/echo:${process.pid}`;
+export const image = `${process.env.PNEUMA_SPACE_HOSTED_TEST_REGISTRY ? `${process.env.PNEUMA_SPACE_HOSTED_TEST_REGISTRY}/` : ''}pneuma-space-hosted-fixture/echo:${process.pid}`;
 export const fixture = (name: string) => fileURLToPath(new URL(`../acceptance/fixtures/${name}/`, import.meta.url));
 export const unique = () => `hosted-${randomBytes(5).toString('hex')}`;
 export const appOrigin = (name: string) => apps.replace('*', name);
@@ -33,11 +33,11 @@ export const cookie = (reply: Reply, name: string): string => {
   assert.ok(entry, `missing ${name} cookie from ${reply.status}`);
   return entry.split(';')[0]!;
 };
-export function call(url: string | URL, method = 'GET', headers: Record<string, string> = {}, body?: string | Buffer): Promise<Reply> {
+export function call(url: string | URL, method = 'GET', headers: Record<string, string> = {}, body?: string | Buffer, port?: number): Promise<Reply> {
   const target = new URL(url);
   assert.equal(target.protocol, 'http:', 'the hosted test runner supports the loopback development stack');
   return new Promise((resolve, reject) => {
-    const req = request({ host: '127.0.0.1', port: target.port || 80, path: target.pathname + target.search, method,
+    const req = request({ host: '127.0.0.1', port: port ?? (target.port || 80), path: target.pathname + target.search, method,
       headers: { host: target.host, connection: 'close', ...headers }, signal: AbortSignal.timeout(30_000) }, (response) => {
       const parts: Buffer[] = [];
       response.on('data', (part: Buffer) => parts.push(part));

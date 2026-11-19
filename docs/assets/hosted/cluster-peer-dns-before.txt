@@ -1,0 +1,41 @@
+
+> test:hosted:replicas
+> node --test tests/hosted/replicas.test.ts
+
+✔ AC-SAAS-3 a login handshake finishes once across replicas (80.867209ms)
+✔ AC-SAAS-5 concurrent replica redemption consumes one private-app grant (127.989542ms)
+✔ AC-SAAS-4 logout on one replica rejects the next control and derived app admission on the other (133.294125ms)
+✔ AC-SAAS-7 credential revocation on one replica rejects the next management and app admission on the other (123.710416ms)
+✖ AC-SAAS-10 operator request feeds contain both replicas and reject an ordinary account (159.656042ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 4
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 724.304333
+
+✖ failing tests:
+
+test at tests/hosted/replicas.test.ts:116:1
+✖ AC-SAAS-10 operator request feeds contain both replicas and reject an ordinary account (159.656042ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+  + [
+  +   '198.18.6.128'
+  + ]
+  - []
+
+      at TestContext.<anonymous> (<checkout>/tests/hosted/replicas.test.ts:126:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ '198.18.6.128' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

@@ -55,7 +55,7 @@ Cordon a node for maintenance; do not drain it. `kubectl drain` refuses instance
 ## Assumptions to check on your cluster
 
 - `pneuma-space-apps-dns` allows kube-dns Pods labelled `k8s-app=kube-dns` in `kube-system`. Adjust it for NodeLocal DNSCache or another DNS layout.
-- The `postgres`, `redis` and `rustfs` aliases in `pneuma-space-apps` assume the cluster domain `cluster.local`.
+- The service aliases and `PNEUMA_SPACE_PEERS` assume the cluster domain `cluster.local`. Use the headless Service's full DNS name for peers; DNS record queries do not expand the Pod's search domains.
 - The runner policy opens worker ports 32768 to 60999, the Linux ephemeral range the runner takes worker ports from.
 - Kubernetes has no per-Pod process limit like compose's `pids_limit`; set `podPidsLimit` on the kubelet if you need one.
 

@@ -17,6 +17,7 @@ const staticManifest = { contract: 1, capabilities: { static: { dir: '.' } } };
 before(async () => {
   [alice, bob, operator] = await Promise.all(['alice', 'bob', 'operator'].map(login));
   execFileSync('docker', ['build', '-q', '-t', image, fixture('echo')], { stdio: ['ignore', 'pipe', 'pipe'] });
+  if (process.env.PNEUMA_SPACE_HOSTED_TEST_REGISTRY) execFileSync('docker', ['push', image], { stdio: ['ignore', 'pipe', 'pipe'] });
 });
 after(async () => {
   await Promise.all([alice, bob, operator].filter(Boolean).map(logout));

@@ -1,0 +1,17 @@
+
+> test:hosted:replicas
+> node --test tests/hosted/replicas.test.ts
+
+✔ AC-SAAS-3 a login handshake finishes once across replicas (74.604833ms)
+✔ AC-SAAS-5 concurrent replica redemption consumes one private-app grant (114.9705ms)
+✔ AC-SAAS-4 logout on one replica rejects the next control and derived app admission on the other (143.814792ms)
+✔ AC-SAAS-7 credential revocation on one replica rejects the next management and app admission on the other (140.944333ms)
+✔ AC-SAAS-10 operator request feeds contain both replicas and reject an ordinary account (174.53225ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 749.6045
