@@ -5,7 +5,7 @@ import { Instances } from './instances.ts';
 import { Lifecycle, type Adopted, type Driver, type Ending, type Gone, type Slot } from './lifecycle.ts';
 import {
   appName, DEFAULT_POLICY, DEFAULT_TENANT, newAppId,
-  type AppId, type HealthCheck, type ImageId, type Policy, type ReleaseNumber, type ReplicaId, type RunSpec, type RuntimeKind,
+  type AppId, type HealthCheck, type ImageId, type Policy, type ReleaseNumber, type ReplicaId, type RunSpec, type RuntimeKind, type Store,
 } from './model.ts';
 import { AppGuard } from './runtimes.ts';
 import { SqliteStore } from './store.ts';
@@ -125,6 +125,19 @@ export function replica(store: SqliteStore, specFor: (app: AppId) => RunSpec | n
   const driver = new FakeDriver();
   const lifecycle = new Lifecycle(driver, { specFor, instances, guard, log });
   return { instances, driver, lifecycle, guard, events };
+}
+
+/** Grants the lead only once `grant` is called. */
+export function withheld(store: Store): { store: Store; grant: () => void } {
+  let granted = false;
+  const proxy = new Proxy(store, {
+    get(target, key, receiver) {
+      if (key === 'leader') return async () => (granted ? target.leader() : null);
+      const value = Reflect.get(target, key, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return { store: proxy, grant: () => void (granted = true) };
 }
 
 export async function until(what: string, condition: () => boolean | Promise<boolean>, ms = 3000): Promise<void> {

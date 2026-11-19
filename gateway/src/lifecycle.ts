@@ -66,12 +66,17 @@ export interface Driver<S extends RunSpec, H extends string> {
 type Counts = Record<LeaseKind, number>;
 /** `onRetire` is set only for a channel. */
 type LeaseRecord = { readonly kind: LeaseKind; readonly onRetire: (() => void) | null };
+type Count = { readonly epoch: number; readonly total: number };
 
 /** This replica's leases on one app and its queue of lease_tally writes. */
 type Local = {
   readonly leases: Map<Lease, LeaseRecord>;
-  /** The count of the last tally write committed or queued, recorded at enqueue time; the fast path needs it above 0 for the row's epoch. */
-  queued: { readonly epoch: number; readonly total: number } | null;
+  /** What this replica's committed tally protects: above 0 only once a write that saw the row awake at that epoch committed (ADR 0027 item 1). */
+  committed: Count | null;
+  /** Tally writes queued and not yet settled, each recorded when queued. */
+  readonly pending: Count[];
+  /** The 0 to >0 write in flight; other acquires on its epoch wait for it. False when its transaction found the row no longer awake. */
+  edge: { readonly epoch: number; readonly done: Promise<boolean> } | null;
   queue: Promise<unknown>;
   lastReleaseAt: number | null;
   dirty: boolean;
@@ -155,7 +160,11 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
       const local = this.#localOf(app);
       if (row?.runtime === this.kind && row.state === 'awake' && local.ended !== row.epoch) {
         if (this.#driver.serves && !this.#driver.serves(row.handle as H, row.address!)) throw new Unavailable(this.kind, `the instance at ${row.address} is gone; retry`);
-        if (local.queued?.epoch === row.epoch && local.queued.total > 0) return this.#lease(local, row, kind);
+        if (this.#covered(local, row.epoch)) return this.#lease(local, row, kind);
+        if (local.edge?.epoch === row.epoch) {
+          await local.edge.done;
+          continue;
+        }
         const lease = await this.#slow(app, row, kind);
         if (lease) return lease;
         continue;
@@ -333,7 +342,10 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
   #localOf(app: AppId): Local {
     let local = this.#local.get(app);
     if (!local) {
-      local = { leases: new Map(), queued: null, queue: Promise.resolve(), lastReleaseAt: null, dirty: false, flush: null, retired: -1, ended: -1, changed: Promise.withResolvers() };
+      local = {
+        leases: new Map(), committed: null, pending: [], edge: null, queue: Promise.resolve(), lastReleaseAt: null, dirty: false, flush: null,
+        retired: -1, ended: -1, changed: Promise.withResolvers(),
+      };
       this.#local.set(app, local);
     }
     return local;
@@ -355,36 +367,71 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
     return lease;
   }
 
-  /** Every tally write of an app goes through this one queue, with the count recorded when it is queued (ADR 0020 item 4). */
-  #enqueue<T>(local: Local, epoch: number, counts: Counts, write: () => Promise<T>): Promise<T> {
-    local.queued = { epoch, total: total(counts) };
-    const run = local.queue.then(write);
+  /** The fast path's condition: a committed tally above 0 for the epoch that no queued write lowers (ADR 0027 item 1). */
+  #covered(local: Local, epoch: number): boolean {
+    return local.committed?.epoch === epoch && local.committed.total > 0 && local.pending.every((count) => count.epoch === epoch && count.total > 0);
+  }
+
+  /**
+   * Every tally write of an app goes through this one queue, with the count recorded when it is queued (ADR 0020 item 4). Only a write that
+   * `raises`, having seen the row awake, lifts the committed count above 0; `write` resolves false when it wrote nothing.
+   */
+  #enqueue(local: Local, tally: LeaseTally, raises: boolean, write: () => Promise<boolean>): Promise<boolean> {
+    const queued: Count = { epoch: tally.epoch, total: total(tally) };
+    local.pending.push(queued);
+    const settle = () => void local.pending.splice(local.pending.indexOf(queued), 1);
+    const run = local.queue.then(write).then(
+      (written) => {
+        settle();
+        const kept = local.committed?.epoch === queued.epoch && local.committed.total > 0;
+        if (written) local.committed = raises || kept ? queued : { epoch: queued.epoch, total: 0 };
+        return written;
+      },
+      (error: unknown) => {
+        settle();
+        throw error;
+      },
+    );
     local.queue = run.catch(() => {});
     return run;
   }
 
-  /** The 0 to >0 edge of this replica's tally: one transaction that sees the row awake under a share lock (ADR 0020 item 4). */
+  /**
+   * The 0 to >0 edge of this replica's tally: one transaction that sees the row awake under a share lock (ADR 0020 item 4). Acquires on the
+   * same epoch meanwhile wait for it instead of opening their own (ADR 0027 item 1).
+   */
   async #slow(app: AppId, row: Instance, kind: LeaseKind): Promise<Lease | null> {
     const local = this.#localOf(app);
     const lease = this.#lease(local, row, kind);
     const tally = this.#tally(app, row.epoch, this.#counts(local), local);
-    const ok = await this.#enqueue(local, row.epoch, tally, () => this.#store.transaction(async (tx) => {
+    const written = this.#enqueue(local, tally, true, () => this.#store.transaction(async (tx) => {
       const current = await tx.instance(app, 'share');
       if (current?.runtime !== this.kind || current.state !== 'awake' || current.epoch !== row.epoch) return false;
       await tx.putLeaseTally(tally);
       return true;
-    })).catch((error: unknown) => {
-      local.leases.delete(lease);
-      throw error;
-    });
-    if (ok) {
-      this.#instances.putTally(tally);
-      return lease;
+    }));
+    const done = written.then(
+      async (ok) => {
+        if (ok) {
+          this.#instances.putTally(tally);
+          return true;
+        }
+        local.leases.delete(lease);
+        await this.#instances.refresh(app);
+        return false;
+      },
+      (error: unknown) => {
+        local.leases.delete(lease);
+        throw error;
+      },
+    );
+    const edge = { epoch: row.epoch, done };
+    local.edge = edge;
+    try {
+      return (await done) ? lease : null;
+    } finally {
+      if (local.edge === edge) local.edge = null;
     }
-    local.leases.delete(lease);
-    if (local.queued?.epoch === row.epoch) local.queued = { epoch: row.epoch, total: 0 };
-    await this.#instances.refresh(app);
-    return null;
   }
 
   async #wake(app: AppId, spec: S, kind: LeaseKind): Promise<Lease | null> {
@@ -451,7 +498,7 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
     const awake: Instance = { ...claimed, state: 'awake', actor: null, handle: slot.handle, release: slot.release, specHash: slot.specHash, address, node: slot.node ?? null, since: now, awakeAt: now };
     const lease = this.#lease(local, awake, kind);
     const tally = this.#tally(app, awake.epoch, this.#counts(local), local);
-    const ok = await this.#enqueue(local, awake.epoch, tally, () => this.#store.transaction(async (tx) => {
+    const ok = await this.#enqueue(local, tally, true, () => this.#store.transaction(async (tx) => {
       if (!(await tx.casInstance(claimed, awake))) return false;
       await tx.putLeaseTally(tally);
       return true;
@@ -489,7 +536,7 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
     if (!local.dirty || !row) return local.queue.then(() => {});
     local.dirty = false;
     const tally = this.#tally(app, row.epoch, this.#counts(local), local);
-    return this.#enqueue(local, row.epoch, tally, () => this.#store.putLeaseTally(tally)).then(
+    return this.#enqueue(local, tally, false, () => this.#store.putLeaseTally(tally).then(() => true)).then(
       () => this.#instances.putTally(tally),
       (error: Error) => {
         this.#emit('tally-failed', app, { error: error.message });
@@ -642,8 +689,8 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
   }
 
   /**
-   * Leader at startup: an instance the driver reports without a matching row, or for another release or spec, is removed;
-   * an awake row whose instance is gone goes asleep as crashed.
+   * Leader at startup: an instance the driver reports without a matching row, or for another release or spec, is removed unless its row,
+   * read after the listing, is waking, as the sweep judges (ADR 0020 item 4); an awake row whose instance is gone goes asleep as crashed.
    */
   async #adopt(): Promise<void> {
     const found = await this.#driver.adopt();
@@ -656,6 +703,8 @@ export class Lifecycle<S extends RunSpec, H extends string> implements Runtime {
       const fits = row !== null && row.handle === handle && spec !== null && !matched.has(app)
         && instance.release === String(spec.release) && instance.spec === specHash(spec) && row.release === spec.release && row.specHash === specHash(spec);
       if (!fits) {
+        const current = await this.#store.instance(app);
+        if (current?.runtime === this.kind && current.state === 'waking') continue;
         discarded.add(handle);
         if (await this.#driver.discard(app, handle)) this.#emit('removed', app, { [this.#driver.handleKey]: handle });
         continue;

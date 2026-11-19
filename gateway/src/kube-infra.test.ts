@@ -136,6 +136,13 @@ test('scaling the runner merge-patches the StatefulSet scale subresource (AC-OPS
   assert.deepEqual(seen, ['PATCH /apis/apps/v1/namespaces/pneuma-space/statefulsets/pneuma-space-runner/scale application/merge-patch+json {"spec":{"replicas":3}}']);
 });
 
+test('a runner home is removed by a count exactly when its ordinal is at or above it, and no other workload holds homes (ADR 0032)', () => {
+  const infra = new KubeInfra({ platform: nowhere, apps: nowhere, registry: null, registryApi: null, authFile: null });
+  const homes = ['pneuma-space-runner-0', 'pneuma-space-runner-1', 'pneuma-space-runner-2', 'pneuma-space-runner-10', 'runner', 'pneuma-space-runner-x', 'pneuma-space-runner-2-a'];
+  assert.deepEqual(homes.map(infra.removedBy('pneuma-space-runner', 2)!), [false, false, true, true, false, false, false]);
+  assert.deepEqual([infra.removedBy('pneuma-space-gateway', 1), infra.removedBy('pneuma-space-postgres', 1)], [null, null]);
+});
+
 test('restarting a postgres Pod is a Conflict and deletes nothing (AC-OPS-13)', async (t) => {
   const { seen, infra } = await platform(t, [named('pneuma-space-postgres-0', { 'app.kubernetes.io/part-of': 'pneuma-space' })]);
   await assert.rejects(infra.deletePod('pneuma-space-postgres-0'), Conflict);

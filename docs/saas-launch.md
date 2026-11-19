@@ -4,7 +4,7 @@
 
 ## 决策依据
 
-产品范围以 [M3 需求](../REQUIREMENTS-M3.md) 为准，组件和唯一写者在 [DESIGN 第 5 节](../DESIGN.md#5-m3-云入口)。[ADR 0027](adr/0027-hosted-fetch-profile.md) 解释独立云入口和运行时选择，[ADR 0028](adr/0028-personal-tenants-and-private-origins.md) 解释身份与浏览器边界，[ADR 0029](adr/0029-terminal-artifact-fences.md) 解释清除与迟到上传的处理。实际验证范围在 [验证记录](saas-verification.md)。
+产品范围以 [M3 需求](../REQUIREMENTS-M3.md) 为准，组件和唯一写者在 [DESIGN 第 5 节](../DESIGN.md#5-m3-云入口)。[ADR 0033](adr/0033-hosted-fetch-profile.md) 解释独立云入口和运行时选择，[ADR 0034](adr/0034-personal-tenants-and-private-origins.md) 解释身份与浏览器边界，[ADR 0035](adr/0035-terminal-artifact-fences.md) 解释清除与迟到上传的处理。实际验证范围在 [验证记录](saas-verification.md)。
 
 第一批使用代码中的保守默认额度，实际值由 `GET /api/profile` 返回。暂不扩大账户容量。这样可以先观察注册、发布、数据操作和账单，再决定放量。免费本地实验足以验证契约和状态机，不能证明云账户权限、真实 OAuth、域名证书或生产隔离。
 
