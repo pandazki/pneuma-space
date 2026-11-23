@@ -11,6 +11,7 @@ import { UpstreamIdentity, type UpstreamConfig } from './identity.ts';
 import { Ingress } from './ingress.ts';
 import { Series } from './metrics.ts';
 import { JwtVerifier } from './jwt.ts';
+import type { TokenScope } from './hosted-model.ts';
 import { appName, parseManifest, subject, USAGE_COUNTERS, type AppId, type AuditRecord, type DeliveryId, type ReplicaId, type TenantName } from './model.ts';
 import { world } from './registry.fakes.ts';
 import type { PlatformRegistry } from './registry.ts';
@@ -54,6 +55,7 @@ before(async () => {
   for (const [name, tenant, owner] of apps) {
     await registry.publish({ name: appName(name), image: 'example:1', manifest: kv, bundle: null, owner: subject(owner), tenant });
   }
+  await registry.publish({ name: appName('temp'), image: 'example:1', manifest: kv, bundle: null, owner: subject('user:bob'), tenant: A, ephemeral: { ttlSeconds: null } });
   for (const [key, who, by] of [['bob', 'user:bob', 'user:bob'], ['ci', `service:${A}.ci`, 'user:ana'], ['old', `service:${A}.old`, 'user:ana']] as const) {
     const issued = await registry.issueTenantToken(A, subject(who), key, subject(by));
     secrets[key] = issued.token;
@@ -134,6 +136,7 @@ const TABLE: [row: string, method: string, path: string, body: unknown, allowed:
   ['remove', 'POST', '/api/apps/alpha/remove', undefined, 'bob', 'cid', 404],
   ['unquarantine', 'POST', '/api/apps/alpha/unquarantine', undefined, 'bob', 'cid', 404],
   ['purge', 'POST', '/api/apps/alpha/purge', undefined, 'ana', 'bob', 403, true],
+  ['discard', 'POST', '/api/apps/temp/discard', undefined, 'token:bob', 'cid', 404],
 ];
 
 const pathOf = (path: string) => path.replace('<old>', tokenIds.old!);
@@ -358,4 +361,19 @@ test('revocation during provider preparation prevents release activation (AC-SAA
   const got = await call('token:publishing', 'PUT', '/api/apps/bobs/release', { ...release, image: 'example:2' });
   assert.equal(got.status, 403);
   assert.equal(registry.view(appName('bobs'))!.release, previous);
+});
+
+test('ADR 0038 a token with the hosted default scopes creates and discards an ephemeral app; one without remove cannot discard it', async () => {
+  for (const [key, scopes] of [['prober', ['read', 'publish', 'invoke', 'remove']], ['publisher', ['read', 'publish']]] as const) {
+    secrets[key] = (await registry.issueTenantToken(A, subject(`service:${A}.${key}`), key, subject('user:ana'), { expiresAt: Date.now() + 60_000, scopes: scopes as readonly TokenScope[], appIds: null })).token;
+  }
+  assert.equal((await call('token:prober', 'PUT', '/api/apps/probe/release', { ...release, ephemeral: {} })).status, 200);
+  assert.equal((await call('token:publisher', 'POST', '/api/apps/probe/discard')).status, 403);
+  assert.equal((await call('token:prober', 'POST', '/api/apps/probe/discard')).status, 200);
+  assert.equal(registry.view(appName('probe')), null);
+});
+
+test('ADR 0038 the detail of an ephemeral app names app.discard for its owner', async () => {
+  await registry.publish({ name: appName('bobs-trial'), image: 'example:1', manifest: kv, bundle: null, owner: subject('user:bob'), tenant: A, ephemeral: { ttlSeconds: null } });
+  assert.ok((await call('bob', 'GET', '/api/apps/bobs-trial')).body.may.includes('app.discard'));
 });

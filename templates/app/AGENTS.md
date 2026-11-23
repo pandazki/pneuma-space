@@ -104,6 +104,8 @@ Set only the variables of capabilities you declare; without `kv`, skip Redis and
 
 Other commands: `appctl list`, `appctl show <name>` (runtime, quarantine, instance state asleep or awake, bindings, recent trigger deliveries), `appctl logs <name>`, `appctl unquarantine <name>` (an app that kept crashing or hanging answers 503 until this or a new publish), `appctl policy <name> idle_seconds=5` (per-app override; the default idle is 60 s), `appctl remove` and `appctl purge`.
 
+To try a version without keeping it, `appctl publish <name> . --ephemeral` publishes an ephemeral app under a new name that ends with its data after the platform's default ttl (`--ttl <seconds>` to choose another); `appctl discard <name>` ends it at once.
+
 Testing on the platform with curl, for an app that declares `identity`:
 
 ```sh

@@ -7,7 +7,7 @@ import { Series } from './metrics.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
   Conflict, DEFAULT_TENANT, InputError, QuotaExceeded, appName, parseManifest, subject, tenantName, triggerName,
-  type App, type AppId, type BundleId, type Capabilities, type Change, type ReleaseNumber, type Store, type StoreOps,
+  type App, type AppId, type BundleId, type Capabilities, type Change, type PublishRequest, type ReleaseNumber, type Store, type StoreOps,
 } from './model.ts';
 import { PlatformRegistry } from './registry.ts';
 import { replicaContract } from './registry.contract.ts';
@@ -635,4 +635,168 @@ test('after remove and purge, the name of an app with files publishes under the 
   await registry.remove(survey);
   await registry.purge(survey);
   assert.equal((await publishOn(registry, 'isolate', { files: {} }, code)).runtime, 'isolate');
+});
+
+const trial = appName('trial');
+
+function temporary(registry: PlatformRegistry, capabilities: Record<string, unknown>, ttlSeconds: number | null = null, name = trial, extra: Partial<PublishRequest> = {}) {
+  const manifest = parseManifest({ contract: 1, capabilities: capabilities as Capabilities });
+  return registry.publish({ name, image: 'example:1', manifest, bundle: null, owner: ann, ephemeral: { ttlSeconds }, ...extra });
+}
+
+test('AC-EPH-1 an ephemeral first publish ends after the default ttl, at access tenant, and the listing says when', async () => {
+  const { registry } = await world().open();
+  const before = Date.now();
+  await temporary(registry, {});
+  const [row] = await registry.listing();
+  assert.ok(row.expiresAt! >= before + 600_000 && row.expiresAt! <= Date.now() + 600_000, `expiresAt ${row.expiresAt}`);
+  assert.equal(row.access, 'tenant');
+});
+
+for (const [first, then] of [['durable', 'ephemeral'], ['ephemeral', 'durable']] as const) {
+  test(`AC-EPH-1 publishing a ${first} app as ${then} is refused with Conflict and changes nothing`, async () => {
+    const { registry, store } = await world().open();
+    const release = (kind: string, image: string) => registry.publish({
+      name: survey, image, manifest: parseManifest({ contract: 1, capabilities: { kv: {} } }), bundle: null, owner: ann, ...(kind === 'ephemeral' && { ephemeral: { ttlSeconds: null } }),
+    });
+    const { app } = await release(first, 'example:1');
+    const state = async () => JSON.stringify([await store.app(survey), await store.releases(app), await store.bindings(app)]);
+    const before = await state();
+    await assert.rejects(release(then, 'example:2'), Conflict);
+    assert.equal(await state(), before);
+  });
+}
+
+test('AC-EPH-1 a ttl above ephemeral_max_ttl_seconds is refused and creates no app', async () => {
+  const { registry, store } = await world().open();
+  await assert.rejects(temporary(registry, {}, 3601), InputError);
+  assert.equal(await store.app(trial), null);
+});
+
+test('AC-EPH-1 republishing an ephemeral app, with a ttl or without, keeps its end', async () => {
+  const { registry } = await world().open();
+  await temporary(registry, {}, 60);
+  const end = registry.view(trial)!.expiresAt;
+  await sleep(5);
+  const second = await temporary(registry, {}, 3600, trial, { image: 'example:2' });
+  const third = await temporary(registry, {}, null, trial, { image: 'example:1' });
+  assert.deepEqual([second.number, third.number, registry.view(trial)!.expiresAt], [2, 3, end]);
+});
+
+test('AC-EPH-1 an ephemeral app\'s access stays tenant', async () => {
+  const { registry } = await world().open();
+  await temporary(registry, {});
+  for (const access of ['org', 'public'] as const) await assert.rejects(registry.setAccess(trial, access), Conflict);
+  assert.equal(registry.view(trial)?.access, 'tenant');
+});
+
+test('AC-EPH-2 discard ends a registered ephemeral app as purge does: instance retired, bindings destroyed, its bundle and rows deleted', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  const own = await w.bundles.put(Readable.from([Buffer.from('own')]));
+  const { app } = await temporary(registry, { kv: {}, files: {}, static: { dir: 'dist' } }, null, trial, { bundle: own });
+  await registry.discard(trial);
+  assert.ok(w.runtime.calls.includes(`retire ${app}`));
+  assert.deepEqual(w.calls.filter(([verb]) => verb === 'destroy').map(([, p]) => p).sort(), ['redis', 'volume']);
+  assert.deepEqual([await store.app(trial), await store.bindings(app), await store.releases(app), registry.view(trial), w.bundles.stored.has(own)], [null, [], [], null, false]);
+});
+
+test('AC-EPH-2 discard of a durable app is refused and changes nothing', async () => {
+  const w = world();
+  const { registry } = await w.open();
+  await publish(registry, { kv: {} });
+  await assert.rejects(registry.discard(survey), Conflict);
+  assert.deepEqual([registry.view(survey)?.status, w.calls.filter(([verb]) => verb === 'destroy')], ['registered', []]);
+});
+
+test('ADR 0038 a discard interrupted after the first destroy finishes on resume after restart', async () => {
+  const w = world();
+  const { registry } = await w.open();
+  const { app } = await temporary(registry, { files: {}, kv: {} });
+  w.providers.get('redis')!.fail = 'destroy';
+  await assert.rejects(registry.discard(trial), /redis destroy failed/);
+  const restarted = await w.open();
+  assert.equal(restarted.registry.view(trial)?.status, 'purging');
+  await restarted.registry.resume();
+  assert.deepEqual([await restarted.store.app(trial), await restarted.store.bindings(app)], [null, []]);
+});
+
+test('AC-EPH-3 the sweep ends only ephemeral apps past their end and audits each as app.expire by platform', async () => {
+  const { registry, store } = await world().open();
+  const { app: gone } = await temporary(registry, {}, 1, appName('gone'));
+  await temporary(registry, {}, 600, appName('kept'));
+  await publish(registry, {});
+  await registry.expire(Date.now() + 1000);
+  assert.deepEqual((await store.apps()).map((a) => a.name), ['kept', 'survey']);
+  const rows = (await store.audit({ target: 'gone' })).reverse();
+  assert.deepEqual(rows.map((r) => [r.actor, r.action, r.result, r.details.appId]), [['platform', 'app.expire', 'started', gone], ['platform', 'app.expire', 'ok', gone]]);
+});
+
+test('AC-EPH-3 an ephemeral app whose end passed while the gateway was down ends at the first sweep after restart', async () => {
+  const w = world();
+  const { registry } = await w.open();
+  await temporary(registry, { files: {} }, 1);
+  const restarted = await w.open();
+  await restarted.registry.expire(Date.now() + 1000);
+  assert.equal(await restarted.store.app(trial), null);
+});
+
+test('ADR 0038 the sweep finishes an expired ephemeral app a failed discard left purging, and audits it ok as resumed', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  await temporary(registry, { kv: {} }, 1);
+  w.providers.get('redis')!.fail = 'destroy';
+  await assert.rejects(registry.discard(trial), /redis destroy failed/);
+  await registry.expire(Date.now() + 1000);
+  assert.equal(await store.app(trial), null);
+  assert.deepEqual((await store.audit({ target: 'trial' })).map((r) => [r.action, r.result, r.details.resumed]), [['app.expire', 'ok', true]]);
+});
+
+for (const end of ['discard', 'expire'] as const) {
+  test(`ADR 0038 a removed ephemeral app still ends by ${end}, its bindings destroyed`, async () => {
+    const w = world();
+    const { registry, store } = await w.open();
+    const { app } = await temporary(registry, { files: {} }, 1);
+    await registry.remove(trial);
+    await (end === 'discard' ? registry.discard(trial) : registry.expire(Date.now() + 1000));
+    assert.deepEqual([await store.app(trial), await store.bindings(app), w.calls.filter(([verb]) => verb === 'destroy').map(([, p]) => p)], [null, [], ['volume']]);
+  });
+}
+
+test('AC-EPH-4 an ephemeral app takes no apps slot, and the ephemeral quota refuses the next one', async () => {
+  const { registry, store } = await quotaWorld({ apps: 1, ephemeral: 1 });
+  await publishIn(registry, 'one', {});
+  await temporary(registry, {}, null, appName('two'), { tenant: blue });
+  await assert.rejects(temporary(registry, {}, null, appName('three'), { tenant: blue }), (error) =>
+    error instanceof QuotaExceeded && JSON.stringify(error.refusal) === JSON.stringify({ resource: 'ephemeral', used: 1, limit: 1, ask: 1 }));
+  const { apps, ephemeral } = await store.quotaUsed(blue);
+  assert.deepEqual({ apps, ephemeral }, { apps: 1, ephemeral: 1 });
+});
+
+test('AC-EPH-4 a discarded ephemeral app frees its slot', async () => {
+  const { registry } = await quotaWorld({ ephemeral: 1 });
+  await temporary(registry, {}, null, appName('two'), { tenant: blue });
+  await registry.discard(appName('two'));
+  assert.equal((await temporary(registry, {}, null, appName('three'), { tenant: blue })).number, 1);
+});
+
+test('AC-EPH-5 an ephemeral app\'s triggers reach the Scheduler without their schedule and an invoke still queues a delivery', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  const { app } = await temporary(registry, { cron: { triggers: { minutely: { schedule: '* * * * *' } } } });
+  assert.deepEqual([registry.schedule(app)!.triggers, await store.triggers()].map((triggers) => triggers.map((t) => t.schedule)), [[null], [null]]);
+  const scheduler = new DeliveryScheduler({ store, runtime: w.runtime, view: (id) => registry.schedule(id), log: () => {} });
+  const delivery = await scheduler.invoke({ app, trigger: triggerName('minutely'), caller: ann, idempotencyKey: null, body: new Uint8Array() });
+  assert.deepEqual((await store.deliveries({ app })).map((d) => d.id), [delivery]);
+});
+
+test('ADR 0038 the ephemeral ttl fields are global only, the default never above the maximum, and a first publish takes the new default', async () => {
+  const { registry } = await world().open();
+  await assert.rejects(registry.setGlobalPolicy({ ephemeral_ttl_seconds: 4000 }), InputError);
+  await publish(registry, {});
+  await assert.rejects(async () => registry.setAppPolicy(survey, { ephemeral_ttl_seconds: 60 } as never), InputError);
+  await registry.setGlobalPolicy({ ephemeral_max_ttl_seconds: 7200, ephemeral_ttl_seconds: 4000 });
+  const before = Date.now();
+  await temporary(registry, {});
+  assert.ok(registry.view(trial)!.expiresAt! >= before + 4_000_000);
 });

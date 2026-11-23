@@ -117,6 +117,10 @@ export const PG_MIGRATIONS = [
   // ADR 0028: purge asks whether another app's release references a bundle. Before the hosted stack merged this index was the previous
   // step, so a database migrated then counts the hosted step as applied without it: this step repeats both.
   `CREATE INDEX IF NOT EXISTS release_bundle ON release (bundle); ${HOSTED}`,
+  // ADR 0038: an ephemeral app's end, and the ephemeral quota of every tenant, unlimited for the default one.
+  `ALTER TABLE app ADD COLUMN IF NOT EXISTS expires_at BIGINT;
+   UPDATE tenant SET quota = jsonb_set(quota::jsonb, '{ephemeral}', CASE WHEN name = '${DEFAULT_TENANT}' THEN 'null'::jsonb ELSE '3'::jsonb END)::text
+     WHERE quota::jsonb -> 'ephemeral' IS NULL`,
 ];
 
 /** Runs every step not yet recorded, each in its own transaction, under a lock so replicas that start together migrate once. */

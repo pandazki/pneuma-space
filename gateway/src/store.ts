@@ -23,6 +23,12 @@ const hosted = (db: DatabaseSync): string => `
   CREATE INDEX IF NOT EXISTS hosted_auth_user ON hosted_auth (user_id, created_at);
   CREATE INDEX IF NOT EXISTS hosted_auth_expiry ON hosted_auth (expires_at);`;
 
+/** ADR 0038: an ephemeral app's end, and the ephemeral quota of every tenant, unlimited for `default`; repeatable like `hosted`. */
+const ephemeral = (db: DatabaseSync): string => `
+  ${db.prepare("SELECT 1 FROM pragma_table_info('app') WHERE name = 'expires_at'").get() ? '' : 'ALTER TABLE app ADD COLUMN expires_at INTEGER;'}
+  UPDATE tenant SET quota = json_set(quota, '$.ephemeral', json('null')) WHERE name = '${DEFAULT_TENANT}' AND json_type(quota, '$.ephemeral') IS NULL;
+  UPDATE tenant SET quota = json_set(quota, '$.ephemeral', 3) WHERE name <> '${DEFAULT_TENANT}' AND json_type(quota, '$.ephemeral') IS NULL;`;
+
 /** Append only; `PRAGMA user_version` counts the steps applied. */
 export const MIGRATIONS: Migration[] = [
   `CREATE TABLE app (
@@ -109,6 +115,7 @@ export const MIGRATIONS: Migration[] = [
   // so a library migrated then counts the hosted step as applied without it: this step repeats both. A gateway released before the
   // constructor kept a newer version may also set the version back to before this step.
   (db) => `CREATE INDEX IF NOT EXISTS release_bundle ON release (bundle); ${hosted(db)}`,
+  ephemeral,
 ];
 
 /** `$n` placeholders become `?n`, which node:sqlite binds by position. */

@@ -124,6 +124,7 @@ export const ACTIONS = {
   'app.access': { need: 'owner', of: 'app', token: true },
   'app.owner': { need: 'admin-or-holder', of: 'app', token: true },
   'app.remove': { need: 'owner', of: 'app', token: true },
+  'app.discard': { need: 'owner', of: 'app', token: true },
   'app.purge': { need: 'admin', of: 'app', token: false },
   'app.move': { need: 'platform', token: false },
   'app.stop': { need: 'owner', of: 'app', token: false },
@@ -166,7 +167,7 @@ export function can(caller: Caller, action: Action, tenant: TenantName | null, h
   const restriction = caller.tokenRestrictions;
   if (restriction) {
     const required: TokenScope | undefined = action === 'apps.create' || action === 'app.release' || action === 'bundles.upload' ? 'publish'
-      : action === 'app.remove' ? 'remove' : ['app.policy', 'app.access', 'app.owner'].includes(action) ? 'manage'
+      : action === 'app.remove' || action === 'app.discard' ? 'remove' : ['app.policy', 'app.access', 'app.owner'].includes(action) ? 'manage'
         : ['health', 'apps.list', 'app.read', 'tenant.read', 'records'].includes(action) ? 'read' : undefined;
     if (restriction.expiresAt <= Date.now() || (required && !restriction.scopes.includes(required))) return { status: 403, reason: 'token does not grant this action' };
     if (restriction.appIds !== null && ((appId !== undefined && !restriction.appIds.includes(appId)) || action === 'apps.create' || action === 'tenant.read')) return { status: 404 };
@@ -196,9 +197,10 @@ export function can(caller: Caller, action: Action, tenant: TenantName | null, h
   return { status: 403, reason: `requires admin of tenant "${tenant}"${or}` };
 }
 
-/** The app actions `can` grants the caller on one app, so the console offers only those (ADR 0022 item 5). */
-export function appActions(caller: Caller, app: { readonly id?: AppId; readonly tenant: TenantName; readonly owner: Subject }): Action[] {
-  return (Object.keys(ACTIONS) as Action[]).filter((action) => action.startsWith('app.') && can(caller, action, app.tenant, app.owner, app.id) === true);
+/** The app actions `can` grants the caller on one app, so the console offers only those (ADR 0022 item 5); discard exists only for an ephemeral app (ADR 0038). */
+export function appActions(caller: Caller, app: { readonly id?: AppId; readonly tenant: TenantName; readonly owner: Subject; readonly expiresAt?: number | null }): Action[] {
+  return (Object.keys(ACTIONS) as Action[]).filter((action) =>
+    action.startsWith('app.') && (action !== 'app.discard' || app.expiresAt != null) && can(caller, action, app.tenant, app.owner, app.id) === true);
 }
 
 /** ADR 0022 item 6; `caller` is null when the request carries no valid credential. */

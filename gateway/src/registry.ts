@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import {
   CAPABILITIES, Conflict, DEFAULT_ENTRY, DEFAULT_QUOTA, DEFAULT_TENANT, GLOBAL_ONLY_POLICY, InputError, NotFound, QUOTA_RESOURCES, QuotaExceeded, RUNTIMES, Stranded,
   admits, appName, declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider, subject, tenantName,
-  type Access, type App, type AppDetail, type AppId, type AppName, type AppSummary, type Binding, type BindingState,
+  type Access, type App, type AppDetail, type AppId, type AppName, type AppSummary, type AuditRecord, type Binding, type BindingState,
   type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type Change, type CapabilityProvider, type Guard, type Infra, type IssuedToken,
   type Manifest, type Policy, type PolicyOverride, type PolicyPatch, type ProviderName, type Quota, type QuotaUsage, type Role,
   type PublishRequest, type Registry, type Release, type ReleaseNumber, type ResourceKind, type RouteView,
@@ -37,7 +37,10 @@ export type RegistryDeps = {
   readonly nodeOf?: (app: AppId) => string | null;
 };
 
-const SECONDS_FIELDS = ['idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds', 'failure_window_seconds', 'restart_backoff_seconds'] as const;
+const SECONDS_FIELDS = [
+  'idle_seconds', 'ready_timeout_seconds', 'drain_timeout_seconds', 'connection_idle_seconds', 'trigger_timeout_seconds', 'failure_window_seconds', 'restart_backoff_seconds',
+  'ephemeral_ttl_seconds', 'ephemeral_max_ttl_seconds',
+] as const;
 const WHOLE_FIELDS = ['max_failures', 'cpu_millis', 'memory_mb', 'usage_retention_days', 'events_retention_days', 'events_max_rows'] as const;
 const POLICY_FIELDS: readonly string[] = [...SECONDS_FIELDS, ...WHOLE_FIELDS, 'db_backend', 'timezone'];
 const DETAIL_DELIVERIES = 50;
@@ -97,9 +100,10 @@ async function currentRelease(store: StoreOps, app: App): Promise<Release | null
   return app.current === null ? null : store.release(app.id, app.current);
 }
 
-function triggersOf(app: AppId, manifest: Manifest): Trigger[] {
+/** An ephemeral app's triggers run on demand only, so no schedule of the real app's fires from its copy (ADR 0038). */
+function triggersOf(app: App, manifest: Manifest): Trigger[] {
   return Object.entries(manifest.capabilities.cron?.triggers ?? {}).map(([name, t]) => ({
-    app, name: name as TriggerName, schedule: t.schedule ?? null,
+    app: app.id, name: name as TriggerName, schedule: app.expiresAt === null ? (t.schedule ?? null) : null,
   }));
 }
 
@@ -207,7 +211,7 @@ export class PlatformRegistry implements Registry {
     });
   }
 
-  async #publish({ name, image: reference, manifest, bundle, owner, tenant = DEFAULT_TENANT, authorize }: PublishRequest): Promise<Release> {
+  async #publish({ name, image: reference, manifest, bundle, owner, tenant = DEFAULT_TENANT, authorize, ephemeral = null }: PublishRequest): Promise<Release> {
     const kinds = declaredKinds(manifest);
     const needsRuntime = kinds.some((k) => CAPABILITIES[k].needsRuntime);
     const runtime: RuntimeKind | null = manifest.runtime ?? (reference !== null ? 'container' : bundle !== null && needsRuntime ? 'isolate' : null);
@@ -231,6 +235,12 @@ export class PlatformRegistry implements Registry {
       return app;
     });
     if (app?.status === 'purging') throw new Conflict(`app "${name}" is being purged; publish again once purge finishes`);
+    // The marker says which kind the caller expects, so a mistaken name lands no release in the other kind (ADR 0038).
+    if (app && (app.expiresAt === null) === (ephemeral !== null)) {
+      throw new Conflict(app.expiresAt === null
+        ? `app "${name}" is durable and never becomes ephemeral; publish the ephemeral copy under another name`
+        : `app "${name}" is ephemeral until ${new Date(app.expiresAt).toISOString()} and never becomes durable; publish it as ephemeral, or the durable app under another name`);
+    }
     const current = app && (await currentRelease(this.#store, app));
     if (app?.status === 'registered' && current?.releaseKey === key) return current;
     if (app && runtime !== null) await this.#keepsRuntime(app, runtime);
@@ -246,14 +256,22 @@ export class PlatformRegistry implements Registry {
 
     if (!app) {
       if (owner === null) throw new InputError(`owner is required on the first publish of "${name}"; pass user:<name> or service:<name>`);
-      const created: App = { name, id: newAppId(), tenant, access: this.#defaultAccess, owner, status: 'registered', current: null, policyOverride: pinned, registeredAt: Date.now() };
+      const max = this.#policy.ephemeral_max_ttl_seconds;
+      const ttl = ephemeral && (ephemeral.ttlSeconds ?? this.#policy.ephemeral_ttl_seconds);
+      // Refused rather than cut, so an app never ends before its caller expects (ADR 0038).
+      if (ephemeral && !(Number.isInteger(ttl) && ttl! > 0 && ttl! <= max)) throw new InputError(`ephemeral ttl_seconds must be a whole number from 1 to ${max} (ephemeral_max_ttl_seconds), got ${ttl}`);
+      const now = Date.now();
+      const expiresAt = ephemeral ? now + ttl! * 1000 : null;
+      const created: App = {
+        name, id: newAppId(), tenant, access: expiresAt === null ? this.#defaultAccess : 'tenant', owner, status: 'registered', current: null, policyOverride: pinned, registeredAt: now, expiresAt,
+      };
       await this.#store.transaction(async (tx) => {
         await authorize?.(tx, await tx.app(name));
         await this.#reserve(tx, created, providers, true);
       });
       app = created;
       await this.#refresh(name);
-      log('app-created', name, { id: app.id });
+      log('app-created', name, { id: app.id, ...(expiresAt !== null && { expiresAt }) });
     } else {
       await this.#store.transaction(async (tx) => {
         const fresh = (await tx.app(name))!;
@@ -275,7 +293,7 @@ export class PlatformRegistry implements Registry {
         image, manifest, bundle, runtime, releaseKey: key, publishedAt: Date.now(),
       };
       if (!reused) await tx.putRelease(release);
-      await tx.replaceTriggers(fresh.id, triggersOf(fresh.id, manifest));
+      await tx.replaceTriggers(fresh.id, triggersOf(fresh, manifest));
       const registeredAt = fresh.status === 'registered' ? fresh.registeredAt : Date.now();
       const next: App = { ...fresh, status: 'registered', current: release.number, registeredAt };
       await tx.putApp(next);
@@ -318,13 +336,46 @@ export class PlatformRegistry implements Registry {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
       if (app.status === 'registered') throw new Conflict(`app "${name}" is registered; remove it before purging`);
-      if (app.status === 'removed') {
-        await this.#updateApp(name, (fresh) => ({ ...fresh, status: 'purging' }));
-        await this.#refresh(name);
-        this.#emit(app.id);
-      }
-      await this.#finishPurge(app);
+      await this.#purge(app);
     });
+  }
+
+  discard(name: AppName): Promise<void> {
+    return this.#store.exclusive(name, async () => {
+      const app = await this.#mustApp(name);
+      if (app.expiresAt === null) throw new Conflict(`app "${name}" is durable; discard ends only an ephemeral app, remove and purge end this one`);
+      await this.#purge(app);
+    });
+  }
+
+  async expire(now = Date.now()): Promise<void> {
+    const due = [...this.#views.values()].filter((view) => view.expiresAt !== null && view.expiresAt <= now);
+    await Promise.all(due.map((view) => this.#store.exclusive(view.name, async () => {
+      const app = await this.#store.app(view.name);
+      if (app?.id !== view.app) return;
+      // No request asks for an expiry, so the boundary that audits requests cannot write its rows (ADR 0038).
+      const audit = (result: AuditRecord['result'], details: Record<string, unknown> = {}) => this.#store.insertAudit({
+        at: Date.now(), actor: 'platform', actorTenant: null, tenant: app.tenant, action: 'app.expire', targetKind: 'app', target: app.name, result,
+        details: { appId: app.id, expiresAt: app.expiresAt, ...details },
+      });
+      const resumed = app.status === 'purging';
+      if (!resumed) await audit('started');
+      await this.#purge(app).catch(async (error: Error) => {
+        await audit('error', { error: error.message });
+        throw error;
+      });
+      await audit('ok', resumed ? { resumed } : {});
+    }).catch((error: Error) => log('expire-failed', view.name, { error: error.message }))));
+  }
+
+  /** Persists purging first, so a restart finishes what this run does not (DESIGN 2.3). */
+  async #purge(app: App): Promise<void> {
+    if (app.status !== 'purging') {
+      await this.#updateApp(app.name, (fresh) => ({ ...fresh, status: 'purging' }));
+      await this.#refresh(app.name);
+      this.#emit(app.id);
+    }
+    await this.#finishPurge(app);
   }
 
   async #finishPurge(app: App): Promise<void> {
@@ -362,6 +413,9 @@ export class PlatformRegistry implements Registry {
     const fields = parsePolicyPatch(patch, 'global');
     const next = await this.#store.transaction(async (tx) => {
       const merged = { ...(await tx.policy()), ...fields } as Policy;
+      if (merged.ephemeral_ttl_seconds > merged.ephemeral_max_ttl_seconds) {
+        throw new InputError(`ephemeral_ttl_seconds ${merged.ephemeral_ttl_seconds} is above ephemeral_max_ttl_seconds ${merged.ephemeral_max_ttl_seconds}`);
+      }
       await tx.putPolicy(merged);
       return merged;
     });
@@ -525,7 +579,10 @@ export class PlatformRegistry implements Registry {
   }
 
   async setAccess(name: AppName, access: Access): Promise<void> {
-    await this.#updateApp(name, (app) => ({ ...app, access }));
+    await this.#updateApp(name, (app) => {
+      if (app.expiresAt !== null && access !== 'tenant') throw new Conflict(`app "${name}" is ephemeral; its access stays tenant`);
+      return { ...app, access };
+    });
     await this.#refresh(name);
     log('access', name, { access });
   }
@@ -637,6 +694,7 @@ export class PlatformRegistry implements Registry {
         requests: s?.requests ?? 0,
         errors: s?.errors ?? 0,
         node: this.#nodeOf(view.app),
+        expiresAt: view.expiresAt,
       };
     }).sort((a, b) => (a.name < b.name ? -1 : 1));
   }
@@ -666,10 +724,13 @@ export class PlatformRegistry implements Registry {
   /** Resolves once every interrupted purge and binding convergence has run; startup need not await it. */
   async resume(): Promise<void> {
     const apps = await this.#store.apps();
-    const work = apps.map((app) => this.#store.exclusive(app.name, async () => {
+    // Re-read under the lock: the expiry sweep may have ended the app, and its name may be published again, since the list was read.
+    const work = apps.map((listed) => this.#store.exclusive(listed.name, async () => {
+      const app = await this.#store.app(listed.name);
+      if (app?.id !== listed.id) return;
       if (app.status === 'purging') await this.#finishPurge(app);
       else await this.#converge(app.name);
-    }).catch((error: Error) => log('resume-failed', app.name, { error: error.message })));
+    }).catch((error: Error) => log('resume-failed', listed.name, { error: error.message })));
     await Promise.all(work);
   }
 
@@ -763,6 +824,7 @@ export class PlatformRegistry implements Registry {
       staticRoot: release?.runtime === 'isolate' && release.manifest.capabilities.static ? `${release.manifest.capabilities.static.dir}/` : '',
       identity: release?.manifest.capabilities.identity ?? null,
       policyOverride: Object.freeze({ ...app.policyOverride }),
+      expiresAt: app.expiresAt,
       version: app.version,
     });
     this.#views.set(name, view);
@@ -775,7 +837,7 @@ export class PlatformRegistry implements Registry {
       this.#schedules.set(app.id, {
         status: app.status,
         publishedAt: Math.max(release.publishedAt, app.registeredAt),
-        triggers: triggersOf(app.id, release.manifest),
+        triggers: triggersOf(app, release.manifest),
         policy,
       });
     } else {
@@ -814,7 +876,9 @@ export class PlatformRegistry implements Registry {
     const bound = first ? [] : await tx.bindings(app.id);
     const missing = providers.filter((p) => PROVISIONED.has(p.name) && !bound.some((b) => b.kind === p.kind && b.provider === p.name));
     if (first || missing.length > 0) {
-      await this.#admit(tx, app.tenant, { ...(first && { apps: 1 }), ...(missing.length > 0 && { storage_gb: missing.length * this.#volumeGb }) });
+      await this.#admit(tx, app.tenant, {
+        ...(first && { [app.expiresAt === null ? 'apps' : 'ephemeral']: 1 }), ...(missing.length > 0 && { storage_gb: missing.length * this.#volumeGb }),
+      });
     }
     if (first) await tx.putApp(app);
     for (const p of missing) await tx.putBinding({ app: app.id, kind: p.kind, provider: p.name, state: 'suspended', resource: {} });

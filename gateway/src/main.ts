@@ -32,6 +32,7 @@ import { SqliteStore } from './store.ts';
 const SAMPLE_MS = 10_000;
 const NODES_MS = 15_000;
 const RUNNER_HEALTH_MS = 1000;
+const EXPIRY_MS = 10_000;
 
 const log = (ev: string, extra: Record<string, unknown> = {}) => emit(ev, null, extra);
 
@@ -139,7 +140,7 @@ const identity: Identity = setup.hosted
     tokens: authority,
     register: (verified) => registry.registerHostedIdentity(verified, {
       limit: setup.signupLimit,
-      quota: { apps: 5, awake: 2, cpu_millis: 2000, memory_mb: 1024, storage_gb: 5 },
+      quota: { apps: 5, ephemeral: 3, awake: 2, cpu_millis: 2000, memory_mb: 1024, storage_gb: 5 },
     }),
     app: async (name) => {
       try { return await store.app(appName(name)); }
@@ -199,10 +200,16 @@ registry.onAppChanged((app) => {
 
 // Reconcile first so a resumed purge retires the containers it finds; Providers converge in the background (DESIGN 2.3).
 await runtime.reconcile();
+let sweep: Promise<void> | null = null;
+const expire = () => void (sweep ??= registry.expire().catch((error: Error) => log('expire-failed', { error: error.message })).finally(() => (sweep = null)));
+let expiry: NodeJS.Timeout | undefined;
 await instances.onLeader((leading) => {
   log('leader', { replica, leading });
+  clearInterval(expiry);
   if (!leading) return scheduler.stop();
   void registry.resume();
+  expire();
+  expiry = setInterval(expire, EXPIRY_MS).unref();
   return scheduler.resume();
 });
 await ingress.listen(INGRESS_PORT, '0.0.0.0');
@@ -231,6 +238,7 @@ log('gateway-ready', { network, data, replica, store: storeUrl ? 'postgres' : 's
 process.once('SIGTERM', async () => {
   clearInterval(flusher);
   clearInterval(nodeSampler);
+  clearInterval(expiry);
   scheduler.stop();
   container.close();
   isolate.close();

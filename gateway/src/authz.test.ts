@@ -81,6 +81,7 @@ const CASES: Record<Action, { allowed: Attempt; refused: readonly [...Attempt, D
   'app.access': { allowed: [memberA, A, mia], refused: [nobody, A, null, 404] },
   'app.owner': { allowed: [memberA, A, mia], refused: [tokenA, A, ana, 403] },
   'app.remove': { allowed: [tokenA, A, null], refused: [memberB, A, null, 404] },
+  'app.discard': { allowed: [personalA, A, mia], refused: [memberB, A, null, 404] },
   'app.purge': { allowed: [adminA, A, null], refused: [memberA, A, mia, 403] },
   'app.move': { allowed: [platform, null, null], refused: [adminA, null, null, 403] },
   'app.stop': { allowed: [memberA, A, mia], refused: [personalA, A, mia, 403] },

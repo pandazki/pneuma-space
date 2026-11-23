@@ -45,6 +45,7 @@ const toApp = (r: Row): App => ({
   current: numOrNull(r.current) as ReleaseNumber | null,
   policyOverride: json(r.policy_override),
   registeredAt: num(r.registered_at),
+  expiresAt: numOrNull(r.expires_at),
   version: num(r.version),
 });
 
@@ -214,12 +215,12 @@ export class SqlOps implements StoreOps {
   /** A write that changes nothing raises no version and announces nothing, so restart convergence leaves the rows as they were. */
   async putApp(app: App) {
     const { changes } = await this.#s.run(
-      `INSERT INTO app (name, id, tenant, access, owner, status, current, policy_override, registered_at, version) VALUES (${placeholders(9)}, 1)
+      `INSERT INTO app (name, id, tenant, access, owner, status, current, policy_override, registered_at, expires_at, version) VALUES (${placeholders(10)}, 1)
        ON CONFLICT (name) DO UPDATE SET id = excluded.id, tenant = excluded.tenant, access = excluded.access, owner = excluded.owner,
          status = excluded.status, current = excluded.current, policy_override = excluded.policy_override, registered_at = excluded.registered_at,
-         version = app.version + 1
-       WHERE ${['id', 'tenant', 'access', 'owner', 'status', 'current', 'policy_override', 'registered_at'].map((c) => `app.${c} IS DISTINCT FROM excluded.${c}`).join(' OR ')}`,
-      [app.name, app.id, app.tenant, app.access, app.owner, app.status, app.current, JSON.stringify(app.policyOverride), app.registeredAt],
+         expires_at = excluded.expires_at, version = app.version + 1
+       WHERE ${['id', 'tenant', 'access', 'owner', 'status', 'current', 'policy_override', 'registered_at', 'expires_at'].map((c) => `app.${c} IS DISTINCT FROM excluded.${c}`).join(' OR ')}`,
+      [app.name, app.id, app.tenant, app.access, app.owner, app.status, app.current, JSON.stringify(app.policyOverride), app.registeredAt, app.expiresAt ?? null],
     );
     if (changes > 0) this.#touch({ kind: 'app', name: app.name });
   }
@@ -381,7 +382,8 @@ export class SqlOps implements StoreOps {
   async quotaUsed(tenant: TenantName): Promise<QuotaUsage> {
     const row = (await this.#one(
       `SELECT
-         (SELECT count(*) FROM app WHERE tenant = $1 AND status <> 'purging') AS apps,
+         (SELECT count(*) FROM app WHERE tenant = $1 AND status <> 'purging' AND expires_at IS NULL) AS apps,
+         (SELECT count(*) FROM app WHERE tenant = $1 AND status <> 'purging' AND expires_at IS NOT NULL) AS ephemeral,
          (SELECT count(*) FROM instance i JOIN app a ON a.id = i.app WHERE a.tenant = $1 AND i.state <> 'asleep') AS awake,
          (SELECT coalesce(sum(i.cpu_millis), 0) FROM instance i JOIN app a ON a.id = i.app WHERE a.tenant = $1 AND i.state <> 'asleep') AS cpu_millis,
          (SELECT coalesce(sum(i.memory_mb), 0) FROM instance i JOIN app a ON a.id = i.app WHERE a.tenant = $1 AND i.state <> 'asleep') AS memory_mb,
@@ -389,7 +391,7 @@ export class SqlOps implements StoreOps {
       [tenant],
     ))!;
     return {
-      apps: num(row.apps), awake: num(row.awake), cpu_millis: num(row.cpu_millis), memory_mb: num(row.memory_mb), storage_gb: num(row.volumes) * this.#volumeGb,
+      apps: num(row.apps), ephemeral: num(row.ephemeral), awake: num(row.awake), cpu_millis: num(row.cpu_millis), memory_mb: num(row.memory_mb), storage_gb: num(row.volumes) * this.#volumeGb,
     };
   }
 

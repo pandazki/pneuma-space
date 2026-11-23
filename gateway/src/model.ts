@@ -153,6 +153,8 @@ export type App = {
   readonly policyOverride: PolicyOverride;
   /** When the status last became registered; a republish after remove starts schedules here. */
   readonly registeredAt: number;
+  /** An ephemeral app's end, fixed at its first publish; null for a durable app (ADR 0038). */
+  readonly expiresAt: number | null;
   /** Raised by the store on every write of the app's rows (app, release, trigger, binding); a reader applies only a newer one (ADR 0025 item 5). */
   readonly version: number;
 };
@@ -203,8 +205,13 @@ export type Policy = {
   readonly usage_retention_days: number;
   readonly events_retention_days: number;
   readonly events_max_rows: number;
+  /** Global only (ADR 0038): an ephemeral app's life when its first publish names none, and the most it may name. */
+  readonly ephemeral_ttl_seconds: number;
+  readonly ephemeral_max_ttl_seconds: number;
 };
-export const GLOBAL_ONLY_POLICY = ['timezone', 'usage_retention_days', 'events_retention_days', 'events_max_rows'] as const;
+export const GLOBAL_ONLY_POLICY = [
+  'timezone', 'usage_retention_days', 'events_retention_days', 'events_max_rows', 'ephemeral_ttl_seconds', 'ephemeral_max_ttl_seconds',
+] as const;
 export type PolicyOverride = Partial<Omit<Policy, (typeof GLOBAL_ONLY_POLICY)[number]>>;
 /** A per-app policy change; null clears that override field. */
 export type PolicyPatch = { readonly [K in keyof PolicyOverride]?: PolicyOverride[K] | null };
@@ -225,6 +232,8 @@ export const DEFAULT_POLICY: Policy = {
   usage_retention_days: 90,
   events_retention_days: 14,
   events_max_rows: 1_000_000,
+  ephemeral_ttl_seconds: 600,
+  ephemeral_max_ttl_seconds: 3600,
 };
 
 /** Merged on every read and never stored, so a global change reaches every app without an override at once. */
@@ -276,13 +285,14 @@ export type Token = {
 
 // Tenants and quotas (ADR 0022, 0023)
 
-export const QUOTA_RESOURCES = ['apps', 'awake', 'cpu_millis', 'memory_mb', 'storage_gb'] as const;
+/** `apps` counts durable apps, `ephemeral` ephemeral ones (ADR 0038). */
+export const QUOTA_RESOURCES = ['apps', 'ephemeral', 'awake', 'cpu_millis', 'memory_mb', 'storage_gb'] as const;
 export type QuotaResource = (typeof QUOTA_RESOURCES)[number];
 /** Null is unlimited. */
 export type Quota = { readonly [R in QuotaResource]: number | null };
 export type QuotaUsage = { readonly [R in QuotaResource]: number };
 /** Copied into a tenant when it is created; changing it leaves existing tenants as they are. */
-export const DEFAULT_QUOTA: Quota = { apps: 100, awake: 20, cpu_millis: 20000, memory_mb: 10240, storage_gb: 20 };
+export const DEFAULT_QUOTA: Quota = { apps: 100, ephemeral: 3, awake: 20, cpu_millis: 20000, memory_mb: 10240, storage_gb: 20 };
 
 export type Refusal = { readonly resource: QuotaResource; readonly used: number; readonly limit: number; readonly ask: number };
 
@@ -408,6 +418,7 @@ export type RouteView = {
   /** Null when the release does not declare identity. */
   readonly identity: IdentityDeclaration | null;
   readonly policyOverride: PolicyOverride;
+  readonly expiresAt: number | null;
   readonly version: number;
 };
 
@@ -422,6 +433,8 @@ export type PublishRequest = {
   readonly owner: Subject | null;
   /** Read on first publish only; DEFAULT_TENANT when absent. */
   readonly tenant?: TenantName;
+  /** On every publish of an ephemeral app and no publish of a durable one (ADR 0038); `ttlSeconds` is read on the first publish only, null for the policy default. */
+  readonly ephemeral?: { readonly ttlSeconds: number | null } | null;
 };
 
 export type AppSummary = {
@@ -448,6 +461,7 @@ export type AppSummary = {
   readonly errors: number;
   /** The node the instance runs on; null when asleep or not known. */
   readonly node: string | null;
+  readonly expiresAt: number | null;
 };
 
 export type StateEntry = Omit<Binding, 'app' | 'resource'> & { readonly location: Readonly<Record<string, string>> };
@@ -589,13 +603,14 @@ export const EVENT_SETTLE_MS = 2000;
 export const AUDIT_ACTIONS = [
   'app.publish', 'app.remove', 'app.purge', 'app.policy', 'app.owner', 'app.access', 'app.move', 'app.unquarantine',
   'policy.global', 'token.issue', 'token.revoke', 'tenant.create', 'tenant.quota', 'member.add', 'member.role', 'member.remove',
-  'app.stop', 'app.restart', 'app.kill', 'cluster.scale', 'cluster.restart', 'cluster.drain',
+  'app.stop', 'app.restart', 'app.kill', 'cluster.scale', 'cluster.restart', 'cluster.drain', 'app.discard', 'app.expire',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export type AuditRecord = {
   readonly id: number;
   readonly at: number;
-  readonly actor: Subject | 'local';
+  /** `platform` for what no request asked: an ephemeral app's expiry (ADR 0038). */
+  readonly actor: Subject | 'local' | 'platform';
   /** The tenant whose role the actor used; null for a platform admin. */
   readonly actorTenant: TenantName | null;
   /** The tenant of what was acted on. */
@@ -1041,6 +1056,10 @@ export interface Registry {
   remove(name: AppName): Promise<void>;
   /** Only from removed; otherwise Conflict. */
   purge(name: AppName): Promise<void>;
+  /** Purge from any status, for an ephemeral app only; Conflict for a durable one (ADR 0038). */
+  discard(name: AppName): Promise<void>;
+  /** The leader's sweep: discards every ephemeral app whose end is at or before `now`, whatever its status (ADR 0038). */
+  expire(now?: number): Promise<void>;
   setGlobalPolicy(patch: Partial<Policy>): Promise<Policy>;
   setAppPolicy(name: AppName, patch: PolicyPatch): Promise<PolicyOverride>;
   setOwner(name: AppName, owner: Subject): Promise<void>;
@@ -1137,6 +1156,7 @@ export const ADMIN_PATHS = {
   owner: (name: string) => `/api/apps/${name}/owner`,
   remove: (name: string) => `/api/apps/${name}/remove`,
   purge: (name: string) => `/api/apps/${name}/purge`,
+  discard: (name: string) => `/api/apps/${name}/discard`,
   unquarantine: (name: string) => `/api/apps/${name}/unquarantine`,
   stop: (name: string) => `/api/apps/${name}/stop`,
   restart: (name: string) => `/api/apps/${name}/restart`,

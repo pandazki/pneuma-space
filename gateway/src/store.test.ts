@@ -5,14 +5,14 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
-import { DEFAULT_TENANT, type AppName, type Subject } from './model.ts';
+import { DEFAULT_TENANT, type AppName, type Subject, type TenantName } from './model.ts';
 import { app, storeContract } from './store.contract.ts';
 import { BUNDLE_REFERENCED } from './sql.ts';
 import { MIGRATIONS, positional, sqlOf, SqliteSession, SqliteStore } from './store.ts';
 import type { TokenRestrictions } from './hosted-model.ts';
 
 /** The steps both main and the hosted stack held before either appended one: main then added release_bundle, the hosted stack its tables. */
-const BEFORE_MERGE = MIGRATIONS.length - 2;
+const BEFORE_MERGE = 8;
 
 const path = () => join(mkdtempSync(join(tmpdir(), 'pneuma-space-store-')), 'pneuma-space.sqlite3');
 
@@ -48,7 +48,7 @@ test('migration step 4 puts every M1 app and token in the default tenant', async
     INSERT INTO token (id, subject, hash, created_at) VALUES ('t1', 'service:ci', 'h1', 2);`);
   m1.close();
   const store = new SqliteStore(file);
-  assert.deepEqual((await store.tenant(DEFAULT_TENANT))?.quota, { apps: null, awake: null, cpu_millis: null, memory_mb: null, storage_gb: null });
+  assert.deepEqual((await store.tenant(DEFAULT_TENANT))?.quota, { apps: null, ephemeral: null, awake: null, cpu_millis: null, memory_mb: null, storage_gb: null });
   assert.deepEqual([(await store.app('survey' as AppName))?.tenant, (await store.app('survey' as AppName))?.access], [DEFAULT_TENANT, 'org']);
   assert.deepEqual(await store.token('h1'), {
     id: 't1', tenant: DEFAULT_TENANT, subject: 'service:ci' as Subject, label: 'ci', hash: 'h1', createdBy: 'local', createdAt: 2, revokedAt: null,
@@ -96,7 +96,7 @@ test('step 6 makes an already migrated default tenant unlimited', async () => {
   migrated.exec(`PRAGMA user_version = 5; UPDATE tenant SET quota = '{"apps":100,"awake":20,"cpu_millis":20000,"memory_mb":8192,"storage_gb":20}'`);
   migrated.close();
   const store = new SqliteStore(file);
-  assert.deepEqual((await store.tenant(DEFAULT_TENANT))?.quota, { apps: null, awake: null, cpu_millis: null, memory_mb: null, storage_gb: null });
+  assert.deepEqual((await store.tenant(DEFAULT_TENANT))?.quota, { apps: null, ephemeral: null, awake: null, cpu_millis: null, memory_mb: null, storage_gb: null });
   await store.close();
 });
 
@@ -114,7 +114,7 @@ test('AC-SAAS-12 hosted migration preserves existing application state and token
   const store = new SqliteStore(file);
   const migrated = new DatabaseSync(file);
   for (const [index, table] of ['app', 'release', 'binding', 'token'].entries()) {
-    const rows = migrated.prepare(`SELECT * FROM ${table}`).all().map(({ restrictions, ...row }) => row);
+    const rows = migrated.prepare(`SELECT * FROM ${table}`).all().map(({ restrictions, expires_at, ...row }) => row);
     assert.deepEqual(rows, snapshot[index].map((row) => ({ ...row })));
   }
   assert.equal((await store.token('legacy-hash'))?.restrictions, undefined);
@@ -151,6 +151,25 @@ test('a library that a gateway without that rule set back to before release_bund
   const indexes = after.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'release_bundle'").all().length;
   after.close();
   assert.deepEqual([version, indexes], [MIGRATIONS.length, 1]);
+});
+
+test('the ADR 0038 step gives every existing tenant an ephemeral quota of 3, the default one unlimited, and every existing app no end', async () => {
+  const file = path();
+  const old = new DatabaseSync(file);
+  for (const step of MIGRATIONS.slice(0, -1)) old.exec(sqlOf(step, old));
+  old.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1};
+    UPDATE tenant SET quota = '{"apps":null,"awake":null,"cpu_millis":null,"memory_mb":null,"storage_gb":null}';
+    INSERT INTO tenant (name, display, quota, created_at) VALUES ('blue', 'Blue', '{"apps":5,"awake":2,"cpu_millis":2000,"memory_mb":1024,"storage_gb":5}', 1);
+    INSERT INTO app (name, id, owner, status, current, policy_override) VALUES ('kept', 'id-kept', 'user:ann', 'registered', NULL, '{}');`);
+  old.close();
+  const store = new SqliteStore(file);
+  const quota = async (name: string) => (await store.tenant(name as TenantName))?.quota;
+  assert.deepEqual([await quota(DEFAULT_TENANT), await quota('blue'), (await store.app('kept' as AppName))?.expiresAt], [
+    { apps: null, ephemeral: null, awake: null, cpu_millis: null, memory_mb: null, storage_gb: null },
+    { apps: 5, ephemeral: 3, awake: 2, cpu_millis: 2000, memory_mb: 1024, storage_gb: 5 },
+    null,
+  ]);
+  await store.close();
 });
 
 const restrictions: TokenRestrictions = { expiresAt: 2, scopes: ['read'], appIds: null };

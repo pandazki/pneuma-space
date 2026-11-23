@@ -4,7 +4,7 @@ PneumaSpace deploys stateful web apps on one trusted host (M1) or an organizatio
 
 - The platform model has no agent, LLM, template chooser or host integration. Those words appear only under `templates/` and `examples/` and in docs that describe examples.
 - The gateway is Node.js LTS with built-in modules only and no runtime dependencies, written in TypeScript that Node runs directly (ADR 0012). It speaks every protocol it needs itself: Docker and Kubernetes APIs over HTTP, S3 and its admin API over SigV4-signed HTTP (ADR 0013), PostgreSQL and Redis over their wire protocols through its own minimal clients (ADR 0025). No npm driver, no jobs for provisioning. Example apps may use any runtime and packages.
-- App state lives in `/data` volumes and platform-provided services, never in the container filesystem. Publish and remove keep every volume, database, key prefix and bucket. Only purge deletes, and only from `removed`.
+- App state lives in `/data` volumes and platform-provided services, never in the container filesystem. Publish and remove keep every volume, database, key prefix and bucket. Only purge deletes, and only from `removed`; an ephemeral app is also deleted by discard and when it expires (ADR 0038).
 - Trust boundaries are in `REQUIREMENTS.md` (M1: one trusted host) and `REQUIREMENTS-M2.md` (M2: one organization, members who err but are not hostile). Never describe loopback binding, shared networks, per-app roles, ACLs, NetworkPolicies or namespaces as tenant isolation against a hostile tenant; that is M3.
 - Object bytes never pass through an app container or the gateway. Static bytes pass through the gateway only.
 

@@ -159,6 +159,18 @@ Public release also requires the following checks on the actual deployment. Loca
 | AC-SAAS-16 | Exhausting compute, memory, processes, storage or request capacity in one account is refused at its limits while another account and the control plane remain usable; billable resource use is bounded and visible. |
 | AC-SAAS-17 | On the required Cloudflare deployment, every supported contract-1 runtime and capability passes its original acceptance rows; an export restores application artifacts, persistent state and account ownership on a second adapter, with the source data retained. |
 
+## Ephemeral apps
+
+These rows cover [ADR 0038](adr/0038-ephemeral-apps.md) and US-P-17 and run in `test:acceptance` against `docker compose up -d`.
+
+| ID | Check |
+| --- | --- |
+| AC-EPH-1 | `appctl publish <name> <image> --ephemeral --ttl 120` prints the end; the listing and the detail show `expiresAt` 120 s after the publish and access `tenant`. A republish with another ttl makes release 2 and keeps `expiresAt`. A publish without the marker answers 409, as does one with the marker for a durable app, which keeps its release. Setting access `org` or `public` answers 409. A ttl above `ephemeral_max_ttl_seconds` answers 400 and creates no app. |
+| AC-EPH-2 | `POST /api/apps/<name>/discard` on a registered ephemeral app with written files and db: the address returns 404, the app leaves the listing, its volumes and bucket are gone, and the audit holds `app.discard` started and ok after an `app.publish` carrying the marker. On a durable app it answers 409 and the app stays registered. |
+| AC-EPH-3 | An ephemeral app with `--ttl 10` is gone, with its volume, within 30 s and no request, and the audit holds `app.expire` started and ok by `platform`. One whose end passes while the gateway is stopped is gone within 30 s of the gateway starting again. |
+| AC-EPH-4 | The default tenant's `ephemeral` quota is null. In a tenant with `ephemeral` 1, one ephemeral app counts 1 in `ephemeral` and 0 in `apps`; a second answers 409 with quota resource `ephemeral` until the first is discarded. |
+| AC-EPH-5 | An ephemeral app declaring `schedule: "* * * * *"` has no delivery after a minute boundary; `POST /apps/<name>/_pneuma-space/trigger/<t>` with a service token returns 202 and the delivery runs. |
+
 ## Cloud profile (contract 2)
 
 These rows cover [US-C-1 through US-C-7](user-stories.md#云端首版) and the [cloud contract](app-contract.md#cloud-profile-contract-2). Run the cloud group on the local Workers engine and repeat account/domain-dependent cases on an explicitly configured staging deployment. Local results do not establish production isolation or OAuth availability. Unchanged M1/M2 rows still apply to their existing deployment profiles.
