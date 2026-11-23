@@ -37,7 +37,11 @@ function reply(request: Recorded): unknown {
   if (request.url === '/api/bundles') return { bundle: createHash('sha256').update(request.body).digest('hex') };
   if (request.url.endsWith('/release')) return { app: 'a1b2c3', number: 1 };
   if (request.url === '/api/tokens') return { token: 'one-time-secret-42', subject: 'service:ci' };
-  if (request.url === '/api/apps') return requests.filter((r) => r.url.endsWith('/release')).map((r) => ({ name: r.url.split('/')[3], address: `https://${r.url.split('/')[3]}.apps.test/` }));
+  if (request.url === '/api/apps') {
+    return requests.filter((r) => r.url.endsWith('/release')).map((r) => ({
+      name: r.url.split('/')[3], address: `https://${r.url.split('/')[3]}.apps.test/`, expiresAt: json(r).ephemeral ? Date.UTC(2026, 10, 9, 0, 10) : null,
+    }));
+  }
   return JSON.parse(request.body.toString() || 'null');
 }
 
@@ -351,6 +355,29 @@ describe('appctl state', () => {
     const { stdout } = await appctl(['state', 'notes', '--json']);
     assert.deepEqual(JSON.parse(stdout), STATE);
   });
+});
+
+test('AC-EPH-1 publish --ephemeral --ttl sends the marker with its ttl and prints when the app ends', async () => {
+  const dir = source({ contract: 1, capabilities: { static: { dir: 'dist' } } }, { 'dist/index.html': '<h1>hi</h1>' });
+  const result = await appctl(['publish', 'trial', dir, '--ephemeral', '--ttl', '120']);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(json(requests[1]).ephemeral, { ttl_seconds: 120 });
+  assert.match(result.stdout, /trial\s+https:\/\/trial\.apps\.test\/\s+release 1\s+expires 2026-11-09T00:10:00\.000Z/);
+  requests = [];
+  assert.equal((await appctl(['publish', 'trial', dir, '--ephemeral'])).code, 0);
+  assert.deepEqual(json(requests[1]).ephemeral, {});
+});
+
+test('AC-EPH-1 publish --ttl without --ephemeral, or with a ttl that is not whole seconds, is a usage error before any request', async () => {
+  const dir = source({ contract: 1, capabilities: { static: { dir: 'dist' } } }, { 'dist/index.html': '<h1>hi</h1>' });
+  for (const args of [['--ttl', '60'], ['--ephemeral', '--ttl', '1.5']]) assert.equal((await appctl(['publish', 'trial', dir, ...args])).code, 1);
+  assert.deepEqual(requests, []);
+});
+
+test('AC-EPH-2 discard posts to the discard path without asking', async () => {
+  const { code, stdout } = await appctl(['discard', 'trial']);
+  assert.deepEqual([code, requests.map((r) => `${r.method} ${r.url}`)], [0, ['POST /api/apps/trial/discard']]);
+  assert.match(stdout, /discarded trial/);
 });
 
 test('purge -y purges without asking', async () => {

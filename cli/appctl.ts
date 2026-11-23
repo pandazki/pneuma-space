@@ -27,7 +27,7 @@ class Failure extends Error {
 }
 
 const USAGE = `usage:
-  appctl publish <name> <dir|image> [--owner <subject>] [--tenant <t>] [--tag <tag>] [--manifest <file>] [--registry <host[/prefix]>]
+  appctl publish <name> <dir|image> [--owner <subject>] [--tenant <t>] [--tag <tag>] [--manifest <file>] [--registry <host[/prefix]>] [--ephemeral [--ttl <seconds>]]
   appctl init <dir> [--container|--static]
   appctl list
   appctl show <name>
@@ -36,6 +36,7 @@ const USAGE = `usage:
   appctl unquarantine <name>
   appctl remove <name>
   appctl purge <name> [--yes|-y]
+  appctl discard <name>
   appctl policy [<name>] key=value ...
   appctl owner <name> <subject>
   appctl access <name> tenant|org|public
@@ -55,7 +56,7 @@ const admin = (process.env.PNEUMA_SPACE_ADMIN ?? `http://127.0.0.1:${ADMIN_PORT}
 const bearer: Record<string, string> = process.env.PNEUMA_SPACE_TOKEN ? { authorization: `Bearer ${process.env.PNEUMA_SPACE_TOKEN}` } : {};
 
 type Options = {
-  owner?: string; tag?: string; manifest?: string; registry?: string; container?: boolean; static?: boolean; yes?: boolean; tail?: string;
+  owner?: string; tag?: string; manifest?: string; registry?: string; container?: boolean; static?: boolean; yes?: boolean; tail?: string; ephemeral?: boolean; ttl?: string;
   tenant?: string; since?: string; action?: string; actor?: string; json?: boolean; kind?: string; label?: string; display?: string;
 };
 
@@ -247,6 +248,8 @@ async function publish([rawName, target, ...extra]: string[], options: Options):
   const name = appName(rawName);
   const owner = options.owner ?? (process.env.PNEUMA_SPACE_OWNER || undefined);
   if (owner !== undefined) subject(owner);
+  if (options.ttl !== undefined && (!options.ephemeral || !/^[1-9]\d*$/.test(options.ttl))) throw usage('--ttl takes whole seconds and needs --ephemeral');
+  const ephemeral = options.ephemeral ? { ephemeral: options.ttl ? { ttl_seconds: Number(options.ttl) } : {} } : {};
   const fromDir = existsSync(target) && statSync(target).isDirectory();
   const manifestFile = fromDir ? join(target, 'pneuma-space.json') : resolve(options.manifest ?? 'pneuma-space.json');
   const manifest = readManifest(manifestFile);
@@ -264,9 +267,9 @@ async function publish([rawName, target, ...extra]: string[], options: Options):
     if (code) codeBundle(target, code);
     const [bundleRoot, bundled] = code ? [code, bundleFiles(code)] : [staticRoot, files];
     const bundle = bundleRoot && bundled ? (await api('POST', ADMIN_PATHS.bundles, ReadableStream.from(tar(bundleRoot, bundled)))).bundle : null;
-    const release = await api('PUT', ADMIN_PATHS.release(name), { image, manifest, bundle, ...(owner && { owner }), ...(options.tenant && { tenant: options.tenant }) });
-    const listed = (await api('GET', ADMIN_PATHS.apps) as { name: string; address: string }[]).find((app) => app.name === name);
-    console.log(`${name}  ${listed?.address ?? '-'}  release ${release.number}`);
+    const release = await api('PUT', ADMIN_PATHS.release(name), { image, manifest, bundle, ...(owner && { owner }), ...(options.tenant && { tenant: options.tenant }), ...ephemeral });
+    const listed = (await api('GET', ADMIN_PATHS.apps) as { name: string; address: string; expiresAt?: number | null }[]).find((app) => app.name === name);
+    console.log(`${name}  ${listed?.address ?? '-'}  release ${release.number}${listed?.expiresAt ? `  expires ${new Date(listed.expiresAt).toISOString()}` : ''}`);
   } finally {
     if (code) rmSync(code, { recursive: true, force: true });
   }
@@ -306,7 +309,7 @@ function one(args: string[], what: string): string {
 async function list(args: string[]): Promise<void> {
   if (args.length) throw usage('list takes no arguments');
   for (const app of await api('GET', ADMIN_PATHS.apps)) {
-    console.log([app.name, app.address, `release ${app.release ?? '-'}`, app.status, app.instance].join('\t'));
+    console.log([app.name, app.address, `release ${app.release ?? '-'}`, app.status, app.instance, ...(app.expiresAt ? [`expires ${new Date(app.expiresAt).toISOString()}`] : [])].join('\t'));
   }
 }
 
@@ -459,6 +462,11 @@ const COMMANDS: Record<string, (args: string[], options: Options) => unknown> = 
     console.log(`removed ${name}; data kept, purge deletes it`);
   },
   purge,
+  discard: async (args) => {
+    const name = one(args, 'discard');
+    await api('POST', ADMIN_PATHS.discard(name));
+    console.log(`discarded ${name}; its data is deleted`);
+  },
   policy,
   owner,
   access: async (args) => {
@@ -499,6 +507,8 @@ async function main(argv: string[]): Promise<void> {
         kind: { type: 'string' },
         label: { type: 'string' },
         display: { type: 'string' },
+        ephemeral: { type: 'boolean' },
+        ttl: { type: 'string' },
       },
     });
   } catch (error) {
