@@ -7,7 +7,7 @@ import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
-  ADMIN_PATHS, ADMIN_PORT, CAPABILITIES, InputError, ManifestError, appName, declaredKinds, parseManifest, subject,
+  ADMIN_PATHS, ADMIN_PORT, CAPABILITIES, InputError, MANAGER_HEADER, ManifestError, appName, declaredKinds, managerName, managerUrl, parseManifest, subject,
   type Manifest, type RuntimeKind, type StateInventory,
 } from '../gateway/src/model.ts';
 import { namesRegistry } from '../gateway/src/kube-infra.ts';
@@ -28,6 +28,7 @@ class Failure extends Error {
 
 const USAGE = `usage:
   appctl publish <name> <dir|image> [--owner <subject>] [--tenant <t>] [--tag <tag>] [--manifest <file>] [--registry <host[/prefix]>] [--ephemeral [--ttl <seconds>]]
+                 [--manager <name> [--manager-url <url>]]
   appctl init <dir> [--container|--static]
   appctl list
   appctl show <name>
@@ -37,6 +38,7 @@ const USAGE = `usage:
   appctl remove <name>
   appctl purge <name> [--yes|-y]
   appctl discard <name>
+  appctl unmanage <name>
   appctl policy [<name>] key=value ...
   appctl owner <name> <subject>
   appctl access <name> tenant|org|public
@@ -49,22 +51,25 @@ const USAGE = `usage:
   appctl quota <tenant> [key=value ...]
   appctl audit [--tenant <t>] [--since 7d|24h|2026-11-01] [--action <action>] [--actor <subject>] [--json]
 admin API: PNEUMA_SPACE_ADMIN (default http://127.0.0.1:${ADMIN_PORT}), PNEUMA_SPACE_TOKEN sent as Authorization: Bearer
+managed apps: --manager <name> names an app's manager, which every write to it needs; on publish it also sets it
 registry: --registry or PNEUMA_SPACE_REGISTRY; publish pushes a local image there and sends its digest`;
 
 const usage = (why: string) => new Failure(EXIT.usage, `${why}\n${USAGE}`);
 const admin = (process.env.PNEUMA_SPACE_ADMIN ?? `http://127.0.0.1:${ADMIN_PORT}`).replace(/\/$/, '');
 const bearer: Record<string, string> = process.env.PNEUMA_SPACE_TOKEN ? { authorization: `Bearer ${process.env.PNEUMA_SPACE_TOKEN}` } : {};
+/** `--manager` as the header on every request (ADR 0039). */
+let named: Record<string, string> = {};
 
 type Options = {
   owner?: string; tag?: string; manifest?: string; registry?: string; container?: boolean; static?: boolean; yes?: boolean; tail?: string; ephemeral?: boolean; ttl?: string;
-  tenant?: string; since?: string; action?: string; actor?: string; json?: boolean; kind?: string; label?: string; display?: string;
+  manager?: string; 'manager-url'?: string; tenant?: string; since?: string; action?: string; actor?: string; json?: boolean; kind?: string; label?: string; display?: string;
 };
 
 async function api(method: string, path: string, body?: unknown): Promise<any> {
   const tar = body instanceof ReadableStream;
-  const init = body === undefined ? { method, headers: bearer } : {
+  const init = body === undefined ? { method, headers: { ...bearer, ...named } } : {
     method,
-    headers: { ...bearer, 'content-type': tar ? 'application/x-tar' : 'application/json' },
+    headers: { ...bearer, ...named, 'content-type': tar ? 'application/x-tar' : 'application/json' },
     body: tar ? body : JSON.stringify(body),
     duplex: 'half',
   };
@@ -250,6 +255,9 @@ async function publish([rawName, target, ...extra]: string[], options: Options):
   if (owner !== undefined) subject(owner);
   if (options.ttl !== undefined && (!options.ephemeral || !/^[1-9]\d*$/.test(options.ttl))) throw usage('--ttl takes whole seconds and needs --ephemeral');
   const ephemeral = options.ephemeral ? { ephemeral: options.ttl ? { ttl_seconds: Number(options.ttl) } : {} } : {};
+  const url = options['manager-url'];
+  if (url !== undefined && !options.manager) throw usage('--manager-url needs --manager');
+  const manager = options.manager ? { manager: { name: options.manager, ...(url !== undefined && { url: managerUrl(url) }) } } : {};
   const fromDir = existsSync(target) && statSync(target).isDirectory();
   const manifestFile = fromDir ? join(target, 'pneuma-space.json') : resolve(options.manifest ?? 'pneuma-space.json');
   const manifest = readManifest(manifestFile);
@@ -267,7 +275,7 @@ async function publish([rawName, target, ...extra]: string[], options: Options):
     if (code) codeBundle(target, code);
     const [bundleRoot, bundled] = code ? [code, bundleFiles(code)] : [staticRoot, files];
     const bundle = bundleRoot && bundled ? (await api('POST', ADMIN_PATHS.bundles, ReadableStream.from(tar(bundleRoot, bundled)))).bundle : null;
-    const release = await api('PUT', ADMIN_PATHS.release(name), { image, manifest, bundle, ...(owner && { owner }), ...(options.tenant && { tenant: options.tenant }), ...ephemeral });
+    const release = await api('PUT', ADMIN_PATHS.release(name), { image, manifest, bundle, ...(owner && { owner }), ...(options.tenant && { tenant: options.tenant }), ...ephemeral, ...manager });
     const listed = (await api('GET', ADMIN_PATHS.apps) as { name: string; address: string; expiresAt?: number | null }[]).find((app) => app.name === name);
     console.log(`${name}  ${listed?.address ?? '-'}  release ${release.number}${listed?.expiresAt ? `  expires ${new Date(listed.expiresAt).toISOString()}` : ''}`);
   } finally {
@@ -309,7 +317,10 @@ function one(args: string[], what: string): string {
 async function list(args: string[]): Promise<void> {
   if (args.length) throw usage('list takes no arguments');
   for (const app of await api('GET', ADMIN_PATHS.apps)) {
-    console.log([app.name, app.address, `release ${app.release ?? '-'}`, app.status, app.instance, ...(app.expiresAt ? [`expires ${new Date(app.expiresAt).toISOString()}`] : [])].join('\t'));
+    console.log([
+      app.name, app.address, `release ${app.release ?? '-'}`, app.status, app.instance,
+      ...(app.expiresAt ? [`expires ${new Date(app.expiresAt).toISOString()}`] : []), ...(app.manager ? [`managed by ${app.manager.name}`] : []),
+    ].join('\t'));
   }
 }
 
@@ -467,6 +478,11 @@ const COMMANDS: Record<string, (args: string[], options: Options) => unknown> = 
     await api('POST', ADMIN_PATHS.discard(name));
     console.log(`discarded ${name}; its data is deleted`);
   },
+  unmanage: async (args) => {
+    const name = one(args, 'unmanage');
+    await api('DELETE', ADMIN_PATHS.manager(name));
+    console.log(`${name} has no manager`);
+  },
   policy,
   owner,
   access: async (args) => {
@@ -509,11 +525,14 @@ async function main(argv: string[]): Promise<void> {
         display: { type: 'string' },
         ephemeral: { type: 'boolean' },
         ttl: { type: 'string' },
+        manager: { type: 'string' },
+        'manager-url': { type: 'string' },
       },
     });
   } catch (error) {
     throw usage((error as Error).message);
   }
+  if (parsed.values.manager !== undefined) named = { [MANAGER_HEADER]: managerName(parsed.values.manager) };
   const [command, ...args] = parsed.positionals;
   const run = command !== undefined && Object.hasOwn(COMMANDS, command) ? COMMANDS[command] : null;
   if (!run) throw usage(command ? `unknown command "${command}"` : 'no command');

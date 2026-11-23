@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 const repo = fileURLToPath(new URL('../', import.meta.url));
 const FAKE_IMAGE = `sha256:${'ab'.repeat(32)}`;
 
-type Recorded = { method: string; url: string; body: Buffer; authorization?: string };
+type Recorded = { method: string; url: string; body: Buffer; authorization?: string; manager?: string };
 let requests: Recorded[] = [];
 let server: Server;
 let admin: string;
@@ -39,7 +39,7 @@ function reply(request: Recorded): unknown {
   if (request.url === '/api/tokens') return { token: 'one-time-secret-42', subject: 'service:ci' };
   if (request.url === '/api/apps') {
     return requests.filter((r) => r.url.endsWith('/release')).map((r) => ({
-      name: r.url.split('/')[3], address: `https://${r.url.split('/')[3]}.apps.test/`, expiresAt: json(r).ephemeral ? Date.UTC(2026, 10, 9, 0, 10) : null,
+      name: r.url.split('/')[3], address: `https://${r.url.split('/')[3]}.apps.test/`, expiresAt: json(r).ephemeral ? Date.UTC(2026, 10, 9, 0, 10) : null, manager: json(r).manager ?? null,
     }));
   }
   return JSON.parse(request.body.toString() || 'null');
@@ -49,7 +49,8 @@ before(async () => {
   server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk);
-    const recorded = { method: req.method!, url: req.url!, body: Buffer.concat(chunks), authorization: req.headers.authorization };
+    const named = req.headers['x-pneuma-space-manager'] as string | undefined;
+    const recorded = { method: req.method!, url: req.url!, body: Buffer.concat(chunks), authorization: req.headers.authorization, ...(named && { manager: named }) };
     requests.push(recorded);
     if (recorded.authorization && /^\/api\/tenants\/[^/]+\/tokens$/.test(recorded.url)) {
       return void res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'tokens.issue.personal accepts a signed-in user, not a token' }));
@@ -378,6 +379,37 @@ test('AC-EPH-2 discard posts to the discard path without asking', async () => {
   const { code, stdout } = await appctl(['discard', 'trial']);
   assert.deepEqual([code, requests.map((r) => `${r.method} ${r.url}`)], [0, ['POST /api/apps/trial/discard']]);
   assert.match(stdout, /discarded trial/);
+});
+
+test('AC-MGR-1 publish --manager --manager-url sets the manager in the body and names it in the header', async () => {
+  const dir = source({ contract: 1, capabilities: { static: { dir: 'dist' } } }, { 'dist/index.html': '<h1>hi</h1>' });
+  const result = await appctl(['publish', 'board', dir, '--manager', 'deployer', '--manager-url', 'https://deploy.test/board']);
+  assert.equal(result.code, 0, result.stderr);
+  const release = requests.find((r) => r.url.endsWith('/release'))!;
+  assert.deepEqual([json(release).manager, release.manager], [{ name: 'deployer', url: 'https://deploy.test/board' }, 'deployer']);
+});
+
+test('AC-MGR-1 list prints the manager of a managed app', async () => {
+  const dir = source({ contract: 1, capabilities: { static: { dir: 'dist' } } }, { 'dist/index.html': '<h1>hi</h1>' });
+  await appctl(['publish', 'board', dir, '--manager', 'deployer']);
+  assert.match((await appctl(['list'])).stdout, /^board\t.*\tmanaged by deployer$/m);
+});
+
+test('AC-MGR-2 --manager names the manager on remove', async () => {
+  assert.equal((await appctl(['remove', 'board', '--manager', 'deployer'])).code, 0);
+  assert.deepEqual(requests.map((r) => [r.method, r.url, r.manager]), [['POST', '/api/apps/board/remove', 'deployer']]);
+});
+
+test('AC-MGR-3 unmanage deletes the manager naming it', async () => {
+  const { code, stdout } = await appctl(['unmanage', 'board', '--manager', 'deployer']);
+  assert.deepEqual([code, requests.map((r) => [r.method, r.url, r.manager])], [0, [['DELETE', '/api/apps/board/manager', 'deployer']]]);
+  assert.match(stdout, /board has no manager/);
+});
+
+test('--manager-url without --manager, or a manager name outside the grammar, is a usage error before any request', async () => {
+  const dir = source({ contract: 1, capabilities: { static: { dir: 'dist' } } }, { 'dist/index.html': '<h1>hi</h1>' });
+  for (const args of [['--manager-url', 'https://deploy.test/'], ['--manager', 'Deployer']]) assert.equal((await appctl(['publish', 'board', dir, ...args])).code, 1);
+  assert.deepEqual(requests, []);
 });
 
 test('purge -y purges without asking', async () => {
