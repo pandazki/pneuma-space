@@ -1,3 +1,3 @@
 node_modules
 data
-sdk/*.test.ts
+**/*.test.ts

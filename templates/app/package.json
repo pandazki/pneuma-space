@@ -7,7 +7,7 @@
   },
   "scripts": {
     "start": "node src/server.ts",
-    "test": "node --test 'sdk/*.test.ts'"
+    "test": "node --test '**/*.test.ts'"
   },
   "dependencies": {
     "pg": "^8.23.1",
