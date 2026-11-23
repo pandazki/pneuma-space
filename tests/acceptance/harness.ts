@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -347,4 +347,46 @@ export async function deployIsolate(t: TestContext, dir = fixtureDir('isolate'))
   t.after(() => cleanup(name));
   await publishIsolate(name, dir);
   return { name, id: await appId(name) };
+}
+
+// Browser (AC-GAME-2, AC-MGR-5)
+
+const CHROME = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+
+export type Page = { evaluate(expression: string): Promise<unknown> };
+
+export async function chrome(t: TestContext): Promise<(url: string) => Promise<Page>> {
+  const profile = mkdtempSync(join(scratch, 'pneuma-space-acc-chrome-'));
+  const browser = spawn(CHROME, [
+    '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run',
+    '--disable-features=WebRtcHideLocalIpsWithMdns', 'about:blank',
+  ], { stdio: 'ignore' });
+  t.after(async () => {
+    const exited = new Promise((ok) => browser.once('exit', ok));
+    browser.kill();
+    await exited;
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+  });
+  const port = await waitFor(() => {
+    try { return readFileSync(join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0]; } catch { return null; }
+  }, 15_000, 'Chrome DevTools port');
+  return async (url) => {
+    const target = await (await fetch(`http://127.0.0.1:${port}/json/new?${url}`, { method: 'PUT' })).json();
+    const ws = new WebSocket(target.webSocketDebuggerUrl);
+    await new Promise((ok) => ws.addEventListener('open', ok));
+    t.after(() => ws.close());
+    let id = 0;
+    const pending = new Map<number, (m: any) => void>();
+    ws.addEventListener('message', (e) => {
+      const message = JSON.parse(String(e.data));
+      pending.get(message.id)?.(message);
+      pending.delete(message.id);
+    });
+    return {
+      evaluate: (expression) => new Promise((ok) => {
+        pending.set(++id, (m) => ok(m.result?.result?.value));
+        ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
+      }),
+    };
+  };
 }

@@ -8,3 +8,4 @@ import './media.test.ts';
 import './worker.test.ts';
 import './isolate.test.ts';
 import './ephemeral.test.ts';
+import './managed.test.ts';
