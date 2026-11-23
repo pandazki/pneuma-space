@@ -12,15 +12,15 @@ PneumaSpace 把有状态的 web 应用部署到一台可信机器上，M2 起也
 
 | 实体 | 键 | 字段 | 存放 | 唯一写者 |
 | --- | --- | --- | --- | --- |
-| App | `name`，文法 `^[a-z][a-z0-9-]{0,39}$` | `id`（不透明，首次发布生成；所有内部资源名和容器名用它，`name` 只用于地址）, `owner`, `tenant`, `access: tenant / org / public`（默认 `org`，ADR 0022）, `status`, `current`, `policy_override` | 平台库 | Registry |
+| App | `name`，文法 `^[a-z][a-z0-9-]{0,39}$` | `id`（不透明，首次发布生成；所有内部资源名和容器名用它，`name` 只用于地址）, `owner`, `tenant`, `access: tenant / org / public`（默认 `org`，ADR 0022）, `status`, `current`, `policy_override`, `expires_at?`（临时应用的结束时刻，首次发布时定下，之后不变；持久应用为空，ADR 0038） | 平台库 | Registry |
 | Release | `(app, number)` | `image?`（Docker 平面是镜像 id，K8s 平面是 `<registry>/<repo>@sha256:...`，ADR 0019）, `manifest`, `bundle?`, `release_key = sha256(image, manifest, bundle)`, `published_at` | 平台库 | Registry |
 | Manifest | 值对象 | `contract`, `capabilities: kind -> declaration` | Release 内 | 发布边界解析一次，下游不再校验 |
 | Binding | `(app, kind, provider)` | `state: active / suspended`（行是真相，后端向行收敛）, `resource`（Provider 私有：卷名、库名和口令、ACL 用户、bucket 和密钥） | 行在平台库；资源在该 Provider 的后端服务和命名卷里 | 行由 Registry 写，资源由该 Provider 写 |
-| Policy | 全局一行；每 App 的 override 存在 `App.policy_override` | `idle_seconds=60`, `ready_timeout_seconds=15`, `drain_timeout_seconds=30`, `connection_idle_seconds=21600`, `trigger_timeout_seconds=600`, `db_backend=sqlite`, `cpu_millis=1000`, `memory_mb=256`（ADR 0023）；全局另有 `timezone`（cron 用，默认 UTC）和 `usage_retention_days=90`, `events_retention_days=14`, `events_max_rows=1000000`（ADR 0024） | 平台库 | Registry |
-| Trigger | `(app, name)` | `schedule?`（cron，空表示只按需） | 平台库，随 Release 在同一事务重写 | Registry |
+| Policy | 全局一行；每 App 的 override 存在 `App.policy_override` | `idle_seconds=60`, `ready_timeout_seconds=15`, `drain_timeout_seconds=30`, `connection_idle_seconds=21600`, `trigger_timeout_seconds=600`, `db_backend=sqlite`, `cpu_millis=1000`, `memory_mb=256`（ADR 0023）；全局另有 `timezone`（cron 用，默认 UTC）和 `usage_retention_days=90`, `events_retention_days=14`, `events_max_rows=1000000`（ADR 0024），`ephemeral_ttl_seconds=600`, `ephemeral_max_ttl_seconds=3600`（ADR 0038） | 平台库 | Registry |
+| Trigger | `(app, name)` | `schedule?`（cron，空表示只按需；临时应用总为空，ADR 0038） | 平台库，随 Release 在同一事务重写 | Registry |
 | Delivery | `id` | `app`, `trigger`, `scheduled_for`, `caller?`, `idempotency_key?`, `body`, `state`, `attempts`, `next_attempt_at` | 平台库 | Scheduler |
 | Token | `id` | `tenant`, `subject`（服务令牌 `service:<tenant>.<name>`，个人令牌是签发人的 `user:<id>`，M1 迁来的保留 `service:<name>`）, `label`, `hash`（`sha256`）, `created_by`, `created_at`, `revoked_at` | 平台库 | Registry；IdentityProvider 只读 |
-| Tenant | `name`，文法同 App | `display`, `quota`（`apps`, `awake`, `cpu_millis`, `memory_mb`, `storage_gb`；建租户时从 `DEFAULT_QUOTA` 拷贝，`null` 不限，ADR 0023）, `created_at` | 平台库 | Registry |
+| Tenant | `name`，文法同 App | `display`, `quota`（`apps`, `ephemeral`, `awake`, `cpu_millis`, `memory_mb`, `storage_gb`；建租户时从 `DEFAULT_QUOTA` 拷贝，`null` 不限，ADR 0023；`apps` 只计持久应用，`ephemeral` 计临时应用，ADR 0038）, `created_at` | 平台库 | Registry |
 | User | `id`（主体去掉 `user:`） | `name`, `groups`（只显示）, `first_seen`, `last_seen` | 平台库，首次经过上游时登记 | Registry（认证路径经 `registry.sighted()`） |
 | Membership | `(tenant, user)` | `role: admin / member`；每个租户至少一个 `admin` | 平台库 | Registry |
 | Bundle | `sha256(tar)` | 文件索引 `path -> (size, etag, content_type)`；tar 内路径相对 `static.dir`（isolate 发布的代码包相对应用根，静态根为 `static.dir`，ADR 0017） | 对象存储 `pneuma-space-bundles/<sha256>/` | BundleStore |
@@ -61,7 +61,7 @@ Provider 不知道应用用哪种运行时：`inject` 给出的存储绑定是�
 
 ### 1.4 状态机
 
-App：`(无) --publish--> registered --remove--> removed --publish--> registered`；`removed --purge--> purging --> (无)`。`remove` 把该 App 的所有 Binding 置 `suspended`（凭据失效，数据保留），地址 404；`publish` 把当前 Release 声明的 kind 置 `active`（`ensure`），未声明的置 `suspended`；`purge` 销毁所有 Binding 的资源，不论状态；`purging` 持久化，重启后续跑。只能从 `removed` 进入 `purging`。
+App：`(无) --publish--> registered --remove--> removed --publish--> registered`；`removed --purge--> purging --> (无)`。`remove` 把该 App 的所有 Binding 置 `suspended`（凭据失效，数据保留），地址 404；`publish` 把当前 Release 声明的 kind 置 `active`（`ensure`），未声明的置 `suspended`；`purge` 销毁所有 Binding 的资源，不论状态；`purging` 持久化，重启后续跑。只能从 `removed` 进入 `purging`，临时应用除外：discard 或到期从任一状态进入或续跑 `purging`，其余与 purge 相同（ADR 0038）。
 
 Instance：`asleep --acquire--> waking --就绪--> awake`；`awake --无 Lease 且闲置到期--> stopping --> asleep`；`awake --retire--> draining --Lease 清空或到期--> stopping --> asleep`（容器或 Pod 删掉，实例行留下，handle 为空，下次唤醒用新 Release）；`asleep --retire--> asleep`，直接删掉停止的容器。`waking` 就绪超时回到 `asleep`，等待者得到 502。所有转换在该实例自己的锁内，没有全局锁；多副本时这把锁是实例行上带 `state` 和 `epoch` 的条件更新（ADR 0020）。`awake -> stopping` 要求 Lease 集合为空，`acquire` 在同一把锁内加 Lease，所以二者不会同时成立。`docker stop` 在锁外执行，期间到达的请求等待后重新唤醒，代价是一次多余的停启，不是被切断的连接。
 
@@ -74,7 +74,7 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 | ID | 保证 |
 | --- | --- |
 | INV-1 | 地址只从 `App.name` 推导。Release 号、容器名、节点、租户从不出现在 URL 里；子域名和路径两种地址都只由名字决定。 |
-| INV-2 | Binding 行只由 `publish` 和 `db_backend` 变更创建，只由 `purge` 删除；`remove` 和 `publish` 只改它的 `state`；资源只由 `purge` 销毁；`purge` 只能从 `removed` 进入。 |
+| INV-2 | Binding 行只由 `publish` 和 `db_backend` 变更创建，只由 `purge` 删除；`remove` 和 `publish` 只改它的 `state`；资源只由 `purge` 销毁；`purge` 只能从 `removed` 进入，临时应用的丢弃和到期除外（ADR 0038）。 |
 | INV-3 | `awake -> stopping` 要求 Lease 为空；流、长连接、触发执行都是 Lease。平台进程存活期间只有 1.4 列出的三种有界情况会由平台结束 Lease，它们都不是闲置停止；重启是例外，1.4 写明了后果。 |
 | INV-4 | Delivery 在任何尝试前已持久；投递通过 `trigger` Lease 唤醒实例；重启后 `delivering` 回到 `due`。上限：连续 5 次失败后 `failed` 并在控制台可见，停机期间错过的槽位只补最近一个。 |
 | INV-5 | Ingress 丢弃所有入站 `X-Pneuma-Space-*`；`upstream` 模式另丢弃上游身份头（值是 JWT 时）和 `PNEUMA_SPACE_IDENTITY_STRIP_COOKIES` 列出的 cookie，应用拿不到能在控制台重放的凭据。身份头只从 `IdentityProvider.authenticate` 的结果设置。主体本身可信到什么程度由 Provider 决定：本地桩是自报姓名，只在可信机器上有意义；`upstream` 的主体来自验签的 JWT，K8s 平面上只有网关能到达实例，身份头因此不可伪造（ADR 0021）。 |
@@ -94,7 +94,7 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 
 | 组件 | 拥有 | 从不做 |
 | --- | --- | --- |
-| Registry | 平台库里 App、Release、Binding、Policy、Trigger、Token、Tenant、User、Membership 的行；每 App 的只读 RouteView，在任何改变该 App 行的命令后重建，其他副本经变更通知重建；publish、remove、purge、policy、owner、access、tenant、token、member、quota 命令，同一应用名的命令经 `Store.exclusive` 互斥，同一 bundle 的提交和删除经 `Store.exclusiveBundle` 互斥；工作负载的 scale 命令，先问 Runtime 的 home 和 Infra 的将删副本再转交 `Infra.scale`（ADR 0032） | 直接调 Docker 或 K8s（镜像引用的解析走 `Infra.resolveImage`）；连应用 |
+| Registry | 平台库里 App、Release、Binding、Policy、Trigger、Token、Tenant、User、Membership 的行；每 App 的只读 RouteView，在任何改变该 App 行的命令后重建，其他副本经变更通知重建；publish、remove、purge、discard、到期、policy、owner、access、tenant、token、member、quota 命令，同一应用名的命令经 `Store.exclusive` 互斥，同一 bundle 的提交和删除经 `Store.exclusiveBundle` 互斥；工作负载的 scale 命令，先问 Runtime 的 home 和 Infra 的将删副本再转交 `Infra.scale`（ADR 0032） | 直接调 Docker 或 K8s（镜像引用的解析走 `Infra.resolveImage`）；连应用 |
 | Ingress | 8080 请求路径：取应用名、访问范围检查、身份头、静态服务、流式和 WebSocket 转发、通过 `acquire` 取得 request 和 channel Lease、Stats | 写平台库（只读 RouteView，只写 Stats） |
 | Runtime | Instance 行、本副本的 Lease、三张表的镜像、reaper；`Runtimes` 门面按 RunSpec 分发到 `RUNTIMES` 表里的实现：`container`（Docker 容器或 Pod）和 `isolate`（runner 服务，`--profile isolate` 或 StatefulSet）（ADR 0017、0019） | 读 Manifest（只接收 Injection 集合）；计失败或隔离（那是 Guard 的事） |
 | Guard | 订阅生命周期事件，按 Policy 计失败、退避和隔离，状态在 `guard` 行，acquire 前被问；一处实现覆盖所有运行时和副本 | 探活（那是各运行时的事） |
@@ -115,7 +115,7 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 | `Infra.resolveImage` | 本地镜像 id | 组织仓库里的 digest |
 | `Store` | `SqliteStore` | `PgStore` |
 
-集群上周期性工作归领导者，即持有 advisory lock `pneuma-space.leader` 的副本：回收器、Scheduler、接管、孤儿 Pod 和 worker 清理、死副本行清理、Provider 收敛、`awake_ms` 和存储采样、观测数据清扫。正确性不靠领导者（INV-11），它失联只让回收和投递延迟（ADR 0020 第 4 条）。单机是 N=1 的特例。
+集群上周期性工作归领导者，即持有 advisory lock `pneuma-space.leader` 的副本：回收器、Scheduler、接管、孤儿 Pod 和 worker 清理、死副本行清理、Provider 收敛、`awake_ms` 和存储采样、观测数据清扫、临时应用的到期清扫（ADR 0038）。正确性不靠领导者（INV-11），它失联只让回收和投递延迟（ADR 0020 第 4 条）。单机是 N=1 的特例。
 
 单机平台库是 `/data/pneuma-space.sqlite3`（WAL），集群是一个独立的 PostgreSQL（`PNEUMA_SPACE_STORE_URL`），不与应用的 `db` 后端共用（ADR 0025）。每张表一个写者。`ensure` 和 `suspend` 的结果由 Registry 写回 Binding 行。发布在一个事务里写 Release、Trigger、Binding 和 `App.current`，这是用数据库而不是 JSON 文件的原因。列出 500 个 App 是一次查询加一次内存读，没有 Docker 或 K8s 调用。
 
@@ -167,10 +167,11 @@ K8s 平面：命名空间 `pneuma-space` 放网关、runner 和集群内的平�
 appctl publish <name> <dir | image>          Registry.publish
  ├─ 读 pneuma-space.json                       ├─ 解析 manifest，错误 400；Infra.resolveImage 把引用解析为 id 或 digest，不存在 404
  ├─ 需要容器时 docker build                    ├─ 声明的 kind 没有可用 Provider（profile 未开）409
- ├─ K8s 平面再 docker push                     ├─ registered 且 release_key 等于当前，返回当前；removed 时继续，不插新 Release
+ ├─ K8s 平面再 docker push                     ├─ 已有 App 是否临时与请求的标记不符 409（ADR 0038）
+                                               ├─ registered 且 release_key 等于当前，返回当前；removed 时继续，不插新 Release
  ├─ 打包静态目录，POST /api/bundles            ├─ 有 files 或 SQLite 的 Binding 行而运行时与上一个有运行时的 Release 不同 409（ADR 0028）
-                                               ├─ 一个事务，租户行锁下：首次发布插 App 行（id、owner、tenant，current 为空，地址 404），
-                                               │   资源才有归属，判 apps；缺的 files、SQLite Binding 行判 storage_gb 后插成 suspended；超额 409（INV-12）
+                                               ├─ 一个事务，租户行锁下：首次发布插 App 行（id、owner、tenant、expires_at，current 为空，地址 404），
+                                               │   资源才有归属，判 apps（临时应用判 ephemeral）；缺的 files、SQLite Binding 行判 storage_gb 后插成 suspended；超额 409（INV-12）
  └─ PUT /api/apps/<name>/release               ├─ 对每个声明的资源 kind：provider.ensure（创建或收敛，置 active）
                                                ├─ 有 bundle 时进它的 exclusiveBundle：从对象存储重读索引，已删 409；下一步的事务也在其中（ADR 0028）
                                                ├─ 一个事务：插 Release，重写 Trigger，Binding 行置 active 或 suspended，
