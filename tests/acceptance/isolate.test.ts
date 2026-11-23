@@ -65,7 +65,7 @@ test('AC-ISO-1', { timeout: 120_000 }, async (t) => {
   const ms = performance.now() - started;
   t.diagnostic(`isolate cold start, first request: ${ms.toFixed(0)} ms`);
   assert.equal(response.status, 200);
-  assert.match(body, /src\/server\.ts/, 'the scaffold page answers');
+  assert.match(body, /src\/app\.ts/, 'the scaffold page answers');
   assert.ok(ms < 1000, `first request ${ms.toFixed(0)} ms, gate 1000 ms`);
   assert.equal(containerFor(await appId(name)), null, 'docker ps -a shows no container for an isolate app');
 });

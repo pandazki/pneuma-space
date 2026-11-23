@@ -1,6 +1,6 @@
 # PneumaSpace app template
 
-You are building a web app for PneumaSpace: one Node program behind the address `/apps/<name>/`, by default an isolate, a worker thread in the platform's runner service, published without Docker. The platform starts it on the first request, stops it when idle, and provides what the app declares in `pneuma-space.json`. This file, `src/server.ts`, `ui/` and `sdk/` are all you need; the default `src/server.ts` is a finished page that greets the visitor by name or offers a sign-in link. The full contract is `docs/app-contract.md` in the PneumaSpace repository.
+You are building a web app for PneumaSpace: one Node program behind the address `/apps/<name>/`, by default an isolate, a worker thread in the platform's runner service, published without Docker. The platform starts it on the first request, stops it when idle, and provides what the app declares in `pneuma-space.json`. This file, `src/`, `ui/` and `sdk/` are all you need; the default `src/app.ts` is a finished page that greets the visitor by name or offers a sign-in link, and `src/server.ts` serves it. The full contract is `docs/app-contract.md` in the PneumaSpace repository.
 
 ## What the platform gives
 
@@ -97,6 +97,28 @@ curl -X POST -H 'X-Pneuma-Space-Delivery: d1' -H 'X-Pneuma-Space-Attempt: 1' htt
 Locally nothing serves `public/`, so pages arrive without `ui.css` and `ui.js`; publish to see them styled.
 
 Set only the variables of capabilities you declare; without `kv`, skip Redis and `PNEUMA_SPACE_KV_*`. Locally `identity` is `null` unless you send `X-Pneuma-Space-Subject`; on the platform a declared `identity` guarantees one unless it says `"required": false`. For the PostgreSQL path run `docker run -d --name dev-pg -p 127.0.0.1:5432:5432 -e POSTGRES_PASSWORD=pw postgres:16-alpine` and use `PNEUMA_SPACE_DB_URL=postgresql://postgres:pw@127.0.0.1:5432/postgres`. In a `--container` app `docker build .` checks the image. Unused `sdk/*` files and their tests may be deleted. If the published app answers 502 "did not start", `appctl logs <name>` shows the app's output, and the local run above shows the same startup error.
+
+Put each test next to the code it covers as `src/<name>.test.ts`; `npm test` runs every `*.test.ts` outside `node_modules`. Keep `serve()` in `src/server.ts` so a test can import the handler from `src/app.ts` and serve it on a free port without the platform, as in this `src/app.test.ts`:
+
+```ts
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import type { AddressInfo } from 'node:net';
+import { serve } from '../sdk/serve.ts';
+import { handler } from './app.ts';
+
+test('the page greets a signed-in visitor by name', async () => {
+  const server = serve(handler, { port: 0 });
+  await once(server, 'listening');
+  const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/`, {
+    headers: { 'x-pneuma-space-subject': 'user:ann', 'x-pneuma-space-name': 'Ann' },
+  });
+  const html = await res.text();
+  server.close();
+  assert.match(html, /Hello, Ann/);
+});
+```
 
 ## Publish
 

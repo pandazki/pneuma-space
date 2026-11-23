@@ -21,7 +21,7 @@ The console is at http://127.0.0.1:8081/, apps at `http://127.0.0.1:8080/apps/<n
 
 ```sh
 node cli/appctl.ts init myapp                     # templates/app, an isolate app; --container adds a Dockerfile, --static copies templates/static
-cd myapp                                          # edit pneuma-space.json and src/server.ts; AGENTS.md there is the guide
+cd myapp                                          # edit pneuma-space.json and src/app.ts; AGENTS.md there is the guide
 node ../cli/appctl.ts publish myapp . --owner user:me
 open http://127.0.0.1:8080/apps/myapp/
 ```
