@@ -121,6 +121,8 @@ export const PG_MIGRATIONS = [
   `ALTER TABLE app ADD COLUMN IF NOT EXISTS expires_at BIGINT;
    UPDATE tenant SET quota = jsonb_set(quota::jsonb, '{ephemeral}', CASE WHEN name = '${DEFAULT_TENANT}' THEN 'null'::jsonb ELSE '3'::jsonb END)::text
      WHERE quota::jsonb -> 'ephemeral' IS NULL`,
+  // ADR 0039: an app's manager.
+  'ALTER TABLE app ADD COLUMN IF NOT EXISTS manager TEXT; ALTER TABLE app ADD COLUMN IF NOT EXISTS manager_url TEXT',
 ];
 
 /** Runs every step not yet recorded, each in its own transaction, under a lock so replicas that start together migrate once. */

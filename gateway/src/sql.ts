@@ -4,7 +4,7 @@ import type { HostedAuthRecord, HostedIdentityLink } from './hosted-model.ts';
 import {
   DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS, USAGE_COUNTERS,
   type App, type AppId, type AppName, type AuditFilter, type AuditRecord, type Binding, type BundleId, type Change, type Delivery, type DeliveryFilter,
-  type DeliveryId, type DeliveryState, type EventFilter, type EventRecord, type GuardRecord, type Instance, type InstanceLog, type LeaseTally, type Membership,
+  type DeliveryId, type DeliveryState, type EventFilter, type EventRecord, type GuardRecord, type Instance, type InstanceLog, type LeaseTally, type ManagerName, type Membership,
   type Policy, type QuotaUsage, type Release, type ReleaseNumber, type Replica, type ReplicaId, type RowLock, type Stats,
   type StoreOps, type Tenant, type TenantName, type Token, type Trigger, type TriggerName, type Usage, type UsageBucket, type UsageFilter,
   type UsageStep, type User,
@@ -46,6 +46,7 @@ const toApp = (r: Row): App => ({
   policyOverride: json(r.policy_override),
   registeredAt: num(r.registered_at),
   expiresAt: numOrNull(r.expires_at),
+  manager: r.manager == null ? null : { name: r.manager as ManagerName, url: (r.manager_url as string | null) ?? null },
   version: num(r.version),
 });
 
@@ -60,6 +61,8 @@ const toRelease = (r: Row): Release => ({
   publishedAt: num(r.published_at),
 });
 
+/** The app columns a write compares, so an unchanged row raises no version. */
+const APP_COLUMNS = ['id', 'tenant', 'access', 'owner', 'status', 'current', 'policy_override', 'registered_at', 'expires_at', 'manager', 'manager_url'] as const;
 const RELEASE_COLUMNS = ['number', 'image', 'manifest', 'bundle', 'runtime', 'release_key', 'published_at'] as const;
 /** Searches the `release_bundle` index on both engines. */
 export const BUNDLE_REFERENCED = 'SELECT 1 FROM release WHERE bundle = $1 AND app <> $2 LIMIT 1';
@@ -215,12 +218,16 @@ export class SqlOps implements StoreOps {
   /** A write that changes nothing raises no version and announces nothing, so restart convergence leaves the rows as they were. */
   async putApp(app: App) {
     const { changes } = await this.#s.run(
-      `INSERT INTO app (name, id, tenant, access, owner, status, current, policy_override, registered_at, expires_at, version) VALUES (${placeholders(10)}, 1)
+      `INSERT INTO app (name, id, tenant, access, owner, status, current, policy_override, registered_at, expires_at, manager, manager_url, version)
+       VALUES (${placeholders(12)}, 1)
        ON CONFLICT (name) DO UPDATE SET id = excluded.id, tenant = excluded.tenant, access = excluded.access, owner = excluded.owner,
          status = excluded.status, current = excluded.current, policy_override = excluded.policy_override, registered_at = excluded.registered_at,
-         expires_at = excluded.expires_at, version = app.version + 1
-       WHERE ${['id', 'tenant', 'access', 'owner', 'status', 'current', 'policy_override', 'registered_at', 'expires_at'].map((c) => `app.${c} IS DISTINCT FROM excluded.${c}`).join(' OR ')}`,
-      [app.name, app.id, app.tenant, app.access, app.owner, app.status, app.current, JSON.stringify(app.policyOverride), app.registeredAt, app.expiresAt ?? null],
+         expires_at = excluded.expires_at, manager = excluded.manager, manager_url = excluded.manager_url, version = app.version + 1
+       WHERE ${APP_COLUMNS.map((c) => `app.${c} IS DISTINCT FROM excluded.${c}`).join(' OR ')}`,
+      [
+        app.name, app.id, app.tenant, app.access, app.owner, app.status, app.current, JSON.stringify(app.policyOverride), app.registeredAt, app.expiresAt ?? null,
+        app.manager?.name ?? null, app.manager?.url ?? null,
+      ],
     );
     if (changes > 0) this.#touch({ kind: 'app', name: app.name });
   }

@@ -9,10 +9,10 @@ import { gather, peerSources, RING, type RequestLog, type Source } from './reque
 import { appActions, can, freshCaller, LOCAL_CALLER, reach, type Action, type Authority } from './authz.ts';
 import type { Answer, Identity } from './identity.ts';
 import {
-  ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, LOGOUT_PATH, NotFound, QuotaExceeded, RUNTIME_KINDS, RUNTIMES, Stranded, USAGE_COUNTERS,
-  appName, bundleId, parseManifest, subject, tenantName,
+  ACCESS_LEVELS, ADMIN_PATHS, ADMIN_PORT, AUDIT_ACTIONS, Conflict, DEFAULT_TENANT, InputError, LOGOUT_PATH, MANAGER_HEADER, NotFound, QuotaExceeded, RUNTIME_KINDS, RUNTIMES, Stranded,
+  USAGE_COUNTERS, appName, bundleId, managerName, managerUrl, parseManifest, subject, tenantName,
   type Access, type Actor, type App, type AppId, type AuditAction, type AuditRecord, type Binding, type BundleStore, type Caller, type CapabilityProvider, type Guard, type Infra,
-  type Registry, type Release, type ReplicaId, type Role, type StateInventory, type StoreOps, type Subject, type TenantName, type UsageBucket, type UsageCounters,
+  type ManagerChange, type ManagerName, type Registry, type Release, type ReplicaId, type Role, type StateInventory, type StoreOps, type Subject, type TenantName, type UsageBucket, type UsageCounters,
 } from './model.ts';
 
 export type AdminDeps = {
@@ -152,6 +152,22 @@ function ephemeralOf(raw: unknown): { readonly ttlSeconds: number | null } | nul
   const ttl = (raw as { ttl_seconds?: unknown }).ttl_seconds;
   if (ttl != null && !(Number.isInteger(ttl) && (ttl as number) > 0)) throw new InputError(`ephemeral.ttl_seconds must be a positive integer number of seconds, got ${JSON.stringify(ttl)}`);
   return { ttlSeconds: (ttl as number | null | undefined) ?? null };
+}
+
+/** `{"name", "url"?}` sets the manager a publish leaves; absent or null keeps the app's (ADR 0039). */
+function managerOf(raw: unknown): ManagerChange | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).some((key) => key !== 'name' && key !== 'url')) throw new InputError('manager must be an object with a name and an optional url');
+  const { name, url } = raw as { name?: unknown; url?: unknown };
+  if (typeof name !== 'string') throw new InputError('manager.name must be a string');
+  return { name: managerName(name), ...(url !== undefined && { url: optional(url, 'manager.url', managerUrl) }) };
+}
+
+/** The manager a request names in its header (ADR 0039); null when it names none. */
+function namedOf({ request }: Ctx): ManagerName | null {
+  const raw = request.headers[MANAGER_HEADER];
+  if (Array.isArray(raw)) throw new InputError(`${MANAGER_HEADER} names one manager`);
+  return raw === undefined ? null : managerName(raw);
 }
 
 function userId(raw: unknown): string {
@@ -355,7 +371,10 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
       },
       audit: onAppAudit('app.publish', (body, result) => {
         const release = result as Release | undefined;
-        return { ...(body.ephemeral != null && { ephemeral: body.ephemeral }), ...(release && { release: release.number, releaseKey: release.releaseKey }) };
+        return {
+          ...(body.ephemeral != null && { ephemeral: body.ephemeral }), ...(body.manager != null && { manager: body.manager }),
+          ...(release && { release: release.number, releaseKey: release.releaseKey }),
+        };
       }),
       handle: (ctx, scope) => registry.publish({
         name: app(ctx.params[0]),
@@ -365,6 +384,8 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
         owner: firstOwner(ctx),
         tenant: scope.tenant ?? DEFAULT_TENANT,
         ephemeral: ephemeralOf(ctx.body.ephemeral),
+        manager: managerOf(ctx.body.manager),
+        named: namedOf(ctx),
         authorize: async (tx, current) => {
           const caller = await freshCaller(ctx.caller, tx);
           if (!caller) throw new Forbidden('credential expired or revoked during publish');
@@ -379,25 +400,26 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
       audit: { action: 'policy.global', target: () => ({ kind: 'policy', id: 'global', tenant: null }), details: (patch) => ({ patch }) },
       handle: ({ body }) => registry.setGlobalPolicy(body),
     },
-    appRoute('PUT', ADMIN_PATHS.appPolicy('<name>'), 'app.policy', ({ params: [name], body }) => registry.setAppPolicy(app(name), body), {
+    appRoute('PUT', ADMIN_PATHS.appPolicy('<name>'), 'app.policy', (ctx) => registry.setAppPolicy(app(ctx.params[0]), ctx.body, namedOf(ctx)), {
       json: true, audit: onAppAudit('app.policy', (patch) => ({ patch })),
     }),
-    appRoute('PUT', ADMIN_PATHS.access('<name>'), 'app.access', async ({ params: [name], body }) => {
+    appRoute('PUT', ADMIN_PATHS.access('<name>'), 'app.access', async (ctx) => {
+      const { params: [name], body } = ctx;
       if (!(ACCESS_LEVELS as readonly unknown[]).includes(body.access)) throw new InputError(`access must be one of ${ACCESS_LEVELS.join(', ')}`);
-      await registry.setAccess(app(name), body.access as Access);
+      await registry.setAccess(app(name), body.access as Access, namedOf(ctx));
       return { access: body.access };
     }, { json: true, audit: onAppAudit('app.access', (body) => ({ access: body.access })) }),
-    appRoute('PUT', ADMIN_PATHS.owner('<name>'), 'app.owner', async ({ params: [name], body }) => {
-      const owner = subject(String(body.owner));
-      await registry.setOwner(app(name), owner);
+    appRoute('PUT', ADMIN_PATHS.owner('<name>'), 'app.owner', async (ctx) => {
+      const owner = subject(String(ctx.body.owner));
+      await registry.setOwner(app(ctx.params[0]), owner, namedOf(ctx));
       return { owner };
     }, { json: true, audit: onAppAudit('app.owner', (body) => ({ owner: body.owner })) }),
-    appRoute('PUT', ADMIN_PATHS.move('<name>'), 'app.move', async ({ params: [name], body }) => {
-      const tenant = tenantName(String(body.tenant));
-      await registry.moveApp(app(name), tenant);
+    appRoute('PUT', ADMIN_PATHS.move('<name>'), 'app.move', async (ctx) => {
+      const tenant = tenantName(String(ctx.body.tenant));
+      await registry.moveApp(app(ctx.params[0]), tenant, namedOf(ctx));
       return { tenant };
     }, { json: true, audit: onAppAudit('app.move', (body) => ({ to: body.tenant })) }),
-    appRoute('POST', ADMIN_PATHS.remove('<name>'), 'app.remove', async ({ params: [name] }) => (await registry.remove(app(name)), { status: 'removed' }), {
+    appRoute('POST', ADMIN_PATHS.remove('<name>'), 'app.remove', async (ctx) => (await registry.remove(app(ctx.params[0]), namedOf(ctx)), { status: 'removed' }), {
       audit: onAppAudit('app.remove'),
     }),
     appRoute('POST', ADMIN_PATHS.unquarantine('<name>'), 'app.remove', async ({ params: [name] }) => {
@@ -413,15 +435,19 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
     appRoute('POST', ADMIN_PATHS.kill('<name>'), 'app.kill', async ({ params: [name] }) => (await registry.kill(app(name)), { instance: 'asleep' }), {
       audit: onAppAudit('app.kill'),
     }),
-    appRoute('POST', ADMIN_PATHS.purge('<name>'), 'app.purge', async ({ params: [name], body }) => {
+    appRoute('POST', ADMIN_PATHS.purge('<name>'), 'app.purge', async (ctx) => {
+      const { params: [name], body } = ctx;
       if (hosted && body.confirm !== name) throw new InputError('type the app name to confirm purge');
-      await registry.purge(app(name));
+      await registry.purge(app(name), namedOf(ctx));
       return { status: 'purged' };
     }, {
       ...(hosted && { json: true as const }), audit: onAppAudit('app.purge'),
     }),
-    appRoute('POST', ADMIN_PATHS.discard('<name>'), 'app.discard', async ({ params: [name] }) => (await registry.discard(app(name)), { status: 'discarded' }), {
+    appRoute('POST', ADMIN_PATHS.discard('<name>'), 'app.discard', async (ctx) => (await registry.discard(app(ctx.params[0]), namedOf(ctx)), { status: 'discarded' }), {
       audit: onAppAudit('app.discard'),
+    }),
+    appRoute('DELETE', ADMIN_PATHS.manager('<name>'), 'app.release', async (ctx) => (await registry.clearManager(app(ctx.params[0]), namedOf(ctx)), { manager: null }), {
+      audit: onAppAudit('app.manager'),
     }),
     { method: 'GET', path: at(ADMIN_PATHS.tenants), action: 'tenants', handle: () => store.tenants() },
     {
@@ -560,6 +586,7 @@ async function audited(store: AdminDeps['store'], audit: Audit, ctx: Ctx, scope:
   const target = audit.target(ctx, scope);
   const action = typeof audit.action === 'string' ? audit.action : await audit.action(ctx, scope);
   const who = actorColumns(caller.actor);
+  const named = ctx.request.headers[MANAGER_HEADER];
   const row = (result: AuditResult, details: Record<string, unknown>) => store.insertAudit({
     at: Date.now(),
     actor: who.actor,
@@ -569,7 +596,7 @@ async function audited(store: AdminDeps['store'], audit: Audit, ctx: Ctx, scope:
     targetKind: target.kind,
     target: target.id,
     result,
-    details: { ...who.details, ...details, ...(scope.appId && { appId: scope.appId }) },
+    details: { ...who.details, ...(named !== undefined && { namedManager: named }), ...details, ...(scope.appId && { appId: scope.appId }) },
   });
   const settle = (result: AuditResult, details: Record<string, unknown>) =>
     row(result, details).catch((error: Error) => emit('audit-failed', null, { action, target: target.id, result, error: error.message }));

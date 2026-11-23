@@ -6,7 +6,7 @@ import type { Readable } from 'node:stream';
 import type { HostedAccount, HostedActor, HostedSignup, HostedStoreOps, TokenRestrictions, VerifiedHostedIdentity } from './hosted-model.ts';
 
 import {
-  Conflict, InputError, ManifestError, type AppId, type AppName, type Brand, type BundleId, type CronExpr, type DeliveryId,
+  Conflict, InputError, ManifestError, NAME_PATTERN, type AppId, type AppName, type Brand, type BundleId, type CronExpr, type DeliveryId,
   type ImageId, type ReleaseNumber, type Subject, type TenantName, type TriggerName,
 } from '../../shared/values.ts';
 import { asObject, capabilitiesFor, onlyKeys, runtimesFor, type IdentityDeclaration } from '../../shared/catalog.ts';
@@ -155,9 +155,31 @@ export type App = {
   readonly registeredAt: number;
   /** An ephemeral app's end, fixed at its first publish; null for a durable app (ADR 0038). */
   readonly expiresAt: number | null;
+  readonly manager: Manager | null;
   /** Raised by the store on every write of the app's rows (app, release, trigger, binding); a reader applies only a newer one (ADR 0025 item 5). */
   readonly version: number;
 };
+
+export type ManagerName = Brand<string, 'ManagerName'>;
+/** Who runs the app's releases from outside the platform, and where a person acts through it (ADR 0039); a fact about the App, never in the manifest. */
+export type Manager = { readonly name: ManagerName; readonly url: string | null };
+/** A publish's manager: an absent url keeps the current one while the name stays. */
+export type ManagerChange = { readonly name: ManagerName; readonly url?: string | null };
+const MANAGER_URL_MAX = 2048;
+
+export function managerName(raw: string): ManagerName {
+  if (!NAME_PATTERN.test(raw)) throw new InputError(`manager name "${raw}" must match ${NAME_PATTERN.source}`);
+  return raw as ManagerName;
+}
+
+/** Absolute http or https only, so the console never links a script URL. */
+export function managerUrl(raw: string): string {
+  const protocol = URL.canParse(raw) ? new URL(raw).protocol : null;
+  if (raw.length > MANAGER_URL_MAX || (protocol !== 'https:' && protocol !== 'http:')) {
+    throw new InputError(`manager url must be an absolute http or https URL of at most ${MANAGER_URL_MAX} characters, got ${JSON.stringify(raw)}`);
+  }
+  return raw;
+}
 
 export type Release = {
   readonly app: AppId;
@@ -419,6 +441,7 @@ export type RouteView = {
   readonly identity: IdentityDeclaration | null;
   readonly policyOverride: PolicyOverride;
   readonly expiresAt: number | null;
+  readonly manager: Manager | null;
   readonly version: number;
 };
 
@@ -435,6 +458,10 @@ export type PublishRequest = {
   readonly tenant?: TenantName;
   /** On every publish of an ephemeral app and no publish of a durable one (ADR 0038); `ttlSeconds` is read on the first publish only, null for the policy default. */
   readonly ephemeral?: { readonly ttlSeconds: number | null } | null;
+  /** The manager after this publish; absent or null keeps the app's (ADR 0039). */
+  readonly manager?: ManagerChange | null;
+  /** The manager the request names (ADR 0039). */
+  readonly named?: ManagerName | null;
 };
 
 export type AppSummary = {
@@ -462,6 +489,7 @@ export type AppSummary = {
   /** The node the instance runs on; null when asleep or not known. */
   readonly node: string | null;
   readonly expiresAt: number | null;
+  readonly manager: Manager | null;
 };
 
 export type StateEntry = Omit<Binding, 'app' | 'resource'> & { readonly location: Readonly<Record<string, string>> };
@@ -603,7 +631,7 @@ export const EVENT_SETTLE_MS = 2000;
 export const AUDIT_ACTIONS = [
   'app.publish', 'app.remove', 'app.purge', 'app.policy', 'app.owner', 'app.access', 'app.move', 'app.unquarantine',
   'policy.global', 'token.issue', 'token.revoke', 'tenant.create', 'tenant.quota', 'member.add', 'member.role', 'member.remove',
-  'app.stop', 'app.restart', 'app.kill', 'cluster.scale', 'cluster.restart', 'cluster.drain', 'app.discard', 'app.expire',
+  'app.stop', 'app.restart', 'app.kill', 'cluster.scale', 'cluster.restart', 'cluster.drain', 'app.discard', 'app.expire', 'app.manager',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export type AuditRecord = {
@@ -1050,19 +1078,24 @@ export type SchedulerView = {
 /** The secret appears here once; the store keeps only its hash. */
 export type IssuedToken = { readonly id: string; readonly token: string; readonly subject: Subject };
 
-/** Hides the platform rows behind commands; the only writer of everything but Delivery and Stats. */
+/**
+ * Hides the platform rows behind commands; the only writer of everything but Delivery and Stats. `named` is the manager a request names:
+ * a command that changes a managed app refuses with Conflict unless it is the app's (ADR 0039).
+ */
 export interface Registry {
   publish(request: PublishRequest): Promise<Release>;
-  remove(name: AppName): Promise<void>;
+  remove(name: AppName, named?: ManagerName | null): Promise<void>;
   /** Only from removed; otherwise Conflict. */
-  purge(name: AppName): Promise<void>;
+  purge(name: AppName, named?: ManagerName | null): Promise<void>;
   /** Purge from any status, for an ephemeral app only; Conflict for a durable one (ADR 0038). */
-  discard(name: AppName): Promise<void>;
+  discard(name: AppName, named?: ManagerName | null): Promise<void>;
   /** The leader's sweep: discards every ephemeral app whose end is at or before `now`, whatever its status (ADR 0038). */
   expire(now?: number): Promise<void>;
   setGlobalPolicy(patch: Partial<Policy>): Promise<Policy>;
-  setAppPolicy(name: AppName, patch: PolicyPatch): Promise<PolicyOverride>;
-  setOwner(name: AppName, owner: Subject): Promise<void>;
+  setAppPolicy(name: AppName, patch: PolicyPatch, named?: ManagerName | null): Promise<PolicyOverride>;
+  setOwner(name: AppName, owner: Subject, named?: ManagerName | null): Promise<void>;
+  /** Clearing an unmanaged app's manager changes nothing. */
+  clearManager(name: AppName, named?: ManagerName | null): Promise<void>;
   /** `local` only: a service token in DEFAULT_TENANT (ADR 0022 item 4). */
   issueToken(name: string): Promise<IssuedToken>;
   /** Copies DEFAULT_QUOTA; `admins` are user ids, at least one. */
@@ -1074,9 +1107,9 @@ export interface Registry {
   issueTenantToken(tenant: TenantName, subject: Subject, label: string, createdBy: Subject | 'local', restrictions?: TokenRestrictions): Promise<IssuedToken>;
   registerHostedIdentity(identity: VerifiedHostedIdentity, signup: HostedSignup): Promise<HostedAccount>;
   revokeToken(tenant: TenantName, id: string): Promise<void>;
-  setAccess(name: AppName, access: Access): Promise<void>;
+  setAccess(name: AppName, access: Access, named?: ManagerName | null): Promise<void>;
   /** Retires the instance, then moves the row, so quota, labels and tokens switch at once (ADR 0022 item 3). */
-  moveApp(name: AppName, tenant: TenantName): Promise<void>;
+  moveApp(name: AppName, tenant: TenantName, named?: ManagerName | null): Promise<void>;
   /** Retires the instance; the next request wakes it (ADR 0026 item 3). */
   stop(name: AppName): Promise<void>;
   /** Retires the instance and wakes it again at once. */
@@ -1129,6 +1162,9 @@ export const HEADERS = {
   idempotencyKey: 'idempotency-key',
 } as const;
 
+/** Names the manager on a write to a managed app (ADR 0039); not a credential. */
+export const MANAGER_HEADER = 'x-pneuma-space-manager';
+
 export const ADMIN_PATHS = {
   /** Unauthenticated liveness for probes (ADR 0022 item 5). */
   healthz: '/healthz',
@@ -1157,6 +1193,7 @@ export const ADMIN_PATHS = {
   remove: (name: string) => `/api/apps/${name}/remove`,
   purge: (name: string) => `/api/apps/${name}/purge`,
   discard: (name: string) => `/api/apps/${name}/discard`,
+  manager: (name: string) => `/api/apps/${name}/manager`,
   unquarantine: (name: string) => `/api/apps/${name}/unquarantine`,
   stop: (name: string) => `/api/apps/${name}/stop`,
   restart: (name: string) => `/api/apps/${name}/restart`,

@@ -29,6 +29,10 @@ const ephemeral = (db: DatabaseSync): string => `
   UPDATE tenant SET quota = json_set(quota, '$.ephemeral', json('null')) WHERE name = '${DEFAULT_TENANT}' AND json_type(quota, '$.ephemeral') IS NULL;
   UPDATE tenant SET quota = json_set(quota, '$.ephemeral', 3) WHERE name <> '${DEFAULT_TENANT}' AND json_type(quota, '$.ephemeral') IS NULL;`;
 
+/** ADR 0039: an app's manager; repeatable like `hosted`. */
+const managed = (db: DatabaseSync): string =>
+  db.prepare("SELECT 1 FROM pragma_table_info('app') WHERE name = 'manager'").get() ? '' : 'ALTER TABLE app ADD COLUMN manager TEXT; ALTER TABLE app ADD COLUMN manager_url TEXT;';
+
 /** Append only; `PRAGMA user_version` counts the steps applied. */
 export const MIGRATIONS: Migration[] = [
   `CREATE TABLE app (
@@ -116,6 +120,7 @@ export const MIGRATIONS: Migration[] = [
   // constructor kept a newer version may also set the version back to before this step.
   (db) => `CREATE INDEX IF NOT EXISTS release_bundle ON release (bundle); ${hosted(db)}`,
   ephemeral,
+  managed,
 ];
 
 /** `$n` placeholders become `?n`, which node:sqlite binds by position. */
