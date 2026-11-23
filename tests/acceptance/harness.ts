@@ -101,6 +101,12 @@ export const adminClient = {
   setOwner: (name: string, owner: string) => call('PUT', ADMIN_PATHS.owner(name), json({ owner })),
   remove: (name: string) => call('POST', ADMIN_PATHS.remove(name)),
   purge: (name: string) => call('POST', ADMIN_PATHS.purge(name)),
+  discard: (name: string) => call('POST', ADMIN_PATHS.discard(name)),
+  setAccess: (name: string, access: string) => call('PUT', ADMIN_PATHS.access(name), json({ access })),
+  createTenant: (name: string, admin: string) => call('POST', ADMIN_PATHS.tenants, json({ name, admins: [admin] })),
+  quota: (tenant: string) => call('GET', ADMIN_PATHS.quota(tenant)),
+  setQuota: (tenant: string, fields: Record<string, unknown>) => call('PUT', ADMIN_PATHS.quota(tenant), json(fields)),
+  audit: (target: string) => call('GET', `${ADMIN_PATHS.audit}?target=${encodeURIComponent(target)}`),
   createToken: (name: string) => call('POST', ADMIN_PATHS.tokens, json({ name })),
 };
 
@@ -130,7 +136,7 @@ export function teardownSuite(): void {
 }
 
 export type Capabilities = Record<string, unknown>;
-export type PublishOptions = { image: string | null; capabilities: Capabilities; staticDir?: string; owner?: string };
+export type PublishOptions = { image: string | null; capabilities: Capabilities; staticDir?: string; owner?: string; flags?: readonly string[] };
 
 export function appctl(...args: string[]): string {
   return execFileSync(process.execPath, [join(root, 'cli/appctl.ts'), ...args], {
@@ -141,7 +147,7 @@ export function appctl(...args: string[]): string {
 }
 
 /** `appctl publish` with a manifest written for this call; the static dir is copied next to it. */
-export function publish(name: string, { image, capabilities, staticDir, owner = OWNER }: PublishOptions): string {
+export function publish(name: string, { image, capabilities, staticDir, owner = OWNER, flags = [] }: PublishOptions): string {
   const dir = mkdtempSync(join(scratch, 'pneuma-space-acc-'));
   try {
     const caps = staticDir ? { ...capabilities, static: { dir: 'static' } } : capabilities;
@@ -149,7 +155,7 @@ export function publish(name: string, { image, capabilities, staticDir, owner = 
     writeFileSync(join(dir, 'pneuma-space.json'), JSON.stringify({ contract: 1, capabilities: caps }));
     const target = image ? [image, '--manifest', join(dir, 'pneuma-space.json')] : [dir];
     try {
-      return appctl('publish', name, ...target, '--owner', owner);
+      return appctl('publish', name, ...target, '--owner', owner, ...flags);
     } catch (error) {
       throw new Error(`appctl publish ${name} failed: ${(error as { stderr?: string }).stderr || (error as Error).message}`);
     }
