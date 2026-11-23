@@ -3,6 +3,7 @@
 // Run directly with Node.js >= 24: node site/build.ts
 // Outputs pure static HTML/CSS/JS/SVG/PNG/WOFF2 into site/dist/ for GitHub Pages (pandazki.im/pneuma-space).
 
+import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -374,6 +375,17 @@ function build() {
   writeFileSync(join(DIST_DIR, '.nojekyll'), '');
 
   console.log(`Built ${PAGES.length} pages + 37 ADRs into ${DIST_DIR}`);
+
+  if (process.argv.includes('--deploy')) {
+    rmSync(join(DIST_DIR, '.git'), { recursive: true, force: true });
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: DIST_DIR, stdio: 'inherit' });
+    git('init', '-b', 'gh-pages');
+    git('add', '-A');
+    git('commit', '-m', 'deploy: PneumaSpace documentation site');
+    git('push', '-f', `${REPO_URL}.git`, 'gh-pages:gh-pages');
+    rmSync(join(DIST_DIR, '.git'), { recursive: true, force: true });
+    console.log(`Deployed ${DIST_DIR} to ${REPO_URL} (branch gh-pages)`);
+  }
 }
 
 build();
