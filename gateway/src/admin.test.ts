@@ -426,3 +426,36 @@ test('hosted purge requires the exact typed app name (AC-SAAS-11)', async (t) =>
   assert.equal((await send(name)).status, 200);
   assert.equal(registry.view(name), null);
 });
+
+test('AC-EPH-2 POST /api/apps/<name>/discard ends an ephemeral app and writes app.discard started and ok rows', async (t) => {
+  const { call, server, store } = await admin();
+  t.after(() => server.close());
+  assert.equal((await call('PUT', '/api/apps/trial/release', { ...kvApp, ephemeral: { ttl_seconds: 60 } })).status, 200);
+  assert.deepEqual(await call('POST', '/api/apps/trial/discard'), { status: 200, body: { status: 'discarded' } });
+  assert.equal((await call('GET', '/api/apps/trial')).status, 404);
+  assert.deepEqual((await audit(store, 'trial')).filter((r) => r.action === 'app.discard').map((r) => r.result), ['started', 'ok']);
+});
+
+test('AC-EPH-2 POST /api/apps/<name>/discard on a durable app answers 409', async (t) => {
+  const { call, server, registry } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  assert.equal((await call('POST', '/api/apps/survey/discard')).status, 409);
+  assert.equal(registry.view(appName('survey'))?.status, 'registered');
+});
+
+test('AC-EPH-1 the publish audit row records the ephemeral marker of the release body', async (t) => {
+  const { call, server, store } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/trial/release', { ...kvApp, ephemeral: { ttl_seconds: 60 } });
+  assert.deepEqual((await audit(store, 'trial')).map((r) => r.details.ephemeral), [{ ttl_seconds: 60 }, { ttl_seconds: 60 }]);
+});
+
+test('AC-EPH-2 hosted discard needs no confirmation body', async (t) => {
+  const { server, base, registry } = await hostedAdmin();
+  t.after(() => server.close());
+  const name = appName('scratch');
+  await registry.publish({ name, image: 'example:1', manifest: parseManifest(kvApp.manifest), bundle: null, owner: subject('user:ana'), ephemeral: { ttlSeconds: null } });
+  const response = await hostedFetch(base + `/api/apps/${name}/discard`, { method: 'POST', headers: { host: 'control.test', origin: 'https://control.test', 'x-pneuma-space-csrf': 'csrf' } });
+  assert.deepEqual([response.status, registry.view(name)], [200, null]);
+});

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { changeKey, DEFAULT_TENANT, type AppName, type BundleId, type ImageId, type Leadership, type ReleaseNumber, type Subject } from './model.ts';
+import { changeKey, DEFAULT_TENANT, type AppName, type BundleId, type ImageId, type Leadership, type ReleaseNumber, type Subject, type TenantName } from './model.ts';
 import { Session, type PgOptions } from './pg.ts';
 import { replicaContract } from './registry.contract.ts';
 import { BUNDLE_REFERENCED } from './sql.ts';
@@ -42,7 +42,7 @@ function selfSigned(name: string): string {
 const skip = !dockerUp && 'Docker is not available';
 
 /** The steps both main and the hosted stack held before either appended one: main then added release_bundle, the hosted stack its tables. */
-const BEFORE_MERGE = PG_MIGRATIONS.length - 2;
+const BEFORE_MERGE = 2;
 
 async function migrated(session: Session, steps: number): Promise<void> {
   await session.simple('CREATE TABLE schema_migration (version INTEGER PRIMARY KEY, applied_at BIGINT NOT NULL)');
@@ -188,11 +188,30 @@ describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () 
     const snapshot = await Promise.all(tables.map(async (table) => (await old.query(`SELECT * FROM ${table}`)).rows));
     const store = await open({}, 'hosted_migration');
     for (const [index, table] of tables.entries()) {
-      const rows = (await old.query(`SELECT * FROM ${table}`)).rows.map(({ restrictions, ...row }) => row);
+      const rows = (await old.query(`SELECT * FROM ${table}`)).rows.map(({ restrictions, expires_at, ...row }) => row);
       assert.deepEqual(rows, snapshot[index]);
     }
     assert.equal((await store.token('legacy-hash'))?.restrictions, undefined);
     await old.close();
+  });
+
+  test('the ADR 0038 step gives every existing tenant an ephemeral quota of 3, the default one unlimited, and every existing app no end', async () => {
+    const admin = await Session.open(plain());
+    await admin.simple('CREATE DATABASE ephemeral_migration');
+    await admin.close();
+    const old = await Session.open(plain('ephemeral_migration'));
+    await migrated(old, PG_MIGRATIONS.length - 1);
+    await old.simple(`UPDATE tenant SET quota = '{"apps":null,"awake":null,"cpu_millis":null,"memory_mb":null,"storage_gb":null}';
+      INSERT INTO tenant (name, display, quota, created_at) VALUES ('blue', 'Blue', '{"apps":5,"awake":2,"cpu_millis":2000,"memory_mb":1024,"storage_gb":5}', 1);
+      INSERT INTO app (name, id, owner, status, current, policy_override) VALUES ('kept', 'id-kept', 'user:ann', 'registered', NULL, '{}');`);
+    await old.close();
+    const store = await open({}, 'ephemeral_migration');
+    const quota = async (name: string) => (await store.tenant(name as TenantName))?.quota;
+    assert.deepEqual([await quota(DEFAULT_TENANT), await quota('blue'), (await store.app('kept' as AppName))?.expiresAt], [
+      { apps: null, ephemeral: null, awake: null, cpu_millis: null, memory_mb: null, storage_gb: null },
+      { apps: 5, ephemeral: 3, awake: 2, cpu_millis: 2000, memory_mb: 1024, storage_gb: 5 },
+      null,
+    ]);
   });
 
   /** Migrates `database` as `before` leaves it, opens it with this gateway, and reads back what the merged schema holds. */

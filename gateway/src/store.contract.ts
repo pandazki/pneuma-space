@@ -20,7 +20,7 @@ const replica = 'replica-a' as ReplicaId;
 export function app(name: string, fields: Partial<App> = {}): App {
   return {
     name: name as AppName, id: appId(name), tenant: DEFAULT_TENANT, access: 'org', owner: 'user:ann' as Subject, status: 'registered',
-    current: null, policyOverride: {}, registeredAt: 0, version: 1, ...fields,
+    current: null, policyOverride: {}, registeredAt: 0, expiresAt: null, version: 1, ...fields,
   };
 }
 
@@ -439,6 +439,15 @@ export function storeContract(name: string, open: OpenStore): void {
       await bind('v1', 'object', 's3');
       await bind('v2', 'files', 'volume');
       assert.equal((await store.quotaUsed(tenant)).storage_gb, 4);
+    });
+
+    test('quotaUsed counts ephemeral apps apart from apps, and purging ones in neither (ADR 0038)', async () => {
+      const tenant = 'ochre' as TenantName;
+      await store.putApp(app('e-durable', { tenant }));
+      await store.putApp(app('e-trial', { tenant, expiresAt: 1 }));
+      await store.putApp(app('e-going', { tenant, expiresAt: 1, status: 'purging' }));
+      const { apps, ephemeral } = await store.quotaUsed(tenant);
+      assert.deepEqual([{ apps, ephemeral }, (await store.app('e-trial' as AppName))?.expiresAt], [{ apps: 1, ephemeral: 1 }, 1]);
     });
 
     test('instance log keeps one row per app', async () => {

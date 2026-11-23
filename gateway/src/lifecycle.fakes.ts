@@ -12,7 +12,7 @@ import { SqliteStore } from './store.ts';
 
 /** Registers the app a test RunSpec names, so a wake transaction finds its row; SQLite runs it before any later call. */
 export function register(store: SqliteStore, spec: RunSpec): void {
-  void store.putApp({ name: spec.name, id: spec.app, tenant: spec.tenant, access: 'org', owner: 'user:ann' as never, status: 'registered', current: spec.release, policyOverride: {}, registeredAt: 0, version: 0 });
+  void store.putApp({ name: spec.name, id: spec.app, tenant: spec.tenant, access: 'org', owner: 'user:ann' as never, status: 'registered', current: spec.release, policyOverride: {}, registeredAt: 0, expiresAt: null, version: 0 });
 }
 
 /** Never older than the app row, so a test spec never waits for a Registry refresh. */
@@ -100,7 +100,7 @@ export class FakeDriver implements Driver<RunSpec, string> {
 export async function registered(store: SqliteStore, policy: Partial<Policy> = {}) {
   const id = newAppId();
   const name = appName(`app-${id.slice(0, 8).toLowerCase()}`);
-  await store.putApp({ name, id, tenant: DEFAULT_TENANT, access: 'org', owner: 'user:ann' as never, status: 'registered', current: 1 as ReleaseNumber, policyOverride: {}, registeredAt: 0, version: 0 });
+  await store.putApp({ name, id, tenant: DEFAULT_TENANT, access: 'org', owner: 'user:ann' as never, status: 'registered', current: 1 as ReleaseNumber, policyOverride: {}, registeredAt: 0, expiresAt: null, version: 0 });
   let spec: RunSpec = {
     app: id, name, tenant: DEFAULT_TENANT, release: 1 as ReleaseNumber, runtime: { kind: 'container', image: 'sha256:fake' as ImageId },
     injection: { env: {}, storage: [], services: [] }, policy: { ...DEFAULT_POLICY, ...policy }, version: CURRENT,

@@ -145,6 +145,15 @@ function auditFilter(query: URLSearchParams) {
   };
 }
 
+/** `{"ttl_seconds"?: n}` marks an ephemeral app, a null or absent ttl taking the policy default; an absent or null marker, a durable one (ADR 0038). */
+function ephemeralOf(raw: unknown): { readonly ttlSeconds: number | null } | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).some((key) => key !== 'ttl_seconds')) throw new InputError('ephemeral must be an object with an optional ttl_seconds');
+  const ttl = (raw as { ttl_seconds?: unknown }).ttl_seconds;
+  if (ttl != null && !(Number.isInteger(ttl) && (ttl as number) > 0)) throw new InputError(`ephemeral.ttl_seconds must be a positive integer number of seconds, got ${JSON.stringify(ttl)}`);
+  return { ttlSeconds: (ttl as number | null | undefined) ?? null };
+}
+
 function userId(raw: unknown): string {
   if (typeof raw !== 'string') throw new InputError('a user is given by id, a string');
   return subject(`user:${raw}`).slice('user:'.length);
@@ -344,9 +353,9 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
         const [name] = ctx.params;
         return registry.view(app(name)) ? onApp(name) : { tenant: firstTenant(ctx), holder: firstOwner(ctx) };
       },
-      audit: onAppAudit('app.publish', (_, result) => {
+      audit: onAppAudit('app.publish', (body, result) => {
         const release = result as Release | undefined;
-        return release ? { release: release.number, releaseKey: release.releaseKey } : {};
+        return { ...(body.ephemeral != null && { ephemeral: body.ephemeral }), ...(release && { release: release.number, releaseKey: release.releaseKey }) };
       }),
       handle: (ctx, scope) => registry.publish({
         name: app(ctx.params[0]),
@@ -355,6 +364,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
         bundle: optional(ctx.body.bundle, 'bundle', bundleId),
         owner: firstOwner(ctx),
         tenant: scope.tenant ?? DEFAULT_TENANT,
+        ephemeral: ephemeralOf(ctx.body.ephemeral),
         authorize: async (tx, current) => {
           const caller = await freshCaller(ctx.caller, tx);
           if (!caller) throw new Forbidden('credential expired or revoked during publish');
@@ -409,6 +419,9 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
       return { status: 'purged' };
     }, {
       ...(hosted && { json: true as const }), audit: onAppAudit('app.purge'),
+    }),
+    appRoute('POST', ADMIN_PATHS.discard('<name>'), 'app.discard', async ({ params: [name] }) => (await registry.discard(app(name)), { status: 'discarded' }), {
+      audit: onAppAudit('app.discard'),
     }),
     { method: 'GET', path: at(ADMIN_PATHS.tenants), action: 'tenants', handle: () => store.tenants() },
     {
