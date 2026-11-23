@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runtimes, Runner &amp; Guard — PneumaSpace Documentation & Architecture Atlas</title>
+<meta name="description" content="Isolate worker_threads runner, isolate-shim.ts protections, 3 s lag-compensated watchdog, DockerDriver vs PodDriver, zero-IO fast path, and AppGuard quarantine.">
+<link rel="icon" type="image/svg+xml" href="./assets/favicon.svg">
+<script>
+(() => {
+  const root = document.documentElement;
+  const stored = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
+  const media = matchMedia('(prefers-color-scheme: dark)');
+  const apply = () => { root.dataset.theme = stored('pneuma-space-theme') ?? (media.matches ? 'dark' : 'light'); };
+  apply();
+  media.addEventListener('change', apply);
+  const lang = stored('pneuma-space-lang') ?? navigator.language ?? 'en';
+  root.lang = lang.startsWith('zh') ? 'zh' : 'en';
+})();
+</script>
+<link rel="stylesheet" href="./assets/style.css">
+</head>
+<body>
+<div class="frame">
+  <aside class="sidebar" aria-label="Primary Documentation Navigation">
+    <div class="aside-in">
+      <div class="brand-row">
+        <a class="brand" href="./index.html">
+          <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true"><rect x=".5" y=".5" width="25" height="25" rx="7" style="fill:var(--surface);stroke:var(--line-strong)"/><circle cx="13" cy="13" r="5" stroke-width="2" style="stroke:var(--accent)"/><circle cx="13" cy="13" r="1.6" style="fill:var(--accent)"/></svg>
+          <span><b>PneumaSpace</b><small><span data-lang="en">Architecture & Docs</span><span data-lang="zh">技术架构与文档站</span></small></span>
+        </a>
+      </div>
+
+      <button type="button" class="search-trigger" data-open-search aria-label="Search documentation and ADRs">
+        <span class="search-left"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4.8"/><line x1="10.6" y1="10.6" x2="14.2" y2="14.2"/></svg><span><span data-lang="en">Search docs & 37 ADRs…</span><span data-lang="zh">搜索文档、源码与 37 篇 ADR…</span></span></span>
+        <kbd>⌘K</kbd>
+      </button>
+
+      <nav class="doc-nav" aria-label="Documentation Chapters">
+        <div class="nav-section">
+        <div class="nav-group-label"><span data-lang="en">Start &amp; Explore</span><span data-lang="zh">入门与全景</span></div>
+        <a href="./index.html"><span class="nav-num">00</span><span><span data-lang="en">Overview &amp; Blueprint Atlas</span><span data-lang="zh">总览与交互架构蓝图</span></span></a>
+        <a href="./quickstart.html"><span class="nav-num">01</span><span><span data-lang="en">Quickstart, CLI &amp; Examples</span><span data-lang="zh">快速上手、CLI 与七大示例</span></span></a>
+      </div>
+        <div class="nav-section">
+        <div class="nav-group-label"><span data-lang="en">Architecture &amp; Contract</span><span data-lang="zh">顶层架构与契约</span></div>
+        <a href="./architecture.html"><span class="nav-num">02</span><span><span data-lang="en">Architecture &amp; 12 Invariants</span><span data-lang="zh">顶层架构与 12 条不变量</span></span></a>
+        <a href="./contract.html"><span class="nav-num">03</span><span><span data-lang="en">App Contract &amp; SDK</span><span data-lang="zh">应用契约、SDK 与管理 API</span></span></a>
+      </div>
+        <div class="nav-section">
+        <div class="nav-group-label"><span data-lang="en">Subsystems, Planes &amp; ADRs</span><span data-lang="zh">核心子系统与决策记录</span></div>
+        <a href="./capabilities.html"><span class="nav-num">04</span><span><span data-lang="en">10 Capabilities &amp; Providers</span><span data-lang="zh">十大能力与线协议供应</span></span></a>
+        <a href="./runtimes.html" aria-current="page"><span class="nav-num">05</span><span><span data-lang="en">Runtimes, Runner &amp; Guard</span><span data-lang="zh">运行时车道、Runner 与 Guard</span></span></a>
+        <a href="./planes.html"><span class="nav-num">06</span><span><span data-lang="en">Docker, K8s &amp; Hosted SaaS</span><span data-lang="zh">单机、K8s 与托管 SaaS 平面</span></span></a>
+        <a href="./adr.html"><span class="nav-num">07</span><span><span data-lang="en">ADR Codex (0001–0037)</span><span data-lang="zh">37 篇 ADR 架构决策全集</span></span></a>
+      </div>
+      </nav>
+
+      <div class="aside-foot">
+        <div class="controls">
+          <div class="seg" role="group" aria-label="Language">
+            <button type="button" data-set-lang="en" aria-pressed="true">EN</button>
+            <button type="button" data-set-lang="zh" aria-pressed="false">中文</button>
+          </div>
+          <div class="seg" role="group" aria-label="Theme">
+            <button type="button" data-set-theme="light" aria-pressed="true"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="3.2"/><line x1="8" y1="1.2" x2="8" y2="2.6"/><line x1="8" y1="13.4" x2="8" y2="14.8"/><line x1="3.2" y1="3.2" x2="4.2" y2="4.2"/><line x1="11.8" y1="11.8" x2="12.8" y2="12.8"/><line x1="1.2" y1="8" x2="2.6" y2="8"/><line x1="13.4" y1="8" x2="14.8" y2="8"/><line x1="3.2" y1="12.8" x2="4.2" y2="11.8"/><line x1="11.8" y1="4.2" x2="12.8" y2="3.2"/></svg><span><span data-lang="en">Light</span><span data-lang="zh">浅色</span></span></button>
+            <button type="button" data-set-theme="dark" aria-pressed="false"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 9.8A5.8 5.8 0 0 1 6.2 2.5a5.8 5.8 0 1 0 7.3 7.3Z"/></svg><span><span data-lang="en">Dark</span><span data-lang="zh">深色</span></span></button>
+          </div>
+        </div>
+        <div class="repo-links">
+          <a class="btn ghost small" href="https://github.com/pandazki/pneuma-space" target="_blank" rel="noopener"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .2a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38l-.01-1.49c-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48l-.01 2.2c0 .21.15.46.55.38A8.01 8.01 0 0 0 8 .2Z"/></svg><span>GitHub</span></a>
+          <a class="btn ghost small" href="https://github.com/pandazki/pneuma-space/blob/main/DESIGN.md" target="_blank" rel="noopener"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 1.5H4a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 4 14.5h8a1.5 1.5 0 0 0 1.5-1.5V6L9 1.5Z"/><polyline points="9 1.5 9 6 13.5 6"/></svg><span>DESIGN.md</span></a>
+          <a class="btn ghost small" href="https://github.com/pandazki/pneuma-space/blob/main/docs/acceptance.md" target="_blank" rel="noopener"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>Acceptance</span></a>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="workspace">
+    <main class="doc-main" id="main-content">
+      
+<div class="page-head" id="lanes-overview">
+  <div class="page-head-row">
+    <h1><span data-lang="en">Runtime Lanes, Isolate Runner & The Guard</span><span data-lang="zh">三大运行时车道、Isolate Runner 内部机制与 Guard 熔断器</span></h1>
+    <div class="chips">
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/runtimes.ts#L48-L244" target="_blank" rel="noopener" title="Inspect source: gateway/src/runtimes.ts:L48-L244"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>gateway/src/runtimes.ts:L48-L244</span></a>
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/lifecycle.ts#L37-L200" target="_blank" rel="noopener" title="Inspect source: gateway/src/lifecycle.ts:L37-L200"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>gateway/src/lifecycle.ts:L37-L200</span></a>
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/runner.ts#L1-L486" target="_blank" rel="noopener" title="Inspect source: gateway/src/runner.ts:L1-L486"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>gateway/src/runner.ts:L1-L486</span></a>
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/isolate-shim.ts#L1-L180" target="_blank" rel="noopener" title="Inspect source: gateway/src/isolate-shim.ts:L1-L180"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>gateway/src/isolate-shim.ts:L1-L180</span></a>
+    </div>
+  </div>
+  <p class="lead">
+    <span data-lang="en">A new runtime is one row in RUNTIMES and one class implementing Runtime (ADR 0017). The Runtimes facade dispatches by RunSpec; Lifecycle<S, H> implements the shared state machine, lease accounting, and reaper over a pluggable Driver<S, H>; and AppGuard alone counts failures and quarantines across all runtimes.</span><span data-lang="zh">在 PneumaSpace 中，新增一种运行时只需在 RUNTIMES 表加一行并实现一个 Runtime 类（ADR 0017）。Runtimes 门面按 RunSpec 分发；Lifecycle<S, H> 在底层 Driver<S, H> 之上统一实现五态 CAS 状态机、租约记账与闲置回收器；AppGuard 则在单一位置统管所有运行时的失败退避与隔离熔断。</span>
+  </p>
+</div>
+
+<section class="doc-section">
+  <div class="sec-head">
+    <h2><span data-lang="en">1. Comparison of the Three Runtime Lanes</span><span data-lang="zh">1. 三大运行时车道全方位工程对比</span></h2>
+    <div class="chips">
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/shared/catalog.ts#L52-L56" target="_blank" rel="noopener" title="Inspect source: shared/catalog.ts:L52-L56"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>shared/catalog.ts:L52-L56</span></a>
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/README.md#L33-L48" target="_blank" rel="noopener" title="Inspect source: README.md:L33-L48"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>README.md:L33-L48</span></a>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table class="spec-table">
+      <thead>
+        <tr>
+          <th><span data-lang="en">Attribute</span><span data-lang="zh">对比维度</span></th>
+          <th><span class="chip accent">isolate</span> (<span data-lang="en">Default Scaffold</span><span data-lang="zh">默认脚手架</span>)</th>
+          <th><span class="chip green">container</span> (<code>--container</code>)</th>
+          <th><span class="chip">static</span> (<code>--static</code>)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong><span data-lang="en">Publish Input</span><span data-lang="zh">发布输入制品</span></strong></td>
+          <td><span data-lang="en">Source directory + pure-JS <code>node_modules</code> tar bundle (~6.9 s upload, 0 Docker build)</span><span data-lang="zh">源码目录 + 纯 JS <code>node_modules</code> 代码包（~6.9 秒直传，无需 Docker 构建）</span></td>
+          <td><span data-lang="en">OCI container image listening on port <code>8000</code> (local image ID on Docker, registry digest on K8s)</span><span data-lang="zh">监听 <code>8000</code> 端口的任意容器镜像（单机为本地镜像 ID，K8s 为仓库 sha256 digest）</span></td>
+          <td><span data-lang="en">Static directory tar bundle only (<code>"runtime": null</code>)</span><span data-lang="zh">仅静态文件目录 tar 包（无运行时进程）</span></td>
+        </tr>
+        <tr>
+          <td><strong><span data-lang="en">Execution Unit</span><span data-lang="zh">底层执行单元</span></strong></td>
+          <td><span data-lang="en"><code>node:worker_threads</code> Worker inside <code>pneuma-space-runner</code> service (:8082 control API)</span><span data-lang="zh"><code>pneuma-space-runner</code> 服务内的独立 <code>worker_threads</code> 线程（控制口 :8082）</span></td>
+          <td><span data-lang="en">Docker container (<code>DockerDriver</code>) or Kubernetes Pod (<code>PodDriver</code>, <code>restartPolicy: Never</code>)</span><span data-lang="zh">独立 Docker 容器（<code>DockerDriver</code>）或 K8s Pod（<code>PodDriver</code>）</span></td>
+          <td><span data-lang="en">None — streamed by <code>Ingress</code> from <code>S3BundleStore</code></span><span data-lang="zh">无进程 — 由 <code>Ingress</code> 从对象存储直出</span></td>
+        </tr>
+        <tr>
+          <td><strong><span data-lang="en">Wake Latency &amp; RAM</span><span data-lang="zh">唤醒延迟与内存</span></strong></td>
+          <td><span data-lang="en"><strong>62–87 ms</strong> after sleep (460–700 ms first wake); <strong>+17–18 MiB</strong> RSS per awake worker</span><span data-lang="zh">休眠后唤醒 <strong>62–87 ms</strong>（首次 460–700 ms）；每个醒着的 worker 仅占 <strong>17–18 MiB</strong> 内存</span></td>
+          <td><span data-lang="en"><strong>~260 ms</strong> on Docker (restarts stopped container); <strong>&lt;2 s</strong> on K8s with cached image (&lt;5 s cold)</span><span data-lang="zh">Docker 单机约 <strong>260 ms</strong>（重启已停止容器）；K8s 节点已缓存镜像时 <strong>&lt;2 s</strong></span></td>
+          <td><span data-lang="en"><strong>&lt;50 ms</strong> first byte, 0 ms wake, 0 MiB instance RAM</span><span data-lang="zh">首字节 <strong>&lt;50 ms</strong>，0 唤醒开销</span></td>
+        </tr>
+        <tr>
+          <td><strong><span data-lang="en">Health &amp; Hang Detection</span><span data-lang="zh">健康与死循环检测</span></strong></td>
+          <td><code>['exit', 'ready', 'hung', 'memory']</code> <span data-lang="en">(1 s ping / 3 s silence watchdog stops infinite loops in 3.5–4 s)</span><span data-lang="zh">（1s 心跳 / 3s 超时看门狗，3.5–4s 强杀同步死循环并采样堆外内存）</span></td>
+          <td>Docker: <code>['exit', 'ready']</code><br>K8s: <code>['exit', 'ready', 'memory']</code> (<code>OOMKilled</code>)</td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td><strong><span data-lang="en">When to Choose</span><span data-lang="zh">适用场景</span></strong></td>
+          <td><span data-lang="en">TypeScript / JavaScript apps using pure JS dependencies (<code>pg</code>, <code>redis</code>); high-density agent micro-apps</span><span data-lang="zh">使用纯 JS 依赖的 TS/JS 全栈微应用、Agent 高频生成的业务工具与实时协作应用</span></td>
+          <td><span data-lang="en">Any language (Python, Go, Rust) or Node apps requiring native C++ addons or child processes</span><span data-lang="zh">Python / Go / Rust 等任意语言应用，或依赖原生 C/C++ 扩展与子进程的 Node 应用</span></td>
+          <td><span data-lang="en">Documentation sites, SPAs, landing pages with no server compute</span><span data-lang="zh">纯前端站点、文档站、无需服务端计算的页面</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="doc-section" id="isolate-lane">
+  <div class="sec-head">
+    <h2><span data-lang="en">2. Inside the Isolate Runner & isolate-shim.ts (ADR 0017 §5–6)</span><span data-lang="zh">2. Isolate Runner 与 isolate-shim.ts 沙箱垫片内部机制 (ADR 0017 §5–6)</span></h2>
+    <div class="chips">
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/runner.ts#L1-L260" target="_blank" rel="noopener" title="Inspect source: gateway/src/runner.ts:L1-L260"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>gateway/src/runner.ts:L1-L260</span></a>
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/isolate-shim.ts#L1-L180" target="_blank" rel="noopener" title="Inspect source: gateway/src/isolate-shim.ts:L1-L180"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>gateway/src/isolate-shim.ts:L1-L180</span></a>
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/isolate.ts#L170-L350" target="_blank" rel="noopener" title="Inspect source: gateway/src/isolate.ts:L170-L350"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>gateway/src/isolate.ts:L170-L350</span></a>
+    </div>
+    <p><span data-lang="en">How does PneumaSpace run untrusted-for-stability worker threads inside a shared runner process without one bad app crashing or hanging the runner?</span><span data-lang="zh">多个 Isolate 应用共享同一个 runner 进程的主线程，PneumaSpace 是如何在源码层面确保单个应用的死循环、内存爆炸、日志洪泛或恶意消息绝不会拖垮 runner 的？</span></p>
+  </div>
+
+  <div class="prose">
+    <ul>
+      <li><span data-lang="en"><strong>Port allocation &amp; 30 s cooldown (<code>gateway/src/runner.ts:L53-L55, L101-L106</code>):</strong> The runner allocates each worker a TCP port from <code>32768..60999</code> (starting at a random offset on boot so a restarted runner does not hand out ports its predecessor just freed). When a worker exits, its port enters a <code>PORT_COOLDOWN_MS = 30_000</code> cooldown map so delayed requests never reach a different app.</span><span data-lang="zh"><strong>端口分配与 30 秒冷却期 (<code>gateway/src/runner.ts:L53-L55, L101-L106</code>)：</strong>runner 在 <code>32768..60999</code> 范围内为每个 worker 分配独立端口（启动时随机选起点，防止 runner 重启后立即复用刚释放的端口）。worker 退出后端口进入 30 秒冷却期（<code>PORT_COOLDOWN_MS = 30_000</code>），杜绝迟到连接串入其他应用。</span></li>
+      <li><span data-lang="en"><strong><code>isolate-shim.ts</code> bootstrap protections (<code>gateway/src/isolate-shim.ts</code>):</strong> Loaded before the app’s <code>entry</code> module, the shim captures and hides <code>parentPort</code>, disables <code>v8.setFlagsFromString</code> (so an app cannot pass <code>--allow-natives-syntax</code> and abort the runner), replaces <code>process.stdout</code> / <code>stderr</code> with rate-limited 4 KiB line streams, and replies to the runner’s 1 s heartbeat pings with <code>process.memoryUsage().external</code>.</span><span data-lang="zh"><strong><code>isolate-shim.ts</code> 启动垫片防护 (<code>gateway/src/isolate-shim.ts</code>)：</strong>在加载应用入口前，垫片先接管并清空 <code>parentPort</code>，禁用 <code>v8.setFlagsFromString</code>（防止应用通过 V8 进程级标志终止整个 runner），将 <code>stdout/stderr</code> 替换为按行截断（4 KiB）且限速的消息流，并每秒响应主线程心跳同时上报堆外内存 <code>external</code>。</span></li>
+      <li><span data-lang="en"><strong>Lag-compensated watchdog &amp; stuck thread abandonment (<code>gateway/src/runner.ts:L128-L148</code>):</strong> Every <code>PING_MS = 1000</code>, the runner checks each worker’s ping deadline (<code>SILENCE_MS = 3000</code>). If the runner’s own event loop was delayed by <code>lag</code>, deadlines are extended by <code>lag</code> so host load spikes never trigger false-positive kills. When a worker misses its deadline, <code>thread.terminate()</code> interrupts synchronous JS loops via V8 <code>TerminateExecution</code>. If <code>terminate()</code> takes longer than <code>TERMINATE_MS = 5000</code> (e.g. blocked in a native syscall), the worker is abandoned as <code>stuck</code> and the app can immediately start a new worker; only if total stuck threads exceed <code>STUCK_LIMIT = 3</code> does the runner call <code>process.abort()</code> to let Compose/K8s restart it.</span><span data-lang="zh"><strong>防抖看门狗与 Stuck 线程遗弃机制 (<code>gateway/src/runner.ts:L128-L148</code>)：</strong>主线程每秒检查一次心跳（超时阈值 <code>SILENCE_MS = 3000</code>），若主线程自身发生事件循环迟滞，自动按迟滞量顺延所有未答心跳期限，绝不因宿主机瞬时高负载误杀。超时后调用 <code>thread.terminate()</code> 打断死循环；若 5 秒内未退出则将其标记为 <code>stuck</code> 并立即从活跃表移除，允许该应用开启新 worker，仅当残留 stuck 线程超过 <code>STUCK_LIMIT = 3</code> 时才由 <code>process.abort()</code> 触发容器级自愈。</span></li>
+      <li><span data-lang="en"><strong>Pinned Home Runner &amp; Safe Scale-Down (ADR 0019 §8, ADR 0032):</strong> On Kubernetes, an isolate app is placed on the ready runner Pod with the fewest awake workers on its very first wake (<code>pick()</code> in <code>gateway/src/isolate.ts:L40-L48</code>) and keeps its <code>files</code> and SQLite data on that runner’s PVC (<code>instance.home</code>). Scaling down <code>pneuma-space-runner</code> checks <code>Runtimes.homes()</code> and <code>KubeInfra.removedBy()</code> first—refusing with <code>409 Conflict</code> and listing the stranded apps before making any Kubernetes API call!</span><span data-lang="zh"><strong>固定 Home Runner 与安全缩容保护 (ADR 0019 §8, ADR 0032)：</strong>在 K8s 平面上，Isolate 应用在首次唤醒时通过负载均衡选定一个 <code>pneuma-space-runner-&lt;n&gt;</code> Pod 作为永久 <code>home</code>（其 <code>files</code> 与 SQLite 数据落在该 runner 的 PVC 上）。当管理员缩容 runner StatefulSet 时，网关先通过 <code>Runtimes.homes()</code> 与 <code>KubeInfra.removedBy()</code> 核对，只要被删副本上还有任何应用的 home，就在发起 K8s 调用前直接返回 <code>409 Conflict</code> 并列出受影响的应用名单！</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="doc-section" id="container-lane">
+  <div class="sec-head">
+    <h2><span data-lang="en">3. Container Lane: DockerDriver vs Kubernetes PodDriver</span><span data-lang="zh">3. Container 车道：DockerDriver 与 Kubernetes PodDriver 实现对比</span></h2>
+    <div class="chips">
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/runtime.ts#L41-L214" target="_blank" rel="noopener" title="Inspect source: gateway/src/runtime.ts:L41-L214"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>gateway/src/runtime.ts:L41-L214</span></a>
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/pods.ts#L85-L511" target="_blank" rel="noopener" title="Inspect source: gateway/src/pods.ts:L85-L511"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>gateway/src/pods.ts:L85-L511</span></a>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table class="spec-table">
+      <thead>
+        <tr>
+          <th><span data-lang="en">Lifecycle Hook</span><span data-lang="zh">Driver 接口方法</span></th>
+          <th><code>DockerDriver</code> (<a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/runtime.ts#L41-L189" target="_blank" rel="noopener" title="Inspect source: runtime.ts"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>runtime.ts</span></a>)</th>
+          <th><code>PodDriver</code> (<a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/pods.ts#L170-L511" target="_blank" rel="noopener" title="Inspect source: pods.ts"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>pods.ts</span></a>)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>start(slot, spec)</code></td>
+          <td><span data-lang="en">Creates volumes and container <code>pneuma-space-&lt;id&gt;-&lt;release&gt;</code> (if <code>slot.handle</code> is missing or <code>specHash</code> changed), calls <code>docker start</code>, caches container IP from <code>docker inspect</code> (bypassing Docker DNS’s 4 s negative cache), and polls TCP :8000 every 50 ms while verifying <code>stillRunning()</code>.</span><span data-lang="zh">按需创建卷与容器 <code>pneuma-space-&lt;id&gt;-&lt;release&gt;</code>，调用 <code>docker start</code>，通过 <code>inspect</code> 缓存容器 IP（绕开 Docker DNS 对外部停止容器的 4s 失败延迟），并每 50 ms 探测 :8000 TCP 就绪同时核对容器未退出。</span></td>
+          <td><span data-lang="en">Ensures RWO PVCs, deletes any leftover Failed Pod (capturing its log first), creates Pod <code>pneuma-space-&lt;id&gt;</code> with <code>pneuma-space.epoch</code> and <code>pneuma-space.reach.*</code> labels, waits on the Pod watch for Running (up to <code>pendingSeconds = 60</code>), then polls TCP <code>podIP:8000</code> every 50 ms.</span><span data-lang="zh">确保 RWO PVC 存在，清理同名残留 Pod（先保存日志），创建带 <code>epoch</code> 与 <code>reach.*</code> 网络策略标签的 Pod <code>pneuma-space-&lt;id&gt;</code>，经 Pod watch 等待进入 Running 后每 50 ms 探测 <code>podIP:8000</code>。</span></td>
+        </tr>
+        <tr>
+          <td><code>sleep(app, slot)</code></td>
+          <td><span data-lang="en">Runs <code>docker stop</code> and <strong>keeps</strong> <code>slot.handle</code> (the stopped container) so the next wake skips container creation and wakes in ~260 ms.</span><span data-lang="zh">执行 <code>docker stop</code> 并<strong>保留</strong>已停止的容器句柄，使下次唤醒无需重建容器，耗时仅约 260 ms。</span></td>
+          <td><span data-lang="en">Kubernetes has no stopped Pod concept: captures last 200 log lines (up to 64 KiB) into <code>instance_log</code>, deletes the Pod with <code>preconditions.uid = handle</code>, and clears <code>slot.handle</code>.</span><span data-lang="zh">K8s 没有「已停止的 Pod」：先抓取最后 200 行日志（至多 64 KiB）写入平台库 <code>instance_log</code>，再带 <code>preconditions.uid</code> 安全删除 Pod。</span></td>
+        </tr>
+        <tr>
+          <td><code>serves(handle, address)</code></td>
+          <td>—</td>
+          <td><span data-lang="en">Before handing out a warm lease from memory, verifies in the local Pod watch cache that <code>address</code> (<code>podIP:8000</code>) still belongs to Pod UID <code>handle</code>, preventing Pod IP reuse races.</span><span data-lang="zh">在走内存快路径发放租约前，先在本地 Pod watch 缓存中核对该 <code>podIP</code> 对应的 Pod UID 仍等于 <code>handle</code>，缩小 Pod IP 复用窗口。</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="doc-section" id="fast-path-cas">
+  <div class="sec-head">
+    <h2><span data-lang="en">4. Multi-Replica Zero-IO Fast Path & ADR 0027 Memory Rules</span><span data-lang="zh">4. 多副本零 IO 快路径与 ADR 0027 内存断定准则</span></h2>
+    <div class="chips">
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/lifecycle.ts#L154-L240" target="_blank" rel="noopener" title="Inspect source: gateway/src/lifecycle.ts:L154-L240"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>gateway/src/lifecycle.ts:L154-L240</span></a>
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/docs/adr/0020-instance-state-in-store.md" target="_blank" rel="noopener" title="Inspect source: ADR 0020"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>ADR 0020</span></a>
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/docs/adr/0027-replica-memory-and-shared-rows.md" target="_blank" rel="noopener" title="Inspect source: ADR 0027"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>ADR 0027</span></a>
+    </div>
+  </div>
+  <div class="prose">
+    <p><span data-lang="en">How can a multi-replica gateway achieve under 5 ms overhead on warm requests (<code>gateway/src/lifecycle.ts:L161-L171</code>) while keeping instance state in PostgreSQL? By enforcing ADR 0027’s exact rule on what a replica may deduce from its own memory:</span><span data-lang="zh">多副本网关把实例状态放在 PostgreSQL 中，如何同时做到热请求网关开销低于 5 ms 且零数据库 IO（<code>gateway/src/lifecycle.ts:L161-L171</code>）？靠的是 ADR 0027 对「副本凭内存能断定什么」的严密证明：</span></p>
+    <ul>
+      <li><span data-lang="en"><strong>The 0 → &gt;0 Edge Gate (<code>Lifecycle.#covered</code>):</strong> A replica may hand out a Lease from memory with <strong>zero database IO</strong> if and only if its mirror shows the row <code>awake</code> at <code>epoch</code>, its most recently <strong>committed</strong> <code>lease_tally</code> row in the store for that <code>epoch</code> is <code>&gt; 0</code>, and no queued write in <code>local.pending</code> lowers that count to <code>0</code>. Because the reaper’s <code>SELECT ... FOR UPDATE</code> sees that replica’s committed <code>&gt; 0</code> tally, the reaper is guaranteed not to put the instance to sleep while the replica hands out warm leases in memory!</span><span data-lang="zh"><strong>0 → &gt;0 边沿门控 (<code>Lifecycle.#covered</code>)：</strong>当且仅当本副本对当前 <code>epoch</code> 最近一次<strong>已提交落库</strong>的 <code>lease_tally</code> 计数大于 0，且本地发送队列中没有将其降为 0 的写操作时，本副本才能在内存中以<strong>零数据库 IO</strong> 直接发放新租约。因为领导者回收器（reaper）在 <code>FOR UPDATE</code> 锁下必然看到该副本已提交的正数租约，所以实例绝不会在快路径转发期间被并发休眠！</span></li>
+      <li><span data-lang="en"><strong>Coalesced Edge Waiters (<code>local.edge</code>):</strong> When the first request arrives at a replica whose local tally is <code>0</code> for an already-awake instance, that replica runs one slow-path transaction (<code>#slow</code>) to bump its <code>lease_tally</code> from <code>0 → 1</code> while verifying the instance row is still <code>awake</code>. Concurrent requests on the same replica await <code>local.edge.done</code> and then immediately take the zero-IO fast path.</span><span data-lang="zh"><strong>冷边沿合并等待 (<code>local.edge</code>)：</strong>当某个副本收到对已唤醒实例的第 1 个请求（本地 tally 从 0 变 1）时，只发起一笔慢路径事务（<code>#slow</code>）将库里的 tally 抬升为正数；同副本并发到达的其他请求共享等待 <code>local.edge.done</code>，一旦提交成功即全部走零 IO 快路径。</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="doc-section" id="guard-deep">
+  <div class="sec-head">
+    <h2><span data-lang="en">5. AppGuard: Unified Failure Counting, Backoff & Quarantine</span><span data-lang="zh">5. AppGuard：跨运行时统一的失败计数、退避与熔断隔离</span></h2>
+    <div class="chips">
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/runtimes.ts#L168-L244" target="_blank" rel="noopener" title="Inspect source: gateway/src/runtimes.ts:L168-L244"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>gateway/src/runtimes.ts:L168-L244</span></a>
+      <a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/model.ts#L193-L196" target="_blank" rel="noopener" title="Inspect source: gateway/src/model.ts:L193-L196"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>gateway/src/model.ts:L193-L196</span></a>
+    </div>
+  </div>
+
+  <div class="code-plate">
+  <div class="code-plate-bar">
+    <span>gateway/src/model.ts:L212-L228 — Default Guard & Instance Policy Tunables</span>
+    <span class="chips"><a class="src-ref" href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/model.ts#L212-L228" target="_blank" rel="noopener" title="Inspect source: DEFAULT_POLICY"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 4 1 8 5 12"/><polyline points="11 4 15 8 11 12"/></svg><span>DEFAULT_POLICY</span></a><button type="button" class="copy-btn" data-copy-target=""><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8.5" height="8.5" rx="1.5"/><path d="M3.5 10.5H2.8A1.3 1.3 0 0 1 1.5 9.2V2.8A1.3 1.3 0 0 1 2.8 1.5h6.4a1.3 1.3 0 0 1 1.3 1.3v.7"/></svg><span class="copy-label"><span data-lang="en">Copy</span><span data-lang="zh">复制</span></span></button></span>
+  </div>
+  <pre><code>export const DEFAULT_POLICY: Policy = {
+  idle_seconds: 60,               // Idle time with 0 leases before awake -&gt; stopping -&gt; asleep
+  ready_timeout_seconds: 15,      // Max time to accept TCP on port 8000 / worker port during wake
+  drain_timeout_seconds: 30,      // Max grace for in-flight requests after retire (WS gets 1001 immediately)
+  connection_idle_seconds: 21600, // 6 hours: silent WebSocket/SSE channel lease timeout (closes with 1001)
+  trigger_timeout_seconds: 600,   // 10 minutes: max duration of one POST /_pneuma-space/trigger/&lt;name&gt; attempt
+  db_backend: 'sqlite',           // Default database provider pinned on an app's first db binding
+  max_failures: 3,                // Failures within failure_window_seconds before quarantine (503)
+  failure_window_seconds: 60,     // Sliding window for counting wake timeouts, crashes, OOMs, and hangs
+  restart_backoff_seconds: 5,     // Cooldown after a failure before another wake is admitted (503 Retry-After)
+  cpu_millis: 1000,               // 1.0 vCPU limit per container/Pod instance
+  memory_mb: 512,                 // 512 MiB container limit / isolate V8 heap + off-heap budget
+  timezone: 'UTC',                // Global 5-field cron evaluation timezone
+  usage_retention_days: 90,       // Hourly usage heatmap retention
+  events_retention_days: 14,      // Persisted lifecycle events retention
+  events_max_rows: 1_000_000,     // Max rows in events table
+};</code></pre>
+</div>
+</section>
+
+      <nav class="page-foot-nav" aria-label="Chapter navigation">
+    <a class="page-foot-link prev" href="./capabilities.html"><small><span data-lang="en">Previous Chapter</span><span data-lang="zh">上一章</span> · 04</small><b><span data-lang="en">10 Capabilities &amp; Providers</span><span data-lang="zh">十大能力与线协议供应</span></b></a>
+    <a class="page-foot-link next" href="./planes.html"><small><span data-lang="en">Next Chapter</span><span data-lang="zh">下一章</span> · 06</small><b><span data-lang="en">Docker, K8s &amp; Hosted SaaS</span><span data-lang="zh">单机、K8s 与托管 SaaS 平面</span></b></a>
+  </nav>
+    </main>
+
+    <aside class="toc-rail" aria-label="On this page">
+      <div class="toc-block">
+        <p class="toc-title"><span data-lang="en">On this page</span><span data-lang="zh">本页目录</span></p>
+        <ul class="toc-list">
+          <li><a href="#lanes-overview"><span data-lang="en">1. Pluggable Runtimes &amp; The Driver Seam</span><span data-lang="zh">1. 可插拔运行时与 Driver 抽象接缝</span></a></li>
+          <li><a href="#isolate-lane"><span data-lang="en">2. Isolate Lane: Runner, Shim &amp; Watchdog</span><span data-lang="zh">2. Isolate 车道：Runner、垫片与看门狗</span></a></li>
+          <li><a href="#container-lane"><span data-lang="en">3. Container Lane: DockerDriver vs PodDriver</span><span data-lang="zh">3. Container 车道：Docker 与 K8s Pod 驱动</span></a></li>
+          <li><a href="#fast-path-cas"><span data-lang="en">4. Zero-IO Fast Path &amp; Replica Tally Rules</span><span data-lang="zh">4. 零 IO 快路径与多副本租约一致性</span></a></li>
+          <li><a href="#guard-deep"><span data-lang="en">5. AppGuard: Failure Window, Backoff &amp; Quarantine</span><span data-lang="zh">5. AppGuard：失败计数、退避与熔断隔离</span></a></li>
+        </ul>
+      </div>
+
+      <div class="toc-block">
+        <p class="toc-title"><span data-lang="en">Core Source Entrypoints</span><span data-lang="zh">核心源码直达</span></p>
+        <ul class="toc-list">
+          <li><a href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/main.ts" target="_blank" rel="noopener"><span class="mono">gateway/src/main.ts</span></a></li>
+          <li><a href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/model.ts" target="_blank" rel="noopener"><span class="mono">gateway/src/model.ts</span></a></li>
+          <li><a href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/registry.ts" target="_blank" rel="noopener"><span class="mono">gateway/src/registry.ts</span></a></li>
+          <li><a href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/ingress.ts" target="_blank" rel="noopener"><span class="mono">gateway/src/ingress.ts</span></a></li>
+          <li><a href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/lifecycle.ts" target="_blank" rel="noopener"><span class="mono">gateway/src/lifecycle.ts</span></a></li>
+          <li><a href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/runtimes.ts" target="_blank" rel="noopener"><span class="mono">gateway/src/runtimes.ts</span></a></li>
+          <li><a href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/runner.ts" target="_blank" rel="noopener"><span class="mono">gateway/src/runner.ts</span></a></li>
+          <li><a href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/providers.ts" target="_blank" rel="noopener"><span class="mono">gateway/src/providers.ts</span></a></li>
+          <li><a href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/pg.ts" target="_blank" rel="noopener"><span class="mono">gateway/src/pg.ts</span></a></li>
+          <li><a href="https://github.com/pandazki/pneuma-space/blob/main/gateway/src/kube.ts" target="_blank" rel="noopener"><span class="mono">gateway/src/kube.ts</span></a></li>
+          <li><a href="https://github.com/pandazki/pneuma-space/blob/main/cli/appctl.ts" target="_blank" rel="noopener"><span class="mono">cli/appctl.ts</span></a></li>
+        </ul>
+      </div>
+
+      <div class="toc-block">
+        <p class="toc-title"><span data-lang="en">Key Invariants</span><span data-lang="zh">关键不变量速查</span></p>
+        <div class="chips">
+          <a class="chip accent" href="./architecture.html#invariants" title="Address derives only from App.name">INV-1</a>
+          <a class="chip accent" href="./architecture.html#invariants" title="Only purge deletes data, only from removed">INV-2</a>
+          <a class="chip accent" href="./architecture.html#invariants" title="Idle stop requires empty Lease set">INV-3</a>
+          <a class="chip accent" href="./architecture.html#invariants" title="Inbound X-Pneuma-Space-* always stripped">INV-5</a>
+          <a class="chip accent" href="./architecture.html#invariants" title="Object bytes never pass app or gateway">INV-10</a>
+          <a class="chip accent" href="./architecture.html#invariants" title="Single instance per app via CAS on (state, epoch)">INV-11</a>
+          <a class="chip accent" href="./architecture.html#invariants" title="Quotas checked under tenant row lock">INV-12</a>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- Global Search Modal (Cmd+K) -->
+<div class="search-backdrop" id="global-search-modal" hidden role="dialog" aria-modal="true" aria-label="Search Documentation and ADRs">
+  <div class="search-dialog">
+    <div class="search-head">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4.8"/><line x1="10.6" y1="10.6" x2="14.2" y2="14.2"/></svg>
+      <input type="search" id="global-search-input" placeholder="Search chapters, capabilities, invariants, source files (e.g. pg.ts, isolate, ADR 0020)..." autocomplete="off">
+      <button type="button" class="btn ghost small" data-close-search>ESC</button>
+    </div>
+    <div class="search-results" id="global-search-results"></div>
+  </div>
+</div>
+
+<script>window.__PNEUMA_SEARCH_INDEX = [{"titleEn":"00 · Overview & Blueprint Atlas","titleZh":"00 · 总览与交互架构蓝图","descEn":"Agent-native stateful micro-app runtime: 6.9 s publish, 62–87 ms isolate wake, live topology, and interactive manifest workbench.","descZh":"专为 Agent 构建的有状态微应用运行时：6.9s 免构建发布、62–87ms 唤醒、动态拓扑与交互式清单工作台。","href":"./index.html","tag":"PAGE 00"},{"titleEn":"01 · Quickstart, CLI & Examples","titleZh":"01 · 快速上手、CLI 与七大示例","descEn":"Run with Docker Compose, scaffold with appctl init, publish in 6.9 s, test locally without Docker, and explore 7 example apps.","descZh":"一条 Compose 命令启动平台，appctl 初始化与发布、本地无 Docker 直接调试，以及覆盖三大运行时的 7 个官方示例。","href":"./quickstart.html","tag":"PAGE 01"},{"titleEn":"02 · Architecture & 12 Invariants","titleZh":"02 · 顶层架构与 12 条不变量","descEn":"Component ownership boundaries, single-writer entities, 4 CAS state machines, 12 source-verified invariants, and 5 built-in wire protocol clients.","descZh":"11 大组件职责与禁区边界、单写者领域模型、4 大状态机、12 条源码级架构不变量与 5 个内置零依赖线协议客户端。","href":"./architecture.html","tag":"PAGE 02"},{"titleEn":"03 · App Contract & SDK","titleZh":"03 · 应用契约、SDK 与管理 API","descEn":"Complete pneuma-space.json grammar, PNEUMA_SPACE_* env vars, X-Pneuma-Space-* headers, access vs identity, triggers, portable SQL, Admin API, and Contract 2.","descZh":"完整的 pneuma-space.json 文法、环境变量、转发请求头、访问范围与身份矩阵、触发器、可移植 SQL 子集、8081 管理 API 与云端契约 2。","href":"./contract.html","tag":"PAGE 03"},{"titleEn":"04 · 10 Capabilities & Providers","titleZh":"04 · 十大能力与线协议供应","descEn":"How ensure, inject, suspend, and destroy work over raw PostgreSQL, Redis RESP2 ACL, SigV4 S3 + Argon2id madmin, and S3BundleStore.","descZh":"深入剖析 10 项能力与 Provider 的 ensure/inject/suspend/destroy 幂等实现：PG 线协议建库、Redis ACL、SigV4 与 madmin 加密管理。","href":"./capabilities.html","tag":"PAGE 04"},{"titleEn":"05 · Runtimes, Runner & Guard","titleZh":"05 · 运行时车道、Runner 与 Guard","descEn":"Isolate worker_threads runner, isolate-shim.ts protections, 3 s lag-compensated watchdog, DockerDriver vs PodDriver, zero-IO fast path, and AppGuard quarantine.","descZh":"深入剖析 Isolate worker_threads 运行时、isolate-shim 沙箱垫片、3s 防抖看门狗、Docker/Pod 驱动对比、零 IO 快路径与 AppGuard 熔断器。","href":"./runtimes.html","tag":"PAGE 05"},{"titleEn":"06 · Docker, K8s & Hosted SaaS","titleZh":"06 · 单机、K8s 与托管 SaaS 平面","descEn":"The 4 plane seams in main.ts, multi-replica PostgreSQL advisory locks & LISTEN/NOTIFY, Kubernetes two-namespace NetworkPolicies, M3 hosted OAuth, and Caddy origin TLS.","descZh":"组合根 main.ts 的 4 个平面接缝、多副本 PG 咨询锁与 LISTEN/NOTIFY、K8s 双命名空间网络策略、M3 托管账户与 Caddy 源站 TLS。","href":"./planes.html","tag":"PAGE 06"},{"titleEn":"07 · ADR Codex (0001–0037)","titleZh":"07 · 37 篇 ADR 架构决策全集","descEn":"Complete unabridged collection of all 37 Architecture Decision Records with bilingual summaries, category filter, and implementing source code citations.","descZh":"收录全部 37 篇架构决策记录（ADR 0001–0037）的完整原文、中英双语摘要、分类检索与对应 TypeScript 源码实现引用。","href":"./adr.html","tag":"PAGE 07"},{"titleEn":"ADR 0001: Single Trusted Host Prototype & Evolution Boundary","titleZh":"ADR 0001：可信单机原型与演进边界","descEn":"M1 serves one trusted machine, operator, and app images over loopback ports; tenant isolation and SSO are deferred to M2/M3.","descZh":"M1 服务单台可信机器与可信镜像，网关控制 Docker socket，端口绑定回环地址；明确区分单机命名空间与多租户安全边界。","href":"./adr.html#adr-0001","tag":"ADR 0001","src":"REQUIREMENTS.md compose.yaml"},{"titleEn":"ADR 0002: Stable Path, On-Demand Start & Idle Stop (Prototype Input)","titleZh":"ADR 0002：稳定路径、按需运行与闲置停止","descEn":"Prototype validation of /apps/<name>/, caching started state to avoid hot-path Docker calls, and pre-request connection retry.","descZh":"原型阶段对稳定路径、按需启动、缓存启动状态消除热路径 Docker 调用及连接失败前重试的实验验证。","href":"./adr.html#adr-0002","tag":"ADR 0002","src":"gateway/src/ingress.ts"},{"titleEn":"ADR 0003: Dual Databases & Portable Relational SQL Subset","titleZh":"ADR 0003：两种数据库与有界关系型接口","descEn":"Establishes the portable SQL subset shared by SQLite and PostgreSQL and the rule that switching db_backend never migrates data.","descZh":"确立 SQLite 与 PostgreSQL 共用的可移植 SQL 子集、切换数据库后端不迁移数据以及 schema 不是安全边界三条持久原则。","href":"./adr.html#adr-0003","tag":"ADR 0003","src":"templates/app/sdk/db.ts docs/app-contract.md"},{"titleEn":"ADR 0004: Treating Coding Agents as Platform Users, Not Platform Model Entities","titleZh":"ADR 0004：把 Agent 视为平台使用者","descEn":"No Agent or template selector exists inside the platform model; coding agents read templates/app/AGENTS.md and publish via appctl like human developers.","descZh":"平台领域模型中不出现 Agent 或模板选择器；编码 Agent 作为平台使用者阅读 templates/app/AGENTS.md 并通过 appctl 发布应用。","href":"./adr.html#adr-0004","tag":"ADR 0004","src":"templates/app/AGENTS.md cli/scaffold.ts"},{"titleEn":"ADR 0005: CAPABILITIES Table, Idempotent Providers & Runtime Injection","titleZh":"ADR 0005：能力清单、Provider 与注入","descEn":"CAPABILITIES is the single source of truth; each resource kind maps to a Provider with ensure, inject, suspend, destroy; bindings belong to App, not Release.","descZh":"CAPABILITIES 是唯一能力表，推导环境变量与 Provider；资源按 App 而非 Release 绑定，ensure 幂等收敛且兼具恢复功能，Injection 在实例创建时即时推导。","href":"./adr.html#adr-0005","tag":"ADR 0005","src":"shared/catalog.ts gateway/src/providers.ts"},{"titleEn":"ADR 0006: Leases, Per-Instance 5-State Lifecycle & Atomic Release Publish","titleZh":"ADR 0006：Lease、实例状态机与发布","descEn":"Unifies HTTP requests, streams, WebSockets, SSE, and triggers as Leases; per-instance lock over asleep/waking/awake/draining/stopping; opaque App.id.","descZh":"将请求、流、长连接与触发统一抽象为 Lease；定义五态实例状态机与单写者平台库；内部资源一律使用不透明的 App.id 命名。","href":"./adr.html#adr-0006","tag":"ADR 0006","src":"gateway/src/lifecycle.ts gateway/src/model.ts"},{"titleEn":"ADR 0007: Direct Object Storage via Presigned URLs & Gateway-Served Static Bundles","titleZh":"ADR 0007：对象由对象服务提供，静态由网关提供","descEn":"Object bytes go straight between browser and S3 storage (RustFS) via presigned URLs or public/*; static bundle bytes stream from gateway without waking compute.","descZh":"对象字节通过预签名 URL 或 public/* 在浏览器与 S3 存储间直传，0 字节经过应用和网关；静态 bundle 由网关从对象存储直接流式响应，不起容器。","href":"./adr.html#adr-0007","tag":"ADR 0007","src":"gateway/src/static.ts templates/app/sdk/objects.ts"},{"titleEn":"ADR 0008: Three Flat Identity Headers & Pluggable IdentityProvider","titleZh":"ADR 0008：身份上下文","descEn":"Drops all inbound X-Pneuma-Space-* headers and injects X-Pneuma-Space-Subject (user:<id> or service:<id>), X-Pneuma-Space-Name, and X-Pneuma-Space-Owner: 1.","descZh":"网关剥离所有入站 X-Pneuma-Space-* 头，经 IdentityProvider 认证后注入 Subject、Name 与 Owner 三个平面请求头，无需 SDK 也能做所有者判断。","href":"./adr.html#adr-0008","tag":"ADR 0008","src":"gateway/src/ingress.ts gateway/src/identity.ts"},{"titleEn":"ADR 0009: At-Least-Once Scheduled & On-Demand Triggers","titleZh":"ADR 0009：触发至少一次","descEn":"Persists Delivery row before calling POST /_pneuma-space/trigger/<name> with trigger Lease; retries up to 5 times with identical X-Pneuma-Space-Delivery ID.","descZh":"定时和按需触发先落库持久化 Delivery 再以 trigger 租约唤醒应用；最多退避重试 5 次并携带相同的 X-Pneuma-Space-Delivery 供应用幂等去重；停机最多补发最近一个槽位。","href":"./adr.html#adr-0009","tag":"ADR 0009","src":"gateway/src/scheduler.ts"},{"titleEn":"ADR 0010: WebRTC STUN/TURN Capability Behind Compose rtc Profile","titleZh":"ADR 0010：RTC 进 M1，在 Compose profile 后面","descEn":"Leaf CoturnProvider injects STUN/TURN URLs and HMAC secret; SDK mints time-limited TURN credentials while signaling uses the app’s own ws capability.","descZh":"作为叶子 Provider 注入 coturn STUN/TURN 地址与 HMAC 共享密钥；SDK 铸造限时 TURN 凭据，信令走应用自己的 ws 长连接。","href":"./adr.html#adr-0010","tag":"ADR 0010","src":"gateway/src/providers.ts templates/app/sdk/rtc.ts"},{"titleEn":"ADR 0011: Publish Input Is Pre-Built Image or Code Bundle Plus Manifest","titleZh":"ADR 0011：发布输入是预构建镜像加清单","descEn":"The platform has no server-side Docker build service; appctl builds or bundles on the developer machine and commits content-hashed Releases.","descZh":"平台不包含服务端构建服务；appctl 在开发者本地完成构建或代码打包，以内容哈希 release_key 标识不可变 Release。","href":"./adr.html#adr-0011","tag":"ADR 0011","src":"cli/appctl.ts gateway/src/model.ts"},{"titleEn":"ADR 0012: Zero-Dependency Node.js LTS & Direct TypeScript Execution","titleZh":"ADR 0012：实现语言与依赖","descEn":"Gateway runs on Node.js LTS using built-in modules only (http, net, tls, node:sqlite, crypto) with zero runtime dependencies and native TypeScript execution.","descZh":"网关采用 Node.js LTS 原生直接执行 TypeScript，只使用内置模块（http、net、tls、node:sqlite、crypto），零运行时 npm 依赖，无编译构建步骤。","href":"./adr.html#adr-0012","tag":"ADR 0012","src":"package.json gateway/src/main.ts"},{"titleEn":"ADR 0013: Object Provider & BundleStore Over SigV4 HTTP & Encrypted madmin API","titleZh":"ADR 0013：对象 Provider 用签名 HTTP 管理对象服务","descEn":"Speaks S3 and MinIO-compatible /minio/admin/v3/ directly from node:crypto using SigV4 and Argon2id + AES-256-GCM encrypted admin payloads.","descZh":"用 node:crypto 直接向 RustFS 发送 SigV4 签名 HTTP 请求与 Argon2id + AES-256-GCM 加密的 madmin 管理请求，为每应用创建限 bucket 的密钥对与公开读策略。","href":"./adr.html#adr-0013","tag":"ADR 0013","src":"gateway/src/providers.ts gateway/src/providers.ts"},{"titleEn":"ADR 0014: Zero-IO In-Memory Console Overview & Telemetry Sampler","titleZh":"ADR 0014：管理后台的平台总览","descEn":"Metrics component samples services, fleet seats, wake latencies, deliveries, and host load every 10 s; GET /api/metrics answers from memory with 0 Docker calls.","descZh":"Metrics 组件每 10 秒后台采样服务状态、并发席位、唤醒耗时、投递与宿主机负载；GET /api/metrics 纯内存响应，0 Docker 调用。","href":"./adr.html#adr-0014","tag":"ADR 0014","src":"gateway/src/metrics.ts gateway/src/console.html"},{"titleEn":"ADR 0015: Diff-Driven Live Overview, Awake Timeline & sleepsAt","titleZh":"ADR 0015：活的总览","descEn":"Adds sleepsAt countdown and event sequence numbers; diff-driven seat ignition, awake instance timeline, synchronized crosshair charts, and pause-on-hover event stream.","descZh":"以醒睡周期为主角：列表增加 sleepsAt 倒计时，通过快照差分驱动席位点亮、实例状态时间线、三图联动十字线与悬停暂存的事件流。","href":"./adr.html#adr-0015","tag":"ADR 0015","src":"gateway/src/console.html gateway/src/lifecycle.ts"},{"titleEn":"ADR 0016: Realtime Page & 1000-Entry In-Memory Request Ring","titleZh":"ADR 0016：实时页与请求记录","descEn":"Records request, static, ws, and trigger durations, cold-start flag, and waitMs in a 1000-entry ring; unified filter bar over request and lifecycle event streams.","descZh":"网关内存维护 1000 条请求记录环（含 request/static/ws/trigger 耗时、冷启动标记与等待时间），在控制台实时页提供统一语法的请求流与事件流双栏视图。","href":"./adr.html#adr-0016","tag":"ADR 0016","src":"gateway/src/requests.ts gateway/src/console.html"},{"titleEn":"ADR 0017: Pluggable Runtimes, Isolate Worker Service & The Guard","titleZh":"ADR 0017：可插拔运行时与 isolate 运行时","descEn":"Introduces RUNTIMES table, Runtimes facade, neutral storage bindings, the standalone worker_threads runner service with 3 s watchdog, and AppGuard quarantine.","descZh":"确立可插拔 RUNTIMES 表与 Runtimes 门面、存储绑定中立化、独立部署的 worker_threads runner 服务（含 1s 心跳/3s 看门狗与垫片防护）以及统一熔断隔离的 AppGuard。","href":"./adr.html#adr-0017","tag":"ADR 0017","src":"gateway/src/runtimes.ts gateway/src/runner.ts gateway/src/isolate-shim.ts"},{"titleEn":"ADR 0018: Live Topology Page: Runtime Lanes View & 5-Column Capability Graph","titleZh":"ADR 0018：拓扑页与运行时视图","descEn":"Inline SVG topology views (Lanes and 5-column Graph) drawn from live gateway state, with reverse fault-color propagation and inline unquarantine.","descZh":"控制台内置泳道视图（Lanes）与五列分层连线图（Graph），实时展示网关阶段、三条运行时车道、十大能力与后端服务的依赖关系及反向故障染色。","href":"./adr.html#adr-0018","tag":"ADR 0018","src":"docs/assets/render.ts gateway/src/console.html"},{"titleEn":"ADR 0019: Kubernetes Deployment Plane: PodDriver, StatefulSetPool & NetworkPolicies","titleZh":"ADR 0019：Kubernetes 部署平面","descEn":"Kubernetes is a deployment plane selected by PNEUMA_SPACE_PLANE=kubernetes; 1 Pod per awake container app, runner StatefulSet with pinned home, zero-dep kube.ts client.","descZh":"将 K8s 定义为部署平面而非运行时：main.ts 按平面切换四个组件，内置零依赖 kube.ts 客户端、双命名空间与 NetworkPolicy、单实例 PodDriver 与固定 home 的 runner StatefulSet。","href":"./adr.html#adr-0019","tag":"ADR 0019","src":"gateway/src/kube.ts gateway/src/pods.ts deploy/kubernetes/60-network-policies.yaml"},{"titleEn":"ADR 0020: Store-Backed Instance State, CAS Transitions & Multi-Replica Gateway","titleZh":"ADR 0020：实例状态进平台库，网关多副本","descEn":"Moves instance, lease_tally, guard, and replica tables to the store; enforces single-instance invariant via CAS on (runtime, state, epoch) with zero-IO local mirrors.","descZh":"将 instance、lease_tally、guard 与 replica 四张表迁入平台库，仅靠 (runtime, state, epoch) 上的条件更新（CAS）保证全集群单实例，并在副本内维护零 IO 镜像。","href":"./adr.html#adr-0020","tag":"ADR 0020","src":"gateway/src/instances.ts gateway/src/lifecycle.ts"},{"titleEn":"ADR 0021: Trusted Upstream JWT Identity Verifier & Separate Console Audience","titleZh":"ADR 0021：可信上游身份","descEn":"Verifies RS256, ES256, and EdDSA JWTs from an authenticating proxy using node:crypto with JWKS caching, audience separation, and cookie Domain stripping.","descZh":"内置零依赖 JwtVerifier（支持 RS256/ES256/EdDSA 与 JWKS 缓存），验证组织上游认证代理注入的签名 JWT，并通过独立控制台 audience 防止应用泄漏的令牌重放管理接口。","href":"./adr.html#adr-0021","tag":"ADR 0021","src":"gateway/src/jwt.ts gateway/src/identity.ts"},{"titleEn":"ADR 0022: Tenants, Memberships, Service/Personal Tokens & App Access Scopes","titleZh":"ADR 0022：租户、成员、令牌与访问范围","descEn":"Defines Tenant, User, Membership (admin | member), Token, and Access (tenant | org | public), plus the pure ACTIONS authorization table and Team console page.","descZh":"引入租户、成员角色（admin 管全租户，member 仅读写自己为 owner 的应用）、服务与个人令牌、三档应用访问范围（tenant/org/public）以及 ACTIONS 集中授权表。","href":"./adr.html#adr-0022","tag":"ADR 0022","src":"gateway/src/authz.ts gateway/src/registry.ts"},{"titleEn":"ADR 0023: Per-Instance CPU/Memory Shape & Per-Tenant Resource Quotas","titleZh":"ADR 0023：配额与资源","descEn":"Adds cpu_millis and memory_mb policy fields and per-tenant quotas (apps, awake, cpu_millis, memory_mb, storage_gb) checked under the tenant row lock.","descZh":"新增每实例 cpu_millis 与 memory_mb 策略，以及按租户行锁串行判定的五项配额（应用数、并发唤醒数、CPU 总量、内存总量、卷存储容量）。","href":"./adr.html#adr-0023","tag":"ADR 0023","src":"gateway/src/model.ts gateway/src/runtimes.ts"},{"titleEn":"ADR 0024: Persisted Usage Heatmaps, Lifecycle Events, Append-Only Audit & Prometheus","titleZh":"ADR 0024：观测落库、热力图、审计、指标、节点与日志","descEn":"Persists per-replica usage buckets, global events with 2 s settle window, append-only audit log, fan-out request stream across peers, and Prometheus /metrics.","descZh":"实现每副本写绝对值读时求和的 usage 热力图表、带 2s 沉淀期的全局递增 events 表、触发器保护的只追加 audit 审计表、跨副本请求流扇出以及 Prometheus 指标端点。","href":"./adr.html#adr-0024","tag":"ADR 0024","src":"gateway/src/metrics.ts gateway/src/admin.ts"},{"titleEn":"ADR 0025: PostgreSQL Platform Store, Built-In pg.ts Wire Client & Direct Provisioning","titleZh":"ADR 0025：平台库上 PostgreSQL，内置线协议客户端，供应直接说协议","descEn":"Built-in PostgreSQL wire client (pg.ts) and Redis RESP2 client (resp.ts); shared sql.ts DML; SERIALIZABLE retries; advisory locks; trigger-driven NOTIFY pneuma_space.","descZh":"内置零依赖 PostgreSQL 线协议客户端 pg.ts 与 Redis 客户端 resp.ts；SQLite 与 PG 共用一份 sql.ts DML；SERIALIZABLE 自动重试、会话咨询锁与行触发器 NOTIFY。","href":"./adr.html#adr-0025","tag":"ADR 0025","src":"gateway/src/pg.ts gateway/src/store-pg.ts gateway/src/resp.ts"},{"titleEn":"ADR 0026: Cluster Console Page & Day-2 Operator Actions (Scale, Drain, Restart, Kill)","titleZh":"ADR 0026：集群页与运维操作","descEn":"Adds Cluster/Host page backed by 15 s cached /api/cluster snapshot and operator controls to scale gateway/runner, restart Pods, drain nodes, and stop/restart/kill instances.","descZh":"控制台新增集群/主机页（基于 15s 采样缓存的 /api/cluster），支持扩缩网关与 runner、重启平台 Pod、排空节点上的全部实例，以及对单实例执行 stop、restart 与 grace 0 强制 kill。","href":"./adr.html#adr-0026","tag":"ADR 0026","src":"gateway/src/nodes.ts gateway/src/kube-infra.ts"},{"titleEn":"ADR 0027: What a Replica May Deduce From Memory: Committed Tally & Worker Ownership","titleZh":"ADR 0027：副本凭内存能断定什么","descEn":"Fast-path acquire trusts only a committed >0 lease_tally with no queued 0 write; isolate worker ownership is judged from store rows; every replica follows awake workers.","descZh":"修正多副本内存竞态：快路径只信任已落库提交的正数 lease_tally；isolate worker 的归属唯一以数据库 instance 行为准；每个副本跟随所有醒着的 isolate worker 的结束事件。","href":"./adr.html#adr-0027","tag":"ADR 0027","src":"gateway/src/lifecycle.ts gateway/src/isolate.ts"},{"titleEn":"ADR 0028: Pre-Ensure Quota Reservation & Bundle Exclusion Between Publish and Purge","titleZh":"ADR 0028：发布、策略和清除在检查与提交之间对资源的假定","descEn":"Inserts suspended placeholder Binding rows under the tenant lock before provider.ensure() so concurrent publishes cannot exceed storage_gb; adds Store.exclusiveBundle.","descZh":"在 provider.ensure() 之前先在租户行锁事务内插入 suspended 占位 Binding 行以防并发发布穿透 storage_gb 配额；新增 Store.exclusiveBundle 互斥 bundle 提交与清除。","href":"./adr.html#adr-0028","tag":"ADR 0028","src":"gateway/src/registry.ts"},{"titleEn":"ADR 0029: Authenticated Delivery Claims (replica, attempts) & Periodic Leader Reclaim","titleZh":"ADR 0029：投递的认领有身份，领导者周期回收","descEn":"Each delivery attempt records (claim_replica, attempts); completion writes are conditional on that claim, and the leader reclaims orphaned delivering rows every 5 s.","descZh":"每次触发投递认领写入 (replica, attempts) 身份，结果写回必须带该条件更新以防迟到尝试覆盖新尝试；领导者每 5 秒周期回收死副本或旧进程遗留的 delivering 行。","href":"./adr.html#adr-0029","tag":"ADR 0029","src":"gateway/src/scheduler.ts"},{"titleEn":"ADR 0030: Compose Service Presence: Same-Subnet DNS Resolution + TCP Connect","titleZh":"ADR 0030：Compose 上的平台服务，在网关的网络上且接受连接才算在","descEn":"Verifies a Compose service DNS answer falls within the gateway’s own IPv4 interface subnets (defeating host Fake-IP proxies) and accepts TCP connections within 1 s.","descZh":"使用 500ms 有界 DNS 解析器并校验解析地址位于网关自身网卡 IPv4 子网内（抵御宿主机 Fake-IP 合成地址干扰），再通过 1 秒 TCP 连接区分 off、down 与 up。","href":"./adr.html#adr-0030","tag":"ADR 0030","src":"gateway/src/providers.ts gateway/src/metrics.ts"},{"titleEn":"ADR 0031: Process Generation in Request Cursors (<replica>:<seq>@<generation>)","titleZh":"ADR 0031：请求游标带进程世代","descEn":"Tags each replica’s request ring cursor with process start timestamp so a restarted replica whose seq caught up to the old cursor is still detected and reported as reset.","descZh":"在跨副本请求流游标中加入进程启动毫秒世代 <replica>:<seq>@<generation>，即使重启后新进程 seq 追上旧游标也能准确识别并渲染副本重启分割行。","href":"./adr.html#adr-0031","tag":"ADR 0031","src":"gateway/src/requests.ts"},{"titleEn":"ADR 0032: Refusing Runner Scale-Down When Any App Is Homed on Removed Replicas","titleZh":"ADR 0032：缩 runner 不改派 home，删掉有 home 的副本时拒绝","descEn":"Scaling pneuma-space-runner to M replicas checks Runtimes.homes() first and answers 409 Conflict with the stranded app list if any app is homed on ordinal >= M.","descZh":"缩容 runner StatefulSet 至 M 个副本前，先从平台库核对所有 instance 行的 home，只要存在序号 >= M 的绑定应用即在 K8s 调用前返回 409 Conflict 并列出受困应用。","href":"./adr.html#adr-0032","tag":"ADR 0032","src":"gateway/src/runtimes.ts gateway/src/kube-infra.ts"},{"titleEn":"ADR 0033: Standalone Cloud Entry & Portable Fetch Contract 2 (pneuma-space.fetch/1)","titleZh":"ADR 0033：独立云入口与可迁移的 Fetch 契约","descEn":"Defines Contract 2 (pneuma-space.fetch/1) with Web standard fetch(request, app) and optimistic-concurrency JSON Records for serverless isolate adapters (cloud/).","descZh":"为无状态 Worker 云后端定义独立的契约 2（pneuma-space.fetch/1）：采用标准 ES Module fetch(request, app) 与乐观并发 JSON Records 接口，支持应用级归档导出与迁移。","href":"./adr.html#adr-0033","tag":"ADR 0033","src":"cloud/README.md docs/app-contract.md"},{"titleEn":"ADR 0034: Personal Tenants, Idempotent Self-Service Signup & Private App Origins","titleZh":"ADR 0034：个人租户、自助注册与私有应用源","descEn":"Maps each verified immutable external identity to a deterministic internal User and personal Tenant; isolates private app browser origins with single-use grants.","descZh":"将外部认证提供者的不可变主体确定性映射为内部 User 与个人私有 Tenant（幂等注册、不按邮箱或显示名合并）；通过单次浏览器绑定 Grant 实现私有应用源访问。","href":"./adr.html#adr-0034","tag":"ADR 0034","src":"gateway/src/registry.ts gateway/src/registry.ts gateway/src/identity-hosted.ts"},{"titleEn":"ADR 0035: Terminal Artifact Fences Against Late Object Writes After Purge","titleZh":"ADR 0035：制品清除的终态栅栏","descEn":"Registers artifact keys in a per-app Durable Object before conditional R2 writes and overwrites all keys with terminal tombstones on purge so delayed writes cannot resurrect code.","descZh":"在写 R2 对象前先在每应用独立的 SQLite Durable Object 中登记制品键，清除时原子封闭登记并将所有 R2 键覆盖为不含代码的终态标记，防止迟到写入导致已清除代码复活。","href":"./adr.html#adr-0035","tag":"ADR 0035","src":"cloud/core/"},{"titleEn":"ADR 0036: Full SaaS Preserves Complete Contract 1 Platform & Original Console","titleZh":"ADR 0036：SaaS 保留完整平台","descEn":"Full SaaS runs the original Node gateway, Registry, Store, Runtimes, Providers, Scheduler, Metrics, and Console with PNEUMA_SPACE_IDENTITY=hosted added.","descZh":"明确完整 SaaS 必须保留全部 M1、M2 应用能力（契约 1）与原控制台监控诊断功能：在原 Node 网关上新增 hosted 身份模式，而将 Fetch 契约 2 保留为独立实验。","href":"./adr.html#adr-0036","tag":"ADR 0036","src":"REQUIREMENTS-M3.md gateway/src/main.ts gateway/src/identity-hosted.ts"},{"titleEn":"ADR 0037: Hybrid Deployment Origin TLS With Dedicated Caddy & Cloudflare DNS-Only","titleZh":"ADR 0037：组合部署的源站 TLS","descEn":"Replaces retired ingress-nginx and avoids Cloudflare HTTP proxy upload/timeout limits by using DNS-only records routed to a dedicated Caddy TLS LoadBalancer Service.","descZh":"为避免 Cloudflare 普通 HTTP 代理收窄契约 1 的无限流式上传与长连接超时，并替代已退役的 ingress-nginx，采用 Cloudflare DNS-only 直连集群内专用 Caddy 服务在源站终止三域 TLS。","href":"./adr.html#adr-0037","tag":"ADR 0037","src":"deploy/hosted/README.md deploy/hosted/verify-tls.ts"}];</script>
+<script src="./assets/app.js"></script>
+</body>
+</html>
