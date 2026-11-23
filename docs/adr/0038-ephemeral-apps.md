@@ -33,7 +33,7 @@
 
 ## 后果
 
-- INV-2 和 DESIGN 1.4 多了一个例外。AGENTS.md 中的"Only purge deletes, and only from `removed`"也需要维护者按本 ADR 补上这个例外，本次没有改它。
+- INV-2、DESIGN 1.4 和 AGENTS.md 中的"Only purge deletes, and only from `removed`"多了这个例外。
 - 到期不精确：应用在 `expires_at` 之后最多约 10 s 开始结束，purge 本身还要时间，领导者失联时再往后推迟。这个窗口里请求照常应答，Ingress 不检查到期。
 - 结束时会退役实例，进行中的请求最多再排空 `drain_timeout_seconds`。名字在结束后释放，任何人都可以再发布它，持久或临时都行。
 - 清扫失败（例如 Provider 不可用）时，行停在 `purging` 并留下 `error` 审计行；下一次清扫或续跑会重试。
