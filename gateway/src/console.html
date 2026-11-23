@@ -652,6 +652,7 @@ dialog .field { margin: 0 0 20px; }
 .lmenu button small + .ico { margin-left: 0; }
 .lmenu button[aria-selected="true"] { font-weight: 600; }
 .lfind { height: 28px; margin: 2px 2px 6px; font-size: 12.5px; }
+dialog.approval .warn { margin: -8px 0 20px; padding: 10px 12px; border-radius: 8px; background: var(--orange-tint); color: var(--ink); }
 dialog.approval .facts { margin: -8px 0 20px; padding: 10px 12px 10px 28px; max-height: 200px; overflow: auto; border-radius: 8px; background: var(--inset); box-shadow: 0 0 0 1px var(--line); font-size: 12.5px; }
 .stepper { display: flex; align-items: center; gap: 8px; margin: -8px 0 20px; }
 .stepper output { min-width: 40px; text-align: center; font: 600 20px/28px var(--mono); }
@@ -981,7 +982,7 @@ const I18N = {
     'st.waking': '唤醒中', 'st.awake': '运行中', 'st.draining': '排空中', 'st.stopping': '停止中', 'st.active': '启用',
     'st.suspended': '已暂停', 'st.due': '待投递', 'st.delivering': '投递中', 'st.done': '完成', 'st.failed': '失败',
     'st.cancelled': '已取消', 'st.up': '在线', 'st.down': '不可达', 'st.off': '未启用', 'st.unknown': '未知',
-    'd.back': '所有项目', 'd.open': '打开 {address}', 'd.since': '{ago}进入', 'd.owner': '所有者 {owner}',
+    'd.back': '所有项目', 'd.open': '打开 {address}', 'd.since': '{ago}进入', 'd.owner': '所有者 {owner}', 'd.manager': '管理方 {name}',
     'd.publish': '发布新版本', 'd.remove': '移除', 'd.purge': '清除', 'cancel': '取消',
     'd.removeTitle': '移除 {name}？', 'd.removeBody': '地址将返回 404。卷、数据库、键前缀和 bucket 全部保留，再次发布即可恢复。',
     'd.purgeTitle': '清除 {name}？', 'd.purgeBody': '这会删除它的文件、数据库、键值数据和 bucket，无法撤销。',
@@ -1153,6 +1154,8 @@ const I18N = {
     'tk.apps': '应用范围', 'tk.allApps': '全部应用', 'tk.selectedApps': '所选应用', 'tk.futureApps': '包括之后创建的应用。', 'tk.chooseApps': '至少选择一个应用。', 'tk.chooseScopes': '至少选择一种操作。', 'tk.appsN': '{n} 个应用',
     'tk.revokeBodyHosted': '吊销后，使用它的新请求立即被拒绝。已经准入的请求可继续结束。',
     'top.signOutBody': '退出控制台，并使这个会话登录的应用在下一次请求时重新验证身份。', 'd.confirmName': '输入 {name} 确认清除',
+    'mg.around': '{name} 负责这个应用的发布。在这里操作会绕过它的检查，它的记录也会和线上对不上。', 'mg.open': '去 {name} 操作', 'mg.confirm': '输入 {name}，绕过它继续',
+    'mg.policyTitle': '修改 {name} 的策略？', 'mg.publishTitle': '发布 {name} 的新版本？',
     'ac.org.hosted': '全部账户', 'ac.org.desc.hosted': '平台上任何已登录账户都能访问，包括其他租户。',
     'ac.public.open.hosted': '任何人不用登录就能打开。', 'ac.public.optional.hosted': '任何人不用登录就能打开，登录的访客带着身份。',
     'empty.members': '还没有成员。', 'empty.tokens': '还没有令牌。', 'empty.tenants': '还没有租户。',
@@ -1276,7 +1279,7 @@ const I18N = {
     'st.waking': 'waking', 'st.awake': 'awake', 'st.draining': 'draining', 'st.stopping': 'stopping', 'st.active': 'active',
     'st.suspended': 'suspended', 'st.due': 'due', 'st.delivering': 'delivering', 'st.done': 'done', 'st.failed': 'failed',
     'st.cancelled': 'cancelled', 'st.up': 'up', 'st.down': 'down', 'st.off': 'off', 'st.unknown': 'unknown',
-    'd.back': 'All projects', 'd.open': 'Open {address}', 'd.since': 'since {ago}', 'd.owner': 'owner {owner}',
+    'd.back': 'All projects', 'd.open': 'Open {address}', 'd.since': 'since {ago}', 'd.owner': 'owner {owner}', 'd.manager': 'managed by {name}',
     'd.publish': 'Publish release', 'd.remove': 'Remove', 'd.purge': 'Purge', 'cancel': 'Cancel',
     'd.removeTitle': 'Remove {name}?', 'd.removeBody': 'Its address will answer 404. Every volume, database, key prefix and bucket is kept; publishing again restores it.',
     'd.purgeTitle': 'Purge {name}?', 'd.purgeBody': 'This deletes its files, database, key-value data and bucket. It cannot be undone.',
@@ -1448,6 +1451,8 @@ const I18N = {
     'tk.apps': 'Application scope', 'tk.allApps': 'All applications', 'tk.selectedApps': 'Selected applications', 'tk.futureApps': 'Includes applications created later.', 'tk.chooseApps': 'Select at least one application.', 'tk.chooseScopes': 'Select at least one action.', 'tk.appsN': '{n} applications',
     'tk.revokeBodyHosted': 'New requests with this token are refused immediately. Already admitted requests may finish.',
     'top.signOutBody': 'Sign out of the console. Apps opened with this session require authentication on their next request.', 'd.confirmName': 'Type {name} to confirm deletion',
+    'mg.around': '{name} runs this app’s releases. Acting here goes around its checks and leaves its record out of step with what runs.', 'mg.open': 'Act through {name}', 'mg.confirm': 'Type {name} to act around it',
+    'mg.policyTitle': 'Change the policy of {name}?', 'mg.publishTitle': 'Publish a release of {name}?',
     'ac.org.hosted': 'All accounts', 'ac.org.desc.hosted': 'Any signed-in account on the platform can visit, including other tenants.',
     'ac.public.open.hosted': 'Anyone can open it without signing in.', 'ac.public.optional.hosted': 'Anyone can open it without signing in, and a signed-in visitor is identified.',
     'empty.members': 'No members yet.', 'empty.tokens': 'No tokens yet.', 'empty.tenants': 'No tenants yet.',
@@ -1601,8 +1606,8 @@ function svg(tag, attrs = {}, ...children) {
   return el;
 }
 
-async function api(method, path, body, contentType = 'application/json') {
-  const headers = body === undefined ? {} : { 'content-type': contentType };
+async function api(method, path, body, contentType = 'application/json', extra = {}) {
+  const headers = { ...(body === undefined ? {} : { 'content-type': contentType }), ...extra };
   if (session?.me.hosted && !['GET', 'HEAD'].includes(method)) headers['X-Pneuma-Space-CSRF'] = session.me.csrf;
   const response = await fetch(path, {
     method,
@@ -1617,6 +1622,12 @@ async function api(method, path, body, contentType = 'application/json') {
 }
 
 const appPath = (name) => `/api/apps/${encodeURIComponent(name)}`;
+/** A write to a managed app names its manager (ADR 0039); sent only after the person typed the name in the approval card. */
+const naming = (manager) => (manager ? { 'X-Pneuma-Space-Manager': manager.name } : {});
+/** Where a person acts through the manager; the server admits only http and https URLs, and the page links nothing else either. */
+const managerLink = (manager, label, attrs = {}) => (/^https?:\/\//.test(manager.url ?? '') ? h('a', { ...attrs, href: manager.url, target: '_blank', rel: 'noopener' }, label) : null);
+const managerChip = (manager) => (manager == null ? null
+  : managerLink(manager, t('d.manager', { name: manager.name }), { class: 'chip text' }) ?? h('span', { class: 'chip text' }, t('d.manager', { name: manager.name })));
 const appLink = (name) => h('a', { href: `#/apps/${encodeURIComponent(name)}`, class: 'mono' }, name);
 const tone = (state) => Object.keys(TONE).find((k) => TONE[k].includes(state)) ?? '';
 const status = (state) => h('span', { class: `st ${tone(state)}` }, t(`st.${state}`));
@@ -1781,22 +1792,26 @@ function fileField({ label, accept }) {
  * The approval card and the console's only confirmation: what will happen, in the reader's words, then Cancel and the
  * action. With `submit`, the card stays open on a refusal and shows it in place.
  */
-function approve({ title, body, facts = [], control = null, danger = false, action = null, submit = null, confirmText = null }) {
+function approve({ title, body, facts = [], control = null, danger = false, action = null, submit = null, confirmText = null, manager = null }) {
   return new Promise((resolve) => {
     const refusal = h('p', { class: 'msg err', role: 'alert', hidden: true });
     const ok = h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, value: 'ok' }, action ?? t('cl.continue'));
-    const confirmation = confirmText === null ? null : h('input', { autocomplete: 'off', spellcheck: 'false', oninput: () => { ok.disabled = confirmation.value !== confirmText; }, onkeydown: (event) => { if (event.key === 'Enter' && !ok.disabled) { event.preventDefault(); ok.click(); } } });
-    if (confirmation) ok.disabled = true;
+    // Each name the person types before Continue: the app's for a hosted purge, the manager's for a write that goes around it (ADR 0039).
+    const typed = [confirmText && [t('d.confirmName', { name: confirmText }), confirmText], manager && [t('mg.confirm', { name: manager.name }), manager.name]].filter(Boolean)
+      .map(([label, text]) => ({ label, text, input: h('input', { autocomplete: 'off', spellcheck: 'false', oninput: () => { ok.disabled = !confirmed(); }, onkeydown: (event) => { if (event.key === 'Enter' && !ok.disabled) { event.preventDefault(); ok.click(); } } }) }));
+    const confirmed = () => typed.every((x) => x.input.value === x.text);
+    ok.disabled = !confirmed();
     const dialog = h('dialog', { class: 'approval' },
       h('h3', {}, title), h('p', {}, body),
+      manager ? h('p', { class: 'warn' }, t('mg.around', { name: manager.name }), ' ', managerLink(manager, t('mg.open', { name: manager.name }))) : null,
       facts.length ? h('ul', { class: 'facts' }, facts.map((f) => h('li', {}, f))) : null,
       control,
-      confirmation ? h('label', { class: 'field' }, h('span', {}, t('d.confirmName', { name: confirmText })), confirmation) : null,
+      typed.map((x) => h('label', { class: 'field' }, h('span', {}, x.label), x.input)),
       refusal,
       h('form', { method: 'dialog', class: 'actions', onsubmit: submit && (async (e) => {
         if (e.submitter?.value !== 'ok') return;
         e.preventDefault();
-        if (confirmation && confirmation.value !== confirmText) return;
+        if (!confirmed()) return;
         ok.disabled = true;
         refusal.hidden = true;
         try {
@@ -1805,7 +1820,7 @@ function approve({ title, body, facts = [], control = null, danger = false, acti
         } catch (error) {
           refusal.textContent = failText(error);
           refusal.hidden = false;
-          ok.disabled = confirmation !== null && confirmation.value !== confirmText;
+          ok.disabled = !confirmed();
         }
       }) },
         h('button', { class: 'btn', value: 'cancel', autofocus: true }, t('cancel')),
@@ -3527,6 +3542,7 @@ async function projects() {
     return h('article', { class: `card acard ${bucket}`, onclick: (e) => { if (!e.target.closest('a, button')) location.hash = `#/apps/${encodeURIComponent(a.name)}`; } },
       h('div', { class: 'ah' }, h('i', { class: `pdot ${appDot(a)}` }), appLink(a.name), runtimeChip(a),
         a.expiresAt == null ? null : h('span', { class: 'chip text' }, ago(a.expiresAt, 'ap.ephemeral')),
+        managerChip(a.manager),
         grouped() && bucket === 'removed' ? h('span', { class: 'muted' }, a.tenant) : null,
         h('span', { class: 'rel num', title: t('d.release') }, a.release == null ? '' : `#${a.release}`)),
       appStateLine(a),
@@ -3613,8 +3629,9 @@ function policyForm(app, effective, reload) {
       if (value !== (override[f] ?? null)) patch[f] = value;
     }
     if (Object.keys(patch).length === 0) return void (message.textContent = t('p.nothing'));
+    if (app.manager && !(await approve({ title: t('mg.policyTitle', { name: app.name }), body: t('sec.policyDesc'), manager: app.manager, action: t('p.save') }))) return;
     try {
-      await api('PUT', `${appPath(app.name)}/policy`, patch);
+      await api('PUT', `${appPath(app.name)}/policy`, patch, undefined, naming(app.manager));
       await reload();
     } catch (error) {
       message.className = 'msg err';
@@ -3693,7 +3710,7 @@ async function detail(name) {
 
   /** Every operation confirms through the approval card, which shows the server's refusal in place; the page reloads after. */
   const op = async (card, call, after = reload) => { if (await approve({ ...card, submit: call })) await after(); };
-  const post = (kind) => () => api('POST', `${appPath(app.name)}/${kind}`);
+  const post = (kind, headers) => () => api('POST', `${appPath(app.name)}/${kind}`, undefined, undefined, headers);
   const lift = () => op({ title: t('d.liftTitle', { name: app.name }), body: t('d.liftBody') }, post('unquarantine'));
   /** Stop and restart are safe and frequent: they act at once and report under the actions. */
   const now = (kind) => async () => {
@@ -3712,12 +3729,12 @@ async function detail(name) {
     const sampled = await api('GET', '/api/cluster').then((v) => v.instances.find((i) => i.app === app.name), () => undefined);
     return op(killCard(sampled ?? { app: app.name, tenant: app.tenant, runtime: row.runtime, node: row.node, pod: null, leases: row.leases }), post('kill'));
   };
-  const remove = () => op({ title: t('d.removeTitle', { name: app.name }), body: t('d.removeBody'), action: t('d.remove') }, post('remove'));
+  const remove = () => op({ title: t('d.removeTitle', { name: app.name }), body: t('d.removeBody'), action: t('d.remove'), manager: app.manager }, post('remove', naming(app.manager)));
   const purge = () => op({
     title: t('d.purgeTitle', { name: app.name }), body: t('d.purgeBody'), danger: true, action: t('d.purge'),
-    confirmText: session.me.hosted ? app.name : null,
+    confirmText: session.me.hosted ? app.name : null, manager: app.manager,
     facts: inventory.bindings.map((b) => [h('b', {}, b.kind), ' ', h('span', { class: 'mono' }, Object.values(b.location).join(' · ') || b.provider)]),
-  }, () => api('POST', `${appPath(app.name)}/purge`, session.me.hosted ? { confirm: app.name } : undefined), () => { location.hash = '#/apps'; });
+  }, () => api('POST', `${appPath(app.name)}/purge`, session.me.hosted ? { confirm: app.name } : undefined, undefined, naming(app.manager)), () => { location.hash = '#/apps'; });
   const access = () => {
     let pick = app.access;
     // `access` decides whether a request arrives, the current release's `identity` whether it must sign in (docs/app-contract.md, Access).
@@ -3732,12 +3749,12 @@ async function detail(name) {
       paint();
     }, t('ac.label')));
     paint();
-    return op({ title: t('ac.title', { name: app.name }), body: note, control, action: t('ac.save') }, async () => { if (pick !== app.access) await api('PUT', `${appPath(app.name)}/access`, { access: pick }); });
+    return op({ title: t('ac.title', { name: app.name }), body: note, control, action: t('ac.save'), manager: app.manager }, async () => { if (pick !== app.access) await api('PUT', `${appPath(app.name)}/access`, { access: pick }, undefined, naming(app.manager)); });
   };
   const move = () => {
     let to = others[0];
     const control = h('div', { class: 'field' }, h('span', {}, t('mv.to')), listbox({ label: t('mv.to'), options: others.map((x) => ({ value: x, label: x })), value: to, onPick: (v) => { to = v; }, wide: true }));
-    return op({ title: t('mv.title', { name: app.name }), body: t('mv.body'), control, action: t('mv.action') }, () => api('PUT', `${appPath(app.name)}/tenant`, { tenant: to }));
+    return op({ title: t('mv.title', { name: app.name }), body: t('mv.body'), control, action: t('mv.action'), manager: app.manager }, () => api('PUT', `${appPath(app.name)}/tenant`, { tenant: to }, undefined, naming(app.manager)));
   };
 
   const head = h('div', { class: 'grow' });
@@ -3794,6 +3811,7 @@ async function detail(name) {
         h('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, status(instance), row?.since != null ? h('span', { class: 'muted' }, ago(row.since, 'd.since')) : null, leaseChips(row?.leases)),
         upstream() ? h('span', { class: 'chip text', title: t('d.tenant') }, app.tenant) : null,
         upstream() ? h('span', { class: 'chip text', title: t('ac.label') }, t(`ac.${app.access}`)) : null,
+        managerChip(app.manager),
         h('span', { class: 'muted' }, t('d.owner', { owner: app.owner })))]);
     repaint('actions', [instance, row?.quarantine?.since, lang], actions, () => [
       may('app.stop') && ACTIVE.includes(instance) ? [quiet(t('cl.stop'), stop), quiet(t('cl.restart'), restart)] : null,
@@ -3898,6 +3916,7 @@ async function publish(prefill) {
   const apps = await api('GET', '/api/apps');
   const existing = new Set(apps.map((a) => a.name));
   const ephemeral = new Set(apps.filter((a) => a.expiresAt != null).map((a) => a.name));
+  const managers = new Map(apps.filter((a) => a.manager != null).map((a) => [a.name, a.manager]));
   const pattern = addressPattern(apps);
   const tenantField = upstream() && session.scope !== null;
   const firstPublish = [];
@@ -3943,6 +3962,8 @@ async function publish(prefill) {
       return fail('manifest', t('f.badJson', { msg: error.message }));
     }
     const name = f.name.control.value.trim();
+    const manager = managers.get(name);
+    if (manager && !(await approve({ title: t('mg.publishTitle', { name }), body: t('pub.sub'), manager, action: t('f.submit') }))) return;
     submit.disabled = true;
     submit.textContent = t('f.busy');
     try {
@@ -3954,7 +3975,7 @@ async function publish(prefill) {
         if (owner || !upstream()) body.owner = owner;
         if (tenantField) body.tenant = tenant.value;
       }
-      await api('PUT', `${appPath(name)}/release`, body);
+      await api('PUT', `${appPath(name)}/release`, body, undefined, naming(manager));
       location.hash = `#/apps/${encodeURIComponent(name)}`;
     } catch (error) {
       const field = !name ? 'name' : error.status === 400 || error.status === 404 ? FIELD_OF.find(([re]) => re.test(error.message))?.[1] ?? (error.status === 400 ? 'manifest' : null) : null;
@@ -5248,8 +5269,10 @@ function cluster() {
           const value = input.value === '' ? null : Number(input.value);
           if (cancelled || (next === undefined ? value === current : value === next)) { input.replaceWith(button); return paint(); }
           input.disabled = true;
+          const manager = live.get(i.app)?.manager;
+          if (manager && !(await approve({ title: t('mg.policyTitle', { name: i.app }), body: t('sec.policyDesc'), manager, action: t('p.save') }))) { input.replaceWith(button); return paint(); }
           try {
-            await api('PUT', `${appPath(i.app)}/policy`, { [field]: value });
+            await api('PUT', `${appPath(i.app)}/policy`, { [field]: value }, undefined, naming(manager));
             nextWake.set(i.app, { ...nextWake.get(i.app), [field]: value });
             input.replaceWith(button);
             paint();

@@ -1,17 +1,12 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { after, before, test, type TestContext } from 'node:test';
+import { after, before, test } from 'node:test';
 import {
-  OWNER, adminClient, appJson, appPut, appUrl, cleanup, compose, deploy, images, scratch, setupSuite, teardownSuite, uniqueName, waitFor,
+  OWNER, adminClient, appJson, appPut, appUrl, chrome, cleanup, compose, deploy, images, setupSuite, teardownSuite, uniqueName, waitFor,
 } from './harness.ts';
 
 before(setupSuite);
 after(teardownSuite);
-
-const CHROME = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 test('AC-GAME-1', { timeout: 120_000 }, async (t) => {
   const app = await deploy(t, { image: images.echo, capabilities: { rtc: {} } });
@@ -28,44 +23,6 @@ test('AC-GAME-1', { timeout: 120_000 }, async (t) => {
     compose('--profile', 'rtc', 'up', '-d', 'coturn');
   }
 });
-
-type Page = { evaluate(expression: string): Promise<unknown> };
-
-async function chrome(t: TestContext): Promise<(url: string) => Promise<Page>> {
-  const profile = mkdtempSync(join(scratch, 'pneuma-space-acc-chrome-'));
-  const browser = spawn(CHROME, [
-    '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run',
-    '--disable-features=WebRtcHideLocalIpsWithMdns', 'about:blank',
-  ], { stdio: 'ignore' });
-  t.after(async () => {
-    const exited = new Promise((ok) => browser.once('exit', ok));
-    browser.kill();
-    await exited;
-    rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
-  });
-  const port = await waitFor(() => {
-    try { return readFileSync(join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0]; } catch { return null; }
-  }, 15_000, 'Chrome DevTools port');
-  return async (url) => {
-    const target = await (await fetch(`http://127.0.0.1:${port}/json/new?${url}`, { method: 'PUT' })).json();
-    const ws = new WebSocket(target.webSocketDebuggerUrl);
-    await new Promise((ok) => ws.addEventListener('open', ok));
-    t.after(() => ws.close());
-    let id = 0;
-    const pending = new Map<number, (m: any) => void>();
-    ws.addEventListener('message', (e) => {
-      const message = JSON.parse(String(e.data));
-      pending.get(message.id)?.(message);
-      pending.delete(message.id);
-    });
-    return {
-      evaluate: (expression) => new Promise((ok) => {
-        pending.set(++id, (m) => ok(m.result?.result?.value));
-        ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
-      }),
-    };
-  };
-}
 
 test('AC-GAME-2', { timeout: 120_000 }, async (t) => {
   const app = await deploy(t, { image: images.echo, capabilities: { kv: {}, ws: {}, rtc: {} } });

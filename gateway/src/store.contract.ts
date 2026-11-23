@@ -8,7 +8,7 @@ import { after, before, describe, test, type TestContext } from 'node:test';
 import { Instances } from './instances.ts';
 import {
   DEFAULT_POLICY, DEFAULT_QUOTA, DEFAULT_TENANT, IDEMPOTENCY_WINDOW_MS, USAGE_COUNTERS, changeKey,
-  type App, type AppId, type AppName, type Binding, type BundleId, type Delivery, type DeliveryId, type ImageId, type Instance, type ReleaseNumber, type ReplicaId, type Store,
+  type App, type AppId, type AppName, type Binding, type BundleId, type Delivery, type DeliveryId, type ImageId, type Instance, type ManagerName, type ReleaseNumber, type ReplicaId, type Store,
   type Subject, type TenantName, type TriggerName, type Usage,
 } from './model.ts';
 
@@ -20,7 +20,7 @@ const replica = 'replica-a' as ReplicaId;
 export function app(name: string, fields: Partial<App> = {}): App {
   return {
     name: name as AppName, id: appId(name), tenant: DEFAULT_TENANT, access: 'org', owner: 'user:ann' as Subject, status: 'registered',
-    current: null, policyOverride: {}, registeredAt: 0, expiresAt: null, version: 1, ...fields,
+    current: null, policyOverride: {}, registeredAt: 0, expiresAt: null, manager: null, version: 1, ...fields,
   };
 }
 
@@ -448,6 +448,14 @@ export function storeContract(name: string, open: OpenStore): void {
       await store.putApp(app('e-going', { tenant, expiresAt: 1, status: 'purging' }));
       const { apps, ephemeral } = await store.quotaUsed(tenant);
       assert.deepEqual([{ apps, ephemeral }, (await store.app('e-trial' as AppName))?.expiresAt], [{ apps: 1, ephemeral: 1 }, 1]);
+    });
+
+    test('a write that changes only the manager stores it and raises the version (ADR 0039)', async () => {
+      await store.putApp(app('m-app'));
+      const row = (await store.app('m-app' as AppName))!;
+      await store.putApp({ ...row, manager: { name: 'deployer' as ManagerName, url: 'https://deploy.test/m-app' } });
+      const managed = (await store.app('m-app' as AppName))!;
+      assert.deepEqual([managed.manager, managed.version > row.version], [{ name: 'deployer', url: 'https://deploy.test/m-app' }, true]);
     });
 
     test('instance log keeps one row per app', async () => {

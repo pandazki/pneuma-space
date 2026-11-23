@@ -106,6 +106,8 @@ Other commands: `appctl list`, `appctl show <name>` (runtime, quarantine, instan
 
 To try a version without keeping it, `appctl publish <name> . --ephemeral` publishes an ephemeral app under a new name that ends with its data after the platform's default ttl (`--ttl <seconds>` to choose another); `appctl discard <name>` ends it at once.
 
+An app published with `--manager <name>` is managed: its later publishes and other writes need `--manager <name>` too; `appctl unmanage <name> --manager <name>` ends that.
+
 Testing on the platform with curl, for an app that declares `identity`:
 
 ```sh

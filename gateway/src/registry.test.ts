@@ -6,8 +6,8 @@ import { Ingress } from './ingress.ts';
 import { Series } from './metrics.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
-  Conflict, DEFAULT_TENANT, InputError, QuotaExceeded, appName, parseManifest, subject, tenantName, triggerName,
-  type App, type AppId, type BundleId, type Capabilities, type Change, type PublishRequest, type ReleaseNumber, type Store, type StoreOps,
+  Conflict, DEFAULT_TENANT, InputError, QuotaExceeded, appName, managerName, parseManifest, subject, tenantName, triggerName,
+  type App, type AppId, type BundleId, type Capabilities, type Change, type ManagerName, type PublishRequest, type ReleaseNumber, type Store, type StoreOps,
 } from './model.ts';
 import { PlatformRegistry } from './registry.ts';
 import { replicaContract } from './registry.contract.ts';
@@ -799,4 +799,111 @@ test('ADR 0038 the ephemeral ttl fields are global only, the default never above
   const before = Date.now();
   await temporary(registry, {});
   assert.ok(registry.view(trial)!.expiresAt! >= before + 4_000_000);
+});
+
+const deployer = { name: managerName('deployer'), url: 'https://deploy.test/survey' };
+const named = deployer.name;
+
+/** A first publish of `survey` that makes deployer its manager. */
+function managed(registry: PlatformRegistry, capabilities: Record<string, unknown> = { kv: {} }, extra: Partial<PublishRequest> = {}) {
+  const manifest = parseManifest({ contract: 1, capabilities: capabilities as Capabilities });
+  return registry.publish({ name: survey, image: 'example:1', manifest, bundle: null, owner: ann, manager: deployer, ...extra });
+}
+
+test('AC-MGR-1 a first publish with a manager sets it; the listing shows it, and null for an unmanaged app', async () => {
+  const { registry } = await world().open();
+  await managed(registry);
+  await temporary(registry, {});
+  assert.deepEqual((await registry.listing()).map((a) => [a.name, a.manager]), [['survey', deployer], ['trial', null]]);
+});
+
+test('AC-MGR-2 a write to a managed app that does not name its manager, or names another, is refused naming it and its url, and changes nothing', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  const { app } = await managed(registry);
+  await registry.createTenant(blue, 'Blue', ['ann']);
+  const writes = (as: ManagerName | null) => [
+    () => managed(registry, { kv: {} }, { image: 'example:2', manager: null, named: as }),
+    () => registry.setAppPolicy(survey, { idle_seconds: 5 }, as),
+    () => registry.setAccess(survey, 'public', as),
+    () => registry.setOwner(survey, subject('user:bob'), as),
+    () => registry.moveApp(survey, blue, as),
+    () => registry.clearManager(survey, as),
+    () => registry.remove(survey, as),
+    () => registry.purge(survey, as),
+    () => registry.discard(survey, as),
+  ];
+  const state = async () => JSON.stringify([await store.app(survey), await store.releases(app), await store.bindings(app)]);
+  const before = await state();
+  for (const as of [null, managerName('other')]) {
+    for (const write of writes(as)) await assert.rejects(write(), /^Error: app "survey" is managed by deployer \(https:\/\/deploy\.test\/survey\); acting here goes around it/);
+  }
+  assert.equal(await state(), before);
+});
+
+test('AC-MGR-2 each write naming the manager proceeds, through to purge', async () => {
+  const { registry, store } = await world().open();
+  await managed(registry);
+  await registry.createTenant(blue, 'Blue', ['ann']);
+  assert.equal((await managed(registry, { kv: {} }, { image: 'example:2', manager: null, named })).number, 2);
+  await registry.setAppPolicy(survey, { idle_seconds: 5 }, named);
+  await registry.setAccess(survey, 'public', named);
+  await registry.setOwner(survey, subject('user:bob'), named);
+  await registry.moveApp(survey, blue, named);
+  const row = (await store.app(survey))!;
+  assert.deepEqual([row.policyOverride.idle_seconds, row.access, row.owner, row.tenant, row.manager], [5, 'public', 'user:bob', blue, deployer]);
+  await registry.remove(survey, named);
+  await registry.purge(survey, named);
+  assert.equal(await store.app(survey), null);
+});
+
+test('ADR 0039 stop, restart and kill of a managed app need no name', async () => {
+  const w = world();
+  const { registry } = await w.open();
+  const { app } = await managed(registry);
+  await registry.stop(survey);
+  await registry.restart(survey);
+  await registry.kill(survey);
+  assert.deepEqual(w.runtime.calls.slice(-4), [`retire ${app}`, `retire ${app}`, `acquire ${app}`, `kill ${app}`]);
+});
+
+test('AC-MGR-3 a publish naming the manager may change it, keeping the url only while the name stays; one without a manager keeps it', async () => {
+  const { registry } = await world().open();
+  await managed(registry);
+  const republish = (image: string, manager: PublishRequest['manager']) => managed(registry, { kv: {} }, { image, manager, named: registry.view(survey)!.manager!.name });
+  await republish('example:2', { name: named });
+  await republish('example:1', null);
+  assert.deepEqual(registry.view(survey)!.manager, deployer);
+  await republish('example:2', { name: managerName('other') });
+  assert.deepEqual(registry.view(survey)!.manager, { name: 'other', url: null });
+});
+
+test('AC-MGR-3 clearing names the manager, after which a write needs no name', async () => {
+  const { registry } = await world().open();
+  await managed(registry);
+  await registry.clearManager(survey, named);
+  await registry.remove(survey);
+  assert.deepEqual([registry.view(survey)!.manager, registry.view(survey)!.status], [null, 'removed']);
+});
+
+test('ADR 0039 a publish of identical inputs that gives a manager marks the app without a new release', async () => {
+  const { registry, store } = await world().open();
+  const { app } = await publish(registry, { kv: {} });
+  assert.equal((await managed(registry)).number, 1);
+  assert.deepEqual([(await store.app(survey))!.manager, (await store.releases(app)).length], [deployer, 1]);
+});
+
+test('ADR 0039 an unmanaged app ignores a named manager', async () => {
+  const { registry } = await world().open();
+  await publish(registry, { kv: {} });
+  await registry.remove(survey, named);
+  assert.deepEqual([registry.view(survey)!.status, registry.view(survey)!.manager], ['removed', null]);
+});
+
+test('AC-MGR-4 a managed ephemeral app refuses a discard that does not name its manager, and the expiry sweep ends it without one', async () => {
+  const { registry, store } = await world().open();
+  await temporary(registry, { files: {} }, 1, trial, { manager: deployer });
+  await assert.rejects(registry.discard(trial), /managed by deployer/);
+  await registry.expire(Date.now() + 1000);
+  assert.equal(await store.app(trial), null);
 });

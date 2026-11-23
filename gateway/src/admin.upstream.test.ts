@@ -114,6 +114,7 @@ const TABLE: [row: string, method: string, path: string, body: unknown, allowed:
   ['global policy', 'PUT', '/api/policy', { idle_seconds: 300 }, 'root', 'ana', 403, true],
   ['app policy', 'PUT', '/api/apps/alpha/policy', { idle_seconds: 5 }, 'bob', 'cid', 404],
   ['access', 'PUT', '/api/apps/alpha/access', { access: 'tenant' }, 'bob', 'cid', 404],
+  ['clear manager', 'DELETE', '/api/apps/alpha/manager', undefined, 'token:bob', 'cid', 404],
   ['owner', 'PUT', '/api/apps/alpha/owner', { owner: 'user:bob' }, 'ana', 'token:ci', 403],
   ['move', 'PUT', '/api/apps/beta/tenant', { tenant: B }, 'root', 'ana', 403, true],
   ['tenants', 'GET', '/api/tenants', undefined, 'root', 'ana', 403, true],

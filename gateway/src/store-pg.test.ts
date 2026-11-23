@@ -43,6 +43,9 @@ const skip = !dockerUp && 'Docker is not available';
 
 /** The steps both main and the hosted stack held before either appended one: main then added release_bundle, the hosted stack its tables. */
 const BEFORE_MERGE = 2;
+/** The steps before ADR 0038's and ADR 0039's. */
+const BEFORE_EPHEMERAL = 4;
+const BEFORE_MANAGED = 5;
 
 async function migrated(session: Session, steps: number): Promise<void> {
   await session.simple('CREATE TABLE schema_migration (version INTEGER PRIMARY KEY, applied_at BIGINT NOT NULL)');
@@ -188,7 +191,7 @@ describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () 
     const snapshot = await Promise.all(tables.map(async (table) => (await old.query(`SELECT * FROM ${table}`)).rows));
     const store = await open({}, 'hosted_migration');
     for (const [index, table] of tables.entries()) {
-      const rows = (await old.query(`SELECT * FROM ${table}`)).rows.map(({ restrictions, expires_at, ...row }) => row);
+      const rows = (await old.query(`SELECT * FROM ${table}`)).rows.map(({ restrictions, expires_at, manager, manager_url, ...row }) => row);
       assert.deepEqual(rows, snapshot[index]);
     }
     assert.equal((await store.token('legacy-hash'))?.restrictions, undefined);
@@ -200,7 +203,7 @@ describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () 
     await admin.simple('CREATE DATABASE ephemeral_migration');
     await admin.close();
     const old = await Session.open(plain('ephemeral_migration'));
-    await migrated(old, PG_MIGRATIONS.length - 1);
+    await migrated(old, BEFORE_EPHEMERAL);
     await old.simple(`UPDATE tenant SET quota = '{"apps":null,"awake":null,"cpu_millis":null,"memory_mb":null,"storage_gb":null}';
       INSERT INTO tenant (name, display, quota, created_at) VALUES ('blue', 'Blue', '{"apps":5,"awake":2,"cpu_millis":2000,"memory_mb":1024,"storage_gb":5}', 1);
       INSERT INTO app (name, id, owner, status, current, policy_override) VALUES ('kept', 'id-kept', 'user:ann', 'registered', NULL, '{}');`);
@@ -212,6 +215,18 @@ describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () 
       { apps: 5, ephemeral: 3, awake: 2, cpu_millis: 2000, memory_mb: 1024, storage_gb: 5 },
       null,
     ]);
+  });
+
+  test('the ADR 0039 step gives every existing app no manager', async () => {
+    const admin = await Session.open(plain());
+    await admin.simple('CREATE DATABASE managed_migration');
+    await admin.close();
+    const old = await Session.open(plain('managed_migration'));
+    await migrated(old, BEFORE_MANAGED);
+    await old.simple("INSERT INTO app (name, id, owner, status, current, policy_override) VALUES ('kept', 'id-kept', 'user:ann', 'registered', NULL, '{}')");
+    await old.close();
+    const store = await open({}, 'managed_migration');
+    assert.equal((await store.app('kept' as AppName))?.manager, null);
   });
 
   /** Migrates `database` as `before` leaves it, opens it with this gateway, and reads back what the merged schema holds. */

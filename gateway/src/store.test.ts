@@ -13,6 +13,9 @@ import type { TokenRestrictions } from './hosted-model.ts';
 
 /** The steps both main and the hosted stack held before either appended one: main then added release_bundle, the hosted stack its tables. */
 const BEFORE_MERGE = 8;
+/** The steps before ADR 0038's and ADR 0039's. */
+const BEFORE_EPHEMERAL = 10;
+const BEFORE_MANAGED = 11;
 
 const path = () => join(mkdtempSync(join(tmpdir(), 'pneuma-space-store-')), 'pneuma-space.sqlite3');
 
@@ -114,7 +117,7 @@ test('AC-SAAS-12 hosted migration preserves existing application state and token
   const store = new SqliteStore(file);
   const migrated = new DatabaseSync(file);
   for (const [index, table] of ['app', 'release', 'binding', 'token'].entries()) {
-    const rows = migrated.prepare(`SELECT * FROM ${table}`).all().map(({ restrictions, expires_at, ...row }) => row);
+    const rows = migrated.prepare(`SELECT * FROM ${table}`).all().map(({ restrictions, expires_at, manager, manager_url, ...row }) => row);
     assert.deepEqual(rows, snapshot[index].map((row) => ({ ...row })));
   }
   assert.equal((await store.token('legacy-hash'))?.restrictions, undefined);
@@ -156,8 +159,8 @@ test('a library that a gateway without that rule set back to before release_bund
 test('the ADR 0038 step gives every existing tenant an ephemeral quota of 3, the default one unlimited, and every existing app no end', async () => {
   const file = path();
   const old = new DatabaseSync(file);
-  for (const step of MIGRATIONS.slice(0, -1)) old.exec(sqlOf(step, old));
-  old.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1};
+  for (const step of MIGRATIONS.slice(0, BEFORE_EPHEMERAL)) old.exec(sqlOf(step, old));
+  old.exec(`PRAGMA user_version = ${BEFORE_EPHEMERAL};
     UPDATE tenant SET quota = '{"apps":null,"awake":null,"cpu_millis":null,"memory_mb":null,"storage_gb":null}';
     INSERT INTO tenant (name, display, quota, created_at) VALUES ('blue', 'Blue', '{"apps":5,"awake":2,"cpu_millis":2000,"memory_mb":1024,"storage_gb":5}', 1);
     INSERT INTO app (name, id, owner, status, current, policy_override) VALUES ('kept', 'id-kept', 'user:ann', 'registered', NULL, '{}');`);
@@ -169,6 +172,18 @@ test('the ADR 0038 step gives every existing tenant an ephemeral quota of 3, the
     { apps: 5, ephemeral: 3, awake: 2, cpu_millis: 2000, memory_mb: 1024, storage_gb: 5 },
     null,
   ]);
+  await store.close();
+});
+
+test('the ADR 0039 step gives every existing app no manager', async () => {
+  const file = path();
+  const old = new DatabaseSync(file);
+  for (const step of MIGRATIONS.slice(0, BEFORE_MANAGED)) old.exec(sqlOf(step, old));
+  old.exec(`PRAGMA user_version = ${BEFORE_MANAGED};
+    INSERT INTO app (name, id, owner, status, current, policy_override) VALUES ('kept', 'id-kept', 'user:ann', 'registered', NULL, '{}');`);
+  old.close();
+  const store = new SqliteStore(file);
+  assert.equal((await store.app('kept' as AppName))?.manager, null);
   await store.close();
 });
 

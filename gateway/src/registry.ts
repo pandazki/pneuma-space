@@ -5,7 +5,7 @@ import {
   admits, appName, declaredKinds, effectivePolicy, newAppId, releaseKey, selectProvider, subject, tenantName,
   type Access, type App, type AppDetail, type AppId, type AppName, type AppSummary, type AuditRecord, type Binding, type BindingState,
   type BundleId, type BundleIndex, type BundleStore, type CapabilityKind, type Change, type CapabilityProvider, type Guard, type Infra, type IssuedToken,
-  type Manifest, type Policy, type PolicyOverride, type PolicyPatch, type ProviderName, type Quota, type QuotaUsage, type Role,
+  type Manager, type ManagerChange, type ManagerName, type Manifest, type Policy, type PolicyOverride, type PolicyPatch, type ProviderName, type Quota, type QuotaUsage, type Role,
   type PublishRequest, type Registry, type Release, type ReleaseNumber, type ResourceKind, type RouteView,
   type RunSpec, type Runtime, type RuntimeKind, type SchedulerView, type Store, type StoreOps, type Subject, type Tenant, type TenantName,
   type Traffic, type Trigger, type TriggerName,
@@ -105,6 +105,22 @@ function triggersOf(app: App, manifest: Manifest): Trigger[] {
   return Object.entries(manifest.capabilities.cron?.triggers ?? {}).map(([name, t]) => ({
     app: app.id, name: name as TriggerName, schedule: app.expiresAt === null ? (t.schedule ?? null) : null,
   }));
+}
+
+/** A write to a managed app names its manager, or it would go around it; the name is no credential (ADR 0039). */
+function mustName(app: App, named: ManagerName | null | undefined): void {
+  const { manager } = app;
+  if (!manager || named === manager.name) return;
+  throw new Conflict(
+    `app "${app.name}" is managed by ${manager.name}${manager.url ? ` (${manager.url})` : ''}; acting here goes around it. ` +
+      `Act through ${manager.name}, or name it to act anyway: X-Pneuma-Space-Manager: ${manager.name} (appctl --manager ${manager.name})`,
+  );
+}
+
+/** The manager a publish leaves: the one it gives, keeping the url while the name stays and none is given; otherwise the app's. */
+function managerAfter(app: App | null, given: ManagerChange | null | undefined): Manager | null {
+  if (!given) return app?.manager ?? null;
+  return { name: given.name, url: given.url !== undefined ? given.url : app?.manager?.name === given.name ? app.manager.url : null };
 }
 
 export class PlatformRegistry implements Registry {
@@ -211,7 +227,7 @@ export class PlatformRegistry implements Registry {
     });
   }
 
-  async #publish({ name, image: reference, manifest, bundle, owner, tenant = DEFAULT_TENANT, authorize, ephemeral = null }: PublishRequest): Promise<Release> {
+  async #publish({ name, image: reference, manifest, bundle, owner, tenant = DEFAULT_TENANT, authorize, ephemeral = null, manager: given, named }: PublishRequest): Promise<Release> {
     const kinds = declaredKinds(manifest);
     const needsRuntime = kinds.some((k) => CAPABILITIES[k].needsRuntime);
     const runtime: RuntimeKind | null = manifest.runtime ?? (reference !== null ? 'container' : bundle !== null && needsRuntime ? 'isolate' : null);
@@ -235,6 +251,7 @@ export class PlatformRegistry implements Registry {
       return app;
     });
     if (app?.status === 'purging') throw new Conflict(`app "${name}" is being purged; publish again once purge finishes`);
+    if (app) mustName(app, named);
     // The marker says which kind the caller expects, so a mistaken name lands no release in the other kind (ADR 0038).
     if (app && (app.expiresAt === null) === (ephemeral !== null)) {
       throw new Conflict(app.expiresAt === null
@@ -242,7 +259,11 @@ export class PlatformRegistry implements Registry {
         : `app "${name}" is ephemeral until ${new Date(app.expiresAt).toISOString()} and never becomes durable; publish it as ephemeral, or the durable app under another name`);
     }
     const current = app && (await currentRelease(this.#store, app));
-    if (app?.status === 'registered' && current?.releaseKey === key) return current;
+    const manager = managerAfter(app, given);
+    if (app?.status === 'registered' && current?.releaseKey === key) {
+      if (manager?.name !== app.manager?.name || manager?.url !== app.manager?.url) await this.#manage(name, manager, authorize);
+      return current;
+    }
     if (app && runtime !== null) await this.#keepsRuntime(app, runtime);
     const service = runtime === null ? null : RUNTIMES[runtime].service;
     if (runtime !== null && service !== null && !(await this.#probe(service))) {
@@ -264,6 +285,7 @@ export class PlatformRegistry implements Registry {
       const expiresAt = ephemeral ? now + ttl! * 1000 : null;
       const created: App = {
         name, id: newAppId(), tenant, access: expiresAt === null ? this.#defaultAccess : 'tenant', owner, status: 'registered', current: null, policyOverride: pinned, registeredAt: now, expiresAt,
+        manager,
       };
       await this.#store.transaction(async (tx) => {
         await authorize?.(tx, await tx.app(name));
@@ -295,7 +317,7 @@ export class PlatformRegistry implements Registry {
       if (!reused) await tx.putRelease(release);
       await tx.replaceTriggers(fresh.id, triggersOf(fresh, manifest));
       const registeredAt = fresh.status === 'registered' ? fresh.registeredAt : Date.now();
-      const next: App = { ...fresh, status: 'registered', current: release.number, registeredAt };
+      const next: App = { ...fresh, status: 'registered', current: release.number, registeredAt, manager };
       await tx.putApp(next);
       return { next, release, suspended: await this.#settle(tx, next, manifest) };
     });
@@ -317,9 +339,10 @@ export class PlatformRegistry implements Registry {
     );
   }
 
-  remove(name: AppName): Promise<void> {
+  remove(name: AppName, named?: ManagerName | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
+      mustName(app, named);
       if (app.status === 'removed') return this.#converge(name);
       if (app.status === 'purging') throw new Conflict(`app "${name}" is being purged`);
       const { next, suspended } = await this.#store.transaction(async (tx) => {
@@ -332,17 +355,19 @@ export class PlatformRegistry implements Registry {
     });
   }
 
-  purge(name: AppName): Promise<void> {
+  purge(name: AppName, named?: ManagerName | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
+      mustName(app, named);
       if (app.status === 'registered') throw new Conflict(`app "${name}" is registered; remove it before purging`);
       await this.#purge(app);
     });
   }
 
-  discard(name: AppName): Promise<void> {
+  discard(name: AppName, named?: ManagerName | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
+      mustName(app, named);
       if (app.expiresAt === null) throw new Conflict(`app "${name}" is durable; discard ends only an ephemeral app, remove and purge end this one`);
       await this.#purge(app);
     });
@@ -425,10 +450,11 @@ export class PlatformRegistry implements Registry {
     return next;
   }
 
-  setAppPolicy(name: AppName, patch: PolicyPatch): Promise<PolicyOverride> {
+  setAppPolicy(name: AppName, patch: PolicyPatch, named?: ManagerName | null): Promise<PolicyOverride> {
     const fields = parsePolicyPatch(patch, 'app');
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
+      mustName(app, named);
       const { quota } = await this.#mustTenant(this.#store, app.tenant);
       for (const field of ['cpu_millis', 'memory_mb'] as const) {
         const value = fields[field];
@@ -469,10 +495,29 @@ export class PlatformRegistry implements Registry {
     });
   }
 
-  async setOwner(name: AppName, owner: Subject): Promise<void> {
-    await this.#updateApp(name, (app) => ({ ...app, owner }));
+  async setOwner(name: AppName, owner: Subject, named?: ManagerName | null): Promise<void> {
+    await this.#updateApp(name, (app) => (mustName(app, named), { ...app, owner }));
     await this.#refresh(name);
     log('owner', name, { owner });
+  }
+
+  clearManager(name: AppName, named?: ManagerName | null): Promise<void> {
+    return this.#store.exclusive(name, async () => {
+      const app = await this.#mustApp(name);
+      mustName(app, named);
+      if (app.manager) await this.#manage(name, null);
+    });
+  }
+
+  /** Under the app's command lock, which every manager change holds, so the name checked before is still the app's. */
+  async #manage(name: AppName, manager: Manager | null, authorize?: PublishRequest['authorize']): Promise<void> {
+    await this.#store.transaction(async (tx) => {
+      const fresh = (await tx.app(name))!;
+      await authorize?.(tx, fresh);
+      await tx.putApp({ ...fresh, manager });
+    });
+    await this.#refresh(name);
+    log('manager', name, { manager });
   }
 
   issueToken(name: string): Promise<IssuedToken> {
@@ -578,8 +623,9 @@ export class PlatformRegistry implements Registry {
     if (!force && admins.length === 1 && admins[0]!.user === leaving) throw new Conflict(`"${leaving}" is the last admin of tenant "${tenant}"; make another member admin first`);
   }
 
-  async setAccess(name: AppName, access: Access): Promise<void> {
+  async setAccess(name: AppName, access: Access, named?: ManagerName | null): Promise<void> {
     await this.#updateApp(name, (app) => {
+      mustName(app, named);
       if (app.expiresAt !== null && access !== 'tenant') throw new Conflict(`app "${name}" is ephemeral; its access stays tenant`);
       return { ...app, access };
     });
@@ -587,9 +633,10 @@ export class PlatformRegistry implements Registry {
     log('access', name, { access });
   }
 
-  moveApp(name: AppName, tenant: TenantName): Promise<void> {
+  moveApp(name: AppName, tenant: TenantName, named?: ManagerName | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
+      mustName(app, named);
       await this.#mustTenant(this.#store, tenant);
       if (app.status === 'purging') throw new Conflict(`app "${name}" is being purged`);
       if (app.tenant === tenant) return;
@@ -695,6 +742,7 @@ export class PlatformRegistry implements Registry {
         errors: s?.errors ?? 0,
         node: this.#nodeOf(view.app),
         expiresAt: view.expiresAt,
+        manager: view.manager,
       };
     }).sort((a, b) => (a.name < b.name ? -1 : 1));
   }
@@ -825,6 +873,7 @@ export class PlatformRegistry implements Registry {
       identity: release?.manifest.capabilities.identity ?? null,
       policyOverride: Object.freeze({ ...app.policyOverride }),
       expiresAt: app.expiresAt,
+      manager: app.manager ?? null,
       version: app.version,
     });
     this.#views.set(name, view);

@@ -459,3 +459,54 @@ test('AC-EPH-2 hosted discard needs no confirmation body', async (t) => {
   const response = await hostedFetch(base + `/api/apps/${name}/discard`, { method: 'POST', headers: { host: 'control.test', origin: 'https://control.test', 'x-pneuma-space-csrf': 'csrf' } });
   assert.deepEqual([response.status, registry.view(name)], [200, null]);
 });
+
+const managedApp = { ...kvApp, manager: { name: 'deployer', url: 'https://deploy.test/survey' } };
+
+test('AC-MGR-1 the listing and the detail carry the manager, null for an unmanaged app, and the publish audit row the manager it sets', async (t) => {
+  const { call, server, store } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', managedApp);
+  await call('PUT', '/api/apps/site/release', kvApp);
+  assert.deepEqual((await call('GET', '/api/apps')).body.map((a: { name: string; manager: unknown }) => [a.name, a.manager]), [['site', null], ['survey', managedApp.manager]]);
+  assert.deepEqual((await call('GET', '/api/apps/survey')).body.app.manager, managedApp.manager);
+  assert.deepEqual((await audit(store, 'survey')).map((r) => r.details.manager), [managedApp.manager, managedApp.manager]);
+});
+
+test('AC-MGR-2 a write to a managed app answers 409 naming the manager unless X-Pneuma-Space-Manager names it; the audit rows of the named one carry it', async (t) => {
+  const { base, call, server, store } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', managedApp);
+  const remove = async (headers: Record<string, string>) => {
+    const response = await fetch(`${base}/api/apps/survey/remove`, { method: 'POST', headers });
+    return { status: response.status, body: await response.json() };
+  };
+  const refused = await remove({});
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /managed by deployer \(https:\/\/deploy\.test\/survey\); acting here goes around it/);
+  assert.equal((await remove({ 'x-pneuma-space-manager': 'other' })).status, 409);
+  assert.equal((await remove({ 'x-pneuma-space-manager': 'deployer' })).status, 200);
+  const rows = (await audit(store, 'survey')).filter((r) => r.action === 'app.remove');
+  assert.deepEqual(rows.map((r) => [r.actor, r.result, r.details.namedManager]), [
+    ['local', 'started', undefined], ['local', 'refused', undefined], ['local', 'started', 'other'], ['local', 'refused', 'other'], ['local', 'started', 'deployer'], ['local', 'ok', 'deployer'],
+  ]);
+});
+
+test('AC-MGR-3 DELETE /api/apps/<name>/manager clears the manager when it names it, audited as app.manager', async (t) => {
+  const { base, call, server, store } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', managedApp);
+  const clear = (headers: Record<string, string>) => fetch(`${base}/api/apps/survey/manager`, { method: 'DELETE', headers }).then((r) => r.status);
+  assert.deepEqual([await clear({}), await clear({ 'x-pneuma-space-manager': 'deployer' })], [409, 200]);
+  assert.equal((await call('GET', '/api/apps/survey')).body.app.manager, null);
+  assert.deepEqual((await audit(store, 'survey')).filter((r) => r.action === 'app.manager').map((r) => r.result), ['started', 'refused', 'started', 'ok']);
+});
+
+test('ADR 0039 a manager outside the name grammar, a url that is not absolute http or https, or a malformed header answers 400', async (t) => {
+  const { base, call, server } = await admin();
+  t.after(() => server.close());
+  for (const manager of [{ name: 'Deployer' }, { name: 'deployer', url: 'javascript:alert(1)' }, { name: 'deployer', url: '/relative' }, 'deployer']) {
+    assert.equal((await call('PUT', '/api/apps/survey/release', { ...kvApp, manager })).status, 400, JSON.stringify(manager));
+  }
+  await call('PUT', '/api/apps/survey/release', managedApp);
+  assert.equal((await fetch(`${base}/api/apps/survey/remove`, { method: 'POST', headers: { 'x-pneuma-space-manager': 'Deployer' } })).status, 400);
+});

@@ -12,7 +12,7 @@ PneumaSpace 把有状态的 web 应用部署到一台可信机器上，M2 起也
 
 | 实体 | 键 | 字段 | 存放 | 唯一写者 |
 | --- | --- | --- | --- | --- |
-| App | `name`，文法 `^[a-z][a-z0-9-]{0,39}$` | `id`（不透明，首次发布生成；所有内部资源名和容器名用它，`name` 只用于地址）, `owner`, `tenant`, `access: tenant / org / public`（默认 `org`，ADR 0022）, `status`, `current`, `policy_override`, `expires_at?`（临时应用的结束时刻，首次发布时定下，之后不变；持久应用为空，ADR 0038） | 平台库 | Registry |
+| App | `name`，文法 `^[a-z][a-z0-9-]{0,39}$` | `id`（不透明，首次发布生成；所有内部资源名和容器名用它，`name` 只用于地址）, `owner`, `tenant`, `access: tenant / org / public`（默认 `org`，ADR 0022）, `status`, `current`, `policy_override`, `expires_at?`（临时应用的结束时刻，首次发布时定下，之后不变；持久应用为空，ADR 0038）, `manager?`（在平台之外负责它发布的一方：`name` 和可选的 `url`；受管时改这个 App 的命令要点名它，ADR 0039） | 平台库 | Registry |
 | Release | `(app, number)` | `image?`（Docker 平面是镜像 id，K8s 平面是 `<registry>/<repo>@sha256:...`，ADR 0019）, `manifest`, `bundle?`, `release_key = sha256(image, manifest, bundle)`, `published_at` | 平台库 | Registry |
 | Manifest | 值对象 | `contract`, `capabilities: kind -> declaration` | Release 内 | 发布边界解析一次，下游不再校验 |
 | Binding | `(app, kind, provider)` | `state: active / suspended`（行是真相，后端向行收敛）, `resource`（Provider 私有：卷名、库名和口令、ACL 用户、bucket 和密钥） | 行在平台库；资源在该 Provider 的后端服务和命名卷里 | 行由 Registry 写，资源由该 Provider 写 |
@@ -78,7 +78,7 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 | INV-3 | `awake -> stopping` 要求 Lease 为空；流、长连接、触发执行都是 Lease。平台进程存活期间只有 1.4 列出的三种有界情况会由平台结束 Lease，它们都不是闲置停止；重启是例外，1.4 写明了后果。 |
 | INV-4 | Delivery 在任何尝试前已持久；投递通过 `trigger` Lease 唤醒实例；重启后 `delivering` 回到 `due`。上限：连续 5 次失败后 `failed` 并在控制台可见，停机期间错过的槽位只补最近一个。 |
 | INV-5 | Ingress 丢弃所有入站 `X-Pneuma-Space-*`；`upstream` 模式另丢弃上游身份头（值是 JWT 时）和 `PNEUMA_SPACE_IDENTITY_STRIP_COOKIES` 列出的 cookie，应用拿不到能在控制台重放的凭据。身份头只从 `IdentityProvider.authenticate` 的结果设置。主体本身可信到什么程度由 Provider 决定：本地桩是自报姓名，只在可信机器上有意义；`upstream` 的主体来自验签的 JWT，K8s 平面上只有网关能到达实例，身份头因此不可伪造（ADR 0021）。 |
-| INV-6 | `publish` 写新 Release 并移动 `App.current`，不碰 `name`、`id`、`owner` 和任何 Binding 的资源，只改 Binding 的 `state`；`registered` 时相同 `release_key` 是空操作。 |
+| INV-6 | `publish` 写新 Release 并移动 `App.current`，不碰 `name`、`id`、`owner` 和任何 Binding 的资源，只改 Binding 的 `state`；`registered` 时相同 `release_key` 除请求体的 manager 外是空操作（ADR 0039）。 |
 | INV-7 | 注册、版本、策略、Binding 行、Token、租户和成员在平台库里（单机是 `/data` 的 SQLite，集群是 PostgreSQL）；每个 Provider 的数据在它的服务和卷里（1.3 节）；Instance 行在平台库，启动时与按标签列出的容器或 Pod 比对；Delivery 从库恢复；Stats 从库加载。 |
 | INV-8 | 契约固定的是协议：`db` 是一个 SQL 连接 URL，`kv` 是 Redis 协议，`object` 是 S3 协议，推送是 WebSocket 和 SSE。应用看不到谁在哪里提供它们。残留只在 `db`：URL 的 scheme 决定应用要带哪个驱动，SQL 要写两种数据库共有的子集；示例 SDK 两者都处理。 |
 | INV-9 | 每条 Binding 恰好属于一个 Provider 实现，每个 ingress 和 schedule kind 恰好有一个负责组件（1.3 节）；Registry 写 Binding 行，Provider 写资源，Runtime 应用 Injection（环境变量和挂载），Ingress 注入请求头，没有别的路径。 |
@@ -94,7 +94,7 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 
 | 组件 | 拥有 | 从不做 |
 | --- | --- | --- |
-| Registry | 平台库里 App、Release、Binding、Policy、Trigger、Token、Tenant、User、Membership 的行；每 App 的只读 RouteView，在任何改变该 App 行的命令后重建，其他副本经变更通知重建；publish、remove、purge、discard、到期、policy、owner、access、tenant、token、member、quota 命令，同一应用名的命令经 `Store.exclusive` 互斥，同一 bundle 的提交和删除经 `Store.exclusiveBundle` 互斥；工作负载的 scale 命令，先问 Runtime 的 home 和 Infra 的将删副本再转交 `Infra.scale`（ADR 0032） | 直接调 Docker 或 K8s（镜像引用的解析走 `Infra.resolveImage`）；连应用 |
+| Registry | 平台库里 App、Release、Binding、Policy、Trigger、Token、Tenant、User、Membership 的行；每 App 的只读 RouteView，在任何改变该 App 行的命令后重建，其他副本经变更通知重建；publish、remove、purge、discard、到期、policy、owner、access、tenant、manager、token、member、quota 命令，同一应用名的命令经 `Store.exclusive` 互斥，同一 bundle 的提交和删除经 `Store.exclusiveBundle` 互斥；工作负载的 scale 命令，先问 Runtime 的 home 和 Infra 的将删副本再转交 `Infra.scale`（ADR 0032） | 直接调 Docker 或 K8s（镜像引用的解析走 `Infra.resolveImage`）；连应用 |
 | Ingress | 8080 请求路径：取应用名、访问范围检查、身份头、静态服务、流式和 WebSocket 转发、通过 `acquire` 取得 request 和 channel Lease、Stats | 写平台库（只读 RouteView，只写 Stats） |
 | Runtime | Instance 行、本副本的 Lease、三张表的镜像、reaper；`Runtimes` 门面按 RunSpec 分发到 `RUNTIMES` 表里的实现：`container`（Docker 容器或 Pod）和 `isolate`（runner 服务，`--profile isolate` 或 StatefulSet）（ADR 0017、0019） | 读 Manifest（只接收 Injection 集合）；计失败或隔离（那是 Guard 的事） |
 | Guard | 订阅生命周期事件，按 Policy 计失败、退避和隔离，状态在 `guard` 行，acquire 前被问；一处实现覆盖所有运行时和副本 | 探活（那是各运行时的事） |
@@ -167,15 +167,16 @@ K8s 平面：命名空间 `pneuma-space` 放网关、runner 和集群内的平�
 appctl publish <name> <dir | image>          Registry.publish
  ├─ 读 pneuma-space.json                       ├─ 解析 manifest，错误 400；Infra.resolveImage 把引用解析为 id 或 digest，不存在 404
  ├─ 需要容器时 docker build                    ├─ 声明的 kind 没有可用 Provider（profile 未开）409
- ├─ K8s 平面再 docker push                     ├─ 已有 App 是否临时与请求的标记不符 409（ADR 0038）
-                                               ├─ registered 且 release_key 等于当前，返回当前；removed 时继续，不插新 Release
+ ├─ K8s 平面再 docker push                     ├─ 已有 App 受管而请求没点名它的 manager 409（ADR 0039）
+                                               ├─ 已有 App 是否临时与请求的标记不符 409（ADR 0038）
+                                               ├─ registered 且 release_key 等于当前，写入请求体的 manager 后返回当前；removed 时继续，不插新 Release
  ├─ 打包静态目录，POST /api/bundles            ├─ 有 files 或 SQLite 的 Binding 行而运行时与上一个有运行时的 Release 不同 409（ADR 0028）
-                                               ├─ 一个事务，租户行锁下：首次发布插 App 行（id、owner、tenant、expires_at，current 为空，地址 404），
+                                               ├─ 一个事务，租户行锁下：首次发布插 App 行（id、owner、tenant、expires_at、manager，current 为空，地址 404），
                                                │   资源才有归属，判 apps（临时应用判 ephemeral）；缺的 files、SQLite Binding 行判 storage_gb 后插成 suspended；超额 409（INV-12）
  └─ PUT /api/apps/<name>/release               ├─ 对每个声明的资源 kind：provider.ensure（创建或收敛，置 active）
                                                ├─ 有 bundle 时进它的 exclusiveBundle：从对象存储重读索引，已删 409；下一步的事务也在其中（ADR 0028）
                                                ├─ 一个事务：插 Release，重写 Trigger，Binding 行置 active 或 suspended，
-                                               │   设 current 和 registered；首次发布时 owner 取自请求，缺省为调用主体
+                                               │   设 current、registered 和请求体的 manager；首次发布时 owner 取自请求，缺省为调用主体
                                                ├─ 对刚置 suspended 的 Binding：provider.suspend（后端向行收敛，重启会重做）
                                                ├─ 重建该 App 的 RouteView
                                                └─ 发 AppChanged：Runtime.retire，Scheduler.reload
