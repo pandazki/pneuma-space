@@ -171,6 +171,18 @@ These rows cover [ADR 0038](adr/0038-ephemeral-apps.md) and US-P-17 and run in `
 | AC-EPH-4 | The default tenant's `ephemeral` quota is null. In a tenant with `ephemeral` 1, one ephemeral app counts 1 in `ephemeral` and 0 in `apps`; a second answers 409 with quota resource `ephemeral` until the first is discarded. |
 | AC-EPH-5 | An ephemeral app declaring `schedule: "* * * * *"` has no delivery after a minute boundary; `POST /apps/<name>/_pneuma-space/trigger/<t>` with a service token returns 202 and the delivery runs. |
 
+## Managed apps
+
+These rows cover [ADR 0039](adr/0039-managed-apps.md) and US-P-18 and run in `test:acceptance` against `docker compose up -d`. Every row outside this section passes unchanged.
+
+| ID | Check |
+| --- | --- |
+| AC-MGR-1 | `appctl publish <name> <image> --manager <m> --manager-url <url>` makes a managed app; the listing and the detail show `manager` with both, an unmanaged app's show `manager: null`, and `appctl list` prints the manager. |
+| AC-MGR-2 | On a managed app, publish, policy, access, owner, tenant and remove without `X-Pneuma-Space-Manager`, or naming another manager, answer 409 with a message naming the manager and its URL, and the app keeps its release, policy, access, owner, tenant and status; purge of it once removed does the same. Each succeeds naming the manager, and its audit rows carry `namedManager` and the actor. Stop, restart, unquarantine, logs and state succeed without it. |
+| AC-MGR-3 | A publish naming the current manager with another `manager` changes it; a publish of a managed app that does not name it answers 409 and the app keeps its manager. `DELETE /api/apps/<name>/manager` answers 409 without the name and clears the manager with it; afterwards remove needs no name. |
+| AC-MGR-4 | An app published with `--ephemeral --ttl 10 --manager <m>` is both: discard without the name answers 409, and it still ends with its volume within 30 s, audited as `app.expire` by `platform`. |
+| AC-MGR-5 | In Chrome, the console's project card and detail show the manager, linked to its URL; remove on the detail opens an approval card saying the app is managed by it and that acting here goes around it, whose Continue stays disabled until the manager's name is typed; after typing it, Continue removes the app and the audit row carries `namedManager`. |
+
 ## Cloud profile (contract 2)
 
 These rows cover [US-C-1 through US-C-7](user-stories.md#云端首版) and the [cloud contract](app-contract.md#cloud-profile-contract-2). Run the cloud group on the local Workers engine and repeat account/domain-dependent cases on an explicitly configured staging deployment. Local results do not establish production isolation or OAuth availability. Unchanged M1/M2 rows still apply to their existing deployment profiles.
