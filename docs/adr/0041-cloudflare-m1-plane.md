@@ -1,6 +1,6 @@
 # ADR 0041：Cloudflare 是 M1 的第二个承载面
 
-状态：提议。2026-11-24。用户已确认第 1 项：这项工作属于 M1，与本机 Docker 平行。第 2、3 项待确认。接受后修订 [ADR 0033](0033-hosted-fetch-profile.md)（Fetch 实验退出）和 G4 对层次的描述。
+状态：接受。2026-11-24。用户确认这项工作属于 M1，与本机 Docker 平行，并确认以下各项。修订 [ADR 0033](0033-hosted-fetch-profile.md)（Fetch 实验退出）和 G4 对层次的描述。
 
 ## 背景
 
