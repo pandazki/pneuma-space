@@ -488,8 +488,8 @@ function inventory(value) {
   return h('div',{ class:'card stack' },
     h('div',{ class:'toolbar' },available.length ? available.map(key => chip(fieldName(key))) : h('span',{ class:'hint' },tr('没有声明数据能力。','No data capabilities declared.'))),
     facts([
-      [tr('数据库','Database'),value.db ? [bytes(value.db.databaseBytes),' · ',tr(`${number(value.db.tables?.length ?? 0)} 张表`,`${number(value.db.tables?.length ?? 0)} tables`)] : null],
-      [tr('键值','KV'),value.kv ? [tr(`${number(value.kv.keys)} 个键`,`${number(value.kv.keys)} keys`),' · ',bytes(value.kv.bytes)] : null],
+      [tr('数据库','Database'),value.db ? [bytes(value.db.databaseBytes),' · ',tr(`${number(value.db.tables?.length ?? 0)} 张表`,`${number(value.db.tables?.length ?? 0)} ${value.db.tables?.length === 1 ? 'table' : 'tables'}`)] : null],
+      [tr('键值','KV'),value.kv ? [tr(`${number(value.kv.keys)} 个键`,`${number(value.kv.keys)} ${value.kv.keys === 1 ? 'key' : 'keys'}`),' · ',bytes(value.kv.bytes)] : null],
       [tr('文件','Files'),inventoryLine(value.files?.count,value.files?.bytes)],
       [tr('对象','Objects'),inventoryLine(value.objects?.count,value.objects?.bytes)],
       [tr('存储 / 上限','Storage / limit'),[bytes(value.storageBytes),' / ',bytes(value.limitBytes)]],
@@ -830,7 +830,7 @@ function runtimeState(app) {
 function runtimePage(panel,id) {
   const url = appUrl(id);
   append(panel,[section(1,tr('当前状态','Current state'),tr('此处读取应用单元的即时状态。','Read directly from the app cell.'),region(url,runtimeState,'state')),
-    section(2,tr('能力与清单','Capabilities & manifest'),tr('只有清单声明的能力可用于此项目。','Only capabilities declared in the manifest are available to this project.'),region(url,app => h('div',{ class:'card stack' },app.capabilities.length ? h('div',{ class:'toolbar' },app.capabilities.map(chip)) : null,app.current ? jsonView(app.current.manifest) : empty(tr('尚未发布清单。','No manifest has been published.'))),'facts')),
+    section(2,tr('能力与清单','Capabilities & manifest'),tr('只有清单声明的能力可用于此项目。','Only capabilities declared in the manifest are available to this project.'),region(url,app => h('div',{ class:'card stack' },app.capabilities.length ? h('div',{ class:'toolbar' },app.capabilities.map(chip)) : null,app.current ? jsonView(app.current.manifest) : empty(tr('尚未发布清单。发布第一个版本后，这里会显示它声明的能力。','No manifest has been published. The first release shows its declared capabilities here.'),mayOperate(app) && ['draft','registered'].includes(app.status) ? navLink(tr('发布第一个版本','Publish the first release'),href('projects',{ app:app.id,tab:'publish' }),'btn primary') : null)),'facts')),
     section(3,tr('运行策略','Runtime policy'),tr('以应用单元返回的有效策略为准。','Effective policy returned by the app cell.'),region(url,app => mayOperate(app) ? policyForm(app) : recordCards(app.policy),'form',{ once:true })),
     section(4,tr('持久数据清单','Durable inventory'),tr('读取清单不会唤醒应用。','Reading the inventory does not wake the app.'),region(`${url}/state`,inventory,'facts'))]);
 }
@@ -935,7 +935,7 @@ async function sqlPane(pane,app) {
     const command = mode === 'query' ? { type:'db.query',sql:sql.value,params:JSON.parse(params.value) } : { type:'db.batch',statements:JSON.parse(sql.value) };
     const value = await perform(command); fill(result,h('div',{ class:'card stack' },h('h3',{},tr('执行结果','Result')),jsonView(value))); return false;
   },tr('执行 SQL','Execute SQL'));
-  append(pane,[h('div',{ class:'stack' },h('div',{ class:'notice' },tr('修改语句会直接改变项目数据。查询结果受平台行数与字节限制。','Write statements change project data immediately. Platform row and byte limits apply to query results.')),form,result)]);
+  append(pane,[h('div',{ class:'stack' },h('div',{ class:'notice warn' },tr('修改语句会直接改变项目数据。查询结果受平台行数与字节限制。','Write statements change project data immediately. Platform row and byte limits apply to query results.')),form,result)]);
 }
 function listLoader(list, outcome, load) {
   return async cursor => {
@@ -1054,9 +1054,19 @@ function deliveryTable(rows) {
     h('div',{ class:'cell-stack' },row.error ? h('span',{ class:'danger-note wrap' },row.error) : h('span',{ class:'hint' },tr('无错误记录','No error recorded')),row.state === 'due' ? h('small',{},tr('下次尝试 ','Next attempt '),time(row.nextAttemptAt)) : null),
   ].map((value,index) => h('td',{ 'data-label':columns[index] },value)))))));
 }
+const eventWords = {
+  published:['发布','Published'], 'publish-failed':['发布失败','Publish failed'], wake:['唤醒','Wake'], sleep:['休眠','Sleep'], restart:['重启','Restart'], kill:['强制终止','Kill'],
+  remove:['下线','Remove'], resume:['恢复','Resume'], unquarantine:['解除隔离','Lift quarantine'], rollback:['回滚','Rollback'], purge:['清除','Purge'], policy:['策略变更','Policy change'],
+};
+function eventMessage(row) {
+  const release = /^Published release (\d+)$/.exec(row.message ?? '');
+  if (release) return tr(`已发布版本 r${release[1]}。`,row.message);
+  if (row.message === 'Application action completed.') return tr('操作已完成。',row.message);
+  return row.message || row.action || row.type;
+}
 function diagnosticRows(rows,kind) {
   if (!rows.length) return empty(kind === 'logs' ? tr('还没有运行日志。应用处理请求时会写入这里。','No runtime logs yet. They appear when the app handles requests.') : tr('暂无记录。','No records yet.'));
-  return h('div',{},[...rows].sort((a,b) => b.at-a.at).map(row => h('div',{ class:'logline' },h('span',{ class:'hint mono' },time(row.at)),h('span',{ class:`mono level ${row.level === 'error' ? 'bad' : row.level === 'warn' ? 'warn' : ''}` },row.level || row.type || kind),h('div',{ class:'wrap' },row.appName ? h('span',{ class:'chip' },row.appName) : null,row.appName ? ' ' : null,h('span',{ class:'message' },row.message || row.action || row.type),row.data ? h('details',{},h('summary',{ class:'hint' },tr('详情','Details')),jsonView(row.data)) : null))));
+  return h('div',{},[...rows].sort((a,b) => b.at-a.at).map(row => h('div',{ class:'logline' },h('span',{ class:'hint mono' },time(row.at)),h('span',{ class:`level ${row.level ? 'mono' : ''} ${row.level === 'error' || row.type === 'publish-failed' ? 'bad' : row.level === 'warn' ? 'warn' : ''}` },row.level || (eventWords[row.type] ? tr(...eventWords[row.type]) : row.type) || kind),h('div',{ class:'wrap' },row.appName ? h('span',{ class:'chip' },row.appName) : null,row.appName ? ' ' : null,h('span',{ class:'message' },eventMessage(row)),row.data ? h('details',{},h('summary',{ class:'hint' },tr('详情','Details')),jsonView(row.data)) : null))));
 }
 function diagnosticPage(panel,id,kind) {
   const endpoint = `${appUrl(id)}/${kind}`;
@@ -1087,7 +1097,7 @@ function stream(endpoint,kind,response) {
 function teamPage(content) {
   const tenant = state.tenant, path = suffix => tenantPath(suffix,tenant);
   const can = canManageTenant(), tokenSecret = h('div');
-  const userId = input({ required:true,placeholder:'usr_…' }); let memberRole = 'member';
+  const userId = input({ required:true,placeholder:'u_…' }); let memberRole = 'member';
   const memberForm = can ? submitForm([h('div',{ class:'form-grid' },field(tr('用户标识','User ID'),userId),field(tr('角色','Role'),segment([['member',tr('成员','Member')],['admin',tr('管理员','Administrator')]],memberRole,value => memberRole = value,tr('成员角色','Member role'))))],async () => {
     await api(path('/members'),{ userId:userId.value,role:memberRole }); userId.value = ''; refresh();
   },tr('添加或更新成员','Add or update member')) : null;
@@ -1252,6 +1262,7 @@ function render(mode = 'replace') {
     } else ((current.admin ? pages.admin : pages.tenant)[current.view] || overview)(content);
   });
   document.querySelector('#content').replaceWith(content);
+  if (mounted.tabs?.isConnected) markTab(mounted.tabs,current.tab);
   if (mode === 'pop') restoreScroll(history.state?.scroll ?? 0,mounted.panel || mounted.layout);
   else if (mode === 'push') scrollTo(0,0);
 }
