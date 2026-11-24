@@ -33,6 +33,10 @@ const ephemeral = (db: DatabaseSync): string => `
 const managed = (db: DatabaseSync): string =>
   db.prepare("SELECT 1 FROM pragma_table_info('app') WHERE name = 'manager'").get() ? '' : 'ALTER TABLE app ADD COLUMN manager TEXT; ALTER TABLE app ADD COLUMN manager_url TEXT;';
 
+/** ADR 0040: the gateway build a replica runs; repeatable like `hosted`. */
+const build = (db: DatabaseSync): string =>
+  db.prepare("SELECT 1 FROM pragma_table_info('replica') WHERE name = 'build'").get() ? '' : 'ALTER TABLE replica ADD COLUMN build TEXT;';
+
 /** Append only; `PRAGMA user_version` counts the steps applied. */
 export const MIGRATIONS: Migration[] = [
   `CREATE TABLE app (
@@ -121,6 +125,7 @@ export const MIGRATIONS: Migration[] = [
   (db) => `CREATE INDEX IF NOT EXISTS release_bundle ON release (bundle); ${hosted(db)}`,
   ephemeral,
   managed,
+  build,
 ];
 
 /** `$n` placeholders become `?n`, which node:sqlite binds by position. */

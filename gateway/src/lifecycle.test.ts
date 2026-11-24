@@ -201,7 +201,7 @@ test('a row whose actor is another live replica is left alone at startup', async
   const store = tempStore();
   const { app, specFor } = await registered(store);
   await store.insertInstance(instance(app, 'waking', 'replica-b'));
-  await store.putReplica({ id: 'replica-b' as ReplicaId, startedAt: Date.now(), seenAt: Date.now(), leading: false });
+  await store.putReplica({ id: 'replica-b' as ReplicaId, startedAt: Date.now(), seenAt: Date.now(), leading: false, build: null });
   const { driver, lifecycle } = replica(store, specFor);
   await lifecycle.reconcile();
   assert.deepEqual([(await store.instance(app))?.state, driver.removed], ['waking', []]);
@@ -211,7 +211,7 @@ test('kill puts a waking row whose actor is live asleep, kills the instance and 
   const store = tempStore();
   const { app, specFor } = await registered(store);
   await store.insertInstance(instance(app, 'waking', 'replica-b'));
-  await store.putReplica({ id: 'replica-b' as ReplicaId, startedAt: Date.now(), seenAt: Date.now(), leading: false });
+  await store.putReplica({ id: 'replica-b' as ReplicaId, startedAt: Date.now(), seenAt: Date.now(), leading: false, build: null });
   for (const id of ['replica-a', 'replica-b']) await store.putLeaseTally({ app, replica: id as ReplicaId, epoch: 3, request: 0, channel: 1, trigger: 0, releasedAt: null });
   const { driver, lifecycle, events } = replica(store, specFor);
   await lifecycle.kill(app);
@@ -263,7 +263,7 @@ test('the sweep keeps an instance whose row is waking, as its waker may still be
   const { driver, lifecycle } = replica(store, specFor);
   await lifecycle.reconcile();
   await store.insertInstance(instance(waking.app, 'waking', 'replica-b', null));
-  await store.putReplica({ id: 'replica-b' as ReplicaId, startedAt: Date.now(), seenAt: Date.now(), leading: false });
+  await store.putReplica({ id: 'replica-b' as ReplicaId, startedAt: Date.now(), seenAt: Date.now(), leading: false, build: null });
   driver.adopted = [{ ...orphan(waking.app), handle: 'creating' }, orphan(gone.app)];
   t.mock.timers.tick(60_000);
   await until('the orphan is discarded', () => driver.discarded.includes('orphan'));
@@ -274,7 +274,7 @@ test('a leader starting while another live replica wakes an app keeps the instan
   const store = tempStore();
   const { app, specFor } = await registered(store);
   const [waker, leader] = [replica(store, specFor, 'replica-a', { leader: false }), replica(store, specFor, 'replica-b')];
-  await store.putReplica({ id: 'replica-a' as ReplicaId, startedAt: Date.now(), seenAt: Date.now(), leading: false });
+  await store.putReplica({ id: 'replica-a' as ReplicaId, startedAt: Date.now(), seenAt: Date.now(), leading: false, build: null });
   let created!: () => void;
   let finish!: () => void;
   const creating = new Promise<void>((resolve) => (created = resolve));

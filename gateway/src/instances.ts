@@ -194,7 +194,7 @@ export class Instances {
     const beat = async () => {
       const now = Date.now();
       await this.#lead();
-      await this.store.putReplica({ id: this.replica, startedAt, seenAt: now, leading: this.leading });
+      await this.store.putReplica({ id: this.replica, startedAt, seenAt: now, leading: this.leading, build: null });
       if (this.leading) await this.store.sweepReplicas(now - DEAD_MS);
     };
     await beat();

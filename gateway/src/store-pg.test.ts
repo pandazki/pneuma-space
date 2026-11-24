@@ -43,9 +43,10 @@ const skip = !dockerUp && 'Docker is not available';
 
 /** The steps both main and the hosted stack held before either appended one: main then added release_bundle, the hosted stack its tables. */
 const BEFORE_MERGE = 2;
-/** The steps before ADR 0038's and ADR 0039's. */
+/** The steps before ADR 0038's, ADR 0039's and ADR 0040's. */
 const BEFORE_EPHEMERAL = 4;
 const BEFORE_MANAGED = 5;
+const BEFORE_BUILD = 6;
 
 async function migrated(session: Session, steps: number): Promise<void> {
   await session.simple('CREATE TABLE schema_migration (version INTEGER PRIMARY KEY, applied_at BIGINT NOT NULL)');
@@ -227,6 +228,18 @@ describe('PgStore against a real PostgreSQL 16', { skip, timeout: 120_000 }, () 
     await old.close();
     const store = await open({}, 'managed_migration');
     assert.equal((await store.app('kept' as AppName))?.manager, null);
+  });
+
+  test('the ADR 0040 step gives every existing replica no build', async () => {
+    const admin = await Session.open(plain());
+    await admin.simple('CREATE DATABASE build_migration');
+    await admin.close();
+    const old = await Session.open(plain('build_migration'));
+    await migrated(old, BEFORE_BUILD);
+    await old.simple("INSERT INTO replica (id, started_at, seen_at, leads) VALUES ('gw-0', 1, 2, 1)");
+    await old.close();
+    const store = await open({}, 'build_migration');
+    assert.deepEqual((await store.replicas()).map((r) => r.build), [null]);
   });
 
   /** Migrates `database` as `before` leaves it, opens it with this gateway, and reads back what the merged schema holds. */

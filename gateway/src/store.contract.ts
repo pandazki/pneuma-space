@@ -273,10 +273,10 @@ export function storeContract(name: string, open: OpenStore): void {
       assert.equal((await store.token('h-t1'))?.revokedAt, 7);
     });
 
-    test('replica round-trips and a sweep removes it with its lease tallies', async () => {
-      await store.putReplica({ id: 'old' as ReplicaId, startedAt: 1, seenAt: 2, leading: true });
+    test('replica round-trips with its build and a sweep removes it with its lease tallies', async () => {
+      await store.putReplica({ id: 'old' as ReplicaId, startedAt: 1, seenAt: 2, leading: true, build: '0123456789ab' });
       await store.putLeaseTally({ app: appId('swept'), replica: 'old' as ReplicaId, epoch: 1, request: 1, channel: 0, trigger: 0, releasedAt: null });
-      assert.deepEqual((await store.replicas()).find((r) => r.id === 'old'), { id: 'old', startedAt: 1, seenAt: 2, leading: true });
+      assert.deepEqual((await store.replicas()).find((r) => r.id === 'old'), { id: 'old', startedAt: 1, seenAt: 2, leading: true, build: '0123456789ab' });
       assert.deepEqual(await store.sweepReplicas(3), ['old']);
       assert.deepEqual([await store.replicas(), await store.leaseTallies(appId('swept'))], [[], []]);
     });

@@ -227,7 +227,7 @@ test('resume leaves a delivery claimed by another live replica delivering', asyn
   const { scheduler, rows, state, invoke } = harness();
   await invoke();
   rows[0] = { ...rows[0], state: 'delivering', attempts: 1, replica: 'other' as ReplicaId };
-  state.replicas = [{ id: 'other' as ReplicaId, startedAt: 0, seenAt: Date.now(), leading: false }];
+  state.replicas = [{ id: 'other' as ReplicaId, startedAt: 0, seenAt: Date.now(), leading: false, build: null }];
   await scheduler.resume();
   scheduler.stop();
   assert.equal(rows[0].state, 'delivering');
@@ -264,7 +264,7 @@ function twoReplicas(hold: number) {
   const replica = (id: string) => new DeliveryScheduler({
     store, runtime, view: () => view, now: () => clock.now, log: (ev) => void logged.push(`${id} ${ev}`), replica: id as ReplicaId,
   });
-  const beat = (id: string) => store.putReplica({ id: id as ReplicaId, startedAt: T0, seenAt: clock.now, leading: false });
+  const beat = (id: string) => store.putReplica({ id: id as ReplicaId, startedAt: T0, seenAt: clock.now, leading: false, build: null });
   const row = async (id: string) => (await store.deliveries({})).find((d) => d.id === id)!;
   const arrived = async (n: number) => {
     while (received.length < n) await new Promise((resolve) => setTimeout(resolve, 5));
