@@ -34,7 +34,7 @@ A developer persona holding only these files, a logged-in Wrangler and one subdo
 
 The run needed what the files did not provide:
 
-- The developer rewrote the names, domains and resource IDs that were then hard-coded in wrangler.jsonc, the artifact CORS file and the starter template. Those are placeholders now; nothing installs them yet.
+- The developer rewrote the names, domains and resource IDs that were then hard-coded in wrangler.jsonc, the artifact CORS file and the starter template. Those are placeholders now.
 - Wrangler's OAuth login cannot create the long-lived API token or the R2 signing credentials the Worker needs. The account owner created one account token (Workers Scripts Write and Workers R2 Storage Write) by hand. The R2 access key ID is that token's ID and the secret is the SHA-256 of its value.
 - `secrets.required` lists both TURN secrets, so a deployment without TURN supplies empty values.
 - Deployment succeeded on the third attempt; the first two stopped while pulling the base image and while polling container image preparation.
@@ -42,3 +42,21 @@ The run needed what the files did not provide:
 - The first app's certificate took longer than the CLI's ten-minute wait. The CLI exited 1; publishing again succeeded.
 
 Not covered by that run: natural idle recovery, browser rendering, TURN and billing.
+
+## Installer (2026-11-24)
+
+`scripts/install.mjs` replaces the manual deployment steps. A real install into an account that already held another deployment of this plane:
+
+- The first run without a token resolved the account and zone, printed the link and the token path, and made only read calls. The account owner created the token from that link; the token then passed verification, Worker listing and R2 calls. Whether the dashboard form opened with both permissions preselected was not recorded.
+- The second run finished in one pass with exit 0: it created the D1 database and both buckets, applied the schema, provisioned the owner, deployed on the first attempt, attached the control domain and saw the health endpoint over valid HTTPS.
+- Afterwards the control origin redirected an unauthenticated visitor to /login, /api/v1/me answered 401, and the owner credentials signed in. The state directory was 0700 and its four files 0600. Nothing in the repository changed. The other deployment kept its version.
+- Running the same command again exited 0 and created and attached nothing. Running it with another prefix was refused.
+- An app published with the owner credentials uploaded its package through a URL signed with the derived R2 credentials, got its exact domain, redirected an unauthenticated visitor and answered 401 to an unauthenticated API call. Signed in, its page loaded.
+- That app's first API request, its first wake on the new deployment, answered 500 `internal`; the same request succeeded seconds later and on every retry. The cause is not established.
+- An example that declares `rtc` was refused with `rtc_unconfigured`, as specified for a deployment without TURN.
+
+Also verified without an account: eight CF-23 engine tests against a simulated account (the token stop changes nothing, a rerun creates nothing, generated files are private and limited to the state directory, taken names are refused, a failed deploy is retried, a foreign domain binding is kept, the generated config and the derived secrets are as specified), and `wrangler deploy --dry-run` with a config generated outside the repository. The link format follows Cloudflare's [token template URL documentation](https://developers.cloudflare.com/fundamentals/api/how-to/account-owned-token-template/).
+
+Not verified: a deploy that fails and is retried against the real service, an install interrupted midway, an account with several memberships, and an apps domain other than the control domain.
+
+Of the stumbles above, the installer removes the hand-edited names, the hand-built secrets, the required TURN values and the manual deploy retry. The token remains the one manual step (ADR 0041). The browser-less publishing token and the CLI certificate wait belong to publishing, not installation.

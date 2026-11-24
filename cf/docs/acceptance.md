@@ -22,7 +22,8 @@ These gates require the deployed CF edition. Local engine checks cannot prove Co
 | CF-16 | Account disable, invite revoke, membership, quotas and last-admin protection work server-side. |
 | CF-17 | Browser verifies Chinese/English, light/dark, 1440/390px, accessible controls and typed purge on both consoles. |
 | CF-18 | Actual TURN credentials establish a relay; master key stays private; unconfigured service is honest. |
-| CF-19 | Service needs no local server. Schema, owner setup and deployment reproduce from the repository. |
+| CF-19 | Service needs no local server. |
 | CF-20 | Quotas and body/result/file limits refuse excess without stopping other apps/control. Diagnostics do not keep idle containers running. |
 | CF-21 | The primary tenant flow creates a read/publish/invoke token and copies one command. A clean directory can run that command without the platform repository or CF credentials, receive project instructions and skills, publish an interactive durable demo, and obtain its app and dashboard links. Repeating setup preserves user files; credentials and instruction files never enter its package. |
 | CF-22 | The starter benchmark reports real request timings and counter deltas, waits for natural idle without a sleep action, verifies a new boot and retained data after access, and links to the app's actual dashboard usage. Incomplete idle verification is reported as incomplete. |
+| CF-23 | One command given a control domain and a prefix installs from the repository. Without a saved API token it prints a prefilled create-token link and changes nothing in the account. A first install refuses resource names the account already has. Generated configuration and credentials stay in a private directory outside the repository. Rerunning after an interruption resumes without creating anything twice. It ends with the control origin answering over valid HTTPS and owner credentials that sign in. |
