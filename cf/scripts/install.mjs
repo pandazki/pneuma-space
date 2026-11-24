@@ -39,7 +39,7 @@ function tokenLink(prefix) {
 export function generateConfig(template, { cfDir, prefix, domain, appsDomain, accountId, zoneId, databaseId }) {
   const names = resourceNames(prefix), config = structuredClone(template);
   delete config.$schema;
-  Object.assign(config, { name: names.worker, main: join(cfDir, config.main), build: { ...config.build, cwd: cfDir } });
+  Object.assign(config, { name: names.worker, account_id: accountId, main: join(cfDir, config.main), build: { ...config.build, cwd: cfDir } });
   Object.assign(config.vars, {
     PNEUMA_SPACE_CONTROL_ORIGIN: 'https://' + domain, PNEUMA_SPACE_APPS_DOMAIN: appsDomain, PNEUMA_SPACE_ACCOUNT_ID: accountId, PNEUMA_SPACE_ZONE_ID: zoneId,
     PNEUMA_SPACE_WORKER_NAME: names.worker, PNEUMA_SPACE_ARTIFACT_BUCKET: names.artifacts, PNEUMA_SPACE_OBJECT_BUCKET: names.objects,
