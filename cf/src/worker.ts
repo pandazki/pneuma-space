@@ -99,7 +99,8 @@ async function control(request: Request, env: Env): Promise<Response> {
     if (path === '/admin' || path.startsWith('/admin/')) requireAdmin(actor);
     asset = '/index.html';
   } else if (path === '/login' || path === '/invite') asset = path + '.html';
-  else if (!['/app.js', '/style.css', '/favicon.ico', '/downloads/cli.json'].includes(path) && !/^\/downloads\/pneuma-space-cli-\d+\.\d+\.\d+-[a-f0-9]{12}\.tgz$/.test(path)) fail(404, 'not_found', 'Route not found.');
+  else if (path === '/_pneuma-space/console/app.js' || path === '/_pneuma-space/console/style.css') asset = path.slice('/_pneuma-space/console'.length);
+  else if (path !== '/downloads/cli.json' && !/^\/downloads\/pneuma-space-cli-\d+\.\d+\.\d+-[a-f0-9]{12}\.tgz$/.test(path)) fail(404, 'not_found', 'Route not found.');
   const target = new URL(asset, url.origin);
   const result = await env.PNEUMA_SPACE_UI.fetch(new Request(target, { method: request.method }));
   const response = new Response(result.body, result);
