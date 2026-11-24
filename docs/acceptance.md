@@ -173,6 +173,7 @@ These rows cover [ADR 0038](adr/0038-ephemeral-apps.md) and US-P-17 and run in `
 | AC-EPH-6 | A tenant row without the `ephemeral` field, as a gateway from before ADR 0038 writes it during a rolling update after the migration ran, reads as 3: the quota endpoint shows 3, and a fourth ephemeral app in the tenant answers 409 with quota resource `ephemeral`. |
 | AC-EPH-7 | An ephemeral app whose postgres database cannot be dropped, because the postgres service is stopped when it ends, stays `purging`, and while later sweeps fail the same way the audit gains no row after one `app.expire` error. Once postgres starts again it ends within 60 s, and its last audit row is `app.expire` ok with `resumed`. |
 | AC-EPH-8 | `appctl publish --ephemeral` prints the app's id. After the app is discarded and its name published again as ephemeral, `POST /api/apps/<name>/discard?app=<first id>` answers 409 and the second app stays registered; `appctl discard <name> --app <second id>` ends it. |
+| AC-EPH-9 | In Chrome, the console's detail of an ephemeral app offers Discard behind ⋯; its approval card names the app and, on Continue, sends the discard with the app's id, after which the app leaves the listing, its volume is gone and the audit holds `app.discard` started and ok. |
 
 ## Managed apps
 

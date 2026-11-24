@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test, type TestContext } from 'node:test';
 import {
-  adminClient, adminUrl, appctl, appId, appJson, appPut, appUrl, bucketExists, cleanup, compose, deliveries, deploy, images, OWNER, publish, serviceToken,
+  adminClient, adminUrl, appctl, appId, appJson, appPut, appUrl, bucketExists, chrome, cleanup, compose, deliveries, deploy, images, OWNER, publish, serviceToken,
   setupSuite, sleep, summary, teardownSuite, uniqueName, volumeExists, waitFor, type Capabilities,
 } from './harness.ts';
 import { ADMIN_PATHS } from '../../gateway/src/model.ts';
@@ -167,4 +167,23 @@ test('AC-EPH-8', { timeout: 120_000 }, async (t) => {
   assert.equal((await summary(first.name)).status, 'registered');
   appctl('discard', first.name, '--app', second);
   assert.equal(await summary(first.name), null);
+});
+
+test('AC-EPH-9', { timeout: 120_000 }, async (t) => {
+  const app = await ephemeral(t, { files: {} });
+  const page = await (await chrome(t))(`${adminUrl}/`);
+  await waitFor(() => page.evaluate(`location.origin === ${JSON.stringify(adminUrl)} && document.readyState === 'complete' && typeof t === 'function'`), 15_000, 'the console');
+  await page.evaluate(`location.hash = ${JSON.stringify(`#/apps/${app.name}`)}`);
+  await waitFor(() => page.evaluate(`!!document.querySelector('.dact button[aria-haspopup="menu"]')`), 15_000, 'the detail');
+  await page.evaluate(`document.querySelector('.dact button[aria-haspopup="menu"]').click()`);
+  await waitFor(() => page.evaluate(`!!document.querySelector('.menu')`), 5000, 'the actions menu');
+  await page.evaluate(`[...document.querySelectorAll('.menu button')].find((b) => b.textContent.startsWith(t('d.discardItem'))).click()`);
+  const title = await waitFor(() => page.evaluate(`document.querySelector('dialog.approval[open] h3')?.textContent`), 5000, 'the approval card');
+  assert.equal(title, await page.evaluate(`t('d.discardTitle', { name: '${app.name}' })`));
+  await page.evaluate(`(() => { const sent = window.sent = []; const original = window.fetch; window.fetch = (url, init) => (sent.push(String(url)), original(url, init)); })()`);
+  await page.evaluate(`document.querySelector('dialog.approval[open] button[value="ok"]').click()`);
+  await waitFor(async () => (await summary(app.name)) === null, 15_000, 'the console to discard the app');
+  assert.ok(await page.evaluate(`window.sent.includes('/api/apps/${app.name}/discard?app=${app.id}')`), 'the discard names the app id');
+  await waitFor(() => !volumeExists(`pneuma-space-files-${app.id}`), 30_000, 'volume deleted by discard');
+  assert.deepEqual((await audit(app.name)).filter(([, action]: string[]) => action === 'app.discard'), [['local', 'app.discard', 'started'], ['local', 'app.discard', 'ok']]);
 });
