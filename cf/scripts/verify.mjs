@@ -7,25 +7,13 @@ const client = await connect(), checks = [];
 const check = (name, details) => { checks.push({ name, ...details }); console.log(JSON.stringify(checks.at(-1))); };
 let app, tokenId;
 const apps = [];
-async function waitForHttps(app) {
-  const deadline = Date.now() + 300000;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(app.origin, { signal: AbortSignal.timeout(10000) });
-      await response.body?.cancel();
-      if (response.status === 401) return;
-    } catch {}
-    await new Promise(resolve => setTimeout(resolve, 2000));
-  }
-  throw new Error('Application HTTPS did not become available: ' + app.origin);
-}
-function socket(origin, token, channel) {
-  const url = new URL(origin), key = randomBytes(16).toString('base64');
+function socket(address, token, channel) {
+  const url = new URL(address), key = randomBytes(16).toString('base64');
   const connection = tls.connect({ host: url.hostname, port: 443, servername: url.hostname });
   let buffer = Buffer.alloc(0), opened = false, expected;
   const ready = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('WebSocket handshake timeout')), 30000);
-    connection.once('secureConnect', () => connection.write(['GET /_pneuma-space/realtime/' + channel + ' HTTP/1.1', 'Host: ' + url.hostname, 'Upgrade: websocket', 'Connection: Upgrade', 'Sec-WebSocket-Version: 13', 'Sec-WebSocket-Key: ' + key, 'Authorization: Bearer ' + token, '', ''].join('\r\n')));
+    connection.once('secureConnect', () => connection.write(['GET ' + url.pathname + '_pneuma-space/realtime/' + channel + ' HTTP/1.1', 'Host: ' + url.hostname, 'Upgrade: websocket', 'Connection: Upgrade', 'Sec-WebSocket-Version: 13', 'Sec-WebSocket-Key: ' + key, 'Authorization: Bearer ' + token, '', ''].join('\r\n')));
     connection.on('error', error => { clearTimeout(timer); reject(error); });
     connection.on('data', chunk => {
       buffer = Buffer.concat([buffer, chunk]);
@@ -58,7 +46,6 @@ try {
   assert.ok(tenant, 'Owner needs a tenant');
   app = await client.api('/tenants/' + tenant + '/apps', { name: 'verify-' + randomUUID().slice(0, 8) });
   apps.push(app);
-  await waitForHttps(app);
   const manifest = { contract: 'pneuma-space.cf/1', runtime: 'static', entry: 'public/index.html', capabilities: { static: { dir: 'public' } } };
   const contents = 'PneumaSpace private verification';
   const bytes = Buffer.from(JSON.stringify({ manifest, files: [{ path: 'public/index.html', body: Buffer.from(contents).toString('base64'), contentType: 'text/plain' }] }));
@@ -74,34 +61,40 @@ try {
   let createdToken = await client.api('/tenants/' + tenant + '/tokens', { label: 'cloud-verification', scopes: ['invoke', 'read'], appIds: [app.id], expiresAt: Date.now() + 600000 });
   tokenId = createdToken.id;
   const headers = { authorization: 'Bearer ' + createdToken.token };
-  const response = await fetch(app.origin, { headers, signal: AbortSignal.timeout(30000) });
+  const response = await fetch(app.url, { headers, signal: AbortSignal.timeout(30000) });
   assert.equal(response.status, 200); assert.equal(await response.text(), contents);
-  const partial = await fetch(app.origin, { headers: { ...headers, range: 'bytes=0-5' }, signal: AbortSignal.timeout(30000) });
+  const partial = await fetch(app.url, { headers: { ...headers, range: 'bytes=0-5' }, signal: AbortSignal.timeout(30000) });
   assert.equal(partial.status, 206); assert.equal(await partial.text(), contents.slice(0, 6));
-  const head = await fetch(app.origin, { method: 'HEAD', headers, signal: AbortSignal.timeout(30000) });
+  const head = await fetch(app.url, { method: 'HEAD', headers, signal: AbortSignal.timeout(30000) });
   assert.equal(head.status, 200); assert.equal(Number(head.headers.get('content-length')), bytes.length > 0 ? contents.length : 0);
-  assert.equal((await fetch(app.origin, { signal: AbortSignal.timeout(30000) })).status, 401);
-  check('CF-03 private origin and CF-12 static HEAD/Range', { status: 'passed', origin: app.origin });
+  assert.equal((await fetch(app.url, { signal: AbortSignal.timeout(30000) })).status, 401);
+  const navigation = await fetch(app.url + '?view=all', { redirect: 'manual', headers: { accept: 'text/html' }, signal: AbortSignal.timeout(30000) });
+  assert.equal(navigation.status, 303);
+  assert.equal(navigation.headers.get('location'), client.origin + '/login?next=' + encodeURIComponent(new URL(app.url).pathname + '?view=all'));
+  const bare = await fetch(app.url.slice(0, -1), { redirect: 'manual', signal: AbortSignal.timeout(30000) });
+  assert.equal(bare.status, 308); assert.equal(bare.headers.get('location'), app.url);
+  check('CF-04 private app path and CF-12 static HEAD/Range and CF-24 path address', { status: 'passed', url: app.url });
   await client.api('/tenants/' + tenant + '/tokens/' + tokenId, undefined, 'DELETE'); tokenId = undefined;
   app = await client.api('/tenants/' + tenant + '/apps', { name: 'verify-node-' + randomUUID().slice(0, 8) });
   apps.push(app);
-  await waitForHttps(app);
   const nodeManifest = { contract: 'pneuma-space.cf/1', runtime: 'node', entry: 'main.mjs', capabilities: { db: {}, kv: {}, files: {}, object: {}, identity: {} } };
-  const source = "import http from 'node:http';http.createServer((req,res)=>{res.setHeader('content-type','application/json');res.end(JSON.stringify({headers:req.headers,env:process.env}))}).listen(Number(process.env.PNEUMA_SPACE_PORT),'0.0.0.0');";
+  const source = "import http from 'node:http';http.createServer((req,res)=>{res.setHeader('content-type','application/json');res.end(JSON.stringify({url:req.url,headers:req.headers,env:process.env}))}).listen(Number(process.env.PNEUMA_SPACE_PORT),'0.0.0.0');";
   const nodeBytes = Buffer.from(JSON.stringify({ manifest: nodeManifest, files: [{ path: 'main.mjs', body: Buffer.from(source).toString('base64'), contentType: 'text/javascript' }] }));
   const nodeTicket = await client.api('/apps/' + app.id + '/uploads', { manifest: nodeManifest, digest: createHash('sha256').update(nodeBytes).digest('hex'), bytes: nodeBytes.length });
   assert.equal((await fetch(nodeTicket.url, { method: 'PUT', headers: nodeTicket.headers, body: nodeBytes, signal: AbortSignal.timeout(60000) })).status, 200);
   await client.api('/apps/' + app.id + '/releases', { uploadId: nodeTicket.uploadId });
   createdToken = await client.api('/tenants/' + tenant + '/tokens', { label: 'cloud-native-verification', scopes: ['invoke', 'read'], appIds: [app.id], expiresAt: Date.now() + 600000 });
   tokenId = createdToken.id; headers.authorization = 'Bearer ' + createdToken.token;
-  const echo = await fetch(app.origin, { headers: { ...headers, 'x-pneuma-space-subject': 'forged', cookie: '__Host-pneuma-space-control=secret' }, signal: AbortSignal.timeout(30000) });
+  const echo = await fetch(app.url + 'probe?x=1', { headers: { ...headers, 'x-pneuma-space-subject': 'forged', cookie: '__Host-pneuma-space-control=secret' }, signal: AbortSignal.timeout(30000) });
   assert.equal(echo.status, 200);
   const identity = await echo.json();
   assert.equal(identity.headers['x-pneuma-space-subject'], client.me.user.id);
   assert.equal(identity.headers.authorization, undefined);
   assert.equal(identity.headers.cookie, undefined);
   assert.equal(identity.env.PNEUMA_SPACE_R2_SECRET_ACCESS_KEY, undefined);
-  check('CF-06 real Node container and CF-04 trusted identity', { status: 'passed', appId: app.id });
+  assert.equal(identity.url, '/probe?x=1');
+  assert.equal(identity.headers['x-forwarded-prefix'], '/apps/' + app.name);
+  check('CF-06 real Node container, CF-04 trusted identity and CF-24 stripped path with prefix header', { status: 'passed', appId: app.id });
   const data = command => client.api('/apps/' + app.id + '/data', command);
   await data({ type: 'db.query', sql: 'CREATE TABLE verification(value TEXT)', params: [] });
   await data({ type: 'db.query', sql: 'INSERT INTO verification(value) VALUES(?)', params: ['persisted'] });
@@ -117,7 +110,7 @@ try {
   const download = await data({ type: 'object.download', key: 'proof.txt' });
   assert.deepEqual(Buffer.from(await (await fetch(download.url, { signal: AbortSignal.timeout(30000) })).arrayBuffer()), objectBytes);
   check('CF-11 direct native object upload/download', { status: 'passed' });
-  const a = socket(app.origin, createdToken.token, 'verification'), b = socket(app.origin, createdToken.token, 'verification');
+  const a = socket(app.url, createdToken.token, 'verification'), b = socket(app.url, createdToken.token, 'verification');
   try {
     await Promise.all([a.ready, b.ready]);
     const nextA = a.next(), nextB = b.next();
@@ -126,7 +119,7 @@ try {
   } finally { a.close(); b.close(); }
   check('CF-14 two real WebSocket subscribers', { status: 'passed' });
   await client.api('/apps/' + app.id + '/actions', { type: 'remove' });
-  assert.equal((await fetch(app.origin, { headers, signal: AbortSignal.timeout(30000) })).status, 409);
+  assert.equal((await fetch(app.url, { headers, signal: AbortSignal.timeout(30000) })).status, 409);
   await client.api('/apps/' + app.id + '/actions', { type: 'resume' });
   assert.equal((await data({ type: 'db.query', sql: 'SELECT value FROM verification', params: [] })).rows[0].value, 'persisted');
   assert.equal((await data({ type: 'kv.get', key: 'counter' })).value, 10);

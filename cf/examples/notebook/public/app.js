@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 async function api(path, body) {
-  const response = await fetch('/api/' + path, { method: body ? 'POST' : 'GET', headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const response = await fetch('api/' + path, { method: body ? 'POST' : 'GET', headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error?.message || result.error || '请求失败');
   return result;
@@ -36,7 +36,7 @@ form('upload-form', async () => {
   if (!response.ok) throw new Error('附件上传失败：' + response.status);
   await api('complete', { id: ticket.id }); $('attachment').value = '';
 });
-const socket = new WebSocket(location.origin.replace('https:', 'wss:') + '/_pneuma-space/realtime/notes');
+const socket = new WebSocket(new URL('_pneuma-space/realtime/notes', location.href.replace(/^http/, 'ws')));
 socket.onopen = () => { $('live').textContent = '实时同步已连接'; };
 socket.onclose = () => { $('live').textContent = '实时同步已断开，刷新可重连'; };
 socket.onmessage = () => refresh().catch(error => { $('notice').textContent = error.message; });

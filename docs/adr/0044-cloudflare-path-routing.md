@@ -21,7 +21,7 @@ ADR 0042 为邀请制多租户站点设计：每个应用一个精确的 Custom 
 4. **认证。** 同一个源，控制台会话 cookie 直接授权应用请求。删除应用会话 cookie、一次性交换（`/_pneuma-space/authorize`、`/_pneuma-space/callback`、`/_pneuma-space/login`）和 `grants`、`app_sessions` 两张表的使用。未登录的 HTML 导航重定向到 `/login?next=<原路径>`，其他未认证请求返回 401。发布令牌（`invoke` 权限）继续以 Bearer 调用应用。平台 cookie、Bearer 凭据和保留的身份头仍在到达应用代码前剥除；应用响应仍不能设置平台 cookie。
 5. **写请求的来源检查。** 控制 API 的规则不变：写操作要求精确的控制源 `Origin` 和会话 CSRF 头。凭 cookie 认证的应用写请求和 WebSocket 升级要求 `Origin` 等于控制源，与此前要求等于应用源是同一条规则，只是源变了；不要求 CSRF 头。Bearer 请求不检查 `Origin`。
 6. **删掉域名机制。** 应用不再挂接或摘除 Custom Domain，清除不再处理域名。Worker 不再有 `PNEUMA_SPACE_APPS_DOMAIN`、`PNEUMA_SPACE_ZONE_ID`、`PNEUMA_SPACE_WORKER_NAME` 和 `PNEUMA_SPACE_CF_API_TOKEN`。`PNEUMA_SPACE_ACCOUNT_ID` 保留，R2 签名地址的主机名要用它。安装命令仍在安装时使用运营者的令牌：检查资源、创建资源、挂接控制域名、派生 R2 签名凭据；它删除旧部署 Worker 上遗留的 API 令牌 secret。
-7. **已有部署。** D1 迁移只有附加语句：新的全局名字索引。旧的租户内名字索引、`origin`、`domain_state`、`domain_error` 列和 `grants`、`app_sessions` 表留在旧库里，代码不再读取；`origin` 列是 `NOT NULL UNIQUE`，SQLite 删不掉，新应用在这一列写入自己的 AppId。两个租户各有一个同名且未清除的应用时，索引建不起来，安装停在应用 schema 一步，要先下线并清除其中一个。升级前建的应用改由名字寻址，从 `<控制源>/apps/<name>/` 访问，数据不变。它们原来的域名不再提供应用：Worker 对控制源以外的主机一律返回 404。这些 Custom Domain 绑定和证书留在账户里，由运营者在 Cloudflare 控制台或 API 里删除。
+7. **已有部署。** D1 迁移只有附加语句：新的全局名字索引。旧的租户内名字索引、`origin`、`domain_state`、`domain_error` 列和 `grants`、`app_sessions` 表留在旧库里，代码不再读取；`origin` 列是 `NOT NULL UNIQUE`，SQLite 删不掉，新应用在这一列写入自己的 AppId。两个租户各有一个同名且未清除的应用时，索引建不起来，安装停在应用 schema 一步，要先下线并清除其中一个。升级前建的应用改由名字寻址，从 `<控制源>/apps/<name>/` 访问，数据不变。按根路径引用页面资源或接口的应用（包括此前的 Little Shelf 起步应用和 notebook 示例）要改用相对地址并重新发布；已生成的起步项目目录里的命令行副本仍按旧域名访问，要换成新版。它们原来的域名不再提供应用：Worker 对控制源以外的主机一律返回 404。这些 Custom Domain 绑定和证书留在账户里，由运营者在 Cloudflare 控制台或 API 里删除。
 
 ## 被拒绝的方案
 

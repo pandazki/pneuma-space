@@ -12,7 +12,7 @@ const items = result => result.items;
 const knownStates = {
   draft: ['待发布','Draft'], registered: ['已发布','Published'], removed: ['已下线','Removed'], purging: ['清除中','Purging'], purged: ['已清除','Purged'],
   asleep: ['休眠','Asleep'], waking: ['唤醒中','Waking'], awake: ['运行中','Awake'], draining: ['停止中','Draining'], quarantined: ['已隔离','Quarantined'],
-  ready: ['已就绪','Ready'], attached: ['已绑定','Attached'], pending: ['待就绪','Pending'], failed: ['失败','Failed'], due: ['待执行','Due'], delivering: ['执行中','Delivering'], done: ['完成','Done'], cancelled: ['已取消','Cancelled'],
+  ready: ['已就绪','Ready'], pending: ['待就绪','Pending'], failed: ['失败','Failed'], due: ['待执行','Due'], delivering: ['执行中','Delivering'], done: ['完成','Done'], cancelled: ['已取消','Cancelled'],
   reachable: ['可连接','Reachable'], configured: ['已配置','Configured'], unconfigured: ['未配置','Not configured'],
   admin: ['管理员','Administrator'], member: ['成员','Member'], active: ['有效','Active'], revoked: ['已撤销','Revoked'], disabled: ['已停用','Disabled'], expired: ['已过期','Expired'],
 };
@@ -236,7 +236,7 @@ function stat(label,value,note) { return h('div',{ class:'card stat' },h('span',
 function appRows(apps) {
   if (!apps.length) return empty(tr('这里还没有项目。','No projects here yet.'),!route().admin && state.tenant ? btn(tr('创建应用','Create app'),()=>goto('launch'),'primary') : null);
   const groups = [
-    [tr('需要关注','Needs attention'),app => app.domainState === 'failed' || ['quarantined','failed'].includes(app.runtime?.state) || app.status === 'purging'],
+    [tr('需要关注','Needs attention'),app => ['quarantined','failed'].includes(app.runtime?.state) || app.status === 'purging'],
     [tr('运行中','Running'),app => ['awake','waking','draining'].includes(app.runtime?.state)],
     [tr('待命','At rest'),app => !['removed','purged'].includes(app.status)],
     [tr('已下线','Removed'),() => true],
@@ -298,7 +298,7 @@ async function launchPage(content) {
   function drawHandoff(){
     if(!active)return;
     const display=command({...active,token:'<YOUR_PUBLISH_TOKEN>'});
-    fill(handoff,h('div',{class:'handoff-card stack'},h('div',{},h('h2',{},tr('接下来，交给你的 agent','Next, hand this to your agent')),h('p',{class:'muted'},tr('Claude Code、Codex、Cursor、Gemini CLI 或其他能运行终端的编程工具。','Claude Code, Codex, Cursor, Gemini CLI, or another coding tool with terminal access.'))),h('pre',{class:'command-preview',tabIndex:0},display),h('div',{class:'toolbar'},btn(tr('复制给 agent','Copy for my agent'),event=>copy(prompt(active),event),'primary'),btn(tr('只复制一行命令','Copy command only'),event=>copy(command(active),event),'ghost')),h('small',{},tr('需要 Node.js 22+ 和 npm。首次域名准备可能需要几分钟，指令会自动等待。','Requires Node.js 22+ and npm. The command waits while the first HTTPS address is prepared.')),h('small',{},tr('指令内含仅限当前工作空间的发布凭据；仅交给可信工具。到期时间：','The instruction contains a publishing token for this workspace; share it only with a trusted tool. Expires: '),stamp(active.expiresAt)),btn(tr('凭据管理与撤销','Manage or revoke credentials'),()=>goto('team'),'ghost small')));
+    fill(handoff,h('div',{class:'handoff-card stack'},h('div',{},h('h2',{},tr('接下来，交给你的 agent','Next, hand this to your agent')),h('p',{class:'muted'},tr('Claude Code、Codex、Cursor、Gemini CLI 或其他能运行终端的编程工具。','Claude Code, Codex, Cursor, Gemini CLI, or another coding tool with terminal access.'))),h('pre',{class:'command-preview',tabIndex:0},display),h('div',{class:'toolbar'},btn(tr('复制给 agent','Copy for my agent'),event=>copy(prompt(active),event),'primary'),btn(tr('只复制一行命令','Copy command only'),event=>copy(command(active),event),'ghost')),h('small',{},tr('需要 Node.js 22+ 和 npm。','Requires Node.js 22+ and npm.')),h('small',{},tr('指令内含仅限当前工作空间的发布凭据；仅交给可信工具。到期时间：','The instruction contains a publishing token for this workspace; share it only with a trusted tool. Expires: '),stamp(active.expiresAt)),btn(tr('凭据管理与撤销','Manage or revoke credentials'),()=>goto('team'),'ghost small')));
   }
   const form=submitForm([field(tr('给应用起个名字','Name your app'),name,tr('同时作为新项目文件夹名称。','This will also be the new project folder name.')),h('div',{class:'starter-preview'},h('span',{class:'starter-mark','aria-hidden':'true'},'↳'),h('div',{},h('strong',{},tr('拾页 · 私人灵感收藏夹','Little Shelf · your private idea collection')),h('p',{},tr('可编辑的完整示例：分类、置顶、归档和搜索。内容保存在持久存储中，只有几 KB。','A complete editable starter with collections, pins, archive and search. Its sample state takes only a few KB.')))),h('small',{},tr('自动选择创建、发布、访问和查看状态所需的权限；不授予平台管理或清除权限。','Only create, publish, invoke and read access. No platform administration or purge permission.'))],async()=>{
     const apps=await api(tenantPath('/apps',tenant));
@@ -313,11 +313,11 @@ async function launchPage(content) {
       const list=await api(tenantPath('/apps',tenant)),app=list.items.find(app=>app.name===active.name);
       if(!app){fill(progress,h('h3',{},tr('等待 agent 开始','Waiting for your agent')),h('p',{class:'muted'},tr('把指令粘贴给 agent。这一页会自动显示发布进展，无需反复刷新。','Paste the instruction into your agent. This page will show deployment progress automatically.')));return;}
       const detail=await api('/apps/'+pathId(app.id));
-      if(!detail.current){fill(progress,h('h3',{},tr('应用已创建，正在准备发布','App created. Preparing its first release.')),h('p',{class:'muted'},tr('HTTPS 证书首次生效可能需要几分钟。agent 会继续等待。','The first HTTPS certificate may take a few minutes. Your agent will keep waiting.')));return;}
+      if(!detail.current){fill(progress,h('h3',{},tr('应用已创建，正在准备发布','App created. Preparing its first release.')),h('p',{class:'muted'},tr('agent 正在上传并发布第一个版本。','Your agent is uploading and publishing the first release.')));return;}
       const verified=detail.usage.sleeps>0&&detail.usage.wakes>1;
       fill(progress,h('h3',{},verified?tr('已记录休眠与再次唤醒','Sleep and another wake are recorded'):tr('应用已上线，正在等待休眠验证','Your app is live. Waiting for the idle check.')),
         h('p',{class:'muted'},verified?tr('打开应用试试，再到统计页看看刚刚发生的访问。数据保留的验证结果由 agent 的 bench 给出。','Try the app, then see the visits in its statistics. Your agent’s benchmark reports whether data was retained.'):tr('先让 agent 完成 bench；此时打开应用可能延后自然休眠。','Let the agent finish the benchmark first. Opening the app now may delay natural idle.')),
-        h('div',{class:'toolbar'},h('a',{href:app.origin,target:'_blank',rel:'noopener',class:'btn primary'},tr('打开我的应用 ↗','Open my app ↗')),link(tr('查看访问统计','See visit statistics'),`/dashboard?view=projects&app=${pathId(app.id)}&tab=usage`),btn(tr('再创建一个应用','Create another app'),()=>{state.launches.delete(tenant.id);render();},'ghost')));
+        h('div',{class:'toolbar'},h('a',{href:app.url,target:'_blank',rel:'noopener',class:'btn primary'},tr('打开我的应用 ↗','Open my app ↗')),link(tr('查看访问统计','See visit statistics'),`/dashboard?view=projects&app=${pathId(app.id)}&tab=usage`),btn(tr('再创建一个应用','Create another app'),()=>{state.launches.delete(tenant.id);render();},'ghost')));
     }catch(error){fill(progress,errorLine(error),btn(tr('重新检查','Check again'),poll,'ghost small'));}finally{checking=false;}
   }
   append(content,[pagehead(tr('创建应用','Create an app'),tr('从一个真正能用的小产品开始，再把它改成你的想法。','Start with a useful little product, then make it your own.')),
@@ -353,7 +353,7 @@ function recordValue(key,value) {
     return h('span',{ class:'mono' },/[Bb]ytes|Size$/.test(key) ? bytes(value) : number(value));
   }
   if (['status','state'].includes(key) && knownStates[value]) return statusBadge(value);
-  if (/^(id|key|path|origin|bucket)$|Id$|_id$/.test(key)) return h('code',{},value);
+  if (/^(id|key|path|url|bucket)$|Id$|_id$/.test(key)) return h('code',{},value);
   if (value === 'Open an application for its current runtime state.') return tr('打开项目查看当前运行状态。','Open a project for its current runtime state.');
   return String(value);
 }
@@ -459,9 +459,7 @@ const labels = {
   platformAdmin:['平台管理员','Platform administrator'],
   username:['用户名','Username'],
   ownerId:['所有者','Owner'],
-  domainState:['域名状态','Domain state'],
-  domainError:['域名错误','Domain error'],
-  origin:['地址','Origin'],
+  url:['地址','Address'],
   release:['版本','Release'],
   number:['版本号','Release'],
   label:['标签','Label'],
@@ -492,7 +490,6 @@ const labels = {
   provider:['服务','Service'],
   disabledAccounts:['已停用账号','Disabled accounts'],
   reservedRuntimes:['运行预留','Runtime reservations'],
-  attached:['已绑定','Attached'],
   observations:['观测','Observations'],
   cloudflare:['Cloudflare','Cloudflare'],
   containers:['容器','Containers'],
@@ -539,8 +536,6 @@ const labels = {
   requestCount:['请求数','Request count'],
   storageSize:['存储大小','Storage size'],
   createdBy:['创建者','Created by'],
-  domain:['域名','Domain'],
-  domains:['域名','Domains'],
   pendingUploads:['待完成上传','Pending uploads'],
   activeUploads:['有效上传','Active uploads'],
   releaseCount:['版本数','Release count'],
@@ -590,7 +585,7 @@ async function projectDetail(content) {
   state.app = app;
   const can = mayOperate(app), tab = route().tab;
   const actions = [];
-  if (app.status === 'registered' && app.origin) actions.push(h('a',{ href:app.origin,target:'_blank',rel:'noopener',class:'btn ghost' },tr('打开应用 ↗','Open app ↗')));
+  if (app.status === 'registered') actions.push(h('a',{ href:app.url,target:'_blank',rel:'noopener',class:'btn ghost' },tr('打开应用 ↗','Open app ↗')));
   actions.push(btn(tr('刷新','Refresh'),render,'ghost'));
   if (can) {
     const entries = [];
@@ -603,8 +598,7 @@ async function projectDetail(content) {
   }
   const tabs = [['runtime',tr('运行概况','Runtime')],['publish',tr('发布','Publish')],['releases',tr('版本','Releases')],['data',tr('数据','Data')],['jobs',tr('任务','Jobs')],['logs',tr('日志','Logs')],['events',tr('事件','Events')],['usage',tr('用量','Usage')]];
   const detail = h('div');
-  append(content,[pagehead(app.name,app.origin || app.id,...actions),h('div',{ class:'tabs',role:'group','aria-label':tr('项目页面','Project pages') },tabs.filter(([key]) => can || key !== 'publish').map(([key,title]) => h('button',{ type:'button',class:'btn small ghost','aria-pressed':String(tab === key),onclick:() => goto('projects',{ app:app.id,tab:key }) },title))),detail]);
-  if (app.domainState !== 'attached') detail.append(section(0,tr('应用域名','Application domain'),null,h('div',{ class:`notice ${app.domainState === 'failed' ? 'error' : ''}` },statusBadge(app.domainState),h('p',{ class:'gap' },app.domainError || tr('域名仍在准备，发布完成不代表 HTTPS 已就绪。','The domain is still being prepared. A published release does not establish HTTPS readiness.')))));
+  append(content,[pagehead(app.name,app.url,...actions),h('div',{ class:'tabs',role:'group','aria-label':tr('项目页面','Project pages') },tabs.filter(([key]) => can || key !== 'publish').map(([key,title]) => h('button',{ type:'button',class:'btn small ghost','aria-pressed':String(tab === key),onclick:() => goto('projects',{ app:app.id,tab:key }) },title))),detail]);
   const pages = { runtime:runtimePage,publish:publishPage,releases:releasesPage,data:dataPage,jobs:jobsPage,logs:diagnosticPage,events:diagnosticPage,usage:appUsagePage };
   await (pages[tab] || runtimePage)(detail,app);
 }
@@ -709,7 +703,7 @@ async function releasesPage(content,app) {
 async function appUsagePage(content,app) {
   content.append(h('div',{class:'usage-toolbar'},h('p',{class:'muted'},tr('每次访问、唤醒和休眠，都会在这里留下实际计数。','Actual requests, wakes and sleeps recorded for this application.')),btn(tr('刷新统计','Refresh statistics'),render,'ghost')),
     section(1,tr('刚刚发生了什么','What happened'),null,h('div',{class:'grid metrics'},stat(tr('访问请求','Requests'),app.usage.requests),stat(tr('唤醒次数','Wakes'),app.usage.wakes),stat(tr('休眠次数','Sleeps'),app.usage.sleeps),stat(tr('请求错误','Request errors'),app.usage.errors)),h('p',{class:'section-meta'},tr('包含页面、资源和 API 请求；bench 的访问也会计入。读取此页不会唤醒应用。','Includes page, asset and API requests, including the benchmark. Viewing these statistics does not wake the app.'))),
-    section(2,tr('当前运行状态','Current runtime state'),null,h('div',{class:'card row'},statusBadge(app.runtime.state),h('p',{class:'muted'},tr(`连续闲置 ${app.policy.idleSeconds} 秒后自动休眠。`,`Sleeps automatically after ${app.policy.idleSeconds} idle seconds.`)),h('a',{href:app.origin,target:'_blank',rel:'noopener',class:'btn ghost'},tr('访问应用 ↗','Visit app ↗')))),
+    section(2,tr('当前运行状态','Current runtime state'),null,h('div',{class:'card row'},statusBadge(app.runtime.state),h('p',{class:'muted'},tr(`连续闲置 ${app.policy.idleSeconds} 秒后自动休眠。`,`Sleeps automatically after ${app.policy.idleSeconds} idle seconds.`)),h('a',{href:app.url,target:'_blank',rel:'noopener',class:'btn ghost'},tr('访问应用 ↗','Visit app ↗')))),
     section(3,tr('更多用量详情','More usage details'),null,recordCards(await api(appPath('/usage',app)))));
 }
 async function native(command,app) { return api(appPath('/data',app),command); }
@@ -979,7 +973,7 @@ function loginDestination(me) {
   const next = new URLSearchParams(location.search).get('next');
   if (next && next.startsWith('/') && !next.startsWith('//')) {
     const url = new URL(next,location.origin);
-    if (url.origin === location.origin && (url.pathname.startsWith('/_pneuma-space/') || url.pathname === '/admin' && me.platformAdmin || url.pathname === '/dashboard')) return url.pathname+url.search;
+    if (url.origin === location.origin && (url.pathname.startsWith('/apps/') || url.pathname === '/admin' && me.platformAdmin || url.pathname === '/dashboard')) return url.pathname+url.search;
   }
   return me.platformAdmin ? '/admin' : '/dashboard';
 }
