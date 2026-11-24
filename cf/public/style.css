@@ -105,7 +105,7 @@ a { text-underline-offset: 3px; }
   .brand .mark { width: 28px; height: 28px; flex-basis: 28px; }
   aside nav { display: flex; max-width: none; overflow-x: auto; scrollbar-width: none; margin: 0 -20px; padding: 0 20px; gap: 2px; mask-image: linear-gradient(to right,transparent,#000 16px,#000 calc(100% - 24px),transparent); }
   aside nav::-webkit-scrollbar { display: none; }
-  aside nav a { flex-shrink: 0; white-space: nowrap; min-height: 36px; padding: 6px 12px; font-size: 13px; }
+  aside nav a { flex-shrink: 0; white-space: nowrap; min-height: 40px; padding: 6px 12px; font-size: 13px; }
   aside nav a:focus-visible { outline-offset: -2px; }
   aside nav .icon { display: none; }
   .aside-foot { display: none; }

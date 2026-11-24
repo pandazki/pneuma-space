@@ -1047,7 +1047,7 @@ function jobsPage(panel,id) {
   section(2,tr('投递历史','Delivery history'),tr('至少送达一次；每次投递保留标识与尝试次数。','At-least-once delivery with persisted IDs and attempt counts.'),h('div',{ class:'stack' },h('div',{ class:'toolbar' },refreshButton(tr('刷新记录','Refresh history'))),region(`${url}/jobs`,deliveries => pager(`${url}/jobs`,deliveries,deliveryTable),'table')))]);
 }
 function deliveryTable(rows) {
-  if (!rows.length) return empty(tr('还没有任务投递。','No job deliveries yet.'));
+  if (!rows.length) return empty(tr('还没有任务投递。计划触发或手动调用后会出现在这里。','No job deliveries yet. Scheduled runs and manual invocations appear here.'));
   const columns = [tr('任务','Job'),tr('状态','State'),tr('计划时间','Scheduled'),tr('尝试','Attempts'),tr('诊断','Diagnostics')];
   return h('div',{ class:'table-wrap' },h('table',{},h('thead',{},h('tr',{},columns.map(label => h('th',{},label)))),h('tbody',{},[...rows].sort((a,b) => b.scheduledFor-a.scheduledFor).map(row => h('tr',{},[
     h('div',{ class:'cell-stack' },h('span',{ class:'mono' },row.name),h('small',{ class:'mono' },row.id)),statusBadge(row.state),time(row.scheduledFor),number(row.attempts),
