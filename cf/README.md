@@ -14,7 +14,7 @@ Every Node app runs in one Cloudflare Container. These limits follow from that, 
 
 - **Cold start takes seconds.** A request to a sleeping Node app waits for the container. One measured wake took about 5.2 seconds, 3.7 of them the container start, which the platform cannot shorten ([verification record](docs/verification.md)). Serve the first screen from the `static` directory and let the page call the API after it paints ([ADR 0045](../docs/adr/0045-cloudflare-first-screen-and-idle.md)).
 - **One instance per app.** An app does not scale out; all its requests share one container.
-- **A space runs a limited number of apps at once.** A wake beyond the limit answers 503 `compute_quota` until another app sleeps.
+- **A space runs a limited number of apps at once.** The limit is two by default and an administrator can change it. A wake beyond it answers 503 `compute_quota` until another app sleeps.
 - **One fixed runner.** Node 24 on Linux amd64, prebuilt JavaScript only. An app brings no image, system package or other runtime.
 - **Nothing in the container lasts.** Its files vanish on every sleep, and it has no public Internet egress. State belongs in the native services of the [contract](docs/app-contract.md).
 - **Installing needs Docker and a plan with Containers.** The installer builds the runner image locally, and a first deploy can time out while Cloudflare prepares it; the installer retries.
