@@ -6,7 +6,7 @@ import { Ingress } from './ingress.ts';
 import { Series } from './metrics.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
-  Conflict, DEFAULT_TENANT, InputError, QuotaExceeded, appName, managerName, parseManifest, subject, tenantName, triggerName,
+  Conflict, DEFAULT_TENANT, InputError, NotFound, QuotaExceeded, appName, managerName, parseManifest, subject, tenantName, triggerName,
   type App, type AppId, type BundleId, type Capabilities, type Change, type ManagerName, type PublishRequest, type ReleaseNumber, type Store, type StoreOps,
 } from './model.ts';
 import { PlatformRegistry } from './registry.ts';
@@ -910,6 +910,18 @@ test('AC-MGR-2 each write naming the manager proceeds, through to purge', async 
   await registry.remove(survey, named);
   await registry.purge(survey, named);
   assert.equal(await store.app(survey), null);
+});
+
+test('ADR 0039 a move of a managed app to a tenant that does not exist is NotFound, with the name or without it', async () => {
+  const { registry } = await world().open();
+  await managed(registry);
+  for (const as of [null, named]) await assert.rejects(registry.moveApp(survey, tenantName('nowhere'), as), (error) => error instanceof NotFound);
+});
+
+test('ADR 0039 a policy above the tenant quota is an input error on a managed app, with the name or without it', async () => {
+  const { registry } = await quotaWorld({ cpu_millis: 2000 });
+  await managed(registry, { kv: {} }, { tenant: blue });
+  for (const as of [null, named]) await assert.rejects(registry.setAppPolicy(survey, { cpu_millis: 2001 }, as), (error) => error instanceof InputError);
 });
 
 test('ADR 0039 stop, restart and kill of a managed app need no name', async () => {

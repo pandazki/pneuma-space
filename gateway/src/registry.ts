@@ -464,7 +464,6 @@ export class PlatformRegistry implements Registry {
     const fields = parsePolicyPatch(patch, 'app');
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
-      mustName(app, named);
       const { quota } = await this.#mustTenant(this.#store, app.tenant);
       for (const field of ['cpu_millis', 'memory_mb'] as const) {
         const value = fields[field];
@@ -473,6 +472,7 @@ export class PlatformRegistry implements Registry {
           throw new InputError(`${field} ${value} is above tenant "${app.tenant}"'s ${field} quota of ${limit}`);
         }
       }
+      mustName(app, named);
       const override: Record<string, unknown> = { ...app.policyOverride };
       for (const [key, value] of Object.entries(fields)) {
         if (value === null) delete override[key];
@@ -646,8 +646,8 @@ export class PlatformRegistry implements Registry {
   moveApp(name: AppName, tenant: TenantName, named?: ManagerName | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
-      mustName(app, named);
       await this.#mustTenant(this.#store, tenant);
+      mustName(app, named);
       if (app.status === 'purging') throw new Conflict(`app "${name}" is being purged`);
       if (app.tenant === tenant) return;
       await this.#runtime.retire(app.id);
