@@ -34,6 +34,7 @@ async function fixture() {
 before(async () => {
   const fixtureWorker = `
     import {AppCell as BaseAppCell} from './src/app.ts';
+    import worker from './src/worker.ts';
     export {AppServices} from './src/app.ts';
     export class AppCell extends BaseAppCell {
       async containerAcquire() {
@@ -81,6 +82,7 @@ before(async () => {
     }
     export default {fetch(request, env) {
       if (new URL(request.url).pathname.startsWith('/test/trigger/')) return env.TEST_TRIGGER.fetch(request);
+      if (new URL(request.url).pathname.startsWith('/apps/')) return worker.fetch(request, env);
       return env.PNEUMA_SPACE_APPS.getByName(request.headers.get('x-test-app')).fetch(request);
     }};
   `;
@@ -99,7 +101,7 @@ before(async () => {
   assert.ok(address && typeof address !== 'string');
   const triggerWorker = `export default {fetch(request) {return fetch('http://127.0.0.1:${address.port}' + new URL(request.url).pathname, request)}};`;
   mf = new Miniflare(convertV4MiniflareOptions({ workers: [
-    { name: 'runtime-tests', modules: true, script: bundled.outputFiles[0].text, compatibilityDate: '2026-11-13', compatibilityFlags: ['nodejs_compat'], durableObjects: { PNEUMA_SPACE_APPS: { className: 'AppCell', useSQLite: true } }, d1Databases: ['PNEUMA_SPACE_DB'], r2Buckets: ['PNEUMA_SPACE_ARTIFACTS', 'PNEUMA_SPACE_OBJECTS'], serviceBindings: {TEST_TRIGGER: 'held-trigger'}, bindings: {} },
+    { name: 'runtime-tests', modules: true, script: bundled.outputFiles[0].text, compatibilityDate: '2026-11-13', compatibilityFlags: ['nodejs_compat'], durableObjects: { PNEUMA_SPACE_APPS: { className: 'AppCell', useSQLite: true } }, d1Databases: ['PNEUMA_SPACE_DB'], r2Buckets: ['PNEUMA_SPACE_ARTIFACTS', 'PNEUMA_SPACE_OBJECTS'], serviceBindings: {TEST_TRIGGER: 'held-trigger'}, bindings: {PNEUMA_SPACE_CONTROL_ORIGIN: 'http://test'} },
     { name: 'held-trigger', modules: true, script: triggerWorker, compatibilityDate: '2026-11-13' },
   ] }));
   const db = await mf.getD1Database('PNEUMA_SPACE_DB');
@@ -356,4 +358,18 @@ test('CF-20 native subscriptions share the app request budget with static admiss
   const second = await call(app, '/subscribe/changes', undefined, {upgrade: 'websocket', 'x-pneuma-space-actor': encodeURIComponent(JSON.stringify(actor))});
   assert.equal(second.status, 429);
   first.webSocket!.close();
+});
+test('CF-25 a sleeping Node app answers its static index without waking', async () => {
+  const { app } = await fixture();
+  await call(app, '/test/configure-kv', {});
+  const bucket = await mf.getR2Bucket('PNEUMA_SPACE_ARTIFACTS') as unknown as R2Bucket;
+  await bucket.put('apps/' + app + '/artifacts/' + digest + '/static/index.html', 'Shell', { httpMetadata: { contentType: 'text/html' } });
+  const session = crypto.randomUUID().replaceAll('-', '').repeat(2);
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  await db.prepare("INSERT INTO sessions(hash,user_id,csrf,created_at,expires_at) VALUES(?,'owner','csrf',1,?)").bind(createHash('sha256').update(session).digest('hex'), Date.now() + 3600000).run();
+  const page = await mf.dispatchFetch('http://test/apps/' + app + '/', { headers: { cookie: '__Host-pneuma-space-control=' + session } });
+  assert.equal(page.status, 200);
+  assert.equal(await page.text(), 'Shell');
+  const snapshot = await (await call(app, '/inspect')).json() as { runtime: { bootId: string | null }; usage: { requests: number; wakes: number } };
+  assert.deepEqual([snapshot.runtime.bootId, snapshot.usage.wakes, snapshot.usage.requests], [null, 0, 1]);
 });
