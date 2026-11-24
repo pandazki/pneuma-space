@@ -74,10 +74,6 @@ test('appName accepts 40 lowercase characters and rejects uppercase or 41', () =
   assert.throws(() => appName('a'.repeat(41)), InputError);
 });
 
-test('contract 1 rejects the records capability', () => {
-  assert.throws(() => parseManifest({ contract: 1, capabilities: { records: {} } }), /unknown capability "records"/);
-});
-
 test('contract 1 rejects the fetch runtime', () => {
   assert.throws(() => parseManifest({ contract: 1, runtime: 'fetch', capabilities: {} }), /runtime must be one of container, isolate/);
 });

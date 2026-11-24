@@ -8,7 +8,7 @@
 
 Cloudflare 的[文件文档](https://developers.cloudflare.com/sandbox/files/)说明，停止 sandbox 会删除实例磁盘。R2 挂载的重命名、锁和权限语义与本地磁盘不同。[容器快照](https://developers.cloudflare.com/containers/guides/snapshots/)与生成它的镜像版本绑定，且有 30 天保留期。
 
-据此，快照或 R2 挂载还不能作为原应用 `/data` 和 SQLite 的等价替代。需要先证明崩溃后的已确认写入、换镜像后的数据保留和文件锁语义，才能选择纯 Cloudflare 计算方案。现有 Fetch 实验也不能替代这项证明。
+据此，快照或 R2 挂载还不能作为原应用 `/data` 和 SQLite 的等价替代。需要先证明崩溃后的已确认写入、换镜像后的数据保留和文件锁语义，才能选择纯 Cloudflare 计算方案。
 
 | 选择 | 下一步必须证明的事 | 当前结论 |
 | --- | --- | --- |

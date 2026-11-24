@@ -1,6 +1,6 @@
 # Run the full hosted platform
 
-This profile adds accounts to the original gateway and console. Its required scope is the [SaaS baseline](../../REQUIREMENTS-M3.md); the separate [Fetch experiment](../../cloud/README.md) remains available with its existing data.
+This profile adds accounts to the original gateway and console. Its required scope is the [SaaS baseline](../../REQUIREMENTS-M3.md).
 
 ## Start locally
 
@@ -12,7 +12,7 @@ npm run dev:hosted
 
 Open [the console](http://localhost:58081/). Choose `operator` to inspect the full monitoring and operations console. Choose `alice` or `bob` to use separate personal spaces. The operator is explicitly configured by the launcher; signup never grants that role.
 
-The launcher uses its own Compose project, network, volumes and ports. It does not replace the existing local or Fetch stacks. To enable the existing RTC capability, run `npm run dev:hosted -- --rtc` when the TURN ports in `compose.yaml` are free.
+The launcher uses its own Compose project, network, volumes and ports. It does not replace the existing local stack. To enable the existing RTC capability, run `npm run dev:hosted -- --rtc` when the TURN ports in `compose.yaml` are free.
 
 On **Team**, create a personal token in your space. Use the original CLI and app templates:
 

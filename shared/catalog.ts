@@ -1,6 +1,5 @@
 import { ManifestError, NAME_PATTERN, type CronExpr, type TriggerName } from './values.ts';
 
-export type Contract = 1 | 2;
 export type KindClass = 'resource' | 'ingress' | 'schedule';
 
 export type EmptyDeclaration = Record<string, never>;
@@ -10,7 +9,6 @@ export type CronDeclaration = { readonly triggers: Readonly<Record<TriggerName, 
 export type IdentityDeclaration = { readonly required?: boolean };
 
 type CapabilitySpec = {
-  readonly contracts: readonly Contract[];
   readonly class: KindClass;
   readonly needsRuntime: boolean;
   /** Provider implementations; non-empty exactly for resource kinds. */
@@ -20,17 +18,16 @@ type CapabilitySpec = {
 
 /** The only capability list. Env names, providers to call and gateway flags derive from it. */
 export const CAPABILITIES = {
-  route:    { contracts: [1, 2], class: 'ingress',  needsRuntime: false, providers: [],                     parse: implicit },
-  files:    { contracts: [1],    class: 'resource', needsRuntime: true,  providers: ['volume'],             parse: empty },
-  db:       { contracts: [1],    class: 'resource', needsRuntime: true,  providers: ['sqlite', 'postgres'], parse: empty },
-  kv:       { contracts: [1],    class: 'resource', needsRuntime: true,  providers: ['redis'],              parse: empty },
-  object:   { contracts: [1],    class: 'resource', needsRuntime: true,  providers: ['s3'],                 parse: empty },
-  static:   { contracts: [1, 2], class: 'ingress',  needsRuntime: false, providers: [],                     parse: parseStatic },
-  ws:       { contracts: [1],    class: 'ingress',  needsRuntime: true,  providers: [],                     parse: empty },
-  cron:     { contracts: [1],    class: 'schedule', needsRuntime: true,  providers: [],                     parse: parseCron },
-  identity: { contracts: [1, 2], class: 'ingress',  needsRuntime: true,  providers: [],                     parse: parseIdentity },
-  rtc:      { contracts: [1],    class: 'resource', needsRuntime: true,  providers: ['coturn'],             parse: empty },
-  records:  { contracts: [2],    class: 'resource', needsRuntime: true,  providers: ['records'],            parse: empty },
+  route:    { class: 'ingress',  needsRuntime: false, providers: [],                     parse: implicit },
+  files:    { class: 'resource', needsRuntime: true,  providers: ['volume'],             parse: empty },
+  db:       { class: 'resource', needsRuntime: true,  providers: ['sqlite', 'postgres'], parse: empty },
+  kv:       { class: 'resource', needsRuntime: true,  providers: ['redis'],              parse: empty },
+  object:   { class: 'resource', needsRuntime: true,  providers: ['s3'],                 parse: empty },
+  static:   { class: 'ingress',  needsRuntime: false, providers: [],                     parse: parseStatic },
+  ws:       { class: 'ingress',  needsRuntime: true,  providers: [],                     parse: empty },
+  cron:     { class: 'schedule', needsRuntime: true,  providers: [],                     parse: parseCron },
+  identity: { class: 'ingress',  needsRuntime: true,  providers: [],                     parse: parseIdentity },
+  rtc:      { class: 'resource', needsRuntime: true,  providers: ['coturn'],             parse: empty },
 } as const satisfies Record<string, CapabilitySpec>;
 
 export type CapabilityKind = keyof typeof CAPABILITIES;
@@ -50,28 +47,11 @@ for (const [kind, spec] of Object.entries(CAPABILITIES)) {
 
 /** The only runtime list: a kind is one row here and one Runtime implementation. `service` names the compose service and profile it needs; `input` is what a publish must carry. */
 export const RUNTIMES = {
-  container: { contracts: [1], family: 'process', service: null,     profile: null,      input: 'image' },
-  isolate:   { contracts: [1], family: 'process', service: 'runner', profile: 'isolate', input: 'bundle' },
-  fetch:     { contracts: [2], family: 'fetch',   service: null,     profile: null,      input: 'artifact' },
-} as const satisfies Record<string, { readonly contracts: readonly Contract[]; readonly family: 'process' | 'fetch'; readonly service: string | null; readonly profile: string | null; readonly input: 'image' | 'bundle' | 'artifact' }>;
+  container: { service: null,     profile: null,      input: 'image' },
+  isolate:   { service: 'runner', profile: 'isolate', input: 'bundle' },
+} as const satisfies Record<string, { readonly service: string | null; readonly profile: string | null; readonly input: 'image' | 'bundle' }>;
 
 export type RuntimeKind = keyof typeof RUNTIMES;
-
-type ForContract<T extends Record<string, { readonly contracts: readonly Contract[] }>, C extends Contract> = C extends Contract ? {
-  [K in keyof T as C extends T[K]['contracts'][number] ? K : never]: T[K];
-} : never;
-
-function forContract<T extends Record<string, { readonly contracts: readonly Contract[] }>, C extends Contract>(table: T, contract: C): ForContract<T, C> {
-  return Object.fromEntries(Object.entries(table).filter(([, spec]) => spec.contracts.includes(contract))) as ForContract<T, C>;
-}
-
-export function capabilitiesFor<C extends Contract>(contract: C): ForContract<typeof CAPABILITIES, C> {
-  return forContract(CAPABILITIES, contract);
-}
-
-export function runtimesFor<C extends Contract>(contract: C): ForContract<typeof RUNTIMES, C> {
-  return forContract(RUNTIMES, contract);
-}
 
 type RawObject = Record<string, unknown>;
 
