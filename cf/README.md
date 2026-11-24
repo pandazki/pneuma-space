@@ -27,38 +27,26 @@ Local workerd tests do not verify cloud Containers, DNS, certificates, browser b
 
 ## Deployment
 
-Use a Cloudflare account with Workers, Containers, D1 and R2 already enabled. No subscription changes are performed by these scripts.
+Use a Cloudflare account with Workers, Containers, D1 and R2 enabled and the control domain's zone in it, Node 24 or later, and Docker. The installer changes no subscription. From the repository root:
 
-There is no installer yet; the steps are manual, and [the verification record](docs/verification.md#fresh-install-by-an-outside-developer-2026-11-24) lists where a first install stumbled.
+    node cf/scripts/install.mjs space.example.com --prefix space-example
 
-1. The checked-in wrangler.jsonc holds placeholders. Set the Worker, D1, bucket and container names (keep them distinct from anything already in the account), `PNEUMA_SPACE_CONTROL_ORIGIN`, `PNEUMA_SPACE_APPS_DOMAIN`, `PNEUMA_SPACE_ACCOUNT_ID` and `PNEUMA_SPACE_ZONE_ID`, and the control origin in deploy/artifact-cors.json. Do not commit the result.
-2. Create the D1 database and two private R2 buckets named in that file. Put the new database ID in the binding. Keep the artifact and object buckets separate.
-3. Apply the schema and CORS configuration:
+The prefix names the Worker, the D1 database and the buckets `PREFIX-artifacts` and `PREFIX-objects`. A first install refuses names that already exist in the account. Apps get `app-ID.space.example.com`; `--apps-domain` places them under another domain in the same zone. `--owner` names the first owner (default `owner`), and `--account` picks the account when the Wrangler login sees several.
 
-       npx wrangler d1 execute D1_NAME --remote --file schema.sql --yes
-       npx wrangler r2 bucket cors set ARTIFACT_BUCKET --file deploy/artifact-cors.json --force
-       npx wrangler r2 bucket cors set OBJECT_BUCKET --file deploy/object-cors.json --force
+The first run stops at the one manual step. Wrangler's login cannot create the long-lived token the Worker uses to attach app domains and sign R2 upload URLs, so the installer prints a link to Cloudflare's create-token form with Workers Scripts edit and Workers R2 Storage edit preselected. Create the token, save it alone in the file the installer names, and run the same command again. The installer prints the token's expiry; after it, new app domains cannot attach and publishes cannot sign upload URLs.
 
-4. Prepare a private JSON secrets file containing the five names in wrangler.jsonc secrets.required. Use a Workers Scripts Write account token for exact domain provisioning, R2 object read/write credentials limited to these two buckets, and a Realtime TURN key ID and its API token. Keep this file outside tracked source. Object CORS allows signed transfers from app origins; it grants no unsigned object access.
-5. Provision the first owner. The credentials file is created with mode 0600, and only a hash enters D1:
+The installer then creates the database and buckets, applies the schema and CORS, provisions the owner, deploys (retrying a failed deploy up to three times), attaches the control domain unless another Worker holds it, and waits for valid HTTPS. Each step checks before it acts, so the same command resumes an interrupted install, and after a `git pull` it upgrades a finished one. It ends with the console URL and the owner credentials file.
 
-       node scripts/bootstrap.mjs OWNER_USERNAME /private/path/owner.json
+Everything it generates stays in `~/.pneuma-space/hosts/DOMAIN/` (mode 0700): the Wrangler config, the API token, the Worker secrets and the owner credentials. To enable TURN, add `PNEUMA_SPACE_TURN_KEY_ID` and `PNEUMA_SPACE_TURN_API_TOKEN` to `worker-secrets.json` there and rerun; the installer keeps them.
 
-6. Deploy and attach the control domain:
-
-       npm run check
-       npm test
-       npx wrangler deploy --secrets-file /private/path/worker-secrets.json
-       node scripts/bind-domain.mjs /private/path/worker-secrets.json
-
-The domain script refuses to replace another Worker's binding. Application domains are attached by the service. Keep domain management outside Wrangler routes so redeployment does not replace the application-domain inventory. An attached domain records the API result; verify its external HTTPS certificate separately.
+The service attaches app domains itself. Keep domain management outside Wrangler routes so redeployment does not replace the application-domain inventory.
 
 ## Publish an application
 
 The example exercises the native APIs through a notebook, document and direct attachment transfers.
 
     node scripts/build-example.mjs
-    export PNEUMA_SPACE_CREDENTIALS=/private/path/owner.json
+    export PNEUMA_SPACE_CREDENTIALS=~/.pneuma-space/hosts/space.example.com/owner.json
     node scripts/cli.mjs publish .build/notebook notebook
 
 The CLI packages prebuilt JavaScript and public files. Its package command also creates the JSON file accepted by the console's publish form:

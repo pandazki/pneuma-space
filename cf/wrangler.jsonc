@@ -17,7 +17,7 @@
     "PNEUMA_SPACE_OBJECT_BUCKET": "pneuma-space-example-objects",
     "PNEUMA_SPACE_MAX_ACCOUNTS": "20"
   },
-  "secrets": { "required": ["PNEUMA_SPACE_CF_API_TOKEN", "PNEUMA_SPACE_R2_ACCESS_KEY_ID", "PNEUMA_SPACE_R2_SECRET_ACCESS_KEY", "PNEUMA_SPACE_TURN_KEY_ID", "PNEUMA_SPACE_TURN_API_TOKEN"] },
+  "secrets": { "required": ["PNEUMA_SPACE_CF_API_TOKEN", "PNEUMA_SPACE_R2_ACCESS_KEY_ID", "PNEUMA_SPACE_R2_SECRET_ACCESS_KEY"] },
   "d1_databases": [{ "binding": "PNEUMA_SPACE_DB", "database_name": "pneuma-space-example", "database_id": "00000000-0000-0000-0000-000000000000" }],
   "r2_buckets": [
     { "binding": "PNEUMA_SPACE_ARTIFACTS", "bucket_name": "pneuma-space-example-artifacts" },

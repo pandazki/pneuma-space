@@ -34,7 +34,7 @@ A developer persona holding only these files, a logged-in Wrangler and one subdo
 
 The run needed what the files did not provide:
 
-- The developer rewrote the names, domains and resource IDs that were then hard-coded in wrangler.jsonc, the artifact CORS file and the starter template. Those are placeholders now; nothing installs them yet.
+- The developer rewrote the names, domains and resource IDs that were then hard-coded in wrangler.jsonc, the artifact CORS file and the starter template. Those are placeholders now.
 - Wrangler's OAuth login cannot create the long-lived API token or the R2 signing credentials the Worker needs. The account owner created one account token (Workers Scripts Write and Workers R2 Storage Write) by hand. The R2 access key ID is that token's ID and the secret is the SHA-256 of its value.
 - `secrets.required` lists both TURN secrets, so a deployment without TURN supplies empty values.
 - Deployment succeeded on the third attempt; the first two stopped while pulling the base image and while polling container image preparation.
@@ -42,3 +42,17 @@ The run needed what the files did not provide:
 - The first app's certificate took longer than the CLI's ten-minute wait. The CLI exited 1; publishing again succeeded.
 
 Not covered by that run: natural idle recovery, browser rendering, TURN and billing.
+
+## Installer (2026-11-24, not yet run against an account)
+
+`scripts/install.mjs` replaces the manual deployment steps. It has not created anything in a real account yet. Verified so far:
+
+- Eight CF-23 engine tests against a simulated account: the token stop changes nothing, a rerun creates nothing, generated files are private and limited to the state directory, taken names are refused, a failed deploy is retried, a foreign domain binding is kept, the generated config and the derived secrets are as specified. Breaking the D1 existence check or the name check fails the matching tests.
+- `wrangler deploy --dry-run` with a config generated into a directory outside the repository, run from `/`, built the Worker, the CLI download and the linux/amd64 runner image and listed every binding with the prefix names. Wrangler state went to that directory.
+- Read-only API calls with a Wrangler login returned the shapes the installer reads: zones by exact name, D1 by name, 404 for an absent R2 bucket, and failure for an invalid token.
+- With the real Wrangler login and a probe hostname in a real zone, the installer resolved the account and zone, stopped at the token step with the link and the token path, and made only read calls. Its empty state directory was removed afterwards.
+- Cloudflare's [token template URL documentation](https://developers.cloudflare.com/fundamentals/api/how-to/account-owned-token-template/) confirms the link format and the `workers_scripts` and `workers_r2` keys.
+
+Unverified until a real install: resource creation, the schema and owner through the generated config, deployment, domain attachment, the certificate wait, token verification and R2 signing with a real account token, and the link opening the form with both permissions in the dashboard.
+
+Of the stumbles above, the installer removes the hand-edited names, the hand-built secrets, the required TURN values and the manual deploy retry. The token remains the one manual step (ADR 0041). The browser-less publishing token and the CLI certificate wait belong to publishing, not installation.
