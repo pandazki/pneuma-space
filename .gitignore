@@ -46,3 +46,6 @@ examples/.build/
 # scratch of verifiers and workers, never content
 /.*-tmp/
 /.screens/
+
+# Rebuilt by the standalone CF deployment
+cf/public/downloads/

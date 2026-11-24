@@ -1,0 +1,4 @@
+.build/
+.dev.vars*
+dist/
+worker-configuration.d.ts

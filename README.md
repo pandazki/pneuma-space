@@ -9,6 +9,8 @@ PneumaSpace runs many small stateful web apps on one machine you own, or on your
 
 The [full hosted profile](deploy/hosted/README.md) adds accounts to the platform below, as required by [the SaaS baseline](REQUIREMENTS-M3.md). Its [verification record](docs/hosted-verification.md) lists completed checks and remaining release gates.
 
+To run it on a Cloudflare account you own instead of a Docker host, see the [Cloudflare plane](cf/README.md). It has the same trust boundary and its own app contract, and its installation is still manual.
+
 Requirements: Docker with Compose v2, and Node.js 24 or newer on the host for `appctl`.
 
 ```sh
@@ -97,6 +99,7 @@ Metering, billing, a CDN and isolation against hostile tenants are in neither ed
 - [`docs/acceptance.md`](docs/acceptance.md): acceptance checks and thresholds.
 - [`docs/console.md`](docs/console.md): how every console page is designed.
 - [`deploy/kubernetes/README.md`](deploy/kubernetes/README.md): installing on a cluster.
+- [`cf/README.md`](cf/README.md): the Cloudflare plane, with its own contract, acceptance and verification under `cf/docs/`.
 - [`docs/adr/`](docs/adr/): decisions and the options they rejected.
 - [`AGENTS.md`](AGENTS.md): conventions for working on this repository.
 

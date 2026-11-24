@@ -1,0 +1,18 @@
+---
+name: pneuma-space
+description: Build, publish, troubleshoot or benchmark this PneumaSpace application. Use for edits to the starter, new app features, deploying a release, checking natural idle recovery, or reporting live usage.
+---
+
+# Build an app the user can actually use
+
+Work from the generated project directory. It already contains a functional stateful example, a manifest and a local CLI. Inspect `app/` before choosing what to change; use `PRODUCT.md` and `DESIGN.md` when changing the experience.
+
+1. If the setup command was `start`, check `.pneuma-space/bench.json`. A completed report means the unchanged starter is already published and verified; do not republish or benchmark it again without a change or unresolved failure. If it was `init`, continue the requested app work now.
+2. Implement the user's app in `app/`. The runtime is Node24 with built-in modules. Prebundle external dependencies into app/ before publication. Add declared native capabilities when needed; read `references/native-api.md` for persistence and the contract. Keep runtime writes in native storage, because the container filesystem is temporary.
+3. Run syntax checks for changed JavaScript and `node .pneuma-space/tool/bin/pneuma-space.mjs package` from the project root. Then run `npm run deploy`. Completion requires the CLI to report the actual application HTTPS address and release.
+4. Run `npm run bench` after a release when the starter probe remains available. It waits for natural idle, performs a later request and verifies retained state. Keep `/api/proof` and its per-process boot identifier until this acceptance is complete. The benchmark never issues a sleep action. If it is incomplete, resolve the specific reported cause and repeat only that failed step. Close live app tabs that generate requests before this measurement.
+5. Give the user the live app link and the exact dashboard statistics link printed by the CLI. Describe what the app does, the recorded warm and wake request timings including network, and whether state survived. Invite the user to save and reopen an entry in the browser where they are signed into the workspace. The app is private: a separate browser needs the user's account login, not the publishing token. Report that boundary if browser verification reaches the login page. Do not make them read setup documentation.
+
+Credentials stay in the ignored `.pneuma-space/` directory, never in source, logs, a URL, or chat. The deploy command packages only app/ and the manifest. A token can create and publish apps within its workspace; it cannot administer the platform, manage credentials or purge applications. Use the supplied deployment origin, not a new CF account or npm publication.
+
+To create another independent application, use the dashboard's Create app command in a new directory. To inspect this one without waking it, run `npm run status`. Expired credentials require a new token from the product. A failed release or HTTPS delay is reported as unfinished; never fabricate a live URL or benchmark result. Natural idle releases the running instance, but platform and retained-storage charges are separate; do not claim zero total cost.

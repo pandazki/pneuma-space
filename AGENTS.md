@@ -1,4 +1,4 @@
-PneumaSpace deploys stateful web apps on one trusted host (M1) or an organization's Kubernetes cluster (M2). Read `REQUIREMENTS.md`, `REQUIREMENTS-M2.md`, `REQUIREMENTS-M3.md`, `DESIGN.md`, `docs/app-contract.md` and `docs/acceptance.md` before changing runtime behavior. Each fact lives in exactly one of them; link to it instead of restating it.
+PneumaSpace deploys stateful web apps on one trusted host (M1) or an organization's Kubernetes cluster (M2). Read `REQUIREMENTS.md`, `REQUIREMENTS-M2.md`, `REQUIREMENTS-M3.md`, `DESIGN.md`, `docs/app-contract.md` and `docs/acceptance.md` before changing runtime behavior. Each fact lives in exactly one of them; link to it instead of restating it. The Cloudflare plane of M1 (ADR 0041) lives in `cf/` with its own `cf/AGENTS.md`, contract and acceptance; the rules below about the gateway, `CAPABILITIES`, `RUNTIMES` and the tests table do not apply inside it, the boundaries on agents, naming and language do.
 
 ## Boundaries that do not move
 
@@ -36,5 +36,6 @@ PneumaSpace deploys stateful web apps on one trusted host (M1) or an organizatio
 | `runtime.ts`, `infra.ts`, `docker.ts`, `providers.ts`, `pg.ts`, `store-pg.ts`, `compose.yaml` | also `npm run test:docker`: real containers and compose services, minutes |
 | `kube.ts`, `pods.ts`, `deploy/kubernetes/`, anything the `kubernetes` plane runs differently | also `npm run test:k8s` against the operator's cluster named by `PNEUMA_SPACE_TEST_KUBECONTEXT`; never creates or deletes clusters; cluster-only acceptance rows live here |
 | `templates/app` | `npm test` inside `templates/app` |
+| Anything under `cf/` | `npm run check` and `npm test` inside `cf/`; real-account rows as `cf/AGENTS.md` says |
 | Before a merge to main | `npm run test:acceptance` against `docker compose up -d`, one run at a time; M2 rows against the cluster |
 | A runtime's speed, and a new runtime against the old ones | `node tests/bench/runtimes.ts` against a running stack: first request after publish, wake after sleep, warm request, per runtime; one TSV per run in `tests/bench/results/` with the host load, so runs compare. Never a timing assertion in a unit test |
