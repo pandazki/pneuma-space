@@ -8,6 +8,19 @@ A signed-in account starts at /dashboard?view=launch: name the app, generate its
 
 The [application contract](docs/app-contract.md) defines native capabilities and limits. The [acceptance gates](docs/acceptance.md) define what must be verified. Read the [verification record](docs/verification.md) before treating this deployment as complete.
 
+## Limits of the Container runtime
+
+Every Node app runs in one Cloudflare Container. These limits follow from that, and none of them applies to a static app or to files in an app's declared `static` directory, which the Worker serves from R2 without a container.
+
+- **Cold start takes seconds.** A request to a sleeping Node app waits for the container. One measured wake took about 5.2 seconds, 3.7 of them the container start, which the platform cannot shorten ([verification record](docs/verification.md)). Serve the first screen from the `static` directory and let the page call the API after it paints ([ADR 0045](../docs/adr/0045-cloudflare-first-screen-and-idle.md)).
+- **One instance per app.** An app does not scale out; all its requests share one container.
+- **A space runs a limited number of apps at once.** The limit is two by default and an administrator can change it. A wake beyond it answers 503 `compute_quota` until another app sleeps.
+- **One fixed runner.** Node 24 on Linux amd64, prebuilt JavaScript only. An app brings no image, system package or other runtime.
+- **Nothing in the container lasts.** Its files vanish on every sleep, and it has no public Internet egress. State belongs in the native services of the [contract](docs/app-contract.md).
+- **Installing needs Docker and a plan with Containers.** The installer builds the runner image locally, and a first deploy can time out while Cloudflare prepares it; the installer retries.
+
+A runtime that starts without a container is not built. [ADR 0041](../docs/adr/0041-cloudflare-m1-plane.md) lists its evaluation as the last step of this plane.
+
 ## Development
 
 Use Node 24 or later and Docker with Linux amd64 support.
