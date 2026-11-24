@@ -228,7 +228,8 @@ export class Instances {
   }
 
   /**
-   * Writes this replica's row now and every 2 s, asking for the lead each time; the leader also sweeps the rows of replicas not seen for 10 s.
+   * Writes this replica's row now and every 2 s, asking for the lead each time while it runs the current build and giving the lead up
+   * while it does not (ADR 0040 item 4); the leader also sweeps the rows of replicas not seen for 10 s.
    * First deletes what an earlier process under this id left: a fresh process holds no leases.
    */
   async start(): Promise<void> {
@@ -236,8 +237,11 @@ export class Instances {
     const startedAt = Date.now();
     const beat = async () => {
       const now = Date.now();
-      await this.#lead();
-      await this.store.putReplica({ id: this.replica, startedAt, seenAt: now, leading: this.leading, build: this.build });
+      const self = { id: this.replica, startedAt, seenAt: now, build: this.build };
+      const others = (await this.store.replicas()).filter((r) => r.id !== this.replica);
+      if (currentBuild([...others, self], now) === this.build) await this.#lead();
+      else await this.#resign();
+      await this.store.putReplica({ ...self, leading: this.leading });
       if (this.leading) await this.store.sweepReplicas(now - DEAD_MS);
     };
     await beat();
@@ -249,13 +253,19 @@ export class Instances {
     if (this.#resync) clearInterval(this.#resync);
     if (this.#tallyTimer) clearInterval(this.#tallyTimer);
     if (this.#heartbeat) clearInterval(this.#heartbeat);
+    await this.#resign();
+    await this.store.deleteReplica(this.replica);
+  }
+
+  async #resign(): Promise<void> {
     const tenure = this.#tenure;
+    if (!tenure) return;
     this.#tenure = null;
-    if (tenure) {
+    try {
       for (const listener of this.#leaderListeners) await listener(false);
+    } finally {
       await tenure.release();
     }
-    await this.store.deleteReplica(this.replica);
   }
 
   async #load(): Promise<void> {
