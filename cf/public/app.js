@@ -166,7 +166,7 @@ function region(paths, draw, shape = 'rows', options = {}) {
     }, error => {
       if (mine !== ticket || gone() || error.name === 'AbortError') return;
       failure?.remove();
-      failure = errorLine(error, () => load(true));
+      failure = painted === null && options.fail ? options.fail(error, () => load(true)) : errorLine(error, () => load(true));
       if (painted === null) { fill(node, failure); node.removeAttribute('aria-busy'); } else node.prepend(failure);
     });
   }
@@ -372,7 +372,7 @@ function refreshButton(label = tr('刷新','Refresh')) { return btn(label,refres
 function number(value) { return typeof value === 'number' ? value.toLocaleString(state.lang === 'zh' ? 'zh-CN' : 'en-GB') : value ?? '—'; }
 function stat(label,value,note) { return h('div',{ class:'card stat' },h('span',{ class:'muted' },label),h('strong',{},number(value)),note ? h('small',{},note) : null); }
 function appRows(apps) {
-  if (!apps.length) return empty(tr('这里还没有项目。','No projects here yet.'),!route().admin && state.tenant ? navLink(tr('创建应用','Create app'),href('launch'),'btn primary') : null);
+  if (!apps.length) return empty(route().admin ? tr('这里还没有项目。','No projects here yet.') : tr('这里还没有项目。用“创建应用”做出第一个。','No projects here yet. Use Create app to make the first one.'));
   const groups = [
     [tr('需要关注','Needs attention'),app => ['quarantined','failed'].includes(app.runtime?.state) || app.status === 'purging'],
     [tr('运行中','Running'),app => ['awake','waking','draining'].includes(app.runtime?.state)],
@@ -780,7 +780,17 @@ function appHead(app, placeholder = false) {
 function projectLayout(content, id) {
   const known = knownApp(id), tabs = h('nav',{ class:'tabs','aria-label':tr('项目页面','Project pages') });
   drawTabs(tabs,id,known ? mayOperate(known) : canManageTenant());
-  const head = region(appUrl(id),app => { state.app = app; drawTabs(tabs,app.id,mayOperate(app)); return appHead(app); },() => appHead(known,true));
+  const show = visible => { tabs.hidden = !visible; mounted.panelNode.hidden = !visible; };
+  const head = region(appUrl(id),app => {
+    state.app = app; drawTabs(tabs,app.id,mayOperate(app));
+    if (tabs.hidden) { show(true); mounted.panel?.regions.forEach(load => load(true)); }
+    return appHead(app);
+  },() => appHead(known,true),{ fail:(error,retry) => {
+    show(false);
+    const missing = error.status === 404;
+    return h('div',{},pagehead(missing ? tr('找不到这个项目','Project not found') : tr('无法读取这个项目','Could not load this project'),missing ? tr('它可能已被清除，或者当前账号无权查看。','It may have been purged, or this account cannot view it.') : null),
+      h('section',{},missing ? empty(tr('回到项目目录查看现有项目。','Return to the project directory to see existing projects.'),navLink(tr('查看全部项目','View all projects'),href('projects'),'btn primary')) : errorLine(error,retry)));
+  } });
   mounted.tabs = tabs; mounted.panelNode = h('div',{ class:'panel' });
   append(content,[head,tabs,mounted.panelNode]);
 }
