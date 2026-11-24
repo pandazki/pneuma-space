@@ -4,6 +4,7 @@ import { cpSync, createReadStream, existsSync, mkdtempSync, readdirSync, readFil
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline/promises';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
@@ -65,18 +66,30 @@ type Options = {
   app?: string; manager?: string; 'manager-url'?: string; tenant?: string; since?: string; action?: string; actor?: string; json?: boolean; kind?: string; label?: string; display?: string;
 };
 
+/** How long a write a gateway refuses during an upgrade is retried (ADR 0040 item 5). */
+const UPGRADE_RETRY_MS = 30_000;
+
+/** `body` is JSON, or a function that opens a tar stream, called again for each attempt. */
 async function api(method: string, path: string, body?: unknown): Promise<any> {
-  const tar = body instanceof ReadableStream;
-  const init = body === undefined ? { method, headers: { ...bearer, ...named } } : {
+  const tar = typeof body === 'function';
+  const init = () => body === undefined ? { method, headers: { ...bearer, ...named } } : {
     method,
     headers: { ...bearer, ...named, 'content-type': tar ? 'application/x-tar' : 'application/json' },
-    body: tar ? body : JSON.stringify(body),
+    body: tar ? (body as () => ReadableStream<Uint8Array>)() : JSON.stringify(body),
     duplex: 'half',
   };
-  const response = await fetch(admin + path, init).catch((error: Error) => {
-    throw new Failure(EXIT.api, `admin API at ${admin} unreachable: ${error.cause ?? error.message}`);
-  });
-  const text = await response.text();
+  const first = Date.now();
+  let response: Response;
+  let text: string;
+  for (;;) {
+    response = await fetch(admin + path, init()).catch((error: Error) => {
+      throw new Failure(EXIT.api, `admin API at ${admin} unreachable: ${error.cause ?? error.message}`);
+    });
+    text = await response.text();
+    const wait = Number(response.headers.get('retry-after') ?? NaN);
+    if (response.status !== 503 || Number.isNaN(wait) || Date.now() - first >= UPGRADE_RETRY_MS) break;
+    await sleep(wait * 1000);
+  }
   let parsed: any = null;
   try {
     parsed = text ? JSON.parse(text) : null;
@@ -274,7 +287,7 @@ async function publish([rawName, target, ...extra]: string[], options: Options):
   try {
     if (code) codeBundle(target, code);
     const [bundleRoot, bundled] = code ? [code, bundleFiles(code)] : [staticRoot, files];
-    const bundle = bundleRoot && bundled ? (await api('POST', ADMIN_PATHS.bundles, ReadableStream.from(tar(bundleRoot, bundled)))).bundle : null;
+    const bundle = bundleRoot && bundled ? (await api('POST', ADMIN_PATHS.bundles, () => ReadableStream.from(tar(bundleRoot, bundled)))).bundle : null;
     const release = await api('PUT', ADMIN_PATHS.release(name), { image, manifest, bundle, ...(owner && { owner }), ...(options.tenant && { tenant: options.tenant }), ...ephemeral, ...manager });
     const listed = (await api('GET', ADMIN_PATHS.apps) as { name: string; address: string; expiresAt?: number | null }[]).find((app) => app.name === name);
     const ends = listed?.expiresAt ? `  expires ${new Date(listed.expiresAt).toISOString()}  app ${release.app}` : '';

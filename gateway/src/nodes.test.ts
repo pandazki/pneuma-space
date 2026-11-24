@@ -71,7 +71,7 @@ test('the cluster view joins an awake instance to its Pod and node and marks the
     rows: [row(A, 'awake', null), row(B, 'asleep', null)],
     apps: [summary('survey', 'awake', 'n1'), summary('chess', 'asleep', null)],
     workloads: [gateways],
-    replicas: [{ id: 'gw-0' as ReplicaId, startedAt: 0, seenAt: 42, leading: false }, { id: 'gw-1' as ReplicaId, startedAt: 0, seenAt: 42, leading: true }],
+    replicas: [{ id: 'gw-0' as ReplicaId, startedAt: 0, seenAt: 42, leading: false, build: null }, { id: 'gw-1' as ReplicaId, startedAt: 0, seenAt: 42, leading: true, build: null }],
   });
   await nodes.sample();
   const cluster = nodes.snapshot();

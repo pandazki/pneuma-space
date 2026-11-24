@@ -14,6 +14,8 @@ const FAKE_IMAGE = `sha256:${'ab'.repeat(32)}`;
 
 type Recorded = { method: string; url: string; body: Buffer; authorization?: string; manager?: string };
 let requests: Recorded[] = [];
+/** The next requests the fake gateway refuses as one not on the current build does, with these headers (ADR 0040). */
+let refusing: { left: number; headers: Record<string, string> } | null = null;
 let server: Server;
 let admin: string;
 
@@ -52,6 +54,9 @@ before(async () => {
     const named = req.headers['x-pneuma-space-manager'] as string | undefined;
     const recorded = { method: req.method!, url: req.url!, body: Buffer.concat(chunks), authorization: req.headers.authorization, ...(named && { manager: named }) };
     requests.push(recorded);
+    if (refusing && refusing.left-- > 0) {
+      return void res.writeHead(503, { 'content-type': 'application/json', ...refusing.headers }).end(JSON.stringify({ error: 'the platform is upgrading; retry in a few seconds' }));
+    }
     if (recorded.authorization && /^\/api\/tenants\/[^/]+\/tokens$/.test(recorded.url)) {
       return void res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'tokens.issue.personal accepts a signed-in user, not a token' }));
     }
@@ -61,7 +66,10 @@ before(async () => {
   admin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 after(() => server.close());
-beforeEach(() => (requests = []));
+beforeEach(() => {
+  requests = [];
+  refusing = null;
+});
 
 function stub(tools: Record<string, string>): string {
   const bin = mkdtempSync(join(tmpdir(), 'appctl-bin-'));
@@ -439,4 +447,20 @@ test('token create through a token tells the caller to sign a personal token in 
   const { code, stderr } = await appctl(['token', 'create', '--tenant', 'lab', '--kind', 'personal'], { token: 'personal-secret' });
   assert.equal(code, 3);
   assert.match(stderr, /sign a personal token in the console/);
+});
+
+test('ADR 0040 item 5: a 503 with Retry-After is retried with the same bundle, and the publish then succeeds', async () => {
+  const dir = source({ contract: 1, capabilities: { static: { dir: 'dist' } } }, { 'dist/index.html': '<h1>hi</h1>' });
+  refusing = { left: 1, headers: { 'retry-after': '0' } };
+  const { code, stderr } = await appctl(['publish', 'site', dir]);
+  assert.equal(code, 0, stderr);
+  const [refused, upload] = requests;
+  assert.deepEqual([refused.url, upload.url, upload.body.length > 0, upload.body.equals(refused.body), requests[2].url], ['/api/bundles', '/api/bundles', true, true, '/api/apps/site/release']);
+});
+
+test('ADR 0040 item 5: a 503 without Retry-After is not retried', async () => {
+  refusing = { left: 1, headers: {} };
+  const { code, stderr } = await appctl(['remove', 'survey']);
+  assert.deepEqual([code, requests.length], [3, 1]);
+  assert.match(stderr, /503 the platform is upgrading/);
 });

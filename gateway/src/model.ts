@@ -535,8 +535,11 @@ export type DeliveryFilter = {
 
 /** Pod name under Kubernetes, the host name on a single host. */
 export type ReplicaId = Brand<string, 'ReplicaId'>;
-/** `leading` is what the replica's last heartbeat said of its own tenure; the cluster view marks the leading gateway with it. */
-export type Replica = { readonly id: ReplicaId; readonly startedAt: number; readonly seenAt: number; readonly leading: boolean };
+/**
+ * `leading` is what the replica's last heartbeat said of its own tenure; the cluster view marks the leading gateway with it.
+ * `build` is the hash of the replica's gateway source (ADR 0040); null on a row a gateway from before it wrote.
+ */
+export type Replica = { readonly id: ReplicaId; readonly startedAt: number; readonly seenAt: number; readonly leading: boolean; readonly build: string | null };
 
 export type Instance = {
   readonly app: AppId;

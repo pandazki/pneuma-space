@@ -123,6 +123,8 @@ export const PG_MIGRATIONS = [
      WHERE quota::jsonb -> 'ephemeral' IS NULL`,
   // ADR 0039: an app's manager.
   'ALTER TABLE app ADD COLUMN IF NOT EXISTS manager TEXT; ALTER TABLE app ADD COLUMN IF NOT EXISTS manager_url TEXT',
+  // ADR 0040: the gateway build a replica runs.
+  'ALTER TABLE replica ADD COLUMN IF NOT EXISTS build TEXT',
 ];
 
 /** Runs every step not yet recorded, each in its own transaction, under a lock so replicas that start together migrate once. */

@@ -1,6 +1,10 @@
+import { createHash } from 'node:crypto';
+import { readdir, readFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
+import { join, relative } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { AppId, AppName, GuardRecord, Instance, Leadership, LeaseTally, ReplicaId, Store } from './model.ts';
+import { fileURLToPath } from 'node:url';
+import type { AppId, AppName, GuardRecord, Instance, Leadership, LeaseTally, Replica, ReplicaId, Store } from './model.ts';
 
 const HEARTBEAT_MS = 2000;
 /** A replica not seen for this long is dead: the leader sweeps its rows and takes over its transitions. */
@@ -10,8 +14,40 @@ const RESYNC_MS = 30_000;
 const TALLY_MS = 5000;
 const POLL_MS = 500;
 
+/**
+ * This gateway's build (ADR 0040 item 1): sha256 over every file under `gateway/src` and `shared`, each its path from their parent and its bytes,
+ * in path order; the parent is the repository or the image root, so both name a file alike. The first 12 hex digits.
+ */
+export async function gatewayBuild(): Promise<string> {
+  const root = fileURLToPath(new URL('../../', import.meta.url));
+  const files: string[] = [];
+  for (const dir of ['gateway/src', 'shared']) {
+    for (const entry of await readdir(join(root, dir), { recursive: true, withFileTypes: true })) {
+      if (entry.isFile()) files.push(relative(root, join(entry.parentPath, entry.name)));
+    }
+  }
+  const hash = createHash('sha256');
+  for (const file of files.sort()) {
+    const bytes = await readFile(join(root, file));
+    hash.update(`${file}\0${bytes.length}\0`).update(bytes);
+  }
+  return hash.digest('hex').slice(0, 12);
+}
+
+/** The build that started last among live replicas (ADR 0040 item 2): each build dated by its earliest start; null also when none lives. */
+export function currentBuild(replicas: readonly Pick<Replica, 'build' | 'startedAt' | 'seenAt'>[], now: number): string | null {
+  const firsts = new Map<string | null, number>();
+  for (const r of replicas) if (r.seenAt >= now - DEAD_MS) firsts.set(r.build, Math.min(firsts.get(r.build) ?? Infinity, r.startedAt));
+  let current: string | null = null;
+  let latest = -Infinity;
+  for (const [build, first] of firsts) if (first > latest) [current, latest] = [build, first];
+  return current;
+}
+
 export type InstancesOptions = {
   readonly replica?: ReplicaId;
+  /** This gateway's build; tests that run one build may leave it out. */
+  readonly build?: string;
   /** False keeps this replica from ever asking for the lead; tests run followers on one SQLite file this way. */
   readonly leader?: boolean;
 };
@@ -23,6 +59,7 @@ export type InstancesOptions = {
  */
 export class Instances {
   readonly replica: ReplicaId;
+  readonly build: string;
   readonly store: Store;
   readonly #rows = new Map<AppId, Instance>();
   readonly #tallies = new Map<AppId, readonly LeaseTally[]>();
@@ -45,6 +82,7 @@ export class Instances {
   constructor(store: Store, options: InstancesOptions = {}) {
     this.store = store;
     this.replica = options.replica ?? (hostname() as ReplicaId);
+    this.build = options.build ?? 'dev';
     this.#mayLead = options.leader ?? true;
     store.onChange((change) => {
       if (change.kind === 'instance') void this.refresh(change.app).catch(() => {});
@@ -146,6 +184,11 @@ export class Instances {
     }
   }
 
+  /** Whether this replica runs the current build; only it takes management writes (ADR 0040 item 3). */
+  async current(): Promise<boolean> {
+    return currentBuild(await this.store.replicas(), Date.now()) === this.build;
+  }
+
   get leading(): boolean {
     return this.#tenure?.held() ?? false;
   }
@@ -185,7 +228,8 @@ export class Instances {
   }
 
   /**
-   * Writes this replica's row now and every 2 s, asking for the lead each time; the leader also sweeps the rows of replicas not seen for 10 s.
+   * Writes this replica's row now and every 2 s, asking for the lead each time while it runs the current build and giving the lead up
+   * while it does not (ADR 0040 item 4); the leader also sweeps the rows of replicas not seen for 10 s.
    * First deletes what an earlier process under this id left: a fresh process holds no leases.
    */
   async start(): Promise<void> {
@@ -193,8 +237,11 @@ export class Instances {
     const startedAt = Date.now();
     const beat = async () => {
       const now = Date.now();
-      await this.#lead();
-      await this.store.putReplica({ id: this.replica, startedAt, seenAt: now, leading: this.leading });
+      const self = { id: this.replica, startedAt, seenAt: now, build: this.build };
+      const others = (await this.store.replicas()).filter((r) => r.id !== this.replica);
+      if (currentBuild([...others, self], now) === this.build) await this.#lead();
+      else await this.#resign();
+      await this.store.putReplica({ ...self, leading: this.leading });
       if (this.leading) await this.store.sweepReplicas(now - DEAD_MS);
     };
     await beat();
@@ -206,13 +253,19 @@ export class Instances {
     if (this.#resync) clearInterval(this.#resync);
     if (this.#tallyTimer) clearInterval(this.#tallyTimer);
     if (this.#heartbeat) clearInterval(this.#heartbeat);
+    await this.#resign();
+    await this.store.deleteReplica(this.replica);
+  }
+
+  async #resign(): Promise<void> {
     const tenure = this.#tenure;
+    if (!tenure) return;
     this.#tenure = null;
-    if (tenure) {
+    try {
       for (const listener of this.#leaderListeners) await listener(false);
+    } finally {
       await tenure.release();
     }
-    await this.store.deleteReplica(this.replica);
   }
 
   async #load(): Promise<void> {

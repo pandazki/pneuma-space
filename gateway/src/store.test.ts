@@ -13,9 +13,10 @@ import type { TokenRestrictions } from './hosted-model.ts';
 
 /** The steps both main and the hosted stack held before either appended one: main then added release_bundle, the hosted stack its tables. */
 const BEFORE_MERGE = 8;
-/** The steps before ADR 0038's and ADR 0039's. */
+/** The steps before ADR 0038's, ADR 0039's and ADR 0040's. */
 const BEFORE_EPHEMERAL = 10;
 const BEFORE_MANAGED = 11;
+const BEFORE_BUILD = 12;
 
 const path = () => join(mkdtempSync(join(tmpdir(), 'pneuma-space-store-')), 'pneuma-space.sqlite3');
 
@@ -184,6 +185,17 @@ test('the ADR 0039 step gives every existing app no manager', async () => {
   old.close();
   const store = new SqliteStore(file);
   assert.equal((await store.app('kept' as AppName))?.manager, null);
+  await store.close();
+});
+
+test('the ADR 0040 step gives every existing replica no build', async () => {
+  const file = path();
+  const old = new DatabaseSync(file);
+  for (const step of MIGRATIONS.slice(0, BEFORE_BUILD)) old.exec(sqlOf(step, old));
+  old.exec(`PRAGMA user_version = ${BEFORE_BUILD}; INSERT INTO replica (id, started_at, seen_at, leads) VALUES ('gw-0', 1, 2, 1);`);
+  old.close();
+  const store = new SqliteStore(file);
+  assert.deepEqual((await store.replicas()).map((r) => r.build), [null]);
   await store.close();
 });
 
