@@ -50,7 +50,7 @@ if (command === 'package') {
       const upload = await fetch(ticket.url, { method: 'PUT', headers: ticket.headers, body: packed.bytes, redirect: 'error', signal: AbortSignal.timeout(60000) });
       if (!upload.ok) throw new Error('Direct package upload failed: ' + upload.status + ' ' + (/<Code>([^<]+)/.exec(await upload.text())?.[1] ?? 'R2 error'));
       const result = await client.api('/apps/' + app.id + '/releases', { uploadId: ticket.uploadId });
-      console.log(JSON.stringify({ id: app.id, origin: app.origin, release: result.current.number }));
+      console.log(JSON.stringify({ id: app.id, url: app.url, release: result.current.number }));
     }
   } finally { await client.close(); }
 } else {

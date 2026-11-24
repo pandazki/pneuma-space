@@ -6,7 +6,9 @@ An application package is JSON with manifest and files. Each file has a normaliz
 
 An app admits at most 200 upload tickets over its lifetime. Their declared package bytes together cannot exceed its allocated native-data capacity. Each ticket reserves three times its size for staged bytes, immutable code and decoded static files, so the separate artifact pool is bounded at three times that capacity. Expiry and failed publication keep reservations; purge releases the pool. The state inventory reports these conservative reservations separately from application data.
 
-Node applications are prebuilt JavaScript with bundled dependencies. They listen on PNEUMA_SPACE_PORT. The fixed runner uses Node 24 on Linux amd64. Container files are temporary. Code is reconstructed from R2 on boot. Public Internet egress is disabled; applications access native services through the scoped internal host. Static assets are served after authorization without starting Node. Every app has its own exact private HTTPS origin.
+Node applications are prebuilt JavaScript with bundled dependencies. They listen on PNEUMA_SPACE_PORT. The fixed runner uses Node 24 on Linux amd64. Container files are temporary. Code is reconstructed from R2 on boot. Public Internet egress is disabled; applications access native services through the scoped internal host.
+
+An app is served at `<control origin>/apps/<name>/`, and `/apps/<name>` redirects there with 308. Names are unique across the deployment. The app receives the request path without `/apps/<name>` and an `X-Forwarded-Prefix: /apps/<name>` header, as in [contract 1](../../docs/app-contract.md); use relative URLs or the prefix in links, redirects and asset URLs. `/apps/<name>/_pneuma-space/` is reserved, and native browser subscriptions connect to `/apps/<name>/_pneuma-space/realtime/<channel>`. Static assets are served after authorization without starting Node. Every app shares one browser origin with the console and the other apps, so its page scripts act with the signed-in owner's session ([ADR 0044](../../docs/adr/0044-cloudflare-path-routing.md)).
 
 | Capability | Native behavior |
 | --- | --- |
@@ -22,9 +24,9 @@ Node applications are prebuilt JavaScript with bundled dependencies. They listen
 
 The SDK calls the intercepted host pneuma-space.internal. Scope comes from trusted platform props, never app input. Every native mutation checks active lifecycle and execution generation. Publish and remove retain data. Purge requires removed status and exact name confirmation. Already-issued signed URLs remain valid until expiry; final object cleanup waits for outstanding upload tickets.
 
-Final purge also detaches the application's exact domain. Failed cloud cleanup remains in purging and retries through its durable alarm.
+Failed cloud cleanup remains in purging and retries through its durable alarm.
 
-The control origin is `PNEUMA_SPACE_CONTROL_ORIGIN`. /admin requires platform administration; /dashboard requires an account. A one-use, expiring invitation creates an ordinary account and private tenant. High-entropy account keys and tokens are shown once and stored as hashes. Control writes require exact Origin and session CSRF. Application sessions use an AppId/origin/nonce-bound one-use grant and depend on a live parent session.
+The control origin is `PNEUMA_SPACE_CONTROL_ORIGIN`. /admin requires platform administration; /dashboard requires an account. A one-use, expiring invitation creates an ordinary account and private tenant. High-entropy account keys and tokens are shown once and stored as hashes. Control writes require exact Origin and session CSRF. The control session also authorizes app requests: an unauthenticated page navigation to an app redirects to `/login?next=<path>`, and other unauthenticated app requests get 401. Cookie-authenticated unsafe app requests and WebSocket upgrades require the exact control Origin. Publishing tokens with `invoke` reach apps as Bearer credentials. Platform cookies, Bearer credentials and incoming reserved headers never reach app code, and app responses cannot set platform cookies or `Service-Worker-Allowed`.
 
 Every HTTP admission rechecks the credential. Existing native browser subscriptions recheck it every 15 seconds and close after revocation or expiry. They survive an idle container stop; execution-scoped subscriptions retire with their container. Trusted display-name headers use percent encoding.
 

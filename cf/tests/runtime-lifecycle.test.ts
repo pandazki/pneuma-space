@@ -20,8 +20,8 @@ async function call(app: string, path: string, body?: unknown, headers: Record<s
 async function fixture() {
   const app = 'app_' + crypto.randomUUID().replaceAll('-', '');
   const db = await mf.getD1Database('PNEUMA_SPACE_DB');
-  await db.prepare("INSERT INTO apps(id,name,tenant_id,owner_id,origin,created_at,create_key) VALUES(?,?,'tenant','owner',?,1,?)").bind(app, app, 'https://' + app + '.test', app).run();
-  const initialized = await call(app, '/initialize', { id: app, name: app, tenantId: 'tenant', ownerId: 'owner', origin: 'https://' + app + '.test', policy: DEFAULT_POLICY });
+  await db.prepare("INSERT INTO apps(id,name,tenant_id,owner_id,origin,created_at,create_key) VALUES(?,?,'tenant','owner',?,1,?)").bind(app, app, app, app).run();
+  const initialized = await call(app, '/initialize', { id: app, name: app, tenantId: 'tenant', ownerId: 'owner', policy: DEFAULT_POLICY });
   assert.equal(initialized.status, 200, await initialized.text());
   const key = 'apps/' + app + '/artifacts/' + digest + '/package.json';
   const bucket = await mf.getR2Bucket('PNEUMA_SPACE_ARTIFACTS') as unknown as R2Bucket;

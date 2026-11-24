@@ -10,7 +10,7 @@ import { install, generateConfig, workerSecrets, statePaths, Stop } from '../scr
 const cfDir = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const account = 'account-example', token = 'example-api-token';
 
-function cloudflare({ scripts = [] as string[], buckets = [] as string[], databases = [] as { name: string, uuid: string }[], domains = [] as { hostname: string, service: string }[], deploys = [0] } = {}) {
+function cloudflare({ scripts = [] as string[], buckets = [] as string[], databases = [] as { name: string, uuid: string }[], domains = [] as { hostname: string, service: string }[], secrets = [] as string[], deploys = [0] } = {}) {
   const calls: string[] = [], logs: string[] = [];
   const reply = (result: unknown, status = 200) => Response.json({ success: status < 400, result, errors: status < 400 ? [] : [{ message: 'not found' }] }, { status });
   const fetch = async (url: string, init: RequestInit = {}) => {
@@ -27,6 +27,8 @@ function cloudflare({ scripts = [] as string[], buckets = [] as string[], databa
     if (bucket && !bucket[2]) return buckets.includes(bucket[1]) ? reply({ name: bucket[1] }) : reply(null, 404);
     if (bucket) return reply({});
     if (path === '/accounts/' + account + '/r2/buckets') { buckets.push(body.name); return reply({}); }
+    if (path === '/accounts/' + account + '/workers/scripts/space-test/secrets') return reply(secrets.map(name => ({ name, type: 'secret_text' })));
+    if (path.startsWith('/accounts/' + account + '/workers/scripts/space-test/secrets/') && method === 'DELETE') return reply(null);
     if (path === '/accounts/' + account + '/workers/domains' && method === 'GET') return reply(domains);
     if (path === '/accounts/' + account + '/workers/domains') { domains.push(body); return reply(body); }
     throw new Error('unexpected ' + method + ' ' + path);
@@ -46,7 +48,7 @@ function cloudflare({ scripts = [] as string[], buckets = [] as string[], databa
 
 async function host(saveToken = true) {
   const stateDir = join(await mkdtemp(join(tmpdir(), 'pneuma-space-install-')), 'space.example.com');
-  const options = { domain: 'space.example.com', appsDomain: 'space.example.com', prefix: 'space-test', stateDir };
+  const options = { domain: 'space.example.com', prefix: 'space-test', stateDir };
   if (saveToken) { await mkdir(stateDir); await writeFile(statePaths(stateDir).token, token + '\n'); }
   return { options, stateDir, done: () => rm(join(stateDir, '..'), { recursive: true, force: true }) };
 }
@@ -112,21 +114,29 @@ test('CF-23 the control domain attached to another Worker is not replaced', asyn
   } finally { await done(); }
 });
 
+test('CF-23 an upgrade deletes the API token secret the Worker held before path routing', async () => {
+  const { options, done } = await host(), cf = cloudflare({ secrets: ['PNEUMA_SPACE_CF_API_TOKEN', 'PNEUMA_SPACE_R2_ACCESS_KEY_ID'] });
+  try {
+    await install(options, cf.io);
+    assert.deepEqual(cf.calls.filter(call => call.startsWith('DELETE ')), ['DELETE /accounts/' + account + '/workers/scripts/space-test/secrets/PNEUMA_SPACE_CF_API_TOKEN']);
+  } finally { await done(); }
+});
+
 test('CF-23 the generated config names resources by prefix and reaches the repository by absolute path', async () => {
   const template = JSON.parse(await readFile(join(cfDir, 'wrangler.jsonc'), 'utf8'));
-  const config = generateConfig(template, { cfDir, prefix: 'space-test', domain: 'space.example.com', appsDomain: 'space.example.com', accountId: account, zoneId: 'zone-example', databaseId: 'database-id' });
+  const config = generateConfig(template, { cfDir, prefix: 'space-test', domain: 'space.example.com', accountId: account, databaseId: 'database-id' });
   assert.equal(config.main, join(cfDir, 'src/worker.ts'));
   assert.equal(config.build.cwd, cfDir);
   assert.equal(config.assets.directory, join(cfDir, 'public'));
   assert.equal(config.containers[0].images.base.dockerfile, join(cfDir, 'runner/Dockerfile'));
   assert.deepEqual([config.name, config.containers[0].name, config.d1_databases[0].database_name, config.d1_databases[0].database_id, ...config.r2_buckets.map((bucket: { bucket_name: string }) => bucket.bucket_name)], ['space-test', 'space-test', 'space-test', 'database-id', 'space-test-artifacts', 'space-test-objects']);
-  assert.equal(config.vars.PNEUMA_SPACE_CONTROL_ORIGIN, 'https://space.example.com');
+  assert.deepEqual(config.vars, { ...template.vars, PNEUMA_SPACE_CONTROL_ORIGIN: 'https://space.example.com', PNEUMA_SPACE_ACCOUNT_ID: account, PNEUMA_SPACE_ARTIFACT_BUCKET: 'space-test-artifacts', PNEUMA_SPACE_OBJECT_BUCKET: 'space-test-objects' });
 });
 
-test('CF-23 worker secrets derive the R2 key from the token and keep operator TURN secrets', () => {
-  const secrets = workerSecrets(token, 'token-id', { PNEUMA_SPACE_TURN_KEY_ID: 'turn-key', PNEUMA_SPACE_R2_ACCESS_KEY_ID: 'stale' });
+test('CF-23 worker secrets carry no API token, derive the R2 key from the token and keep operator TURN secrets', () => {
+  const secrets = workerSecrets(token, 'token-id', { PNEUMA_SPACE_TURN_KEY_ID: 'turn-key', PNEUMA_SPACE_R2_ACCESS_KEY_ID: 'stale', PNEUMA_SPACE_CF_API_TOKEN: 'old-token' });
   assert.deepEqual(secrets, {
-    PNEUMA_SPACE_TURN_KEY_ID: 'turn-key', PNEUMA_SPACE_CF_API_TOKEN: token, PNEUMA_SPACE_R2_ACCESS_KEY_ID: 'token-id',
+    PNEUMA_SPACE_TURN_KEY_ID: 'turn-key', PNEUMA_SPACE_R2_ACCESS_KEY_ID: 'token-id',
     PNEUMA_SPACE_R2_SECRET_ACCESS_KEY: createHash('sha256').update(token).digest('hex'),
   });
 });

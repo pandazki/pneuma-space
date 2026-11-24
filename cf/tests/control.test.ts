@@ -34,7 +34,7 @@ async function invite(): Promise<string> {
   return new URL((await response.json() as Value).url).searchParams.get('code')!;
 }
 async function staticApp(client: Client) {
-  const app = await (await request('/tenants/' + client.tenant + '/apps', client, { name: 'static-' + randomBytes(4).toString('hex') })).json() as { id: string; origin: string };
+  const app = await (await request('/tenants/' + client.tenant + '/apps', client, { name: 'static-' + randomBytes(4).toString('hex') })).json() as { id: string; name: string; url: string };
   const manifest = { contract: 'pneuma-space.cf/1', runtime: 'static', entry: 'public/index.html', capabilities: { static: { dir: 'public' } } };
   const contents = 'Private application ' + app.id;
   const bytes = JSON.stringify({ manifest, files: [{ path: 'public/index.html', body: Buffer.from(contents).toString('base64'), contentType: 'text/plain' }] });
@@ -56,7 +56,7 @@ before(async () => {
     compatibilityDate: '2026-11-13', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { PNEUMA_SPACE_APPS: { className: 'AppCell', useSQLite: true } },
     d1Databases: ['PNEUMA_SPACE_DB'], r2Buckets: ['PNEUMA_SPACE_ARTIFACTS', 'PNEUMA_SPACE_OBJECTS'],
-    bindings: { PNEUMA_SPACE_CONTROL_ORIGIN: origin, PNEUMA_SPACE_APPS_DOMAIN: 'apps.test', PNEUMA_SPACE_MAX_ACCOUNTS: '100', PNEUMA_SPACE_R2_ACCESS_KEY_ID: 'test-key', PNEUMA_SPACE_R2_SECRET_ACCESS_KEY: 'test-secret', PNEUMA_SPACE_ACCOUNT_ID: '00000000000000000000000000000000', PNEUMA_SPACE_ARTIFACT_BUCKET: 'artifacts' },
+    bindings: { PNEUMA_SPACE_CONTROL_ORIGIN: origin, PNEUMA_SPACE_MAX_ACCOUNTS: '100', PNEUMA_SPACE_R2_ACCESS_KEY_ID: 'test-key', PNEUMA_SPACE_R2_SECRET_ACCESS_KEY: 'test-secret', PNEUMA_SPACE_ACCOUNT_ID: '00000000000000000000000000000000', PNEUMA_SPACE_ARTIFACT_BUCKET: 'artifacts' },
   }));
   const db = await mf.getD1Database('PNEUMA_SPACE_DB');
   await db.exec((await readFile(new URL('../schema.sql', import.meta.url).pathname, 'utf8')).replace(/\n/g, ' '));
@@ -90,7 +90,7 @@ test('CF-03 tenant cannot access platform APIs or another tenant directory', asy
   assert.equal((await request('/tenants/' + a.tenant + '/apps', a)).status, 200);
 });
 test('CF-04 control mutations reject incorrect Origin and CSRF', async () => {
-  assert.equal((await request('/admin/invitations', owner, {}, 'POST', { origin: 'https://app.apps.test' })).status, 403);
+  assert.equal((await request('/admin/invitations', owner, {}, 'POST', { origin: 'https://elsewhere.test' })).status, 403);
   assert.equal((await request('/admin/invitations', owner, {}, 'POST', { 'x-pneuma-space-csrf': 'bad' })).status, 403);
 });
 test('CF-04 logout immediately revokes the session', async () => {
@@ -98,26 +98,26 @@ test('CF-04 logout immediately revokes the session', async () => {
   assert.equal((await request('/auth/logout', client, {})).status, 204);
   assert.equal((await request('/me', client)).status, 401);
 });
-test('CF-04 app grant binds nonce and AppId, is used once, and follows parent revocation', async () => {
-  const client = await identity(), app = await staticApp(client), other = await staticApp(client);
-  const start = await mf.dispatchFetch(app.origin + '/_pneuma-space/login', { redirect: 'manual' });
-  assert.equal(start.status, 303);
-  const nonce = start.headers.get('set-cookie')!.split(';')[0];
-  const grant = await mf.dispatchFetch(start.headers.get('location')!, { redirect: 'manual', headers: { cookie: client.cookie } });
-  assert.equal(grant.status, 303);
-  const callback = grant.headers.get('location')!;
-  assert.equal((await mf.dispatchFetch(callback, { redirect: 'manual' })).status, 401);
-  assert.equal((await mf.dispatchFetch(callback.replace(app.origin, other.origin), { redirect: 'manual', headers: { cookie: nonce } })).status, 401);
-  const accepted = await mf.dispatchFetch(callback, { redirect: 'manual', headers: { cookie: nonce } });
-  assert.equal(accepted.status, 303);
-  const appCookie = accepted.headers.getSetCookie().find(value => value.startsWith('__Host-pneuma-space-app='))!.split(';')[0];
-  assert.equal((await mf.dispatchFetch(callback, { redirect: 'manual', headers: { cookie: nonce } })).status, 401);
-  const page = await mf.dispatchFetch(app.origin + '/', { headers: { cookie: appCookie } });
-  assert.equal(page.status, 200);
-  assert.equal(await page.text(), app.contents);
-  assert.equal((await mf.dispatchFetch(other.origin + '/', { headers: { cookie: appCookie } })).status, 401);
+test('CF-04 logout revokes access to applications', async () => {
+  const client = await identity(), app = await staticApp(client);
   await request('/auth/logout', client, {});
-  assert.equal((await mf.dispatchFetch(app.origin + '/', { headers: { cookie: appCookie } })).status, 401);
+  assert.equal((await mf.dispatchFetch(app.url, { headers: { cookie: client.cookie } })).status, 401);
+});
+test('CF-04 an unauthenticated page navigation to an app redirects to login with its path', async () => {
+  const app = await staticApp(await identity());
+  const response = await mf.dispatchFetch(app.url + 'notes?view=all', { redirect: 'manual', headers: { accept: 'text/html' } });
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get('location'), origin + '/login?next=' + encodeURIComponent('/apps/' + app.name + '/notes?view=all'));
+});
+test('CF-04 an unauthenticated app API call answers 401', async () => {
+  const app = await staticApp(await identity());
+  assert.equal((await mf.dispatchFetch(app.url + 'api/items', { redirect: 'manual' })).status, 401);
+});
+test('CF-04 a cookie-authenticated app write must come from the control origin', async () => {
+  const client = await identity(), app = await staticApp(client);
+  const write = (from: string) => mf.dispatchFetch(app.url, { method: 'POST', headers: { cookie: client.cookie, origin: from } });
+  assert.equal((await write('https://elsewhere.test')).status, 403);
+  assert.equal((await write(origin)).status, 404);
 });
 test('CF-05 bearer credentials cannot manage users or issue other credentials', async () => {
   const client = await identity();
@@ -170,12 +170,30 @@ test('CF-20 concurrent app creation admits only the tenant application quota', a
   const results = await Promise.all(['first', 'second'].map(name => request('/tenants/' + client.tenant + '/apps', client, { name })));
   assert.deepEqual(results.map(r => r.status).sort(), [201, 409]);
 });
-test('CF-03 exact app origin requires authorization and unknown hosts fail', async () => {
-  const client = await identity();
-  const app = await (await request('/tenants/' + client.tenant + '/apps', client, { name: 'private' })).json() as { id: string; origin: string };
-  assert.equal((await mf.dispatchFetch(app.origin + '/', { redirect: 'manual' })).status, 401);
-  assert.equal((await mf.dispatchFetch('https://unknown.apps.test/')).status, 404);
-  assert.equal((await request('/apps/' + app.id, await identity())).status, 404);
+test('CF-24 the control session serves an app at its path on the control origin', async () => {
+  const client = await identity(), app = await staticApp(client);
+  assert.equal(app.url, origin + '/apps/' + app.name + '/');
+  const page = await mf.dispatchFetch(app.url, { headers: { cookie: client.cookie } });
+  assert.equal(page.status, 200);
+  assert.equal(await page.text(), app.contents);
+});
+test('CF-24 an app path without its trailing slash redirects to the slash form', async () => {
+  const response = await mf.dispatchFetch(origin + '/apps/some-app?view=all', { redirect: 'manual' });
+  assert.equal(response.status, 308);
+  assert.equal(response.headers.get('location'), origin + '/apps/some-app/?view=all');
+});
+test('CF-24 application names are unique across tenants', async () => {
+  const a = await identity(), b = await identity(), name = 'shared-' + randomBytes(4).toString('hex');
+  assert.equal((await request('/tenants/' + a.tenant + '/apps', a, { name })).status, 201);
+  assert.equal((await request('/tenants/' + b.tenant + '/apps', b, { name })).status, 409);
+});
+test('CF-24 hosts other than the control origin are unknown', async () => {
+  assert.equal((await mf.dispatchFetch('https://app-example.apps.test/')).status, 404);
+});
+test('CF-03 another tenant cannot reach an app by its path or its control API', async () => {
+  const app = await staticApp(await identity()), other = await identity();
+  assert.equal((await mf.dispatchFetch(app.url, { headers: { cookie: other.cookie } })).status, 404);
+  assert.equal((await request('/apps/' + app.id, other)).status, 404);
 });
 test('CF-20 artifact reservations are atomic and expiry cannot release retained bytes', async () => {
   const client = await identity(), db = await mf.getD1Database('PNEUMA_SPACE_DB');

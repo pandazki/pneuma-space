@@ -8,8 +8,8 @@ before(async () => {
   const source = [
     "import {guestResponse,guestHeaders} from './src/worker.ts';",
     "export default {fetch(request){",
-    "if(new URL(request.url).pathname==='/request')return Response.json(Object.fromEntries(guestHeaders(request,{user:{id:'u_1',name:'测试'},kind:'session'},true,{owner_id:'u_1'})));",
-    "const headers=new Headers();headers.append('set-cookie','ordinary=value; Domain=apps.test; Path=/; HttpOnly');headers.append('set-cookie','another=ok; dOmAiN = apps.test; Secure');headers.append('set-cookie','__Host-pneuma-space-app=forged; Path=/; Secure');",
+    "if(new URL(request.url).pathname==='/request')return Response.json(Object.fromEntries(guestHeaders(request,{user:{id:'u_1',name:'测试'},kind:'session'},true,{owner_id:'u_1',name:'notes'})));",
+    "const headers=new Headers();headers.append('set-cookie','ordinary=value; Domain=apps.test; Path=/; HttpOnly');headers.append('set-cookie','another=ok; dOmAiN = apps.test; Secure');headers.append('set-cookie','__Host-pneuma-space-control=forged; Path=/; Secure');headers.set('service-worker-allowed','/');",
     "if(request.headers.get('upgrade')==='websocket'){const pair=new WebSocketPair();pair[1].accept();pair[1].close();return guestResponse(new Response(null,{status:101,headers,webSocket:pair[0]}))}",
     "return guestResponse(new Response('app response',{headers}))}}",
   ].join('\n');
@@ -18,13 +18,22 @@ before(async () => {
 });
 after(async () => { await mf?.dispose(); });
 test('CF-04 guest cannot receive platform cookies, bearer credentials or spoofed identity', async () => {
-  const response = await mf.dispatchFetch('https://test/request', { headers: { cookie: '__Host-pneuma-space-app=secret; ordinary=ok; __Host-pneuma-space-control=other-secret', authorization: 'Bearer secret', 'x-pneuma-space-subject': 'forged', 'x-pneuma-space-scope': 'forged' } });
+  const response = await mf.dispatchFetch('https://test/request', { headers: { cookie: 'ordinary=ok; __Host-pneuma-space-control=secret', authorization: 'Bearer secret', 'x-pneuma-space-subject': 'forged', 'x-pneuma-space-scope': 'forged' } });
   const headers = await response.json() as Record<string, string>;
   assert.equal(headers.cookie, 'ordinary=ok');
   assert.equal(headers.authorization, undefined);
   assert.equal(headers['x-pneuma-space-scope'], undefined);
   assert.equal(headers['x-pneuma-space-subject'], 'u_1');
   assert.equal(decodeURIComponent(headers['x-pneuma-space-name']), '测试');
+});
+test('CF-24 the app receives its path prefix and cannot be handed another', async () => {
+  const response = await mf.dispatchFetch('https://test/request', { headers: { 'x-forwarded-prefix': '/apps/other' } });
+  assert.equal((await response.json() as Record<string, string>)['x-forwarded-prefix'], '/apps/notes');
+});
+test('CF-24 an app response cannot widen its service worker scope beyond its path', async () => {
+  const response = await mf.dispatchFetch('https://test/');
+  assert.equal(response.headers.get('service-worker-allowed'), null);
+  await response.body?.cancel();
 });
 test('CF-03 guest HTTP cookies cannot target sibling hosts or platform sessions', async () => {
   const response = await mf.dispatchFetch('https://test/');

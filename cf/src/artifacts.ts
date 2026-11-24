@@ -1,6 +1,6 @@
 import { CAPABILITIES, type Actor, type AppPackage, type AppRow, type AppSnapshot, type Artifact, type Manifest, type PackageFile, fail } from './model.ts';
 import { authorizeApp } from './auth.ts';
-import { cellValue, ensureDomain, audit } from './directory.ts';
+import { cellValue, audit } from './directory.ts';
 import { nextSchedule } from './cron.ts';
 import { signR2 } from './s3.ts';
 import { boundedBody, id, integer, record, safePath, sha, text } from './util.ts';
@@ -109,7 +109,6 @@ export async function artifactUsage(env: Env, appId: string) {
   return { reservedBytes: row.bytes * 3, limitBytes: row.storage_bytes * 3, uploads: row.uploads, maxUploads: 200 };
 }
 export async function publishUpload(env: Env, actor: Actor, app: AppRow, uploadInput: unknown, operation: string): Promise<unknown> {
-  await ensureDomain(env, app);
   const result = await cellValue<AppSnapshot>(env, app.id, '/publish-upload', { actor, uploadId: text(uploadInput, 'upload', 80), idempotencyKey: operation });
   await audit(env, actor, 'app.publish', app.tenant_id, app.id, 'ok', 'release ' + result.current?.number);
   return result;
@@ -142,10 +141,9 @@ export async function prepareUploadArtifact(env: Env, actor: Actor, appId: strin
   }
   return artifact;
 }
-export async function staticResponse(env: Env, appId: string, artifact: Artifact, request: Request): Promise<Response | null> {
-  const url = new URL(request.url);
+export async function staticResponse(env: Env, appId: string, artifact: Artifact, request: Request, pathname: string): Promise<Response | null> {
   let path: string;
-  try { path = decodeURIComponent(url.pathname).slice(1); } catch { return null; }
+  try { path = decodeURIComponent(pathname).slice(1); } catch { return null; }
   path = path.endsWith('/') || path === '' ? path + 'index.html' : path;
   if (!path || path.includes('\\') || path.split('/').some(part => !part || part === '.' || part === '..')) return null;
   const key = 'apps/' + appId + '/artifacts/' + artifact.digest + '/static/' + path;

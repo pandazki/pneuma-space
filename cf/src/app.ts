@@ -1,6 +1,6 @@
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import { authorizeApp, type CredentialProof } from './auth.ts';
-import { admitRequest, appRow, observeApp, releaseCompute, removeDomain, reserveCompute } from './directory.ts';
+import { admitRequest, appRow, observeApp, releaseCompute, reserveCompute } from './directory.ts';
 import { artifactPurgeDeadline, prepareUploadArtifact, readPackage } from './artifacts.ts';
 import { NativeResources } from './resources.ts';
 import { nextSchedule } from './cron.ts';
@@ -26,8 +26,10 @@ export class AppCell extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
-      const state = this.ctx.storage.kv.get<State>(STATE);
+      const state = this.ctx.storage.kv.get<State & { origin?: string }>(STATE);
       if (!state) return;
+      // Apps created under per-app domains stored their origin (ADR 0044).
+      if (state.origin !== undefined) { delete state.origin; this.save(state); }
       if (state.journal) {
         state.current = state.journal.previous;
         state.capabilities = Object.keys(state.current?.manifest.capabilities ?? {}) as Capability[];
@@ -206,7 +208,6 @@ export class AppCell extends DurableObject<Env> {
         if (listed.objects.length) await this.env.PNEUMA_SPACE_ARTIFACTS.delete(listed.objects.map(x => x.key));
         cursor = listed.truncated ? listed.cursor : undefined;
       } while (cursor);
-      await removeDomain(this.env, state);
       state.status = 'purged'; state.purgeAt = null; state.current = null; state.capabilities = [];
       for (const [key] of this.ctx.storage.kv.list({ prefix: 'platform:release:' })) this.ctx.storage.kv.delete(key);
     }

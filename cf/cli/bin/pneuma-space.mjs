@@ -75,7 +75,6 @@ export async function initialize(directory,options={}){
   const project={name,tenant,origin:client.origin,createKey:randomUUID()};
   await save(projectFile,project);
   await cp(join(toolRoot,'templates','demo'),directory,{recursive:true,force:false,errorOnExist:true});
-  const page=join(directory,'app','index.html');await writeFile(page,(await readFile(page,'utf8')).replaceAll('__PNEUMA_SPACE_CONTROL__',client.origin));
   await cp(toolRoot,join(privateDir,'tool'),{recursive:true});
   const skill=await readFile(join(toolRoot,'templates','skill','SKILL.md'),'utf8');
   for(const folder of ['.agents','.claude','.cursor','.gemini','.github']){
@@ -88,21 +87,12 @@ export async function initialize(directory,options={}){
   log('setup',`Created ${directory}. Project instructions and skills are installed for Codex, Claude Code, Cursor, Gemini CLI and Copilot.`);
   return workspace(directory);
 }
-async function waitForHttps(origin){
-  log('https','Preparing your private HTTPS address. The first certificate can take a few minutes.');
-  const deadline=Date.now()+600000;
-  while(Date.now()<deadline){
-    try{const r=await fetch(origin,{redirect:'manual',signal:AbortSignal.timeout(10000)});await r.body?.cancel();if(r.status===401)return;}catch{}
-    await delay(3000);
-  }
-  throw Error('HTTPS is still preparing. Run npm run deploy in this project to continue; your files and application are retained.');
-}
+const appUrl=w=>w.client.origin+'/apps/'+w.project.app.name+'/';
 export async function publish(w){
   const {project,client}=w,packed=await packageApp(w.directory);
   if(!project.app){
     project.app=await client.request('/tenants/'+project.tenant+'/apps',{name:project.name},'POST',project.createKey);await saveProject(w);
   }
-  if(!project.httpsReady){await waitForHttps(project.app.origin);project.httpsReady=true;await saveProject(w);}
   const path='/apps/'+project.app.id;
   if(project.publishedDigest===packed.digest){
     const snapshot=await client.request(path);
@@ -118,14 +108,14 @@ export async function publish(w){
   if(!put.ok){await put.body?.cancel();throw Error('Direct upload failed ('+put.status+'). Run npm run deploy to retry.');}await put.body?.cancel();
   const snapshot=await client.request(path+'/releases',{uploadId:ticket.uploadId},'POST',ticket.publishKey);
   project.publishedDigest=packed.digest;project.upload=null;await saveProject(w);
-  log('publish',`Release ${snapshot.current.number} is live: ${project.app.origin}`);return snapshot;
+  log('publish',`Release ${snapshot.current.number} is live: ${appUrl(w)}`);return snapshot;
 }
 export async function benchmark(w){
   const {project,client}=w;if(!project.app)throw Error('Publish the project first with npm run deploy.');
   const path='/apps/'+project.app.id,before=await client.request(path);
   if(before.current?.manifest.runtime!=='node')throw Error('The idle/wake benchmark requires a Node application.');
   const call=async(method='GET',body)=>{
-    const start=performance.now();const r=await fetch(project.app.origin+'/api/proof',{method,headers:{...client.headers,'content-type':'application/json'},body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.timeout(60000)});
+    const start=performance.now();const r=await fetch(appUrl(w)+'api/proof',{method,headers:{...client.headers,'content-type':'application/json'},body:body?JSON.stringify(body):undefined,redirect:'error',signal:AbortSignal.timeout(60000)});
     const value=await r.json();if(!r.ok)throw Error('The benchmark probe failed ('+r.status+'). Keep the starter /api/proof endpoint or adapt it to your app.');
     if(typeof value.boot!=='string')throw Error('The benchmark probe must return its process boot identifier.');
     return {ms:Math.round(performance.now()-start),...value};
@@ -140,16 +130,16 @@ export async function benchmark(w){
     if(snapshot.runtime.state==='asleep'&&!snapshot.runtime.running){slept=snapshot;break;}
   }
   const dashboard=client.origin+'/dashboard?view=projects&app='+project.app.id+'&tab=usage';
-  if(!slept){const report={complete:false,reason:'Other traffic or active leases prevented natural idle.',app:project.app.origin,dashboard};await save(join(w.privateDir,'bench.json'),report);throw Error('Idle was not observed. Close app tabs and run npm run bench again. See '+dashboard);}
+  if(!slept){const report={complete:false,reason:'Other traffic or active leases prevented natural idle.',app:appUrl(w),dashboard};await save(join(w.privateDir,'bench.json'),report);throw Error('Idle was not observed. Close app tabs and run npm run bench again. See '+dashboard);}
   log('bench','The runtime stopped naturally. Visiting it again now.');
   const resumed=await call();
   if(resumed.boot===first.boot)throw Error('The probe returned the same process boot; automatic restart is not verified.');
   if(resumed.marker!==marker)throw Error('The saved marker did not survive idle.');
   const after=await client.request(path),sorted=[...warm].sort((a,b)=>a-b);
-  const report={complete:true,at:new Date().toISOString(),appId:project.app.id,app:project.app.origin,dashboard,initialState:before.runtime.state,firstRequestMs:first.ms,warmMedianMs:sorted[Math.floor(sorted.length/2)],warmP95Ms:sorted.at(-1),warmSamplesMs:warm,naturalIdleObserved:true,idleObservedAfterMs:Date.now()-idleStart-resumed.ms,wakeRequestMs:resumed.ms,newBoot:true,dataRetained:true,before:before.usage,after:after.usage,delta:Object.fromEntries(['requests','errors','wakes','sleeps'].map(key=>[key,after.usage[key]-before.usage[key]]))};
+  const report={complete:true,at:new Date().toISOString(),appId:project.app.id,app:appUrl(w),dashboard,initialState:before.runtime.state,firstRequestMs:first.ms,warmMedianMs:sorted[Math.floor(sorted.length/2)],warmP95Ms:sorted.at(-1),warmSamplesMs:warm,naturalIdleObserved:true,idleObservedAfterMs:Date.now()-idleStart-resumed.ms,wakeRequestMs:resumed.ms,newBoot:true,dataRetained:true,before:before.usage,after:after.usage,delta:Object.fromEntries(['requests','errors','wakes','sleeps'].map(key=>[key,after.usage[key]-before.usage[key]]))};
   await save(join(w.privateDir,'bench.json'),report);
   console.log(JSON.stringify(report,null,2));
-  log('ready','Open your app: '+project.app.origin);log('access','Use the browser where you are signed into '+client.origin+'. This app is private; a publishing token does not replace browser login.');log('stats','See real requests and wake/sleep counts: '+dashboard);
+  log('ready','Open your app: '+appUrl(w));log('access','Use the browser where you are signed into '+client.origin+'. This app is private; a publishing token does not replace browser login.');log('stats','See real requests and wake/sleep counts: '+dashboard);
   return report;
 }
 async function main(){

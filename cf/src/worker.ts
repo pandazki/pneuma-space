@@ -1,5 +1,5 @@
 export { AppCell, AppServices } from './app.ts';
-import { appActor, appLogin, authenticate, authRoute, authorizeApp, grantApp, me, protectWrite, requireAdmin, requireSession } from './auth.ts';
+import { authenticate, authRoute, authorizeApp, me, protectWrite, requireAdmin, requireSession } from './auth.ts';
 import { artifactUsage, beginUpload, publishUpload, staticResponse } from './artifacts.ts';
 import { controlRoute, operationKey } from './control.ts';
 import { admitRequest, appSummary, audit, cell, cellValue } from './directory.ts';
@@ -39,7 +39,7 @@ async function appControl(request: Request, env: Env, actor: Actor, appId: strin
   if (!section) {
     method(request, 'GET');
     const snapshot = await cellValue<AppSnapshot>(env, app.id, '/inspect');
-    return json({ ...appSummary(app), ...snapshot });
+    return json({ ...appSummary(env, app), ...snapshot });
   }
   if (section === 'actions') {
     method(request, 'POST');
@@ -87,13 +87,14 @@ async function control(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url), path = url.pathname;
   const actor = await authenticate(request, env);
   if (path.startsWith('/api/v1/')) return api(request, env, actor, path.slice('/api/v1'.length));
-  if (path === '/_pneuma-space/authorize') { method(request, 'GET'); return grantApp(request, env, actor); }
+  const app = /^\/apps\/([^/]+)(\/.*)?$/.exec(path);
+  if (app) return app[2] ? application(request, env, actor, app[1], app[2]) : Response.redirect(url.origin + path + '/' + url.search, 308);
   if (path === '/_pneuma-space/health') { method(request, 'GET'); return json({ service: 'pneuma-space-cf' }); }
   if (!['GET', 'HEAD'].includes(request.method)) fail(405, 'method', 'Use GET or HEAD.');
   if (path === '/') return Response.redirect(url.origin + (actor ? actor.user.platformAdmin ? '/admin' : '/dashboard' : '/login'), 303);
   let asset = path;
   if (/^\/(?:admin|dashboard)(?:\/|$)/.test(path)) {
-    if (!actor) return Response.redirect(url.origin + '/login?next=' + encodeURIComponent(path + url.search), 303);
+    if (!actor) return login(url);
     requireSession(actor);
     if (path === '/admin' || path.startsWith('/admin/')) requireAdmin(actor);
     asset = '/index.html';
@@ -108,6 +109,7 @@ async function control(request: Request, env: Env): Promise<Response> {
   response.headers.set('referrer-policy', 'no-referrer');
   return response;
 }
+const login = (url: URL): Response => Response.redirect(url.origin + '/login?next=' + encodeURIComponent(url.pathname + url.search), 303);
 export function guestHeaders(request: Request, actor: Actor, identity: boolean, app: AppRow): Headers {
   const headers = new Headers(request.headers);
   for (const key of [...headers.keys()]) if (key.startsWith('x-pneuma-space-') || key === 'authorization' || key === 'proxy-authorization') headers.delete(key);
@@ -118,11 +120,13 @@ export function guestHeaders(request: Request, actor: Actor, identity: boolean, 
     headers.set('x-pneuma-space-name', encodeURIComponent(actor.user.name));
     headers.set('x-pneuma-space-owner', String(actor.user.id === app.owner_id));
   }
+  headers.set('x-forwarded-prefix', '/apps/' + app.name);
   return headers;
 }
 export function guestResponse(result: Response): Response {
   const headers = new Headers(result.headers), cookies = headers.getSetCookie();
   headers.delete('set-cookie');
+  headers.delete('service-worker-allowed');
   for (const cookie of cookies) {
     const parts = cookie.split(';');
     if (/^__Host-pneuma-space-/i.test(parts[0].trim())) continue;
@@ -132,17 +136,14 @@ export function guestResponse(result: Response): Response {
   headers.set('referrer-policy', 'same-origin');
   return new Response(result.body, { status: result.status, statusText: result.statusText, headers, ...(result.webSocket ? { webSocket: result.webSocket } : {}) });
 }
-async function application(request: Request, env: Env, app: AppRow): Promise<Response> {
-  const url = new URL(request.url), path = url.pathname;
-  if (path === '/_pneuma-space/callback' || path === '/_pneuma-space/login') {
-    method(request, 'GET'); return appLogin(request, env, app);
-  }
-  const actor = await appActor(request, env, app);
+async function application(request: Request, env: Env, actor: Actor | null, name: string, path: string): Promise<Response> {
   if (!actor) {
-    if (request.method === 'GET' && !request.headers.has('authorization') && request.headers.get('upgrade') !== 'websocket' && request.headers.get('accept')?.includes('text/html')) return appLogin(request, env, app);
+    if (request.method === 'GET' && !request.headers.has('authorization') && request.headers.get('upgrade') === null && request.headers.get('accept')?.includes('text/html')) return login(new URL(request.url));
     fail(401, 'unauthorized', 'Sign in to this application.');
   }
-  if (actor.kind === 'session' && (!['GET', 'HEAD'].includes(request.method) || request.headers.get('upgrade')?.toLowerCase() === 'websocket') && request.headers.get('origin') !== app.origin) fail(403, 'origin', 'The request origin is not allowed.');
+  const row = await env.PNEUMA_SPACE_DB.prepare('SELECT id FROM apps WHERE name=? AND purged_at IS NULL').bind(name).first<{ id: string }>();
+  const app = await authorizeApp(env, actor, row?.id ?? fail(404, 'app_not_found', 'Application not found.'), 'invoke');
+  if (actor.kind === 'session' && (!['GET', 'HEAD'].includes(request.method) || request.headers.get('upgrade')?.toLowerCase() === 'websocket') && request.headers.get('origin') !== env.PNEUMA_SPACE_CONTROL_ORIGIN) fail(403, 'origin', 'The request origin is not allowed.');
   const snapshot = await cellValue<AppSnapshot>(env, app.id, '/inspect');
   if (snapshot.status !== 'registered' || !snapshot.current) fail(409, 'inactive', 'Application is not active.');
   await admitRequest(env, app.tenant_id);
@@ -155,7 +156,7 @@ async function application(request: Request, env: Env, app: AppRow): Promise<Res
   }
   if (path.startsWith('/_pneuma-space/')) fail(404, 'reserved_path', 'This path is reserved.');
   if (['GET', 'HEAD'].includes(request.method) && snapshot.capabilities.includes('static')) {
-    const response = await staticResponse(env, app.id, snapshot.current, request);
+    const response = await staticResponse(env, app.id, snapshot.current, request, path);
     if (response) {
       const admission = await cell(env, app.id, '/admit', { expectedGeneration: snapshot.generation });
       if (!admission.ok) { await response.body?.cancel(); return admission; }
@@ -164,6 +165,7 @@ async function application(request: Request, env: Env, app: AppRow): Promise<Res
   }
   if (snapshot.current.manifest.runtime === 'static') fail(404, 'not_found', 'File not found.');
   const body = request.body ? await boundedBody(request) : null;
+  const url = new URL(request.url);
   url.pathname = '/_pneuma-space/invoke' + path;
   const result = await env.PNEUMA_SPACE_APPS.getByName(app.id).fetch(new Request(url, {
     method: request.method, headers: guestHeaders(request, actor, snapshot.capabilities.includes('identity'), app), body,
@@ -174,11 +176,8 @@ async function application(request: Request, env: Env, app: AppRow): Promise<Res
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
-      const url = new URL(request.url);
-      if (url.origin === env.PNEUMA_SPACE_CONTROL_ORIGIN) return await control(request, env);
-      const app = await env.PNEUMA_SPACE_DB.prepare('SELECT * FROM apps WHERE origin=? AND purged_at IS NULL').bind(url.origin).first<AppRow>();
-      if (!app) fail(404, 'host', 'Unknown application hostname.');
-      return await application(request, env, app);
+      if (new URL(request.url).origin !== env.PNEUMA_SPACE_CONTROL_ORIGIN) fail(404, 'host', 'Unknown hostname.');
+      return await control(request, env);
     } catch (error) { return errorResponse(error); }
   },
 } satisfies ExportedHandler<Env>;

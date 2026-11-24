@@ -1,9 +1,7 @@
 import { ACTIONS, type Action, type Actor, type AppRow, type Role, type User, fail } from './model.ts';
 import { cookie, id, input, integer, json, secret, sha, text } from './util.ts';
 
-export const CONTROL_COOKIE = '__Host-pneuma-space-control';
-export const APP_COOKIE = '__Host-pneuma-space-app';
-export const NONCE_COOKIE = '__Host-pneuma-space-nonce';
+const CONTROL_COOKIE = '__Host-pneuma-space-control';
 export type CredentialProof = Pick<Actor, 'kind' | 'hash'>;
 type UserRow = { id: string; username: string; name: string; platform_admin: number; disabled: number; created_at: number };
 type SessionRow = UserRow & { hash: string; csrf: string };
@@ -12,8 +10,8 @@ export const user = (row: UserRow): User => ({
   id: row.id, username: row.username, name: row.name, platformAdmin: row.platform_admin === 1,
   disabled: row.disabled === 1, createdAt: row.created_at,
 });
-export const sessionCookie = (name: string, value: string, seconds: number): string =>
-  name + '=' + value + '; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=' + seconds;
+const sessionCookie = (value: string, seconds: number): string =>
+  CONTROL_COOKIE + '=' + value + '; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=' + seconds;
 
 async function proof(env: Env, kind: 'session' | 'token', hash: string): Promise<Actor | null> {
   const db = env.PNEUMA_SPACE_DB;
@@ -97,7 +95,7 @@ export async function authRoute(request: Request, env: Env, path: string, actor:
   protectWrite(request, env, path === 'logout' ? actor ?? undefined : undefined);
   if (path === 'logout') {
     if (actor) { requireSession(actor); await env.PNEUMA_SPACE_DB.prepare('UPDATE sessions SET revoked_at=? WHERE hash=?').bind(Date.now(), actor.hash).run(); }
-    return new Response(null, { status: 204, headers: { 'set-cookie': sessionCookie(CONTROL_COOKIE, '', 0) } });
+    return new Response(null, { status: 204, headers: { 'set-cookie': sessionCookie('', 0) } });
   }
   await loginLimit(request, env);
   const body = await input(request, 4096);
@@ -133,7 +131,7 @@ export async function authRoute(request: Request, env: Env, path: string, actor:
   const created = await createSession(env, userId);
   const value = await me(env, created.actor);
   const response = json({ ...value, ...(accessKey ? { accessKey } : {}) });
-  response.headers.set('set-cookie', sessionCookie(CONTROL_COOKIE, created.key, 7 * 86400));
+  response.headers.set('set-cookie', sessionCookie(created.key, 7 * 86400));
   return response;
 }
 export async function createInvitation(env: Env, actor: Actor, expiresAt: unknown): Promise<unknown> {
@@ -161,59 +159,4 @@ export async function createToken(env: Env, actor: Actor, tenantId: string, body
   const result = await env.PNEUMA_SPACE_DB.prepare('INSERT INTO tokens(id,hash,tenant_id,user_id,label,scopes_json,app_ids_json,expires_at,created_at) SELECT ?,?,?,?,?,?,?,?,? WHERE (SELECT count(*) FROM tokens WHERE user_id=? AND revoked_at IS NULL AND expires_at>?)<30').bind(tokenId, await sha(key), tenantId, actor.user.id, label, JSON.stringify(scopes), appIds === null ? null : JSON.stringify(appIds), expires, Date.now(), actor.user.id, Date.now()).run();
   if (!result.meta.changes) fail(409, 'token_limit', 'Revoke an existing credential before creating another.');
   return { id: tokenId, token: key, expiresAt: expires };
-}
-export async function appActor(request: Request, env: Env, app: AppRow): Promise<Actor | null> {
-  if (request.headers.has('authorization')) {
-    const actor = await authenticate(request, env);
-    if (actor) await authorizeApp(env, actor, app.id, 'invoke');
-    return actor;
-  }
-  const key = cookie(request, APP_COOKIE);
-  if (!key || !/^[a-f0-9]{64}$/.test(key)) return null;
-  const row = await env.PNEUMA_SPACE_DB.prepare('SELECT parent_hash FROM app_sessions WHERE hash=? AND app_id=? AND expires_at>?').bind(await sha(key), app.id, Date.now()).first<{ parent_hash: string }>();
-  if (!row) return null;
-  const actor = await proof(env, 'session', row.parent_hash);
-  if (actor) await authorizeApp(env, actor, app.id, 'invoke');
-  return actor;
-}
-export async function appLogin(request: Request, env: Env, app: AppRow): Promise<Response> {
-  const url = new URL(request.url);
-  if (url.pathname === '/_pneuma-space/callback') {
-    const nonce = cookie(request, NONCE_COOKIE), code = url.searchParams.get('code');
-    if (!nonce || !code) fail(401, 'grant', 'Sign-in handshake is incomplete.');
-    const row = await env.PNEUMA_SPACE_DB.prepare('SELECT * FROM grants WHERE hash=? AND app_id=? AND origin=? AND nonce_hash=? AND consumed_at IS NULL AND expires_at>?').bind(await sha(code), app.id, app.origin, await sha(nonce), Date.now()).first<{ hash: string; user_id: string; parent_hash: string; next_path: string }>();
-    if (!row) fail(401, 'grant', 'Sign-in handshake is invalid or expired.');
-    const actor = await proof(env, 'session', row.parent_hash);
-    if (!actor) fail(401, 'grant', 'The parent session has ended.');
-    await authorizeApp(env, actor, app.id, 'invoke');
-    const key = secret(), now = Date.now(), grantHash = row.hash;
-    const result = await env.PNEUMA_SPACE_DB.batch([
-      env.PNEUMA_SPACE_DB.prepare('INSERT INTO app_sessions(hash,user_id,app_id,parent_hash,expires_at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM grants WHERE hash=? AND consumed_at IS NULL AND expires_at>?)').bind(await sha(key), row.user_id, app.id, row.parent_hash, now + 86400000, grantHash, now),
-      env.PNEUMA_SPACE_DB.prepare('UPDATE grants SET consumed_at=? WHERE hash=? AND consumed_at IS NULL AND expires_at>?').bind(now, grantHash, now),
-    ]);
-    if (result[1].meta.changes !== 1) fail(401, 'grant', 'Sign-in handshake was already used.');
-    const response = new Response(null, { status: 303, headers: { location: app.origin + row.next_path, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' } });
-    response.headers.append('set-cookie', sessionCookie(APP_COOKIE, key, 86400));
-    response.headers.append('set-cookie', sessionCookie(NONCE_COOKIE, '', 0));
-    return response;
-  }
-  const nonce = secret();
-  const next = url.pathname === '/_pneuma-space/login' ? url.searchParams.get('next') ?? '/' : url.pathname + url.search;
-  const safeNext = next.startsWith('/') && !next.startsWith('//') && !next.includes('\\') && !/[\r\n]/.test(next) ? next : '/';
-  const location = new URL('/_pneuma-space/authorize', env.PNEUMA_SPACE_CONTROL_ORIGIN);
-  location.searchParams.set('app', app.id); location.searchParams.set('nonce', await sha(nonce)); location.searchParams.set('next', safeNext);
-  return new Response(null, { status: 303, headers: { location: location.href, 'set-cookie': sessionCookie(NONCE_COOKIE, nonce, 300), 'cache-control': 'no-store' } });
-}
-export async function grantApp(request: Request, env: Env, actor: Actor | null): Promise<Response> {
-  const url = new URL(request.url);
-  if (!actor) return Response.redirect(env.PNEUMA_SPACE_CONTROL_ORIGIN + '/login?next=' + encodeURIComponent(url.pathname + url.search), 303);
-  requireSession(actor);
-  const app = await authorizeApp(env, actor, text(url.searchParams.get('app'), 'app'), 'invoke');
-  const nonce = text(url.searchParams.get('nonce'), 'nonce', 64);
-  if (!/^[a-f0-9]{64}$/.test(nonce)) fail(400, 'nonce', 'Invalid sign-in nonce.');
-  const next = url.searchParams.get('next') ?? '/';
-  if (!next.startsWith('/') || next.startsWith('//') || next.includes('\\') || /[\r\n]/.test(next)) fail(400, 'next', 'Invalid return path.');
-  const key = secret();
-  await env.PNEUMA_SPACE_DB.prepare('INSERT INTO grants(hash,app_id,user_id,parent_hash,origin,nonce_hash,next_path,expires_at) VALUES(?,?,?,?,?,?,?,?)').bind(await sha(key), app.id, actor.user.id, actor.hash, app.origin, nonce, next, Date.now() + 60000).run();
-  return new Response(null, { status: 303, headers: { location: app.origin + '/_pneuma-space/callback?code=' + key, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' } });
 }

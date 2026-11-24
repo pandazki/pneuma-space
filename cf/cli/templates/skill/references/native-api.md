@@ -19,4 +19,6 @@ Declare files for small durable documents. `{type:'files.put',path,body,expected
 
 The starter needs only kv and identity. Its one collection is limited to24 entries and16KiB of JSON. Filter/search in the browser and avoid polling so the app can become idle. The benchmark proof marker is a separate small key and does not change the user's collection.
 
-Requests arrive with platform-provided X-Pneuma-Space-Subject/Name/Owner headers when identity is declared. Keep the app private at its assigned HTTPS origin. Framework or dependency additions must fit the4MiB package limit. The CLI publishes only app/; credentials and project instructions live outside it.
+The app lives at `/apps/<name>/` on the workspace origin, which it shares with the workspace and every other app. Requests reach the server with that prefix removed and an `X-Forwarded-Prefix: /apps/<name>` header. Use relative URLs for pages, assets, API calls and WebSockets (`api/items`, not `/api/items`), and add the prefix to any absolute path the server writes, such as a redirect. `_pneuma-space/` is reserved under the prefix.
+
+Requests arrive with platform-provided X-Pneuma-Space-Subject/Name/Owner headers when identity is declared. Framework or dependency additions must fit the4MiB package limit. The CLI publishes only app/; credentials and project instructions live outside it.
