@@ -163,11 +163,23 @@ function managerOf(raw: unknown): ManagerChange | null {
   return { name: managerName(name), ...(url !== undefined && { url: optional(url, 'manager.url', managerUrl) }) };
 }
 
-/** The manager a request names in its header (ADR 0039); null when it names none. */
+/**
+ * The manager a request names in its header (ADR 0039); null when it names none. A header that is not one name answers 400 on every app,
+ * an unmanaged one included: the same request would start failing the day the app becomes managed.
+ */
 function namedOf({ request }: Ctx): ManagerName | null {
   const raw = request.headers[MANAGER_HEADER];
-  if (Array.isArray(raw)) throw new InputError(`${MANAGER_HEADER} names one manager`);
-  return raw === undefined ? null : managerName(raw);
+  if (raw === undefined) return null;
+  // Node joins a repeated header into one value with ", ", and a name has no comma.
+  if (typeof raw !== 'string' || raw.includes(',')) throw new InputError(`${MANAGER_HEADER} names one manager, got "${raw}"`);
+  return managerName(raw);
+}
+
+/** `?app=<id>`: the `app` of the release a publish returned, so a discard never ends a later app of the same name (ADR 0038). */
+function appIdOf(query: URLSearchParams): AppId | null {
+  const raw = query.get('app');
+  if (raw === '') throw new InputError('app must be the id of the app, the app field of the release its publish returned');
+  return raw as AppId | null;
 }
 
 function userId(raw: unknown): string {
@@ -443,7 +455,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
     }, {
       ...(hosted && { json: true as const }), audit: onAppAudit('app.purge'),
     }),
-    appRoute('POST', ADMIN_PATHS.discard('<name>'), 'app.discard', async (ctx) => (await registry.discard(app(ctx.params[0]), namedOf(ctx)), { status: 'discarded' }), {
+    appRoute('POST', ADMIN_PATHS.discard('<name>'), 'app.discard', async (ctx) => (await registry.discard(app(ctx.params[0]), namedOf(ctx), appIdOf(ctx.query)), { status: 'discarded' }), {
       audit: onAppAudit('app.discard'),
     }),
     appRoute('DELETE', ADMIN_PATHS.manager('<name>'), 'app.release', async (ctx) => (await registry.clearManager(app(ctx.params[0]), namedOf(ctx)), { manager: null }), {

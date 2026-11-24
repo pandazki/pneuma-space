@@ -240,6 +240,14 @@ export function storeContract(name: string, open: OpenStore): void {
       assert.deepEqual(await store.tenant(tenant.name), tenant);
     });
 
+    test('a tenant row a gateway before ADR 0038 writes, after the migration ran, reads its missing ephemeral quota as the default', async () => {
+      const { ephemeral: _, ...before } = { ...DEFAULT_QUOTA, apps: null };
+      await store.putTenant({ name: 'umber' as TenantName, display: 'Umber', quota: before as never, createdAt: 5 });
+      assert.deepEqual([(await store.tenant('umber' as TenantName))?.quota, (await store.tenants()).find((t) => t.name === 'umber')?.quota], [
+        { ...DEFAULT_QUOTA, apps: null }, { ...DEFAULT_QUOTA, apps: null },
+      ]);
+    });
+
     test('user round-trips, keeping its first sighting', async () => {
       await store.putUser({ id: 'ann+ops@example.com', name: 'Ann', groups: ['ops'], firstSeen: 1, lastSeen: 1 });
       await store.putUser({ id: 'ann+ops@example.com', name: 'Ann B', groups: [], firstSeen: 9, lastSeen: 9 });

@@ -17,9 +17,9 @@
 
 ## 决定
 
-1. **App 的属性。** App 多一个 `manager`：`name`（文法同应用名）和可选的 `url`（`http` 或 `https` 的绝对地址，至多 2048 个字符，人去那里经管理方操作）。没有管理方的应用为空。列表和详情返回它。
+1. **App 的属性。** App 多一个 `manager`：`name`（文法同应用名）和可选的 `url`（`http` 或 `https` 的绝对地址，至多 2048 个字符，人去那里经管理方操作；按 URL 解析器写出的形式存，所以协议是小写、存下的值总能当链接用，含控制字符的答 400）。没有管理方的应用为空。列表和详情返回它。
 2. **点名放在请求头。** 写请求用 `X-Pneuma-Space-Manager: <name>` 点名。不用请求体：remove、purge、discard 没有请求体（purge 只在托管模式有），policy 的请求体就是补丁本身。请求头在每个路由上是同一个位置，现有请求体一字不改，不读请求体的路由也不用开始解析。`appctl` 的 `--manager <name>` 发送它，控制台在人输入名字后发送它。
-3. **哪些写要点名。** 对受管应用：publish、remove、purge、discard，改 policy、access、owner、tenant，以及清除 manager。不带请求头或名字不同，答 409，什么都不改，消息写明管理方和它的 `url`、在这里操作会绕过它、怎样点名。授权不变：先按 ADR 0022 判定，403 和 404 先于 409。非受管应用忽略这个请求头。
+3. **哪些写要点名。** 对受管应用：publish、remove、purge、discard，改 policy、access、owner、tenant，以及清除 manager。不带请求头或名字不同，答 409，什么都不改，消息写明管理方和它的 `url`、在这里操作会绕过它、怎样点名。授权不变：先按 ADR 0022 判定，403 和 404 先于 409；请求本身的错误也先于 409，例如移到不存在的租户答 404、policy 超过租户配额答 400，带不带名字答的都一样。非受管应用不拿请求头里的名字比较任何东西；但请求头不是一个合乎文法的名字时（格式不对，或写了两次，Node 把重复的请求头拼成 `a, b`），在任何应用上都答 400，非受管的也一样：这是调用方的错误，在非受管应用上放过它，应用一旦受管同一个请求就开始失败，所以到处拒绝。
 4. **运维不受限。** stop、restart、kill、unquarantine、日志、状态、指标和所有读都不用点名。平台自己发起的动作也不用：临时应用的到期清扫（ADR 0038）、续跑 purge、启动收敛。全局策略不是对某个应用的写，也不受限。
 5. **设置、更换、清除。** 发布请求体的 `"manager": {"name": n, "url"?: u}` 定下发布之后的 manager。首次发布可以设；非受管的已有应用由一次带它的发布变成受管，权限与发布相同。更换是对受管应用的写，要点名当前的 manager。没给 `url` 时，名字不变则保留原来的 `url`，名字变了则为空。请求体没有 `manager`（或为 `null`）时 manager 不变，漏写不会清除它。清除只有一个显式入口 `DELETE /api/apps/<name>/manager`（`appctl unmanage <name>`），同样要点名，动作与发布相同（`app.release`，托管令牌要 `publish` 范围），审计为 `app.manager`。相同 `release_key` 的发布不写 Release，请求体的 manager 照常生效。
 6. **审计。** 带这个请求头的写，审计行的 details 记 `namedManager`，点名的人就是这一行的 actor。`app.publish` 的 details 记请求体的 `manager`。被拒绝的写照常记为 `refused`。

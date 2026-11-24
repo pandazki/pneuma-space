@@ -2,7 +2,7 @@ import type { HostedAuthRecord, HostedIdentityLink } from './hosted-model.ts';
 // The platform library's DML and row mapping, shared by SqliteStore and PgStore (ADR 0025 item 2). Placeholders are `$n`.
 
 import {
-  DEFAULT_POLICY, IDEMPOTENCY_WINDOW_MS, USAGE_COUNTERS,
+  DEFAULT_POLICY, DEFAULT_QUOTA, IDEMPOTENCY_WINDOW_MS, USAGE_COUNTERS,
   type App, type AppId, type AppName, type AuditFilter, type AuditRecord, type Binding, type BundleId, type Change, type Delivery, type DeliveryFilter,
   type DeliveryId, type DeliveryState, type EventFilter, type EventRecord, type GuardRecord, type Instance, type InstanceLog, type LeaseTally, type ManagerName, type Membership,
   type Policy, type QuotaUsage, type Release, type ReleaseNumber, type Replica, type ReplicaId, type RowLock, type Stats,
@@ -102,7 +102,8 @@ const toToken = (r: Row): Token => ({
   ...(r.restrictions == null ? {} : { restrictions: json(r.restrictions) }),
 });
 
-const toTenant = (r: Row): Tenant => ({ name: r.name as TenantName, display: r.display as string, quota: json(r.quota), createdAt: num(r.created_at) });
+// A gateway from before a quota resource writes rows without it, also after the migration that added it ran (ADR 0025 item 8); it reads as the default.
+const toTenant = (r: Row): Tenant => ({ name: r.name as TenantName, display: r.display as string, quota: { ...DEFAULT_QUOTA, ...json(r.quota) }, createdAt: num(r.created_at) });
 
 const toInstance = (r: Row): Instance => ({
   app: r.app as AppId,

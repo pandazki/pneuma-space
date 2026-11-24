@@ -37,7 +37,7 @@ const USAGE = `usage:
   appctl unquarantine <name>
   appctl remove <name>
   appctl purge <name> [--yes|-y]
-  appctl discard <name>
+  appctl discard <name> [--app <id>]
   appctl unmanage <name>
   appctl policy [<name>] key=value ...
   appctl owner <name> <subject>
@@ -62,7 +62,7 @@ let named: Record<string, string> = {};
 
 type Options = {
   owner?: string; tag?: string; manifest?: string; registry?: string; container?: boolean; static?: boolean; yes?: boolean; tail?: string; ephemeral?: boolean; ttl?: string;
-  manager?: string; 'manager-url'?: string; tenant?: string; since?: string; action?: string; actor?: string; json?: boolean; kind?: string; label?: string; display?: string;
+  app?: string; manager?: string; 'manager-url'?: string; tenant?: string; since?: string; action?: string; actor?: string; json?: boolean; kind?: string; label?: string; display?: string;
 };
 
 async function api(method: string, path: string, body?: unknown): Promise<any> {
@@ -277,7 +277,8 @@ async function publish([rawName, target, ...extra]: string[], options: Options):
     const bundle = bundleRoot && bundled ? (await api('POST', ADMIN_PATHS.bundles, ReadableStream.from(tar(bundleRoot, bundled)))).bundle : null;
     const release = await api('PUT', ADMIN_PATHS.release(name), { image, manifest, bundle, ...(owner && { owner }), ...(options.tenant && { tenant: options.tenant }), ...ephemeral, ...manager });
     const listed = (await api('GET', ADMIN_PATHS.apps) as { name: string; address: string; expiresAt?: number | null }[]).find((app) => app.name === name);
-    console.log(`${name}  ${listed?.address ?? '-'}  release ${release.number}${listed?.expiresAt ? `  expires ${new Date(listed.expiresAt).toISOString()}` : ''}`);
+    const ends = listed?.expiresAt ? `  expires ${new Date(listed.expiresAt).toISOString()}  app ${release.app}` : '';
+    console.log(`${name}  ${listed?.address ?? '-'}  release ${release.number}${ends}`);
   } finally {
     if (code) rmSync(code, { recursive: true, force: true });
   }
@@ -473,9 +474,9 @@ const COMMANDS: Record<string, (args: string[], options: Options) => unknown> = 
     console.log(`removed ${name}; data kept, purge deletes it`);
   },
   purge,
-  discard: async (args) => {
+  discard: async (args, options) => {
     const name = one(args, 'discard');
-    await api('POST', ADMIN_PATHS.discard(name));
+    await api('POST', ADMIN_PATHS.discard(name) + (options.app === undefined ? '' : `?app=${encodeURIComponent(options.app)}`));
     console.log(`discarded ${name}; its data is deleted`);
   },
   unmanage: async (args) => {
@@ -525,6 +526,7 @@ async function main(argv: string[]): Promise<void> {
         display: { type: 'string' },
         ephemeral: { type: 'boolean' },
         ttl: { type: 'string' },
+        app: { type: 'string' },
         manager: { type: 'string' },
         'manager-url': { type: 'string' },
       },

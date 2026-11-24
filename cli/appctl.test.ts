@@ -363,7 +363,7 @@ test('AC-EPH-1 publish --ephemeral --ttl sends the marker with its ttl and print
   const result = await appctl(['publish', 'trial', dir, '--ephemeral', '--ttl', '120']);
   assert.equal(result.code, 0, result.stderr);
   assert.deepEqual(json(requests[1]).ephemeral, { ttl_seconds: 120 });
-  assert.match(result.stdout, /trial\s+https:\/\/trial\.apps\.test\/\s+release 1\s+expires 2026-11-09T00:10:00\.000Z/);
+  assert.match(result.stdout, /trial\s+https:\/\/trial\.apps\.test\/\s+release 1\s+expires 2026-11-09T00:10:00\.000Z\s+app a1b2c3$/m);
   requests = [];
   assert.equal((await appctl(['publish', 'trial', dir, '--ephemeral'])).code, 0);
   assert.deepEqual(json(requests[1]).ephemeral, {});
@@ -371,7 +371,10 @@ test('AC-EPH-1 publish --ephemeral --ttl sends the marker with its ttl and print
 
 test('AC-EPH-1 publish --ttl without --ephemeral, or with a ttl that is not whole seconds, is a usage error before any request', async () => {
   const dir = source({ contract: 1, capabilities: { static: { dir: 'dist' } } }, { 'dist/index.html': '<h1>hi</h1>' });
-  for (const args of [['--ttl', '60'], ['--ephemeral', '--ttl', '1.5']]) assert.equal((await appctl(['publish', 'trial', dir, ...args])).code, 1);
+  for (const args of [['--ttl', '60'], ['--ephemeral', '--ttl', '1.5']]) {
+    const { code, stderr } = await appctl(['publish', 'trial', dir, ...args]);
+    assert.deepEqual([code, /--ttl takes whole seconds and needs --ephemeral/.test(stderr)], [1, true], stderr);
+  }
   assert.deepEqual(requests, []);
 });
 
@@ -379,6 +382,11 @@ test('AC-EPH-2 discard posts to the discard path without asking', async () => {
   const { code, stdout } = await appctl(['discard', 'trial']);
   assert.deepEqual([code, requests.map((r) => `${r.method} ${r.url}`)], [0, ['POST /api/apps/trial/discard']]);
   assert.match(stdout, /discarded trial/);
+});
+
+test('ADR 0038 discard --app sends the id the publish printed, so a retry never ends a later app of the name', async () => {
+  assert.equal((await appctl(['discard', 'trial', '--app', 'a1b2c3'])).code, 0);
+  assert.deepEqual(requests.map((r) => `${r.method} ${r.url}`), ['POST /api/apps/trial/discard?app=a1b2c3']);
 });
 
 test('AC-MGR-1 publish --manager --manager-url sets the manager in the body and names it in the header', async () => {
@@ -408,7 +416,10 @@ test('AC-MGR-3 unmanage deletes the manager naming it', async () => {
 
 test('--manager-url without --manager, or a manager name outside the grammar, is a usage error before any request', async () => {
   const dir = source({ contract: 1, capabilities: { static: { dir: 'dist' } } }, { 'dist/index.html': '<h1>hi</h1>' });
-  for (const args of [['--manager-url', 'https://deploy.test/'], ['--manager', 'Deployer']]) assert.equal((await appctl(['publish', 'board', dir, ...args])).code, 1);
+  for (const [args, why] of [[['--manager-url', 'https://deploy.test/'], /--manager-url needs --manager/], [['--manager', 'Deployer'], /manager name "Deployer" must match/]] as const) {
+    const { code, stderr } = await appctl(['publish', 'board', dir, ...args]);
+    assert.deepEqual([code, why.test(stderr)], [1, true], stderr);
+  }
   assert.deepEqual(requests, []);
 });
 

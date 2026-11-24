@@ -986,6 +986,8 @@ const I18N = {
     'd.publish': '发布新版本', 'd.remove': '移除', 'd.purge': '清除', 'cancel': '取消',
     'd.removeTitle': '移除 {name}？', 'd.removeBody': '地址将返回 404。卷、数据库、键前缀和 bucket 全部保留，再次发布即可恢复。',
     'd.purgeTitle': '清除 {name}？', 'd.purgeBody': '这会删除它的文件、数据库、键值数据和 bucket，无法撤销。',
+    'd.discardItem': '丢弃…', 'd.discardNote': '现在结束，删除全部数据', 'd.discard': '丢弃', 'd.discardTitle': '丢弃临时应用 {name}？',
+    'd.discardBody': '它现在就结束，不等到期：文件、数据库、键值数据和 bucket 一并删除，无法撤销。名字随后释放。',
     'd.requests': '请求（24 小时）', 'd.errors': '错误（24 小时）', 'd.lastAccess': '最近访问', 'd.release': '当前版本',
     'sec.usage': '热度', 'sec.usageDesc': '每格是一个小时，行是日期，最新在上；当地时间。',
     'sec.policy': '策略', 'sec.policyDesc': '只对这个应用生效的覆盖值。留空则沿用平台值。',
@@ -1283,6 +1285,8 @@ const I18N = {
     'd.publish': 'Publish release', 'd.remove': 'Remove', 'd.purge': 'Purge', 'cancel': 'Cancel',
     'd.removeTitle': 'Remove {name}?', 'd.removeBody': 'Its address will answer 404. Every volume, database, key prefix and bucket is kept; publishing again restores it.',
     'd.purgeTitle': 'Purge {name}?', 'd.purgeBody': 'This deletes its files, database, key-value data and bucket. It cannot be undone.',
+    'd.discardItem': 'Discard…', 'd.discardNote': 'ends it now, deletes every byte', 'd.discard': 'Discard', 'd.discardTitle': 'Discard the ephemeral app {name}?',
+    'd.discardBody': 'It ends now rather than when it expires: its files, database, key-value data and bucket are deleted, which cannot be undone. Its name is free afterwards.',
     'd.requests': 'Requests, 24 h', 'd.errors': 'Errors, 24 h', 'd.lastAccess': 'Last access', 'd.release': 'Current release',
     'sec.usage': 'Heat', 'sec.usageDesc': 'One cell per hour, one row per day, newest on top; local time.',
     'sec.policy': 'Policy', 'sec.policyDesc': 'Overrides for this app. An empty field follows the platform value.',
@@ -1624,8 +1628,12 @@ async function api(method, path, body, contentType = 'application/json', extra =
 const appPath = (name) => `/api/apps/${encodeURIComponent(name)}`;
 /** A write to a managed app names its manager (ADR 0039); sent only after the person typed the name in the approval card. */
 const naming = (manager) => (manager ? { 'X-Pneuma-Space-Manager': manager.name } : {});
-/** Where a person acts through the manager; the server admits only http and https URLs, and the page links nothing else either. */
-const managerLink = (manager, label, attrs = {}) => (/^https?:\/\//.test(manager.url ?? '') ? h('a', { ...attrs, href: manager.url, target: '_blank', rel: 'noopener' }, label) : null);
+/** Where a person acts through the manager; the server admits only http and https URLs, and the page links nothing else either. A URL stored before the server normalised it parses the same. */
+const managerLink = (manager, label, attrs = {}) => {
+  let url = null;
+  try { url = new URL(manager.url); } catch {}
+  return url && /^https?:$/.test(url.protocol) ? h('a', { ...attrs, href: url.href, target: '_blank', rel: 'noopener' }, label) : null;
+};
 const managerChip = (manager) => (manager == null ? null
   : managerLink(manager, t('d.manager', { name: manager.name }), { class: 'chip text' }) ?? h('span', { class: 'chip text' }, t('d.manager', { name: manager.name })));
 const appLink = (name) => h('a', { href: `#/apps/${encodeURIComponent(name)}`, class: 'mono' }, name);
@@ -3730,11 +3738,16 @@ async function detail(name) {
     return op(killCard(sampled ?? { app: app.name, tenant: app.tenant, runtime: row.runtime, node: row.node, pod: null, leases: row.leases }), post('kill'));
   };
   const remove = () => op({ title: t('d.removeTitle', { name: app.name }), body: t('d.removeBody'), action: t('d.remove'), manager: app.manager }, post('remove', naming(app.manager)));
+  /** What purge and discard delete, one fact per binding. */
+  const doomed = () => inventory.bindings.map((b) => [h('b', {}, b.kind), ' ', h('span', { class: 'mono' }, Object.values(b.location).join(' · ') || b.provider)]);
   const purge = () => op({
     title: t('d.purgeTitle', { name: app.name }), body: t('d.purgeBody'), danger: true, action: t('d.purge'),
-    confirmText: session.me.hosted ? app.name : null, manager: app.manager,
-    facts: inventory.bindings.map((b) => [h('b', {}, b.kind), ' ', h('span', { class: 'mono' }, Object.values(b.location).join(' · ') || b.provider)]),
+    confirmText: session.me.hosted ? app.name : null, manager: app.manager, facts: doomed(),
   }, () => api('POST', `${appPath(app.name)}/purge`, session.me.hosted ? { confirm: app.name } : undefined, undefined, naming(app.manager)), () => { location.hash = '#/apps'; });
+  /** The id keeps the discard off a later app the name may be published as meanwhile (ADR 0038). */
+  const discard = () => op({
+    title: t('d.discardTitle', { name: app.name }), body: t('d.discardBody'), danger: true, action: t('d.discard'), manager: app.manager, facts: doomed(),
+  }, () => api('POST', `${appPath(app.name)}/discard?app=${encodeURIComponent(app.id)}`, undefined, undefined, naming(app.manager)), () => { location.hash = '#/apps'; });
   const access = () => {
     let pick = app.access;
     // `access` decides whether a request arrives, the current release's `identity` whether it must sign in (docs/app-contract.md, Access).
@@ -3769,11 +3782,13 @@ async function detail(name) {
 
   const menu = (row) => moreMenu(t('cl.moreFor', { name: app.name }), [
     row?.quarantine && may('app.remove') && { label: t('d.unquarantine'), note: t('d.liftNote'), onPick: lift },
-    upstream() && may('app.access') && { label: t('ac.change'), note: t(`ac.${app.access}`), onPick: access },
+    // An ephemeral app's access stays tenant (ADR 0038), so there is nothing to change.
+    upstream() && may('app.access') && app.expiresAt == null && { label: t('ac.change'), note: t(`ac.${app.access}`), onPick: access },
     upstream() && may('app.move') && { label: t('d.move'), note: others.length ? app.tenant : t('mv.none'), disabled: !others.length, onPick: move },
     app.status === 'registered' && may('app.remove') && { label: t('d.removeItem'), note: t('d.removeNote'), onPick: remove },
     may('app.kill') && row && ACTIVE.includes(row.instance) && { label: t('cl.killItem'), note: t('cl.killNote'), danger: true, onPick: () => kill(row) },
     app.status === 'removed' && may('app.purge') && { label: t('d.purgeItem'), note: t('d.purgeNote'), danger: true, onPick: purge },
+    app.expiresAt != null && may('app.discard') && { label: t('d.discardItem'), note: t('d.discardNote'), danger: true, onPick: discard },
   ]);
 
   const attentionItems = (row, fresh, events) => {

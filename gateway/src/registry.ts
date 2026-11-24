@@ -364,9 +364,11 @@ export class PlatformRegistry implements Registry {
     });
   }
 
-  discard(name: AppName, named?: ManagerName | null): Promise<void> {
+  discard(name: AppName, named?: ManagerName | null, id?: AppId | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
+      // A retry after a lost answer may meet a later app the name was published as since; the id the publish returned tells them apart (ADR 0038).
+      if (id && app.id !== id) throw new Conflict(`app "${name}" is now ${app.id}, not ${id}: the name belongs to a later app; nothing was discarded`);
       mustName(app, named);
       if (app.expiresAt === null) throw new Conflict(`app "${name}" is durable; discard ends only an ephemeral app, remove and purge end this one`);
       await this.#purge(app);
@@ -386,11 +388,19 @@ export class PlatformRegistry implements Registry {
       const resumed = app.status === 'purging';
       if (!resumed) await audit('started');
       await this.#purge(app).catch(async (error: Error) => {
-        await audit('error', { error: error.message });
+        // Every sweep retries a failed end; the audit only grows, so a failure is written once until the outcome changes (ADR 0024 item 6).
+        if (!(await this.#failedAlike(app, error.message))) await audit('error', { error: error.message, ...(resumed && { resumed }) });
         throw error;
       });
       await audit('ok', resumed ? { resumed } : {});
     }).catch((error: Error) => log('expire-failed', view.name, { error: error.message }))));
+  }
+
+  /** Whether the app's last discard or expiry row already records this error. Rows of an earlier app of the same name are all older. */
+  async #failedAlike(app: App, error: string): Promise<boolean> {
+    const rows = await Promise.all((['app.expire', 'app.discard'] as const).map((action) => this.#store.audit({ action, target: app.name, limit: 1 })));
+    const last = rows.flat().filter((row) => row.details.appId === app.id).sort((a, b) => b.id - a.id)[0];
+    return last?.result === 'error' && last.details.error === error;
   }
 
   /** Persists purging first, so a restart finishes what this run does not (DESIGN 2.3). */
@@ -454,7 +464,6 @@ export class PlatformRegistry implements Registry {
     const fields = parsePolicyPatch(patch, 'app');
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
-      mustName(app, named);
       const { quota } = await this.#mustTenant(this.#store, app.tenant);
       for (const field of ['cpu_millis', 'memory_mb'] as const) {
         const value = fields[field];
@@ -463,6 +472,7 @@ export class PlatformRegistry implements Registry {
           throw new InputError(`${field} ${value} is above tenant "${app.tenant}"'s ${field} quota of ${limit}`);
         }
       }
+      mustName(app, named);
       const override: Record<string, unknown> = { ...app.policyOverride };
       for (const [key, value] of Object.entries(fields)) {
         if (value === null) delete override[key];
@@ -636,8 +646,8 @@ export class PlatformRegistry implements Registry {
   moveApp(name: AppName, tenant: TenantName, named?: ManagerName | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
-      mustName(app, named);
       await this.#mustTenant(this.#store, tenant);
+      mustName(app, named);
       if (app.status === 'purging') throw new Conflict(`app "${name}" is being purged`);
       if (app.tenant === tenant) return;
       await this.#runtime.retire(app.id);

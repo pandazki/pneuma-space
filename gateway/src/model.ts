@@ -172,13 +172,17 @@ export function managerName(raw: string): ManagerName {
   return raw as ManagerName;
 }
 
-/** Absolute http or https only, so the console never links a script URL. */
+/**
+ * Absolute http or https only, so the console never links a script URL. Stored as the URL parser writes it, so the scheme is lower case and
+ * a stored value reads back as the link it is; control characters are refused, since PostgreSQL TEXT takes no NUL.
+ */
 export function managerUrl(raw: string): string {
-  const protocol = URL.canParse(raw) ? new URL(raw).protocol : null;
-  if (raw.length > MANAGER_URL_MAX || (protocol !== 'https:' && protocol !== 'http:')) {
-    throw new InputError(`manager url must be an absolute http or https URL of at most ${MANAGER_URL_MAX} characters, got ${JSON.stringify(raw)}`);
+  const url = !/[\u0000-\u001f\u007f]/.test(raw) && URL.canParse(raw) ? new URL(raw) : null;
+  const href = url?.protocol === 'https:' || url?.protocol === 'http:' ? url.href : null;
+  if (href === null || href.length > MANAGER_URL_MAX) {
+    throw new InputError(`manager url must be an absolute http or https URL of at most ${MANAGER_URL_MAX} characters without control characters, got ${JSON.stringify(raw)}`);
   }
-  return raw;
+  return href;
 }
 
 export type Release = {
@@ -1087,8 +1091,8 @@ export interface Registry {
   remove(name: AppName, named?: ManagerName | null): Promise<void>;
   /** Only from removed; otherwise Conflict. */
   purge(name: AppName, named?: ManagerName | null): Promise<void>;
-  /** Purge from any status, for an ephemeral app only; Conflict for a durable one (ADR 0038). */
-  discard(name: AppName, named?: ManagerName | null): Promise<void>;
+  /** Purge from any status, for an ephemeral app only; Conflict for a durable one, or when `id` is given and the app has another (ADR 0038). */
+  discard(name: AppName, named?: ManagerName | null, id?: AppId | null): Promise<void>;
   /** The leader's sweep: discards every ephemeral app whose end is at or before `now`, whatever its status (ADR 0038). */
   expire(now?: number): Promise<void>;
   setGlobalPolicy(patch: Partial<Policy>): Promise<Policy>;

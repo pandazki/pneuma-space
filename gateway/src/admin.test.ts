@@ -436,6 +436,16 @@ test('AC-EPH-2 POST /api/apps/<name>/discard ends an ephemeral app and writes ap
   assert.deepEqual((await audit(store, 'trial')).filter((r) => r.action === 'app.discard').map((r) => r.result), ['started', 'ok']);
 });
 
+test('ADR 0038 POST /api/apps/<name>/discard?app=<id> answers 409 for another id and 400 for an empty one, and discards for the id the publish returned', async (t) => {
+  const { call, server, registry } = await admin();
+  t.after(() => server.close());
+  const { body: release } = await call('PUT', '/api/apps/trial/release', { ...kvApp, ephemeral: {} });
+  assert.deepEqual([(await call('POST', '/api/apps/trial/discard?app=0123456789ab')).status, (await call('POST', '/api/apps/trial/discard?app=')).status], [409, 400]);
+  assert.equal(registry.view(appName('trial'))?.status, 'registered');
+  assert.equal((await call('POST', `/api/apps/trial/discard?app=${release.app}`)).status, 200);
+  assert.equal(registry.view(appName('trial')), null);
+});
+
 test('AC-EPH-2 POST /api/apps/<name>/discard on a durable app answers 409', async (t) => {
   const { call, server, registry } = await admin();
   t.after(() => server.close());
@@ -501,6 +511,14 @@ test('AC-MGR-3 DELETE /api/apps/<name>/manager clears the manager when it names 
   assert.deepEqual((await audit(store, 'survey')).filter((r) => r.action === 'app.manager').map((r) => r.result), ['started', 'refused', 'started', 'ok']);
 });
 
+test('ADR 0039 a manager url is stored as the URL parser writes it, and one with a control character answers 400', async (t) => {
+  const { call, server } = await admin();
+  t.after(() => server.close());
+  assert.equal((await call('PUT', '/api/apps/survey/release', { ...kvApp, manager: { name: 'deployer', url: 'https://deploy.test/\u0000x' } })).status, 400);
+  assert.equal((await call('PUT', '/api/apps/survey/release', { ...kvApp, manager: { name: 'deployer', url: ' HTTPS://Deploy.test/x' } })).status, 200);
+  assert.deepEqual((await call('GET', '/api/apps/survey')).body.app.manager, { name: 'deployer', url: 'https://deploy.test/x' });
+});
+
 test('ADR 0039 a manager outside the name grammar, a url that is not absolute http or https, or a malformed header answers 400', async (t) => {
   const { base, call, server } = await admin();
   t.after(() => server.close());
@@ -509,4 +527,28 @@ test('ADR 0039 a manager outside the name grammar, a url that is not absolute ht
   }
   await call('PUT', '/api/apps/survey/release', managedApp);
   assert.equal((await fetch(`${base}/api/apps/survey/remove`, { method: 'POST', headers: { 'x-pneuma-space-manager': 'Deployer' } })).status, 400);
+});
+
+test('ADR 0039 a malformed manager header answers 400 on an unmanaged app too, and the app is not removed', async (t) => {
+  const { base, call, server, registry } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  const remove = await fetch(`${base}/api/apps/survey/remove`, { method: 'POST', headers: { 'x-pneuma-space-manager': 'Deployer' } });
+  assert.deepEqual([remove.status, registry.view(appName('survey'))?.status], [400, 'registered']);
+});
+
+test('ADR 0039 a manager header given twice answers 400 saying it names one manager', async (t) => {
+  const { base, call, server } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', managedApp);
+  // Two header lines; fetch would join them before sending.
+  const reply = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const request = httpRequest(`${base}/api/apps/survey/remove`, { method: 'POST', headers: { 'x-pneuma-space-manager': ['deployer', 'deployer'] } }, (response) => {
+      let body = '';
+      response.on('data', (chunk) => (body += chunk)).on('end', () => resolve({ status: response.statusCode!, body }));
+    });
+    request.on('error', reject).end();
+  });
+  assert.equal(reply.status, 400);
+  assert.match(JSON.parse(reply.body).error, /names one manager, got "deployer, deployer"/);
 });

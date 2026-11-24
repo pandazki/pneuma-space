@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test, type TestContext } from 'node:test';
 import {
-  adminClient, adminUrl, appId, appJson, appPut, appUrl, bucketExists, cleanup, compose, deliveries, deploy, images, OWNER, publish, serviceToken,
+  adminClient, adminUrl, appctl, appId, appJson, appPut, appUrl, bucketExists, chrome, cleanup, compose, deliveries, deploy, images, OWNER, publish, serviceToken,
   setupSuite, sleep, summary, teardownSuite, uniqueName, volumeExists, waitFor, type Capabilities,
 } from './harness.ts';
 import { ADMIN_PATHS } from '../../gateway/src/model.ts';
@@ -117,4 +117,73 @@ test('AC-EPH-5', { timeout: 150_000 }, async (t) => {
   assert.equal(response.status, 202);
   const { delivery } = await response.json();
   await waitFor(async () => (await appJson(app.name, '/deliveries')).some((d: any) => d.delivery === delivery && d.phase === 'start'), 30_000, 'the invoked delivery to run');
+});
+
+/** What a gateway from before ADR 0038 leaves for a tenant it creates after the migration ran: a quota without `ephemeral`. */
+const OLD_TENANT_ROW = `
+import { DatabaseSync } from 'node:sqlite';
+const db = new DatabaseSync('/data/pneuma-space.sqlite3');
+db.exec('PRAGMA busy_timeout = 5000');
+const { changes } = db.prepare("UPDATE tenant SET quota = json_remove(quota, '$.ephemeral') WHERE name = ?").run(process.argv[1]);
+if (changes !== 1) throw new Error('no tenant ' + process.argv[1]);`;
+
+test('AC-EPH-6', { timeout: 120_000 }, async (t) => {
+  const tenant = uniqueName('eph');
+  assert.equal((await adminClient.createTenant(tenant, OWNER.slice('user:'.length))).status, 200);
+  compose('exec', '-T', 'gateway', 'node', '--disable-warning=ExperimentalWarning', '--input-type=module', '-e', OLD_TENANT_ROW, tenant);
+  assert.equal((await adminClient.quota(tenant)).body.quota.ephemeral, 3);
+  for (let i = 0; i < 3; i++) await ephemeral(t, {}, undefined, tenant);
+  const fourth = uniqueName('eph');
+  t.after(() => cleanup(fourth));
+  const refused = await adminClient.publish(fourth, { ...release({ ephemeral: {} }), tenant } as never);
+  assert.deepEqual([refused.status, refused.body.quota?.resource, refused.body.quota?.limit], [409, 'ephemeral', 3]);
+});
+
+test('AC-EPH-7', { timeout: 240_000 }, async (t) => {
+  const app = await ephemeral(t, { db: {} }, 30);
+  assert.ok((await adminClient.setAppPolicy(app.name, { db_backend: 'postgres' })).status < 300, 'db_backend postgres');
+  const expiry = async () => (await audit(app.name)).filter(([, action]: string[]) => action === 'app.expire');
+  compose('stop', 'postgres');
+  try {
+    await waitFor(async () => (await expiry()).some(([, , result]: string[]) => result === 'error'), 60_000, 'the end to fail');
+    assert.equal((await summary(app.name)).status, 'purging');
+    await sleep(35_000);
+    assert.deepEqual(await expiry(), [['platform', 'app.expire', 'started'], ['platform', 'app.expire', 'error']], 'sweeps failing the same way add no row');
+  } finally {
+    compose('--profile', 'postgres', 'up', '-d', 'postgres');
+  }
+  await waitFor(async () => (await summary(app.name)) === null, 60_000, 'the end once postgres is back');
+  const last = (await adminClient.audit(app.name)).body.find((r: any) => r.action === 'app.expire');
+  assert.deepEqual([last.actor, last.result, last.details.resumed], ['platform', 'ok', true]);
+});
+
+test('AC-EPH-8', { timeout: 120_000 }, async (t) => {
+  const first = await ephemeral(t, {});
+  assert.match(first.printed, new RegExp(`  app ${first.id}$`, 'm'));
+  assert.ok((await adminClient.discard(first.name)).status < 300);
+  publish(first.name, { image: images.echo, capabilities: {}, flags: ['--ephemeral'] });
+  const second = await appId(first.name);
+  assert.equal((await fetch(`${adminUrl}${ADMIN_PATHS.discard(first.name)}?app=${first.id}`, { method: 'POST' })).status, 409);
+  assert.equal((await summary(first.name)).status, 'registered');
+  appctl('discard', first.name, '--app', second);
+  assert.equal(await summary(first.name), null);
+});
+
+test('AC-EPH-9', { timeout: 120_000 }, async (t) => {
+  const app = await ephemeral(t, { files: {} });
+  const page = await (await chrome(t))(`${adminUrl}/`);
+  await waitFor(() => page.evaluate(`location.origin === ${JSON.stringify(adminUrl)} && document.readyState === 'complete' && typeof t === 'function'`), 15_000, 'the console');
+  await page.evaluate(`location.hash = ${JSON.stringify(`#/apps/${app.name}`)}`);
+  await waitFor(() => page.evaluate(`!!document.querySelector('.dact button[aria-haspopup="menu"]')`), 15_000, 'the detail');
+  await page.evaluate(`document.querySelector('.dact button[aria-haspopup="menu"]').click()`);
+  await waitFor(() => page.evaluate(`!!document.querySelector('.menu')`), 5000, 'the actions menu');
+  await page.evaluate(`[...document.querySelectorAll('.menu button')].find((b) => b.textContent.startsWith(t('d.discardItem'))).click()`);
+  const title = await waitFor(() => page.evaluate(`document.querySelector('dialog.approval[open] h3')?.textContent`), 5000, 'the approval card');
+  assert.equal(title, await page.evaluate(`t('d.discardTitle', { name: '${app.name}' })`));
+  await page.evaluate(`(() => { const sent = window.sent = []; const original = window.fetch; window.fetch = (url, init) => (sent.push(String(url)), original(url, init)); })()`);
+  await page.evaluate(`document.querySelector('dialog.approval[open] button[value="ok"]').click()`);
+  await waitFor(async () => (await summary(app.name)) === null, 15_000, 'the console to discard the app');
+  assert.ok(await page.evaluate(`window.sent.includes('/api/apps/${app.name}/discard?app=${app.id}')`), 'the discard names the app id');
+  await waitFor(() => !volumeExists(`pneuma-space-files-${app.id}`), 30_000, 'volume deleted by discard');
+  assert.deepEqual((await audit(app.name)).filter(([, action]: string[]) => action === 'app.discard'), [['local', 'app.discard', 'started'], ['local', 'app.discard', 'ok']]);
 });

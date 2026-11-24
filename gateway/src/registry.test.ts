@@ -6,7 +6,7 @@ import { Ingress } from './ingress.ts';
 import { Series } from './metrics.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
-  Conflict, DEFAULT_TENANT, InputError, QuotaExceeded, appName, managerName, parseManifest, subject, tenantName, triggerName,
+  Conflict, DEFAULT_TENANT, InputError, NotFound, QuotaExceeded, appName, managerName, parseManifest, subject, tenantName, triggerName,
   type App, type AppId, type BundleId, type Capabilities, type Change, type ManagerName, type PublishRequest, type ReleaseNumber, type Store, type StoreOps,
 } from './model.ts';
 import { PlatformRegistry } from './registry.ts';
@@ -709,6 +709,18 @@ test('AC-EPH-2 discard of a durable app is refused and changes nothing', async (
   assert.deepEqual([registry.view(survey)?.status, w.calls.filter(([verb]) => verb === 'destroy')], ['registered', []]);
 });
 
+test('ADR 0038 a discard given the id of an earlier app of the name is refused and changes nothing; given the app\'s own id it ends the app', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  const { app: earlier } = await temporary(registry, { kv: {} });
+  await registry.discard(trial);
+  const { app } = await temporary(registry, { kv: {} });
+  await assert.rejects(registry.discard(trial, null, earlier), (error) => error instanceof Conflict && /belongs to a later app/.test(error.message));
+  assert.deepEqual([(await store.app(trial))?.status, w.calls.filter(([verb, , id]) => verb === 'destroy' && id === app)], ['registered', []]);
+  await registry.discard(trial, null, app);
+  assert.equal(await store.app(trial), null);
+});
+
 test('ADR 0038 a discard interrupted after the first destroy finishes on resume after restart', async () => {
   const w = world();
   const { registry } = await w.open();
@@ -750,6 +762,49 @@ test('ADR 0038 the sweep finishes an expired ephemeral app a failed discard left
   await registry.expire(Date.now() + 1000);
   assert.equal(await store.app(trial), null);
   assert.deepEqual((await store.audit({ target: 'trial' })).map((r) => [r.action, r.result, r.details.resumed]), [['app.expire', 'ok', true]]);
+});
+
+test('ADR 0038 sweeps that keep failing to end an app audit the error once, and the end that finally succeeds as resumed', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  await temporary(registry, { kv: {} }, 1);
+  for (let sweep = 0; sweep < 3; sweep++) {
+    w.providers.get('redis')!.fail = 'destroy';
+    await registry.expire(Date.now() + 1000);
+  }
+  await registry.expire(Date.now() + 1000);
+  assert.equal(await store.app(trial), null);
+  assert.deepEqual((await store.audit({ target: 'trial' })).reverse().map((r) => [r.result, r.details.error, r.details.resumed]), [
+    ['started', undefined, undefined], ['error', 'redis destroy failed', undefined], ['ok', undefined, true],
+  ]);
+});
+
+test('ADR 0038 a sweep that resumes an end and fails audits the error as resumed, once while the error stays the same', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  await temporary(registry, { kv: {} }, 1);
+  w.providers.get('redis')!.fail = 'destroy';
+  await assert.rejects(registry.discard(trial), /redis destroy failed/);
+  for (let sweep = 0; sweep < 2; sweep++) {
+    w.providers.get('redis')!.fail = 'destroy';
+    await registry.expire(Date.now() + 1000);
+  }
+  assert.deepEqual((await store.audit({ target: 'trial' })).map((r) => [r.action, r.result, r.details.resumed]), [['app.expire', 'error', true]]);
+});
+
+test('ADR 0038 a sweep that fails as the discard before it did adds no row', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  const { app } = await temporary(registry, { kv: {} }, 1);
+  w.providers.get('redis')!.fail = 'destroy';
+  await assert.rejects(registry.discard(trial), /redis destroy failed/);
+  await store.insertAudit({
+    at: Date.now(), actor: 'local', actorTenant: null, tenant: DEFAULT_TENANT, action: 'app.discard', targetKind: 'app', target: 'trial', result: 'error',
+    details: { error: 'redis destroy failed', appId: app },
+  });
+  w.providers.get('redis')!.fail = 'destroy';
+  await registry.expire(Date.now() + 1000);
+  assert.deepEqual((await store.audit({ target: 'trial' })).map((r) => [r.action, r.result]), [['app.discard', 'error']]);
 });
 
 for (const end of ['discard', 'expire'] as const) {
@@ -855,6 +910,18 @@ test('AC-MGR-2 each write naming the manager proceeds, through to purge', async 
   await registry.remove(survey, named);
   await registry.purge(survey, named);
   assert.equal(await store.app(survey), null);
+});
+
+test('ADR 0039 a move of a managed app to a tenant that does not exist is NotFound, with the name or without it', async () => {
+  const { registry } = await world().open();
+  await managed(registry);
+  for (const as of [null, named]) await assert.rejects(registry.moveApp(survey, tenantName('nowhere'), as), (error) => error instanceof NotFound);
+});
+
+test('ADR 0039 a policy above the tenant quota is an input error on a managed app, with the name or without it', async () => {
+  const { registry } = await quotaWorld({ cpu_millis: 2000 });
+  await managed(registry, { kv: {} }, { tenant: blue });
+  for (const as of [null, named]) await assert.rejects(registry.setAppPolicy(survey, { cpu_millis: 2001 }, as), (error) => error instanceof InputError);
 });
 
 test('ADR 0039 stop, restart and kill of a managed app need no name', async () => {
