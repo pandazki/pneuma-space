@@ -60,3 +60,9 @@ Also verified without an account: eight CF-23 engine tests against a simulated a
 Not verified: a deploy that fails and is retried against the real service, an install interrupted midway, an account with several memberships, and an apps domain other than the control domain.
 
 Of the stumbles above, the installer removes the hand-edited names, the hand-built secrets, the required TURN values and the manual deploy retry. The token remains the one manual step (ADR 0041). The browser-less publishing token and the CLI certificate wait belong to publishing, not installation.
+
+## Path routing (2026-11-24)
+
+[ADR 0044](../../docs/adr/0044-cloudflare-path-routing.md) moved every app from its own Custom Domain to `/apps/NAME/` on the control origin and removed the app session and grant exchange. The results above that mention exact app domains, certificates, app grants or domain cleanup describe that earlier addressing and say nothing about the current one.
+
+The path routing change has passed TypeScript, 84 engine tests with the four Docker cases skipped, and `wrangler deploy --dry-run`; the engine tests include the CF-04 and CF-24 rows against local workerd. It has not run on Cloudflare: the installer's upgrade of a per-app-domain deployment, its removal of the old token secret, apps created before the change, Node requests and WebSockets under the prefix, the starter and notebook pages in a browser, and `npm run verify` are unverified.

@@ -54,7 +54,7 @@ function artifactCors(template, origin) {
   return { rules: template.rules.map(rule => ({ ...rule, allowed: { ...rule.allowed, origins: [origin] } })) };
 }
 
-export const LEGACY_TOKEN_SECRET = 'PNEUMA_SPACE_CF_API_TOKEN';
+const LEGACY_TOKEN_SECRET = 'PNEUMA_SPACE_CF_API_TOKEN';
 
 export function workerSecrets(token, tokenId, { [LEGACY_TOKEN_SECRET]: _, ...existing } = {}) {
   return { ...existing, PNEUMA_SPACE_R2_ACCESS_KEY_ID: tokenId, PNEUMA_SPACE_R2_SECRET_ACCESS_KEY: createHash('sha256').update(token).digest('hex') };
