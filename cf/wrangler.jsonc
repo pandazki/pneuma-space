@@ -1,0 +1,37 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "pneuma-space-example",
+  "main": "src/worker.ts",
+  "build": { "command": "node scripts/build-cli.mjs" },
+  "compatibility_date": "2026-11-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "PNEUMA_SPACE_CONTROL_ORIGIN": "https://space.example.com",
+    "PNEUMA_SPACE_APPS_DOMAIN": "space-apps.example.com",
+    "PNEUMA_SPACE_ACCOUNT_ID": "",
+    "PNEUMA_SPACE_ZONE_ID": "",
+    "PNEUMA_SPACE_WORKER_NAME": "pneuma-space-example",
+    "PNEUMA_SPACE_ARTIFACT_BUCKET": "pneuma-space-example-artifacts",
+    "PNEUMA_SPACE_OBJECT_BUCKET": "pneuma-space-example-objects",
+    "PNEUMA_SPACE_MAX_ACCOUNTS": "20"
+  },
+  "secrets": { "required": ["PNEUMA_SPACE_CF_API_TOKEN", "PNEUMA_SPACE_R2_ACCESS_KEY_ID", "PNEUMA_SPACE_R2_SECRET_ACCESS_KEY", "PNEUMA_SPACE_TURN_KEY_ID", "PNEUMA_SPACE_TURN_API_TOKEN"] },
+  "d1_databases": [{ "binding": "PNEUMA_SPACE_DB", "database_name": "pneuma-space-example", "database_id": "00000000-0000-0000-0000-000000000000" }],
+  "r2_buckets": [
+    { "binding": "PNEUMA_SPACE_ARTIFACTS", "bucket_name": "pneuma-space-example-artifacts" },
+    { "binding": "PNEUMA_SPACE_OBJECTS", "bucket_name": "pneuma-space-example-objects" }
+  ],
+  "durable_objects": { "bindings": [{ "name": "PNEUMA_SPACE_APPS", "class_name": "AppCell" }] },
+  "exports": { "AppCell": { "type": "durable-object", "storage": "sqlite" } },
+  "containers": [{
+    "class_name": "AppCell",
+    "name": "pneuma-space-example",
+    "scheduling_policy": "durable_object",
+    "images": { "base": { "dockerfile": "./runner/Dockerfile" } }
+  }],
+  "assets": { "directory": "./public", "binding": "PNEUMA_SPACE_UI", "run_worker_first": true },
+  "limits": { "cpu_ms": 1000 },
+  "observability": { "enabled": true, "head_sampling_rate": 0.1 }
+}

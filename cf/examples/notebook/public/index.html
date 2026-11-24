@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>我的笔记 · PneumaSpace</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<main>
+  <header><div><p class="eyebrow">PNEUMASPACE</p><h1>留下一点想法。</h1><p id="identity">正在打开你的笔记…</p></div></header>
+  <p id="notice" role="status"></p>
+  <section><div class="heading"><h2>笔记</h2><span id="live">正在连接…</span></div><form id="note-form"><label for="note">新的想法</label><textarea id="note" maxlength="4000" required placeholder="写下一条，刷新或关闭后再回来。"></textarea><button>保存笔记</button></form><div id="notes"></div></section>
+  <div class="columns">
+    <section><h2>随手文档</h2><form id="document-form"><label for="document">文档内容</label><textarea id="document" maxlength="20000" placeholder="这份文档会一直保存。"></textarea><button>保存文档</button></form></section>
+    <section><h2>附件</h2><form id="upload-form"><label for="attachment">选择文件</label><input id="attachment" type="file" required><button>上传附件</button></form><div id="objects"></div></section>
+  </div>
+  <section><h2>运行记录</h2><p id="visits"></p><p id="jobs"></p><button id="relay" type="button">检查实时连接</button><p id="relay-result" role="status"></p></section>
+</main>
+<script type="module" src="/app.js"></script>
+</body></html>

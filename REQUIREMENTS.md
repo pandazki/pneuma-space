@@ -51,7 +51,7 @@ M1 只服务一个可信的机器、可信的运营者和可信的应用镜像�
 
 ## M1 范围
 
-一台可信机器上，开发者按 `docs/app-contract.md` 能做出上表七类应用并长期运行。用户故事和不变量在 `docs/user-stories.md`。模型和结构在 `DESIGN.md`，决定理由在 `docs/adr/`。
+一台可信机器上，开发者按 `docs/app-contract.md` 能做出上表七类应用并长期运行。M1 还有第二个承载面：运营者自己的 Cloudflare 账户，信任边界相同，应用契约不同（[ADR 0041](docs/adr/0041-cloudflare-m1-plane.md)，`cf/`）。用户故事和不变量在 `docs/user-stories.md`。模型和结构在 `DESIGN.md`，决定理由在 `docs/adr/`。
 
 M1 不做的事在 `DESIGN.md` 第 4 节。许可证是 MIT（`LICENSE`）。M2 组织版的需求在 `REQUIREMENTS-M2.md`。
 

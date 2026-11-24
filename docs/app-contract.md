@@ -1,6 +1,6 @@
 # App contract
 
-This file describes protocol version 1 for M1, M2 and the full hosted platform.
+This file describes protocol version 1 for M1 on Docker, M2 and the full hosted platform. The Cloudflare plane of M1 has [its own contract](../cf/docs/app-contract.md).
 
 What an app sees from PneumaSpace, and nothing else. The contract fixes protocols, not providers. `db` is a SQL connection URL, `kv` speaks the Redis protocol, `object` speaks S3, push is WebSocket and SSE. An app that follows this file runs on any PneumaSpace whichever database engine, Redis deployment, object store or runtime sits behind them. The one exception is SQL dialect: write the subset SQLite and PostgreSQL both accept. The platform model behind it is in `DESIGN.md` (Chinese). The example TypeScript SDK in `templates/` wraps this contract. Any language can do the same by reading environment variables and headers.
 

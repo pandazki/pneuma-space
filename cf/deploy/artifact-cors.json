@@ -1,0 +1,11 @@
+{
+  "rules": [{
+    "allowed": {
+      "origins": ["https://space.example.com"],
+      "methods": ["PUT"],
+      "headers": ["content-type"]
+    },
+    "exposeHeaders": ["ETag"],
+    "maxAgeSeconds": 600
+  }]
+}

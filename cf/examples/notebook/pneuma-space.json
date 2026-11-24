@@ -1,0 +1,10 @@
+{
+  "contract": "pneuma-space.cf/1",
+  "runtime": "node",
+  "entry": "main.mjs",
+  "capabilities": {
+    "db": {}, "kv": {}, "files": {}, "object": {}, "identity": { "required": true },
+    "static": { "dir": "public" }, "ws": {}, "rtc": {},
+    "cron": { "triggers": { "heartbeat": { "schedule": "0 0 * * *" } } }
+  }
+}
