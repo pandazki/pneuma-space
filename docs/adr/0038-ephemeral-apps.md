@@ -25,7 +25,7 @@
 2. **TTL 由策略决定，超限拒绝，不截断。** 缺省值是全局策略 `ephemeral_ttl_seconds`（默认 600），上限是 `ephemeral_max_ttl_seconds`（默认 3600）。两个字段只能全局设置，缺省值大于上限时答 400。TTL 超过上限的发布答 400，不建 App。截断会让应用在调用方预期之前悄悄结束。
 3. **一个动作结束它。** 用 `POST /api/apps/<name>/discard` 或 `appctl discard <name>`。动作是 `app.discard`，级别是 `owner`，令牌可用。托管令牌需要 `remove` 范围：令牌原本能结束什么，现在仍是那些。不要确认体，也不用先 remove。持久应用答 409。它从 `registered`、`removed`、`purging` 任一状态进入 purge 的同一路径：先持久化 `purging`，再退役实例、销毁每条 Binding、删除没有别的应用引用的 bundle、删行。终态与 purge 相同。中断的丢弃由启动和接任领导者时的续跑完成，到期后的清扫也会完成它。详情的 `may` 只对临时应用列出 `app.discard`。
 4. **到期自行结束。** 领导者在接任时清扫一次，之后每 10 s 清扫一次：`expires_at` 已到的临时应用按第 3 项结束，状态不论。每个应用的清扫审计为 `app.expire`，主体 `platform`，先写 `started`，再写 `ok` 或 `error`；续跑一次未完成的结束时只写带 `resumed` 的 `ok` 或 `error`。停机期间到期的应用在重启后的第一次清扫中结束。
-5. **单独计配额。** 临时应用不计入 `apps`，计入租户配额的新字段 `ephemeral`。`DEFAULT_QUOTA` 和托管个人租户为 3，`default` 租户不限，`null` 表示不限。迁移给已有租户补上这个字段：`default` 不限，其余为 3。运行时配额（`awake`、`cpu_millis`、`memory_mb`、`storage_gb`）照常适用。
+5. **单独计配额。** 临时应用不计入 `apps`，计入租户配额的新字段 `ephemeral`。`DEFAULT_QUOTA` 和托管个人租户为 3，`default` 租户不限，`null` 表示不限。迁移给已有租户补上这个字段：`default` 不限，其余为 3。迁移之后，滚动发布中仍在服务的旧网关（ADR 0025 第 8 条）建出的租户行没有这个字段；读租户时，缺的字段按 `DEFAULT_QUOTA` 补齐，所以它也是 3，缺字段不等于不限。运行时配额（`awake`、`cpu_millis`、`memory_mb`、`storage_gb`）照常适用。
 6. **访问固定为 `tenant`。** 建应用时就是 `tenant`，不受默认访问级别影响。access 命令改成其他值答 409。
 7. **不排日程。** Trigger 行和 Scheduler 视图里的 `schedule` 为空，只有建 Trigger 的函数里多一个分支，Scheduler 不变。按需 `invoke` 照常可用。
 8. **可见。** 列表和详情带 `expiresAt`，持久应用为 `null`；`appctl publish` 和 `appctl list` 打印结束时刻。审计记录创建（`app.publish` 的 details 带标记）、`app.discard` 和 `app.expire`。控制台项目卡片多一个标记和结束时刻，配额多一项。

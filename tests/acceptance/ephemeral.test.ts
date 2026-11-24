@@ -118,3 +118,23 @@ test('AC-EPH-5', { timeout: 150_000 }, async (t) => {
   const { delivery } = await response.json();
   await waitFor(async () => (await appJson(app.name, '/deliveries')).some((d: any) => d.delivery === delivery && d.phase === 'start'), 30_000, 'the invoked delivery to run');
 });
+
+/** What a gateway from before ADR 0038 leaves for a tenant it creates after the migration ran: a quota without `ephemeral`. */
+const OLD_TENANT_ROW = `
+import { DatabaseSync } from 'node:sqlite';
+const db = new DatabaseSync('/data/pneuma-space.sqlite3');
+db.exec('PRAGMA busy_timeout = 5000');
+const { changes } = db.prepare("UPDATE tenant SET quota = json_remove(quota, '$.ephemeral') WHERE name = ?").run(process.argv[1]);
+if (changes !== 1) throw new Error('no tenant ' + process.argv[1]);`;
+
+test('AC-EPH-6', { timeout: 120_000 }, async (t) => {
+  const tenant = uniqueName('eph');
+  assert.equal((await adminClient.createTenant(tenant, OWNER.slice('user:'.length))).status, 200);
+  compose('exec', '-T', 'gateway', 'node', '--disable-warning=ExperimentalWarning', '--input-type=module', '-e', OLD_TENANT_ROW, tenant);
+  assert.equal((await adminClient.quota(tenant)).body.quota.ephemeral, 3);
+  for (let i = 0; i < 3; i++) await ephemeral(t, {}, undefined, tenant);
+  const fourth = uniqueName('eph');
+  t.after(() => cleanup(fourth));
+  const refused = await adminClient.publish(fourth, { ...release({ ephemeral: {} }), tenant } as never);
+  assert.deepEqual([refused.status, refused.body.quota?.resource, refused.body.quota?.limit], [409, 'ephemeral', 3]);
+});

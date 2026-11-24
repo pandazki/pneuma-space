@@ -170,6 +170,7 @@ These rows cover [ADR 0038](adr/0038-ephemeral-apps.md) and US-P-17 and run in `
 | AC-EPH-3 | An ephemeral app with `--ttl 10` is gone, with its volume, within 30 s and no request, and the audit holds `app.expire` started and ok by `platform`. One whose end passes while the gateway is stopped is gone within 30 s of the gateway starting again. |
 | AC-EPH-4 | The default tenant's `ephemeral` quota is null. In a tenant with `ephemeral` 1, one ephemeral app counts 1 in `ephemeral` and 0 in `apps`; a second answers 409 with quota resource `ephemeral` until the first is discarded. |
 | AC-EPH-5 | An ephemeral app declaring `schedule: "* * * * *"` has no delivery after a minute boundary; `POST /apps/<name>/_pneuma-space/trigger/<t>` with a service token returns 202 and the delivery runs. |
+| AC-EPH-6 | A tenant row without the `ephemeral` field, as a gateway from before ADR 0038 writes it during a rolling update after the migration ran, reads as 3: the quota endpoint shows 3, and a fourth ephemeral app in the tenant answers 409 with quota resource `ephemeral`. |
 
 ## Managed apps
 
