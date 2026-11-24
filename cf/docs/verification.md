@@ -65,4 +65,13 @@ Of the stumbles above, the installer removes the hand-edited names, the hand-bui
 
 [ADR 0044](../../docs/adr/0044-cloudflare-path-routing.md) moved every app from its own Custom Domain to `/apps/NAME/` on the control origin and removed the app session and grant exchange. The results above that mention exact app domains, certificates, app grants or domain cleanup describe that earlier addressing and say nothing about the current one.
 
-The path routing change has passed TypeScript, 84 engine tests with the four Docker cases skipped, and `wrangler deploy --dry-run`; the engine tests include the CF-04 and CF-24 rows against local workerd. It has not run on Cloudflare: the installer's upgrade of a per-app-domain deployment, its removal of the old token secret, apps created before the change, Node requests and WebSockets under the prefix, the starter and notebook pages in a browser, and `npm run verify` are unverified.
+The change passed TypeScript, 84 engine tests with the four Docker cases skipped, and `wrangler deploy --dry-run`. The installer then upgraded a real per-app-domain deployment in one run:
+
+- It removed the account token from the Worker's secrets. The control origin kept answering; the workers.dev hostname and a former app hostname answered 404.
+- A newly published starter app answered at `/apps/NAME/` immediately, with no certificate wait. Signed in, its page and its API answered 200 on the first request, served by Node under the prefix. Its assets are relative.
+- Unauthenticated: an HTML navigation redirected to `/login?next=`, an API call answered 401, and the path without the trailing slash answered 308.
+- A cookie-authenticated write without an `Origin` answered 403; with the control origin it reached the app.
+- An app published before the change resolved by name. Its page loaded but still references assets from the root, as the ADR predicts, until it is republished.
+- With two apps awake, a third answered 503 `compute_quota` until one slept. The tenant's running-app limit is unchanged by this work.
+
+Not verified on Cloudflare: WebSockets, SSE and native subscriptions under the prefix, the pages in a browser, the notebook example and `npm run verify`.
