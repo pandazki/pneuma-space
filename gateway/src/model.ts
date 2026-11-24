@@ -9,7 +9,7 @@ import {
   Conflict, InputError, ManifestError, NAME_PATTERN, type AppId, type AppName, type Brand, type BundleId, type CronExpr, type DeliveryId,
   type ImageId, type ReleaseNumber, type Subject, type TenantName, type TriggerName,
 } from '../../shared/values.ts';
-import { asObject, capabilitiesFor, onlyKeys, runtimesFor, type IdentityDeclaration } from '../../shared/catalog.ts';
+import { CAPABILITIES, RUNTIMES, asObject, onlyKeys, type IdentityDeclaration } from '../../shared/catalog.ts';
 
 export {
   Conflict, DEFAULT_TENANT, InputError, ManifestError, NotFound, appName, bundleId, subject, tenantName, triggerName,
@@ -24,7 +24,7 @@ export function newAppId(): AppId {
 
 // Capabilities
 
-export const CAPABILITIES = capabilitiesFor(1);
+export { CAPABILITIES, RUNTIMES };
 export type CapabilityKind = keyof typeof CAPABILITIES;
 export const CAPABILITY_KINDS = Object.keys(CAPABILITIES) as readonly CapabilityKind[];
 export type Declaration<K extends CapabilityKind> = ReturnType<(typeof CAPABILITIES)[K]['parse']>;
@@ -53,7 +53,6 @@ export const RUNTIME_ENV = { app: 'PNEUMA_SPACE_APP', release: 'PNEUMA_SPACE_REL
 
 // Runtimes (ADR 0017)
 
-export const RUNTIMES = runtimesFor(1);
 export type RuntimeKind = keyof typeof RUNTIMES;
 export const RUNTIME_KINDS = Object.keys(RUNTIMES) as readonly RuntimeKind[];
 export const DEFAULT_ENTRY = 'src/server.ts';

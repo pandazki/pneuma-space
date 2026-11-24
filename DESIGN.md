@@ -214,48 +214,7 @@ M2 不做的事在 `REQUIREMENTS-M2.md` 的"M2 不做"一节。
 
 ## 5 M3 云入口
 
-[ADR 0033](docs/adr/0033-hosted-fetch-profile.md) 和 [ADR 0034](docs/adr/0034-personal-tenants-and-private-origins.md) 明确引入契约 2。本节保留该独立 Fetch 实验的结构，完整 SaaS 按 [ADR 0036](docs/adr/0036-additive-hosted-platform.md) 和第 6 节实施。第 1、2 节继续描述进程版。调用者看到的形式在 [应用契约](docs/app-contract.md#cloud-profile-contract-2)。
-
-### 5.1 组成与拥有者
-
-`cloud/core` 包含与宿主无关的账户、Registry、记录和 FetchRuntime。`cloud/adapters/cloudflare` 连接托管执行、对象存储和事务存储；`cloud/adapters/local` 提供同一契约的本地实现。HTTP 边界负责解析和授权，应用执行只能经 FetchRuntime。云厂商类型只出现在适配器和组合入口。
-
-租户、用户、成员、应用、版本、令牌与 Binding 的概念沿用第 1.2 节，唯一写者仍为 Registry。云端增加以下状态。
-
-| 状态 | 键 | 唯一写者 | 含义 |
-| --- | --- | --- | --- |
-| IdentityLink | 提供者及不可变主体的散列 | Accounts | 内部用户、个人租户与注册意图，先保存后建立租户 |
-| SignupAdmission | 身份键 | Accounts | 新注册的容量预留，重试复用，既有账户不再预留 |
-| Session | 随机秘密的散列 | Sessions | 租户、用户、作用源、到期与父会话 |
-| AppGrant | 随机码的散列 | Sessions | 应用登录的一次性交换，含 nonce 散列与精确目标源 |
-| Operation | 租户及幂等键 | Registry | 输入摘要、命令序号、准备中或终态及可恢复阶段 |
-| Records | AppId 及记录键 | RecordsProvider | JSON 值、版本及应用级的单调版本计数 |
-| ResourceState | AppId | RecordsProvider | 生命周期命令序号、访问世代和 active/suspended/purged 状态 |
-| ArtifactKeys | AppId 及制品摘要 | ArtifactStore | 已登记键和拒绝迟到写入的清除终态，见 [ADR 0035](docs/adr/0035-terminal-artifact-fences.md) |
-| 云用量与审计 | 租户、时间及操作 | 管理与准入边界 | 操作计数和结果，不存秘密或请求体 |
-
-Registry 持有资源的期望状态，Provider 持有资源已执行的状态。记录操作与世代检查在同一个资源事务中完成。清除保留终态标记，低序号的迟到命令不能重新创建同一个 AppId。普通发布不轮换仍 active 的数据世代；下线、恢复和清除使旧句柄失效。
-
-### 5.2 执行与发布
-
-路由由租户与应用名定位。准入原子检查凭据、应用状态和配额，返回限定于当前 AppId、版本及期限的调用权。静态文件也先准入。动态请求经 FetchRuntime 调用指定的不可变制品，数据句柄仅覆盖该应用。
-
-发布先保存命令及容量预留，再保存和检查制品、收敛资源，最后按命令序号提交 current。并发的不同发布得到冲突。下线提高命令序号，使旧发布无法提交。失败发布保留原 current；同一幂等键可重试未完成阶段。发布的源代码由制品存储拥有，应用记录由资源拥有，两者不混入租户元数据。
-
-下线先拒绝新准入，再等待资源暂停。清除只从 removed 开始，先使资源进入终态，随后清除制品和 Registry 的应用记录。所有外部效果在事务之外，带持久操作身份。重试不依赖原进程仍然存活。
-
-### 5.3 替换点
-
-| 端口 | 承诺 | 首个实现 |
-| --- | --- | --- |
-| IdentityProvider | 已验证的不可变外部身份 | GitHub OAuth |
-| AccountsStore | 身份映射及幂等注册容量预留 | 按身份分片的 Durable Objects，独立开户容量对象 |
-| TenantStore | 同一租户内的原子读改写 | 每租户 SQLite Durable Object |
-| ArtifactStore | 按 AppId 与摘要保存不可变制品 | 私有 R2 bucket |
-| ExecutionHost | 检查及调用固定 Fetch ABI，落实资源与网络限制 | Dynamic Workers |
-| RecordsResource | 有界记录事务、生命周期条件更新、导出和空目标恢复 | 每应用 SQLite Durable Object |
-
-本地适配器不改变业务规则，生产隔离承诺不延伸到本地进程。账户备份和应用导出不含云资源句柄，迁移后重新建立物理绑定。
+本节原为 Fetch 实验的结构，已随 [ADR 0041](docs/adr/0041-cloudflare-m1-plane.md) 删除。完整 SaaS 见第 6 节。
 
 ## 6 完整平台的托管身份
 
@@ -272,4 +231,4 @@ Registry 持有资源的期望状态，Provider 持有资源已执行的状态�
 
 Authority 从托管身份生成原有 Caller，权限继续由 `can` 和 `allows` 决定。托管模式的令牌和成员关系不使用副本内的延迟缓存。管理端必须配置认证依赖和精确控制源；入口的身份模式、凭据过滤及应用访问检查一起组合。副本间的实时请求查询转发调用者会话和原控制 Host。
 
-控制台仍为 `gateway/src/console.html`。托管模式增加会话 CSRF、令牌限制和清除名称确认，原有页面保持角色边界。Fetch 实验自己的账户和数据不自动并入完整平台。
+控制台仍为 `gateway/src/console.html`。托管模式增加会话 CSRF、令牌限制和清除名称确认，原有页面保持角色边界。

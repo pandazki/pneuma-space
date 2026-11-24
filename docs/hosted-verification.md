@@ -16,8 +16,6 @@ The later [cluster verification](hosted-cluster-verification.md) adds actual Kub
 | `npm run test:acceptance` | All 49 original Compose acceptance checks passed in one serial run |
 | `PNEUMA_SPACE_HOSTED_TEST_RTC=true PNEUMA_SPACE_HOSTED_TEST_PAUSE_OBJECTS=true npm run test:hosted` | All 29 hosted checks passed, no skips |
 | `python3 -m unittest discover -s prototype/00-appbase-python/tests -v` | 18 passed |
-| `npm --prefix cloud test` | 158 passed for the retained Fetch experiment |
-| `npm --prefix cloud run typecheck` | Passed |
 | `kubectl kustomize deploy/hosted/kubernetes` | Rendered successfully |
 | `npm run test:k8s` | 13 skipped because `PNEUMA_SPACE_TEST_KUBECONTEXT` was unset; no cluster pass is claimed |
 
