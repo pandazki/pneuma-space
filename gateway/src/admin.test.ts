@@ -511,6 +511,14 @@ test('AC-MGR-3 DELETE /api/apps/<name>/manager clears the manager when it names 
   assert.deepEqual((await audit(store, 'survey')).filter((r) => r.action === 'app.manager').map((r) => r.result), ['started', 'refused', 'started', 'ok']);
 });
 
+test('ADR 0039 a manager url is stored as the URL parser writes it, and one with a control character answers 400', async (t) => {
+  const { call, server } = await admin();
+  t.after(() => server.close());
+  assert.equal((await call('PUT', '/api/apps/survey/release', { ...kvApp, manager: { name: 'deployer', url: 'https://deploy.test/\u0000x' } })).status, 400);
+  assert.equal((await call('PUT', '/api/apps/survey/release', { ...kvApp, manager: { name: 'deployer', url: ' HTTPS://Deploy.test/x' } })).status, 200);
+  assert.deepEqual((await call('GET', '/api/apps/survey')).body.app.manager, { name: 'deployer', url: 'https://deploy.test/x' });
+});
+
 test('ADR 0039 a manager outside the name grammar, a url that is not absolute http or https, or a malformed header answers 400', async (t) => {
   const { base, call, server } = await admin();
   t.after(() => server.close());

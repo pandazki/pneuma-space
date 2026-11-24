@@ -1628,8 +1628,12 @@ async function api(method, path, body, contentType = 'application/json', extra =
 const appPath = (name) => `/api/apps/${encodeURIComponent(name)}`;
 /** A write to a managed app names its manager (ADR 0039); sent only after the person typed the name in the approval card. */
 const naming = (manager) => (manager ? { 'X-Pneuma-Space-Manager': manager.name } : {});
-/** Where a person acts through the manager; the server admits only http and https URLs, and the page links nothing else either. */
-const managerLink = (manager, label, attrs = {}) => (/^https?:\/\//.test(manager.url ?? '') ? h('a', { ...attrs, href: manager.url, target: '_blank', rel: 'noopener' }, label) : null);
+/** Where a person acts through the manager; the server admits only http and https URLs, and the page links nothing else either. A URL stored before the server normalised it parses the same. */
+const managerLink = (manager, label, attrs = {}) => {
+  let url = null;
+  try { url = new URL(manager.url); } catch {}
+  return url && /^https?:$/.test(url.protocol) ? h('a', { ...attrs, href: url.href, target: '_blank', rel: 'noopener' }, label) : null;
+};
 const managerChip = (manager) => (manager == null ? null
   : managerLink(manager, t('d.manager', { name: manager.name }), { class: 'chip text' }) ?? h('span', { class: 'chip text' }, t('d.manager', { name: manager.name })));
 const appLink = (name) => h('a', { href: `#/apps/${encodeURIComponent(name)}`, class: 'mono' }, name);
