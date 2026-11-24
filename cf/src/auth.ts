@@ -58,6 +58,9 @@ export async function authorizeApp(env: Env, stale: CredentialProof, appId: stri
   const actor = await fresh(env, stale);
   const app = await env.PNEUMA_SPACE_DB.prepare('SELECT * FROM apps WHERE id=? AND purged_at IS NULL').bind(appId).first<AppRow>();
   if (!app) fail(404, 'app_not_found', 'Application not found.');
+  return permit(env, actor, app, action);
+}
+export async function permit(env: Env, actor: Actor, app: AppRow, action: Action | 'purge' | 'kill'): Promise<AppRow> {
   if (actor.kind === 'token') {
     if (action === 'purge' || action === 'kill') fail(403, 'session_required', 'This action requires a signed-in account.');
     if (actor.tenantId !== app.tenant_id || (actor.appIds !== null && !actor.appIds.includes(app.id))) fail(404, 'app_not_found', 'Application not found.');

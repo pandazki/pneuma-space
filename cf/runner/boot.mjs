@@ -6,13 +6,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { extractPackage } from './package.mjs';
 
+const started = performance.now();
+const elapsed = since => Math.round(performance.now() - since);
 const broker = process.env.PNEUMA_SPACE_BROKER ?? 'http://pneuma-space.internal';
 const boot = process.env.PNEUMA_SPACE_BOOT_ID;
 const digest = process.env.PNEUMA_SPACE_DIGEST;
-const directory = await mkdtemp(join(tmpdir(), 'pneuma-space-'));
-const response = await fetch(broker + '/boot');
-if (!response.ok) throw new Error('Package fetch failed: ' + response.status);
-const manifest = await extractPackage(Buffer.from(await response.arrayBuffer()), digest, directory);
+const phases = { fetch: null, unpack: null, listen: null };
 let ready = false;
 let exited = false;
 let logs = [];
@@ -25,20 +24,10 @@ async function flush() {
   catch { logs = [...batch, ...logs].slice(-100); }
   finally { sending = false; }
 }
-const child = spawn(process.execPath, [manifest.entry], {
-  cwd: directory, stdio: ['ignore', 'pipe', 'pipe'],
-  env: { PATH: process.env.PATH, HOME: directory, NODE_ENV: 'production', PNEUMA_SPACE_PORT: '8000', PORT: '8000', PNEUMA_SPACE_BROKER: broker },
-});
-for (const [stream, level] of [[child.stdout, 'info'], [child.stderr, 'error']]) stream.on('data', chunk => {
-  for (const message of chunk.toString().split('\n').filter(Boolean)) logs.push({ level, message: message.slice(0, 2000) });
-  logs = logs.slice(-100);
-  void flush();
-});
-child.on('exit', () => { exited = true; ready = false; });
 const server = http.createServer((req, res) => {
   if (req.url === '/_pneuma-space/ready') {
     res.writeHead(ready && !exited ? 200 : 503, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ bootId: boot, digest, ready }));
+    res.end(JSON.stringify({ bootId: boot, digest, ready, uptime: elapsed(started), phases }));
     return;
   }
   if (!ready) { res.writeHead(503); res.end(); return; }
@@ -63,14 +52,32 @@ server.on('upgrade', (req, socket, head) => {
   socket.on('close', () => upstream.destroy());
 });
 server.listen(Number(process.env.PNEUMA_SPACE_SUPERVISOR_PORT ?? 8080), '0.0.0.0');
-for (let attempt = 0; attempt < 150 && !exited; attempt++) {
+const directory = await mkdtemp(join(tmpdir(), 'pneuma-space-'));
+let mark = performance.now();
+const response = await fetch(broker + '/boot');
+if (!response.ok) throw new Error('Package fetch failed: ' + response.status);
+const bytes = Buffer.from(await response.arrayBuffer());
+phases.fetch = elapsed(mark); mark = performance.now();
+const manifest = await extractPackage(bytes, digest, directory);
+phases.unpack = elapsed(mark); mark = performance.now();
+const child = spawn(process.execPath, [manifest.entry], {
+  cwd: directory, stdio: ['ignore', 'pipe', 'pipe'],
+  env: { PATH: process.env.PATH, HOME: directory, NODE_ENV: 'production', PNEUMA_SPACE_PORT: '8000', PORT: '8000', PNEUMA_SPACE_BROKER: broker },
+});
+for (const [stream, level] of [[child.stdout, 'info'], [child.stderr, 'error']]) stream.on('data', chunk => {
+  for (const message of chunk.toString().split('\n').filter(Boolean)) logs.push({ level, message: message.slice(0, 2000) });
+  logs = logs.slice(-100);
+  void flush();
+});
+child.on('exit', () => { exited = true; ready = false; });
+for (let attempt = 0; attempt < 600 && !exited; attempt++) {
   ready = await new Promise(resolve => {
     const socket = net.connect(8000, '127.0.0.1');
     socket.once('connect', () => { socket.destroy(); resolve(true); });
     socket.once('error', () => resolve(false));
   });
-  if (ready) break;
-  await new Promise(resolve => setTimeout(resolve, 200));
+  if (ready) { phases.listen = elapsed(mark); break; }
+  await new Promise(resolve => setTimeout(resolve, 50));
 }
 if (!ready) { await flush(); child.kill('SIGKILL'); process.exitCode = 1; server.close(); }
 setInterval(flush, 1000).unref();

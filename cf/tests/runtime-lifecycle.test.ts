@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import http from 'node:http';
 import { once } from 'node:events';
-import { DEFAULT_POLICY } from '../src/model.ts';
+import { DEFAULT_POLICY, WAKE_PHASES } from '../src/model.ts';
 
 let mf: Miniflare;
 let triggerServer: http.Server;
@@ -34,8 +34,22 @@ async function fixture() {
 before(async () => {
   const fixtureWorker = `
     import {AppCell as BaseAppCell} from './src/app.ts';
+    import worker from './src/worker.ts';
     export {AppServices} from './src/app.ts';
     export class AppCell extends BaseAppCell {
+      container() {
+        if (!this.ctx.storage.kv.get('test:runner')) return super.container();
+        const cell = this;
+        return {
+          running: false, images: {base: 'runner'},
+          start(options) { cell.boot = options.env.PNEUMA_SPACE_BOOT_ID; },
+          async setInactivityTimeout() {},
+          getTcpPort() { return {fetch: async input => new URL(input.url ?? input).pathname === '/_pneuma-space/ready'
+            ? Response.json({bootId: cell.boot, digest: cell.state().current.digest, ready: true, uptime: 5, phases: {fetch: 30, unpack: 4, listen: 12}})
+            : new Response('woken')}; },
+        };
+      }
+      async startBinding(scope) { if (!this.ctx.storage.kv.get('test:runner')) return super.startBinding(scope); }
       async containerAcquire() {
         if (!this.ctx.storage.kv.get('test:trigger')) return super.containerAcquire();
         return {fetch: request => {
@@ -51,6 +65,7 @@ before(async () => {
           this.ctx.storage.kv.delete('platform:receipt:' + key);
           return new Response('{}');
         }
+        if (path === '/test/runner') { this.ctx.storage.kv.put('test:runner', true); return new Response('{}'); }
         if (path === '/test/deliveries') return Response.json({pending: this.deliveries?.size ?? 0});
         if (path === '/test/configure-kv') {
           const {boot} = await request.json();
@@ -81,6 +96,7 @@ before(async () => {
     }
     export default {fetch(request, env) {
       if (new URL(request.url).pathname.startsWith('/test/trigger/')) return env.TEST_TRIGGER.fetch(request);
+      if (new URL(request.url).pathname.startsWith('/apps/')) return worker.fetch(request, env);
       return env.PNEUMA_SPACE_APPS.getByName(request.headers.get('x-test-app')).fetch(request);
     }};
   `;
@@ -99,7 +115,7 @@ before(async () => {
   assert.ok(address && typeof address !== 'string');
   const triggerWorker = `export default {fetch(request) {return fetch('http://127.0.0.1:${address.port}' + new URL(request.url).pathname, request)}};`;
   mf = new Miniflare(convertV4MiniflareOptions({ workers: [
-    { name: 'runtime-tests', modules: true, script: bundled.outputFiles[0].text, compatibilityDate: '2026-11-13', compatibilityFlags: ['nodejs_compat'], durableObjects: { PNEUMA_SPACE_APPS: { className: 'AppCell', useSQLite: true } }, d1Databases: ['PNEUMA_SPACE_DB'], r2Buckets: ['PNEUMA_SPACE_ARTIFACTS', 'PNEUMA_SPACE_OBJECTS'], serviceBindings: {TEST_TRIGGER: 'held-trigger'}, bindings: {} },
+    { name: 'runtime-tests', modules: true, script: bundled.outputFiles[0].text, compatibilityDate: '2026-11-13', compatibilityFlags: ['nodejs_compat'], durableObjects: { PNEUMA_SPACE_APPS: { className: 'AppCell', useSQLite: true } }, d1Databases: ['PNEUMA_SPACE_DB'], r2Buckets: ['PNEUMA_SPACE_ARTIFACTS', 'PNEUMA_SPACE_OBJECTS'], serviceBindings: {TEST_TRIGGER: 'held-trigger'}, bindings: {PNEUMA_SPACE_CONTROL_ORIGIN: 'http://test'} },
     { name: 'held-trigger', modules: true, script: triggerWorker, compatibilityDate: '2026-11-13' },
   ] }));
   const db = await mf.getD1Database('PNEUMA_SPACE_DB');
@@ -356,4 +372,39 @@ test('CF-20 native subscriptions share the app request budget with static admiss
   const second = await call(app, '/subscribe/changes', undefined, {upgrade: 'websocket', 'x-pneuma-space-actor': encodeURIComponent(JSON.stringify(actor))});
   assert.equal(second.status, 429);
   first.webSocket!.close();
+});
+test('CF-25 a sleeping Node app answers its static index without waking', async () => {
+  const { app } = await fixture();
+  await call(app, '/test/configure-kv', {});
+  const bucket = await mf.getR2Bucket('PNEUMA_SPACE_ARTIFACTS') as unknown as R2Bucket;
+  await bucket.put('apps/' + app + '/artifacts/' + digest + '/static/index.html', 'Shell', { httpMetadata: { contentType: 'text/html' } });
+  const session = crypto.randomUUID().replaceAll('-', '').repeat(2);
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  await db.prepare("INSERT INTO sessions(hash,user_id,csrf,created_at,expires_at) VALUES(?,'owner','csrf',1,?)").bind(createHash('sha256').update(session).digest('hex'), Date.now() + 3600000).run();
+  const page = await mf.dispatchFetch('http://test/apps/' + app + '/', { headers: { cookie: '__Host-pneuma-space-control=' + session } });
+  assert.equal(page.status, 200);
+  assert.equal(await page.text(), 'Shell');
+  const snapshot = await (await call(app, '/inspect')).json() as { runtime: { bootId: string | null }; usage: { requests: number; wakes: number } };
+  assert.deepEqual([snapshot.runtime.bootId, snapshot.usage.wakes, snapshot.usage.requests], [null, 0, 1]);
+});
+async function requestWake() {
+  const { app } = await fixture();
+  await call(app, '/test/configure-kv', {});
+  await call(app, '/test/runner', {});
+  assert.equal(await (await call(app, '/_pneuma-space/invoke/')).text(), 'woken');
+  return app;
+}
+test('CF-28 a request wake records the duration of each phase in the app detail', async () => {
+  const app = await requestWake();
+  const { wake, runtime } = await (await call(app, '/inspect')).json() as { runtime: { bootId: string }; wake: { bootId: string; outcome: string; error: null; phases: Record<string, number | null> } };
+  assert.deepEqual([wake.bootId, wake.outcome, wake.error], [runtime.bootId, 'ready', null]);
+  assert.deepEqual(Object.keys(wake.phases), [...WAKE_PHASES]);
+  assert.deepEqual([wake.phases.fetch, wake.phases.unpack, wake.phases.listen], [30, 4, 12]);
+  for (const phase of ['reserve', 'container', 'confirm', 'respond']) assert.equal(typeof wake.phases[phase], 'number', phase);
+});
+test('CF-28 each wake appends an event carrying its record', async () => {
+  const app = await requestWake();
+  const { runtime } = await (await call(app, '/inspect')).json() as { runtime: { bootId: string } };
+  const events = await (await call(app, '/events')).json() as { items: { type: string; data?: { bootId: string; outcome: string } }[] };
+  assert.deepEqual(events.items.filter(event => event.type === 'wake-ready').map(event => [event.data?.bootId, event.data?.outcome]), [[runtime.bootId, 'ready']]);
 });

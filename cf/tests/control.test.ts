@@ -56,6 +56,7 @@ before(async () => {
     compatibilityDate: '2026-11-13', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { PNEUMA_SPACE_APPS: { className: 'AppCell', useSQLite: true } },
     d1Databases: ['PNEUMA_SPACE_DB'], r2Buckets: ['PNEUMA_SPACE_ARTIFACTS', 'PNEUMA_SPACE_OBJECTS'],
+    serviceBindings: { PNEUMA_SPACE_UI: async (request: Request) => new Response('asset ' + new URL(request.url).pathname) },
     bindings: { PNEUMA_SPACE_CONTROL_ORIGIN: origin, PNEUMA_SPACE_MAX_ACCOUNTS: '100', PNEUMA_SPACE_R2_ACCESS_KEY_ID: 'test-key', PNEUMA_SPACE_R2_SECRET_ACCESS_KEY: 'test-secret', PNEUMA_SPACE_ACCOUNT_ID: '00000000000000000000000000000000', PNEUMA_SPACE_ARTIFACT_BUCKET: 'artifacts' },
   }));
   const db = await mf.getD1Database('PNEUMA_SPACE_DB');
@@ -189,6 +190,22 @@ test('CF-24 application names are unique across tenants', async () => {
 });
 test('CF-24 hosts other than the control origin are unknown', async () => {
   assert.equal((await mf.dispatchFetch('https://app-example.apps.test/')).status, 404);
+});
+test('CF-26 console files are served under the reserved console path', async () => {
+  const response = await mf.dispatchFetch(origin + '/_pneuma-space/console/style.css');
+  assert.equal(await response.text(), 'asset /style.css');
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+});
+test('CF-26 root paths outside the console routes answer 404, never a console file', async () => {
+  const client = await identity();
+  const statuses = await Promise.all(['/style.css', '/app.js', '/index.html', '/favicon.ico'].map(async path => (await mf.dispatchFetch(origin + path, { headers: { cookie: client.cookie } })).status));
+  assert.deepEqual(statuses, [404, 404, 404, 404]);
+});
+test('CF-27 a new app sleeps after 300 idle seconds by default', async () => {
+  const client = await identity();
+  const app = await (await request('/tenants/' + client.tenant + '/apps', client, { name: 'idle-' + randomBytes(4).toString('hex') })).json() as { id: string };
+  const detail = await (await request('/apps/' + app.id, client)).json() as { policy: { idleSeconds: number } };
+  assert.equal(detail.policy.idleSeconds, 300);
 });
 test('CF-03 another tenant cannot reach an app by its path or its control API', async () => {
   const app = await staticApp(await identity()), other = await identity();

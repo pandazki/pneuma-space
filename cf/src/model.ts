@@ -33,7 +33,7 @@ export type Policy = {
   maxFailures: number; requestsPerDay: number; storageBytes: number;
 };
 export const DEFAULT_POLICY: Policy = {
-  idleSeconds: 30, requestSeconds: 120, drainSeconds: 10,
+  idleSeconds: 300, requestSeconds: 120, drainSeconds: 10,
   maxFailures: 5, requestsPerDay: 2000, storageBytes: 10 * 1024 * 1024,
 };
 export type Quota = { apps: number; awake: number; requestsPerDay: number; storageBytes: number };
@@ -56,10 +56,16 @@ export type RuntimeStatus = {
   running: boolean; bootId: string | null; since: number;
   sleepsAt: number | null; requests: number; channels: number; failures: number;
 };
+export const WAKE_PHASES = ['reserve', 'container', 'fetch', 'unpack', 'listen', 'confirm', 'respond'] as const;
+export type Wake = {
+  bootId: string; at: number; outcome: 'waking' | 'ready' | 'failed'; error: string | null;
+  phases: Record<(typeof WAKE_PHASES)[number], number | null>;
+};
 export type AppSnapshot = AppRegistration & {
   status: AppStatus; generation: number; current: Release | null; releases: Release[];
   runtime: RuntimeStatus; capabilities: Capability[]; lastAccessAt: number | null;
   usage: { requests: number; errors: number; wakes: number; sleeps: number };
+  wake: Wake | null;
 };
 export type AppAction =
   | { type: 'wake' | 'sleep' | 'restart' | 'kill' | 'remove' | 'resume' | 'unquarantine' }

@@ -4,7 +4,7 @@ PneumaSpace on a Cloudflare account you own: the M1 trust boundary, one trusted 
 
 The control origin is `PNEUMA_SPACE_CONTROL_ORIGIN`. Platform administrators use /admin and invited accounts use /dashboard. Each app is served at `/apps/NAME/` on the same origin ([ADR 0044](../docs/adr/0044-cloudflare-path-routing.md)).
 
-A signed-in account starts at /dashboard?view=launch: name the app, generate its publishing token, and copy the instruction to a coding tool. The command initializes the starter app, installs project instructions and skills, publishes it, verifies natural idle recovery, and returns links to the private app and its statistics. Open those links in the browser signed into the workspace. The client flow is defined by [ADR 0043](../docs/adr/0043-cloudflare-first-application.md).
+A signed-in account starts at /dashboard?view=launch: name the app, generate its publishing token, and copy the instruction to a coding tool. The command initializes the starter app, installs project instructions and skills, publishes it, measures its requests, and returns links to the private app and its statistics. `npm run bench` in the project later verifies natural idle recovery; it waits as long as the app's idle policy. Open those links in the browser signed into the workspace. The client flow is defined by [ADR 0043](../docs/adr/0043-cloudflare-first-application.md).
 
 The [application contract](docs/app-contract.md) defines native capabilities and limits. The [acceptance gates](docs/acceptance.md) define what must be verified. Read the [verification record](docs/verification.md) before treating this deployment as complete.
 

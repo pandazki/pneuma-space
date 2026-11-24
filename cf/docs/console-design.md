@@ -18,7 +18,7 @@ Both routes use a quiet sidebar, wrapped toolbar, indexed sections, grouped app 
 
 Chinese is the default. English and light/dark controls persist locally. The shell stays mounted across navigations. A project keeps its head and an underline tab row while a tab change swaps only the panel. Back and forward restore the scroll position. The navigation becomes a scrollable horizontal bar on narrow screens, where language, appearance and the console switch move into the account menu. Controls retain visible focus. Custom listboxes support arrows, Enter, Escape and type-ahead. File fields use a styled drop target and hidden picker. Destructive actions enter an approval card from a menu. Purge exists only for removed apps and requires the exact app name.
 
-`index.html` serves `/admin` and `/dashboard`. `login.html` serves `/login`; `invite.html` serves `/invite`. All load `/app.js` and `/style.css`. API requests remain under `/api/v1`. Package and object bytes use the returned direct R2 tickets.
+`index.html` serves `/admin` and `/dashboard`. `login.html` serves `/login`; `invite.html` serves `/invite`. All load `/_pneuma-space/console/app.js` and `/_pneuma-space/console/style.css`, sent with `no-store` because their names carry no content hash. API requests remain under `/api/v1`. Package and object bytes use the returned direct R2 tickets.
 
 ## Verification
 

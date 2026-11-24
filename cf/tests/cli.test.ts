@@ -18,5 +18,5 @@ test('CF-21 packaging refuses symlinks into local credentials',async()=>{
 });
 test('CF-21 the installed npm bin symlink executes the CLI',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'pneuma-space-cli-bin-'));
- try{const bin=join(dir,'pneuma-space');await symlink(cli,bin);const output=execFileSync(process.execPath,[bin,'help'],{encoding:'utf8'});assert.match(output,/Scaffold, publish and verify natural idle/);}finally{await rm(dir,{recursive:true,force:true});}
+ try{const bin=join(dir,'pneuma-space');await symlink(cli,bin);const output=execFileSync(process.execPath,[bin,'help'],{encoding:'utf8'});assert.match(output,/Scaffold, publish and measure requests/);}finally{await rm(dir,{recursive:true,force:true});}
 });

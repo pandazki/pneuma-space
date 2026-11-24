@@ -1,6 +1,6 @@
 # ADR 0044：Cloudflare 承载面按路径寻址应用
 
-状态：接受。2026-11-24。用户决定“改成 path 吧，M1 不存在多租户”。修订 [ADR 0042](0042-cloudflare-edition.md) 的“每个应用使用独立的 Custom Domain、独立应用会话和一次性交换”，以及 [ADR 0041](0041-cloudflare-m1-plane.md) 后果中“每个应用一个精确域名，首次发布要等证书”一句。
+状态：接受。2026-11-24。用户决定“改成 path 吧，M1 不存在多租户”。修订 [ADR 0042](0042-cloudflare-edition.md) 的“每个应用使用独立的 Custom Domain、独立应用会话和一次性交换”，以及 [ADR 0041](0041-cloudflare-m1-plane.md) 后果中“每个应用一个精确域名，首次发布要等证书”一句。[ADR 0045](0045-cloudflare-first-screen-and-idle.md) 补充第 3 条：控制源的根路径只属于控制台，其他根路径返回 404。
 
 ## 背景
 

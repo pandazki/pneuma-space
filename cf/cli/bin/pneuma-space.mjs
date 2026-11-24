@@ -110,7 +110,7 @@ export async function publish(w){
   project.publishedDigest=packed.digest;project.upload=null;await saveProject(w);
   log('publish',`Release ${snapshot.current.number} is live: ${appUrl(w)}`);return snapshot;
 }
-export async function benchmark(w){
+export async function benchmark(w,{awaitIdle=true}={}){
   const {project,client}=w;if(!project.app)throw Error('Publish the project first with npm run deploy.');
   const path='/apps/'+project.app.id,before=await client.request(path);
   if(before.current?.manifest.runtime!=='node')throw Error('The idle/wake benchmark requires a Node application.');
@@ -123,29 +123,40 @@ export async function benchmark(w){
   log('bench','Checking a saved marker and warm requests. Times include your network.');
   const marker=randomUUID(),first=await call('POST',{marker}),warm=[];
   for(let i=0;i<5;i++)warm.push((await call()).ms);
-  log('bench',`Waiting for natural idle (${before.policy.idleSeconds}s policy). Keep the app tab closed for this check.`);
-  const idleStart=Date.now(),deadline=idleStart+before.policy.idleSeconds*1000+90000;let slept=null;
+  const dashboard=client.origin+'/dashboard?view=projects&app='+project.app.id+'&tab=usage',sorted=[...warm].sort((a,b)=>a-b);
+  const timings={firstRequestMs:first.ms,warmMedianMs:sorted[Math.floor(sorted.length/2)],warmP95Ms:sorted.at(-1),warmSamplesMs:warm};
+  const waitSeconds=before.policy.idleSeconds+90,links=()=>{log('ready','Open your app: '+appUrl(w));log('access','Use the browser where you are signed into '+client.origin+'. This app is private; a publishing token does not replace browser login.');log('stats','See real requests and wake/sleep counts: '+dashboard);};
+  if(!awaitIdle){
+    const after=await client.request(path);
+    const report={complete:false,reason:`Natural idle was not awaited. npm run bench waits for it, up to ${waitSeconds}s under this app's policy.`,at:new Date().toISOString(),appId:project.app.id,app:appUrl(w),dashboard,...timings,wake:after.wake,naturalIdleObserved:false,before:before.usage,after:after.usage};
+    await save(join(w.privateDir,'bench.json'),report);
+    console.log(JSON.stringify(report,null,2));
+    links();
+    log('idle',`Sleep and recovery are not verified yet. Run npm run bench while the app is closed; it waits up to ${waitSeconds}s.`);
+    return report;
+  }
+  log('bench',`Waiting for natural idle (${before.policy.idleSeconds}s policy, up to ${waitSeconds}s). Keep the app tab closed for this check.`);
+  const idleStart=Date.now(),deadline=idleStart+waitSeconds*1000;let slept=null;
   while(Date.now()<deadline){
     await delay(3000);const snapshot=await client.request(path);
     if(snapshot.runtime.state==='asleep'&&!snapshot.runtime.running){slept=snapshot;break;}
   }
-  const dashboard=client.origin+'/dashboard?view=projects&app='+project.app.id+'&tab=usage';
   if(!slept){const report={complete:false,reason:'Other traffic or active leases prevented natural idle.',app:appUrl(w),dashboard};await save(join(w.privateDir,'bench.json'),report);throw Error('Idle was not observed. Close app tabs and run npm run bench again. See '+dashboard);}
   log('bench','The runtime stopped naturally. Visiting it again now.');
   const resumed=await call();
   if(resumed.boot===first.boot)throw Error('The probe returned the same process boot; automatic restart is not verified.');
   if(resumed.marker!==marker)throw Error('The saved marker did not survive idle.');
-  const after=await client.request(path),sorted=[...warm].sort((a,b)=>a-b);
-  const report={complete:true,at:new Date().toISOString(),appId:project.app.id,app:appUrl(w),dashboard,initialState:before.runtime.state,firstRequestMs:first.ms,warmMedianMs:sorted[Math.floor(sorted.length/2)],warmP95Ms:sorted.at(-1),warmSamplesMs:warm,naturalIdleObserved:true,idleObservedAfterMs:Date.now()-idleStart-resumed.ms,wakeRequestMs:resumed.ms,newBoot:true,dataRetained:true,before:before.usage,after:after.usage,delta:Object.fromEntries(['requests','errors','wakes','sleeps'].map(key=>[key,after.usage[key]-before.usage[key]]))};
+  const after=await client.request(path);
+  const report={complete:true,at:new Date().toISOString(),appId:project.app.id,app:appUrl(w),dashboard,initialState:before.runtime.state,...timings,naturalIdleObserved:true,idleObservedAfterMs:Date.now()-idleStart-resumed.ms,wakeRequestMs:resumed.ms,wake:after.wake,newBoot:true,dataRetained:true,before:before.usage,after:after.usage,delta:Object.fromEntries(['requests','errors','wakes','sleeps'].map(key=>[key,after.usage[key]-before.usage[key]]))};
   await save(join(w.privateDir,'bench.json'),report);
   console.log(JSON.stringify(report,null,2));
-  log('ready','Open your app: '+appUrl(w));log('access','Use the browser where you are signed into '+client.origin+'. This app is private; a publishing token does not replace browser login.');log('stats','See real requests and wake/sleep counts: '+dashboard);
+  links();
   return report;
 }
 async function main(){
   const [command='help',...args]=process.argv.slice(2),options={},pos=[];
   for(let i=0;i<args.length;i++){if(args[i]==='--token-stdin'){options.tokenStdin=true;continue;}if(args[i].startsWith('--')){const key=args[i].slice(2);if(!['origin','tenant','name'].includes(key)||!args[i+1])throw Error('Unknown or incomplete option: '+args[i]);options[key]=args[++i];}else pos.push(args[i]);}
-  if(['help','--help','-h'].includes(command)){console.log('PneumaSpace\n  start DIRECTORY --origin URL [--tenant ID]   Scaffold, publish and verify natural idle/recovery\n  init DIRECTORY --origin URL [--tenant ID]    Scaffold without publishing\n  publish [DIRECTORY]                         Publish app/ with your saved token\n  bench [DIRECTORY]                           Verify warm requests, natural idle and retained state\n  status [DIRECTORY]                          Inspect real runtime and usage\n  package [DIRECTORY]                         Validate files without publishing\nToken: PNEUMA_SPACE_TOKEN from Dashboard → Create app. Node 22+ required.');return;}
+  if(['help','--help','-h'].includes(command)){console.log('PneumaSpace\n  start DIRECTORY --origin URL [--tenant ID]   Scaffold, publish and measure requests; natural idle is left to bench\n  init DIRECTORY --origin URL [--tenant ID]    Scaffold without publishing\n  publish [DIRECTORY]                         Publish app/ with your saved token\n  bench [DIRECTORY]                           Verify warm requests, natural idle and retained state\n  status [DIRECTORY]                          Inspect real runtime and usage\n  package [DIRECTORY]                         Validate files without publishing\nToken: PNEUMA_SPACE_TOKEN from Dashboard → Create app. Node 22+ required.');return;}
   if(!['start','init','publish','bench','status','package'].includes(command))throw Error('Unknown command. Run pneuma-space help.');
   if(['start','init'].includes(command)&&!pos[0])throw Error('Choose a new project directory.');
   if(options.tokenStdin){let value='';for await(const chunk of process.stdin){value+=chunk;if(value.length>256)throw Error('Invalid token input.');}process.env.PNEUMA_SPACE_TOKEN=value.trim();}
@@ -154,7 +165,7 @@ async function main(){
   const w=['start','init'].includes(command)?await initialize(directory,options):await workspace(directory);
   if(command==='init'){log('next',`Read ${join(directory,'AGENTS.md')}. Edit app/, then run npm run deploy and npm run bench in this directory.`);return;}
   if(['start','publish'].includes(command))await publish(w);
-  if(['start','bench'].includes(command))await benchmark(w);
+  if(['start','bench'].includes(command))await benchmark(w,{awaitIdle:command==='bench'});
   if(command==='status')console.log(JSON.stringify(await w.client.request('/apps/'+w.project.app.id),null,2));
 }
 if(process.argv[1]&&await realpath(resolve(process.argv[1]))===fileURLToPath(import.meta.url))main().catch(error=>{console.error('PneumaSpace: '+error.message);process.exitCode=1;});
