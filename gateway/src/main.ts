@@ -222,6 +222,7 @@ const peers = process.env.PNEUMA_SPACE_PEERS
   : undefined;
 const admin = await startAdmin({
   registry, bundles, runtime, guard, metrics, nodes, infra, scaleMax: setup.scaleMax, requests, replica, peers, store, ingressPort, upstream, providers,
+  current: () => instances.current(),
   hosted: setup.hosted ? { controlOrigin: setup.hosted.controlOrigin, identityPaths: HOSTED_IDENTITY_PATHS } : undefined,
 }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const exporter = await serveMetrics(process.env.PNEUMA_SPACE_METRICS_PORT, () => metrics.prometheus());

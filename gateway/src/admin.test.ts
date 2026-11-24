@@ -552,3 +552,20 @@ test('ADR 0039 a manager header given twice answers 400 saying it names one mana
   assert.equal(reply.status, 400);
   assert.match(JSON.parse(reply.body).error, /names one manager, got "deployer, deployer"/);
 });
+
+test('ADR 0040 item 3: a write to a replica not on the current build answers 503 with Retry-After, changes nothing and writes no audit row', async (t) => {
+  let current = true;
+  const { base, call, server, registry, store } = await admin({ overrides: { current: async () => current } });
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  current = false;
+  const remove = await fetch(`${base}/api/apps/survey/remove`, { method: 'POST' });
+  assert.deepEqual([remove.status, remove.headers.get('retry-after'), (await remove.json()).error], [503, '2', 'the platform is upgrading; retry in a few seconds']);
+  assert.deepEqual([registry.view(appName('survey'))?.status, (await audit(store, 'survey')).map((r) => r.action)], ['registered', ['app.publish', 'app.publish']]);
+});
+
+test('ADR 0040 item 3: a read from a replica not on the current build answers as usual', async (t) => {
+  const { call, server } = await admin({ overrides: { current: async () => false } });
+  t.after(() => server.close());
+  assert.equal((await call('GET', '/api/apps')).status, 200);
+});

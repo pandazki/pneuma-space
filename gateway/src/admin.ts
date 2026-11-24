@@ -37,6 +37,8 @@ export type AdminDeps = {
   readonly consoleFile?: string | URL;
   /** The console-audience provider and the Authority; absent under `local`, where every request is LOCAL_CALLER (ADR 0022 item 4). */
   readonly upstream?: { readonly identity: Pick<Identity, 'identify' | 'challenge' | 'serve'>; readonly authority: Pick<Authority, 'callerOf'> };
+  /** Whether this replica runs the current build, which alone takes writes (ADR 0040 item 3); absent, it always does. */
+  readonly current?: () => Promise<boolean>;
 };
 
 const BODY_LIMIT = 1024 * 1024;
@@ -670,6 +672,10 @@ export function createAdmin(deps: AdminDeps): Server {
       for (const route of table) {
         const match = route.path.exec(path);
         if (!match || route.method !== request.method) continue;
+        if (route.method !== 'GET' && deps.current && !(await deps.current())) {
+          response.setHeader('retry-after', '2');
+          return send(response, 503, { error: 'the platform is upgrading; retry in a few seconds' });
+        }
         const caller = await callerOf(request, response);
         if (!caller) return;
         if (deps.hosted && caller.authentication?.kind === 'hosted' && !READS.has(request.method ?? '')) {
