@@ -28,7 +28,7 @@ PneumaSpace 把有状态的 web 应用部署到一台可信机器上，M2 起也
 | Instance | `app` | 表 `instance`：`runtime`, `release`, `spec_hash`, `epoch`, `state`, `actor`, `handle`, `address`, `node`, `home`, `since`, `awake_at`, `cpu_millis`, `memory_mb` | 平台库，副本内有镜像和本地租约（ADR 0020） | Runtime，只经 CAS |
 | Guard 状态 | `app` | 表 `guard`：`release`, `failures`, `quarantine_reason`, `quarantined_at`（ADR 0017） | 平台库，副本内有镜像 | Guard，事务里读改写 |
 | Lease | 持有者的线程；跨副本按 `(app, replica)` 计 | `kind: request / channel / trigger`, `on_retire?`；表 `lease_tally`：`epoch`, `request`, `channel`, `trigger`, `released_at` | 平台库，副本内有镜像和本地租约 | Runtime（Ingress 和 Scheduler 只通过 `acquire` 和 `release` 取得和归还）；每副本只写自己的 `lease_tally` 行 |
-| Replica | `id`（`PNEUMA_SPACE_REPLICA`，单机取主机名） | 表 `replica`：`started_at`, `seen_at` | 平台库 | 每副本自己心跳；领导者删死副本的行 |
+| Replica | `id`（`PNEUMA_SPACE_REPLICA`，单机取主机名） | 表 `replica`：`started_at`, `seen_at`, `build`（网关源码的构建号，ADR 0040） | 平台库 | 每副本自己心跳；领导者删死副本的行 |
 | Usage | `(app, step, start, replica)`，`app` 为 `'*'` 表示整个平台 | `tenant`（写入时的）, 请求、错误、唤醒、休眠、投递结果的计数, `wake_ms`, `awake_ms`；每 App 只有 3600 s 步长，`'*'` 另有 60 s 步长 | 平台库，保留 `usage_retention_days` | Metrics，每副本只写自己的行，写绝对值（ADR 0024） |
 | Event | `id`，全局递增 | `at`（库时钟）, `replica`, `ev`, `app`, `tenant`, `body` | 平台库，按 `events_retention_days` 和 `events_max_rows` 清扫；同时写 stdout | Metrics |
 | Audit | `id` | `at`, `actor`, `actor_tenant`, `tenant`, `action`, `target_kind`, `target`, `result`, `details`（不含密钥） | 平台库，只追加，触发器拒绝改删 | 管理边界：路由表的每个变更路由声明 `audit` |
@@ -104,7 +104,7 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 | 认证与授权 | `jwt.ts` 验上游 JWT（只用 `node:crypto` 和 `fetch`，ADR 0021）；每请求至多认证一次，得到 `Caller`；`authz.ts` 的 `ACTIONS` 表和纯函数 `can(caller, action, tenant)` 是管理 API 唯一的授权判定；成员和令牌缓存，按 `tenant/<name>` 通知失效（ADR 0022） | 写库（User 行经 `registry.sighted()` 由 Registry 写） |
 | Store | `SqliteStore` 或 `PgStore`（`pg.ts`），DML 只写一次，在 `sql.ts`；`transaction`（PostgreSQL 上 `SERIALIZABLE`，冲突重跑）、`exclusive`（按应用名互斥）、`exclusiveBundle`（按 bundle 互斥，在命令里先应用名后 bundle）、行触发器在提交时向通道 `pneuma_space` 发变更通知（ADR 0025） | 业务判断；每张表的写者仍是 1.2 节那一列 |
 | Metrics | 1.2 节的 Usage、Event 和 Metrics 行。订阅生命周期事件流（每行 JSON 日志同时发给订阅者），批量写 `events`；每 10 s 写本副本的 `usage` 行并读回总览的序列，采样 Runtime 的实例和 Lease 计数、Delivery 的状态计数、宿主机和平台服务可达性；`GET /api/metrics` 返回一份内存快照，每 App 的 Lease 计数、进入状态的时间和休眠时刻随列表返回（ADR 0015）；`GET /api/requests` 由接到请求的副本扇出到 `PNEUMA_SPACE_PEERS` 并归并，记录由 Ingress 和 Scheduler 写入内存环（ADR 0016）；`GET /api/nodes` 有人请求才采样；`/metrics` 在单独端口（ADR 0024） | 写这三张表之外的表；在请求路径上调 Docker、K8s 或网络（探测只在采样器里） |
-| Console 和 CLI | 8081 管理边界；页面是总览（US-P-13 列的指标）、实时（ADR 0016）、拓扑（ADR 0018）和项目（US-P-6 列的字段，项目详情含 Release 列表、Delivery 列表和容器日志），`upstream` 模式另有团队页和租户切换器（ADR 0022 第 8 条），中英双语，明暗主题，单文件 HTML 内联 CSS、JS 和 SVG 图表，不加载外部资源；发布表单收镜像引用、manifest、可选 bundle 和首次发布时的 owner，引用由网关解析为镜像 id 或 digest；`appctl publish` 用 `--owner`（默认取环境变量 `PNEUMA_SPACE_OWNER`）；全局 Policy 和 owner 变更只有 `appctl`，`upstream` 模式的令牌只在团队页签发；`appctl` 先读 `pneuma-space.json`，需要容器时才 `docker build`（K8s 平面再 `docker push` 到 `PNEUMA_SPACE_REGISTRY`），有 `static` 时打包目录，再以 `PNEUMA_SPACE_TOKEN` 作 Bearer 调管理接口；管理接口的分发器按 `ACTIONS` 授权，按路由声明的 `audit` 在处理结束后写审计行（ADR 0024 第 6 条） | 任何业务逻辑；它们是薄壳 |
+| Console 和 CLI | 8081 管理边界；页面是总览（US-P-13 列的指标）、实时（ADR 0016）、拓扑（ADR 0018）和项目（US-P-6 列的字段，项目详情含 Release 列表、Delivery 列表和容器日志），`upstream` 模式另有团队页和租户切换器（ADR 0022 第 8 条），中英双语，明暗主题，单文件 HTML 内联 CSS、JS 和 SVG 图表，不加载外部资源；发布表单收镜像引用、manifest、可选 bundle 和首次发布时的 owner，引用由网关解析为镜像 id 或 digest；`appctl publish` 用 `--owner`（默认取环境变量 `PNEUMA_SPACE_OWNER`）；全局 Policy 和 owner 变更只有 `appctl`，`upstream` 模式的令牌只在团队页签发；`appctl` 先读 `pneuma-space.json`，需要容器时才 `docker build`（K8s 平面再 `docker push` 到 `PNEUMA_SPACE_REGISTRY`），有 `static` 时打包目录，再以 `PNEUMA_SPACE_TOKEN` 作 Bearer 调管理接口；管理接口的分发器按 `ACTIONS` 授权，按路由声明的 `audit` 在处理结束后写审计行（ADR 0024 第 6 条）；不在当前构建上的副本对 GET 以外的路由答 503（ADR 0040） | 任何业务逻辑；它们是薄壳 |
 
 部署平面是 `PNEUMA_SPACE_PLANE`（默认 `docker`，或 `kubernetes`）。组合根 `main.ts` 按它选下表四个实现；Lifecycle、`Runtimes` 门面、Guard、Scheduler、Ingress、Registry、Providers 两个平面共用一份。K8s 是平面不是运行时，`RUNTIMES` 仍是两行（ADR 0019 第 1 条）。
 
@@ -115,7 +115,7 @@ Lease：`request` 从 acquire 到响应体最后一个字节写完，客户端�
 | `Infra.resolveImage` | 本地镜像 id | 组织仓库里的 digest |
 | `Store` | `SqliteStore` | `PgStore` |
 
-集群上周期性工作归领导者，即持有 advisory lock `pneuma-space.leader` 的副本：回收器、Scheduler、接管、孤儿 Pod 和 worker 清理、死副本行清理、Provider 收敛、`awake_ms` 和存储采样、观测数据清扫、临时应用的到期清扫（ADR 0038）。正确性不靠领导者（INV-11），它失联只让回收和投递延迟（ADR 0020 第 4 条）。单机是 N=1 的特例。
+集群上周期性工作归领导者，即持有 advisory lock `pneuma-space.leader` 的副本：回收器、Scheduler、接管、孤儿 Pod 和 worker 清理、死副本行清理、Provider 收敛、`awake_ms` 和存储采样、观测数据清扫、临时应用的到期清扫（ADR 0038）。只有当前构建的副本争这把锁（ADR 0040）。正确性不靠领导者（INV-11），它失联只让回收和投递延迟（ADR 0020 第 4 条）。单机是 N=1 的特例。
 
 单机平台库是 `/data/pneuma-space.sqlite3`（WAL），集群是一个独立的 PostgreSQL（`PNEUMA_SPACE_STORE_URL`），不与应用的 `db` 后端共用（ADR 0025）。每张表一个写者。`ensure` 和 `suspend` 的结果由 Registry 写回 Binding 行。发布在一个事务里写 Release、Trigger、Binding 和 `App.current`，这是用数据库而不是 JSON 文件的原因。列出 500 个 App 是一次查询加一次内存读，没有 Docker 或 K8s 调用。
 
