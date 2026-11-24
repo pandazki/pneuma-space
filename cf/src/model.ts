@@ -33,7 +33,7 @@ export type Policy = {
   maxFailures: number; requestsPerDay: number; storageBytes: number;
 };
 export const DEFAULT_POLICY: Policy = {
-  idleSeconds: 30, requestSeconds: 120, drainSeconds: 10,
+  idleSeconds: 300, requestSeconds: 120, drainSeconds: 10,
   maxFailures: 5, requestsPerDay: 2000, storageBytes: 10 * 1024 * 1024,
 };
 export type Quota = { apps: number; awake: number; requestsPerDay: number; storageBytes: number };

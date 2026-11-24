@@ -201,6 +201,12 @@ test('CF-26 root paths outside the console routes answer 404, never a console fi
   const statuses = await Promise.all(['/style.css', '/app.js', '/index.html', '/favicon.ico'].map(async path => (await mf.dispatchFetch(origin + path, { headers: { cookie: client.cookie } })).status));
   assert.deepEqual(statuses, [404, 404, 404, 404]);
 });
+test('CF-27 a new app sleeps after 300 idle seconds by default', async () => {
+  const client = await identity();
+  const app = await (await request('/tenants/' + client.tenant + '/apps', client, { name: 'idle-' + randomBytes(4).toString('hex') })).json() as { id: string };
+  const detail = await (await request('/apps/' + app.id, client)).json() as { policy: { idleSeconds: number } };
+  assert.equal(detail.policy.idleSeconds, 300);
+});
 test('CF-03 another tenant cannot reach an app by its path or its control API', async () => {
   const app = await staticApp(await identity()), other = await identity();
   assert.equal((await mf.dispatchFetch(app.url, { headers: { cookie: other.cookie } })).status, 404);
