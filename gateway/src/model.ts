@@ -1087,8 +1087,8 @@ export interface Registry {
   remove(name: AppName, named?: ManagerName | null): Promise<void>;
   /** Only from removed; otherwise Conflict. */
   purge(name: AppName, named?: ManagerName | null): Promise<void>;
-  /** Purge from any status, for an ephemeral app only; Conflict for a durable one (ADR 0038). */
-  discard(name: AppName, named?: ManagerName | null): Promise<void>;
+  /** Purge from any status, for an ephemeral app only; Conflict for a durable one, or when `id` is given and the app has another (ADR 0038). */
+  discard(name: AppName, named?: ManagerName | null, id?: AppId | null): Promise<void>;
   /** The leader's sweep: discards every ephemeral app whose end is at or before `now`, whatever its status (ADR 0038). */
   expire(now?: number): Promise<void>;
   setGlobalPolicy(patch: Partial<Policy>): Promise<Policy>;

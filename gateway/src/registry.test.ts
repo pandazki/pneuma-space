@@ -709,6 +709,18 @@ test('AC-EPH-2 discard of a durable app is refused and changes nothing', async (
   assert.deepEqual([registry.view(survey)?.status, w.calls.filter(([verb]) => verb === 'destroy')], ['registered', []]);
 });
 
+test('ADR 0038 a discard given the id of an earlier app of the name is refused and changes nothing; given the app\'s own id it ends the app', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  const { app: earlier } = await temporary(registry, { kv: {} });
+  await registry.discard(trial);
+  const { app } = await temporary(registry, { kv: {} });
+  await assert.rejects(registry.discard(trial, null, earlier), (error) => error instanceof Conflict && /belongs to a later app/.test(error.message));
+  assert.deepEqual([(await store.app(trial))?.status, w.calls.filter(([verb, , id]) => verb === 'destroy' && id === app)], ['registered', []]);
+  await registry.discard(trial, null, app);
+  assert.equal(await store.app(trial), null);
+});
+
 test('ADR 0038 a discard interrupted after the first destroy finishes on resume after restart', async () => {
   const w = world();
   const { registry } = await w.open();

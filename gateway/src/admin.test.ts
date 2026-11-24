@@ -436,6 +436,16 @@ test('AC-EPH-2 POST /api/apps/<name>/discard ends an ephemeral app and writes ap
   assert.deepEqual((await audit(store, 'trial')).filter((r) => r.action === 'app.discard').map((r) => r.result), ['started', 'ok']);
 });
 
+test('ADR 0038 POST /api/apps/<name>/discard?app=<id> answers 409 for another id and 400 for an empty one, and discards for the id the publish returned', async (t) => {
+  const { call, server, registry } = await admin();
+  t.after(() => server.close());
+  const { body: release } = await call('PUT', '/api/apps/trial/release', { ...kvApp, ephemeral: {} });
+  assert.deepEqual([(await call('POST', '/api/apps/trial/discard?app=0123456789ab')).status, (await call('POST', '/api/apps/trial/discard?app=')).status], [409, 400]);
+  assert.equal(registry.view(appName('trial'))?.status, 'registered');
+  assert.equal((await call('POST', `/api/apps/trial/discard?app=${release.app}`)).status, 200);
+  assert.equal(registry.view(appName('trial')), null);
+});
+
 test('AC-EPH-2 POST /api/apps/<name>/discard on a durable app answers 409', async (t) => {
   const { call, server, registry } = await admin();
   t.after(() => server.close());

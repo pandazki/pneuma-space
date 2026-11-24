@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test, type TestContext } from 'node:test';
 import {
-  adminClient, adminUrl, appId, appJson, appPut, appUrl, bucketExists, cleanup, compose, deliveries, deploy, images, OWNER, publish, serviceToken,
+  adminClient, adminUrl, appctl, appId, appJson, appPut, appUrl, bucketExists, cleanup, compose, deliveries, deploy, images, OWNER, publish, serviceToken,
   setupSuite, sleep, summary, teardownSuite, uniqueName, volumeExists, waitFor, type Capabilities,
 } from './harness.ts';
 import { ADMIN_PATHS } from '../../gateway/src/model.ts';
@@ -155,4 +155,16 @@ test('AC-EPH-7', { timeout: 240_000 }, async (t) => {
   await waitFor(async () => (await summary(app.name)) === null, 60_000, 'the end once postgres is back');
   const last = (await adminClient.audit(app.name)).body.find((r: any) => r.action === 'app.expire');
   assert.deepEqual([last.actor, last.result, last.details.resumed], ['platform', 'ok', true]);
+});
+
+test('AC-EPH-8', { timeout: 120_000 }, async (t) => {
+  const first = await ephemeral(t, {});
+  assert.match(first.printed, new RegExp(`  app ${first.id}$`, 'm'));
+  assert.ok((await adminClient.discard(first.name)).status < 300);
+  publish(first.name, { image: images.echo, capabilities: {}, flags: ['--ephemeral'] });
+  const second = await appId(first.name);
+  assert.equal((await fetch(`${adminUrl}${ADMIN_PATHS.discard(first.name)}?app=${first.id}`, { method: 'POST' })).status, 409);
+  assert.equal((await summary(first.name)).status, 'registered');
+  appctl('discard', first.name, '--app', second);
+  assert.equal(await summary(first.name), null);
 });

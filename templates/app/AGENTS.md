@@ -126,7 +126,7 @@ test('the page greets a signed-in visitor by name', async () => {
 
 Other commands: `appctl list`, `appctl show <name>` (runtime, quarantine, instance state asleep or awake, bindings, recent trigger deliveries), `appctl logs <name>`, `appctl unquarantine <name>` (an app that kept crashing or hanging answers 503 until this or a new publish), `appctl policy <name> idle_seconds=5` (per-app override; the default idle is 60 s), `appctl remove` and `appctl purge`.
 
-To try a version without keeping it, `appctl publish <name> . --ephemeral` publishes an ephemeral app under a new name that ends with its data after the platform's default ttl (`--ttl <seconds>` to choose another); `appctl discard <name>` ends it at once.
+To try a version without keeping it, `appctl publish <name> . --ephemeral` publishes an ephemeral app under a new name that ends with its data after the platform's default ttl (`--ttl <seconds>` to choose another); `appctl discard <name> --app <id>`, with the id the publish printed, ends it at once and never a later app given the same name.
 
 An app published with `--manager <name>` is managed: its later publishes and other writes need `--manager <name>` too; `appctl unmanage <name> --manager <name>` ends that.
 

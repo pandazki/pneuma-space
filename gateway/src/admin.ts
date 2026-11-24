@@ -170,6 +170,13 @@ function namedOf({ request }: Ctx): ManagerName | null {
   return raw === undefined ? null : managerName(raw);
 }
 
+/** `?app=<id>`: the `app` of the release a publish returned, so a discard never ends a later app of the same name (ADR 0038). */
+function appIdOf(query: URLSearchParams): AppId | null {
+  const raw = query.get('app');
+  if (raw === '') throw new InputError('app must be the id of the app, the app field of the release its publish returned');
+  return raw as AppId | null;
+}
+
 function userId(raw: unknown): string {
   if (typeof raw !== 'string') throw new InputError('a user is given by id, a string');
   return subject(`user:${raw}`).slice('user:'.length);
@@ -443,7 +450,7 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
     }, {
       ...(hosted && { json: true as const }), audit: onAppAudit('app.purge'),
     }),
-    appRoute('POST', ADMIN_PATHS.discard('<name>'), 'app.discard', async (ctx) => (await registry.discard(app(ctx.params[0]), namedOf(ctx)), { status: 'discarded' }), {
+    appRoute('POST', ADMIN_PATHS.discard('<name>'), 'app.discard', async (ctx) => (await registry.discard(app(ctx.params[0]), namedOf(ctx), appIdOf(ctx.query)), { status: 'discarded' }), {
       audit: onAppAudit('app.discard'),
     }),
     appRoute('DELETE', ADMIN_PATHS.manager('<name>'), 'app.release', async (ctx) => (await registry.clearManager(app(ctx.params[0]), namedOf(ctx)), { manager: null }), {

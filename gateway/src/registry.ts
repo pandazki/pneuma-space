@@ -364,9 +364,11 @@ export class PlatformRegistry implements Registry {
     });
   }
 
-  discard(name: AppName, named?: ManagerName | null): Promise<void> {
+  discard(name: AppName, named?: ManagerName | null, id?: AppId | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
+      // A retry after a lost answer may meet a later app the name was published as since; the id the publish returned tells them apart (ADR 0038).
+      if (id && app.id !== id) throw new Conflict(`app "${name}" is now ${app.id}, not ${id}: the name belongs to a later app; nothing was discarded`);
       mustName(app, named);
       if (app.expiresAt === null) throw new Conflict(`app "${name}" is durable; discard ends only an ephemeral app, remove and purge end this one`);
       await this.#purge(app);
