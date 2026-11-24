@@ -528,3 +528,27 @@ test('ADR 0039 a manager outside the name grammar, a url that is not absolute ht
   await call('PUT', '/api/apps/survey/release', managedApp);
   assert.equal((await fetch(`${base}/api/apps/survey/remove`, { method: 'POST', headers: { 'x-pneuma-space-manager': 'Deployer' } })).status, 400);
 });
+
+test('ADR 0039 a malformed manager header answers 400 on an unmanaged app too, and the app is not removed', async (t) => {
+  const { base, call, server, registry } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  const remove = await fetch(`${base}/api/apps/survey/remove`, { method: 'POST', headers: { 'x-pneuma-space-manager': 'Deployer' } });
+  assert.deepEqual([remove.status, registry.view(appName('survey'))?.status], [400, 'registered']);
+});
+
+test('ADR 0039 a manager header given twice answers 400 saying it names one manager', async (t) => {
+  const { base, call, server } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', managedApp);
+  // Two header lines; fetch would join them before sending.
+  const reply = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const request = httpRequest(`${base}/api/apps/survey/remove`, { method: 'POST', headers: { 'x-pneuma-space-manager': ['deployer', 'deployer'] } }, (response) => {
+      let body = '';
+      response.on('data', (chunk) => (body += chunk)).on('end', () => resolve({ status: response.statusCode!, body }));
+    });
+    request.on('error', reject).end();
+  });
+  assert.equal(reply.status, 400);
+  assert.match(JSON.parse(reply.body).error, /names one manager, got "deployer, deployer"/);
+});
