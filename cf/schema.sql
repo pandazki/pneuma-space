@@ -22,30 +22,21 @@ CREATE TABLE IF NOT EXISTS sessions (
   hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), csrf TEXT NOT NULL,
   created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER
 );
-CREATE TABLE IF NOT EXISTS app_sessions (
-  hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), app_id TEXT NOT NULL,
-  parent_hash TEXT NOT NULL REFERENCES sessions(hash), expires_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS grants (
-  hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, user_id TEXT NOT NULL, parent_hash TEXT NOT NULL,
-  origin TEXT NOT NULL, nonce_hash TEXT NOT NULL, next_path TEXT NOT NULL, expires_at INTEGER NOT NULL,
-  consumed_at INTEGER
-);
 CREATE TABLE IF NOT EXISTS tokens (
   id TEXT NOT NULL UNIQUE, hash TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(id),
   user_id TEXT NOT NULL REFERENCES users(id), label TEXT NOT NULL, scopes_json TEXT NOT NULL,
   app_ids_json TEXT, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER
 );
+/* origin holds the AppId: databases from per-app domains keep this NOT NULL UNIQUE column (ADR 0044). */
 CREATE TABLE IF NOT EXISTS apps (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, tenant_id TEXT NOT NULL REFERENCES tenants(id),
   owner_id TEXT NOT NULL REFERENCES users(id), origin TEXT NOT NULL UNIQUE,
-  domain_state TEXT NOT NULL DEFAULT 'pending', domain_error TEXT,
   created_at INTEGER NOT NULL, create_key TEXT NOT NULL, storage_bytes INTEGER NOT NULL DEFAULT 10485760,
   observed_status TEXT NOT NULL DEFAULT 'draft', observed_runtime TEXT NOT NULL DEFAULT 'asleep',
   observed_release INTEGER, observed_at INTEGER, purged_at INTEGER,
   UNIQUE(tenant_id,create_key)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS app_names ON apps(tenant_id,name) WHERE purged_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS app_name ON apps(name) WHERE purged_at IS NULL;
 CREATE TABLE IF NOT EXISTS uploads (
   id TEXT PRIMARY KEY, app_id TEXT NOT NULL REFERENCES apps(id), actor_hash TEXT NOT NULL,
   digest TEXT NOT NULL, bytes INTEGER NOT NULL, manifest_json TEXT NOT NULL, generation INTEGER NOT NULL,

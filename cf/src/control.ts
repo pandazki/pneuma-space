@@ -59,7 +59,6 @@ async function resources(env: Env): Promise<Response> {
     objects: { bucket: env.PNEUMA_SPACE_OBJECT_BUCKET, status: checks[2].status === 'fulfilled' ? 'reachable' : 'failed' },
     runtime: { provider: 'Cloudflare Containers', observations: 'Open an application for its current runtime state.' },
     turn: { status: env.PNEUMA_SPACE_TURN_KEY_ID && env.PNEUMA_SPACE_TURN_API_TOKEN ? 'configured' : 'unconfigured' },
-    domain: { status: env.PNEUMA_SPACE_CF_API_TOKEN ? 'configured' : 'unconfigured' },
   });
 }
 async function adminRoute(request: Request, env: Env, actor: Actor, segments: string[], url: URL): Promise<Response> {
@@ -95,7 +94,7 @@ async function adminRoute(request: Request, env: Env, actor: Actor, segments: st
     }
   }
   if (request.method === 'GET' && !target) {
-    if (section === 'apps') return json({ items: (await listApps(env, actor)).map(appSummary) });
+    if (section === 'apps') return json({ items: (await listApps(env, actor)).map(row => appSummary(env, row)) });
     if (section === 'resources') return resources(env);
     if (section === 'audit') return auditPage(env, actor, url);
     if (section === 'overview') {
@@ -153,8 +152,8 @@ export async function controlRoute(request: Request, env: Env, actor: Actor, pat
   if (segments[0] !== 'tenants' || segments.length < 3 || segments.length > 4) return null;
   const [, tenantId, section, target] = segments;
   if (section === 'apps' && !target) {
-    if (request.method === 'GET') return json({ items: (await listApps(env, actor, tenantId)).map(appSummary) });
-    if (request.method === 'POST') return json(appSummary(await createApp(env, actor, tenantId, (await input(request, 2048)).name, operationKey(request))), 201);
+    if (request.method === 'GET') return json({ items: (await listApps(env, actor, tenantId)).map(row => appSummary(env, row)) });
+    if (request.method === 'POST') return json(appSummary(env, await createApp(env, actor, tenantId, (await input(request, 2048)).name, operationKey(request))), 201);
   }
   requireSession(actor);
   await tenantRole(env, actor, tenantId);

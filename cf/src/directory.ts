@@ -2,15 +2,15 @@ import { DEFAULT_POLICY, type Actor, type AppRow, type AppSnapshot, type AppRegi
 import { authorizeApp, requireAdmin, tenantRole } from './auth.ts';
 import { id, text } from './util.ts';
 
+export const appUrl = (env: Env, name: string): string => env.PNEUMA_SPACE_CONTROL_ORIGIN + '/apps/' + name + '/';
 export async function appRow(env: Env, appId: string): Promise<AppRow & { storage_bytes: number }> {
   const row = await env.PNEUMA_SPACE_DB.prepare('SELECT * FROM apps WHERE id=? AND purged_at IS NULL').bind(appId).first<AppRow & { storage_bytes: number }>();
   return row ?? fail(404, 'app_not_found', 'Application not found.');
 }
-export function appSummary(row: AppRow) {
+export function appSummary(env: Env, row: AppRow) {
   return {
-    id: row.id, name: row.name, tenantId: row.tenant_id, ownerId: row.owner_id, origin: row.origin,
-    domainState: row.domain_state, domainError: row.domain_error, status: row.observed_status,
-    runtime: { state: row.observed_runtime }, release: row.observed_release,
+    id: row.id, name: row.name, tenantId: row.tenant_id, ownerId: row.owner_id, url: appUrl(env, row.name),
+    status: row.observed_status, runtime: { state: row.observed_runtime }, release: row.observed_release,
     observedAt: row.observed_at, createdAt: row.created_at,
   };
 }
@@ -27,7 +27,7 @@ export async function cellValue<T>(env: Env, appId: string, path: string, value?
 }
 export async function initialize(env: Env, row: AppRow & { storage_bytes: number }): Promise<void> {
   const registration: AppRegistration = {
-    id: row.id, name: row.name, tenantId: row.tenant_id, ownerId: row.owner_id, origin: row.origin,
+    id: row.id, name: row.name, tenantId: row.tenant_id, ownerId: row.owner_id,
     policy: { ...DEFAULT_POLICY, storageBytes: row.storage_bytes },
   };
   await cellValue(env, row.id, '/initialize', registration);
@@ -54,12 +54,12 @@ export async function createApp(env: Env, actor: Actor, tenantId: string, nameIn
   let row = await env.PNEUMA_SPACE_DB.prepare('SELECT * FROM apps WHERE tenant_id=? AND create_key=?').bind(tenantId, operation).first<AppRow & { storage_bytes: number }>();
   if (row && row.name !== name) fail(409, 'idempotency', 'This operation key was used for another application.');
   if (!row) {
-    const appId = id('a'), origin = 'https://app-' + appId.slice(2) + '.' + env.PNEUMA_SPACE_APPS_DOMAIN;
+    const appId = id('a');
     const tenant = await env.PNEUMA_SPACE_DB.prepare('SELECT storage_limit,apps_limit FROM tenants WHERE id=?').bind(tenantId).first<{ storage_limit: number; apps_limit: number }>();
     if (!tenant) fail(404, 'tenant_not_found', 'Space not found.');
     const bytes = Math.min(DEFAULT_POLICY.storageBytes, Math.floor(tenant.storage_limit / Math.max(tenant.apps_limit, 1)));
     try {
-      const created = await env.PNEUMA_SPACE_DB.prepare('INSERT INTO apps(id,name,tenant_id,owner_id,origin,created_at,create_key,storage_bytes) SELECT ?,?,?,?,?,?,?,? WHERE (SELECT count(*) FROM apps WHERE tenant_id=? AND purged_at IS NULL)<(SELECT apps_limit FROM tenants WHERE id=?) AND (SELECT coalesce(sum(storage_bytes),0) FROM apps WHERE tenant_id=? AND purged_at IS NULL)+?<=(SELECT storage_limit FROM tenants WHERE id=?)').bind(appId, name, tenantId, actor.user.id, origin, Date.now(), operation, bytes, tenantId, tenantId, tenantId, bytes, tenantId).run();
+      const created = await env.PNEUMA_SPACE_DB.prepare('INSERT INTO apps(id,name,tenant_id,owner_id,origin,created_at,create_key,storage_bytes) SELECT ?,?,?,?,?,?,?,? WHERE (SELECT count(*) FROM apps WHERE tenant_id=? AND purged_at IS NULL)<(SELECT apps_limit FROM tenants WHERE id=?) AND (SELECT coalesce(sum(storage_bytes),0) FROM apps WHERE tenant_id=? AND purged_at IS NULL)+?<=(SELECT storage_limit FROM tenants WHERE id=?)').bind(appId, name, tenantId, actor.user.id, appId, Date.now(), operation, bytes, tenantId, tenantId, tenantId, bytes, tenantId).run();
       if (!created.meta.changes) fail(409, 'app_quota', 'The space has reached its application or allocated storage limit.');
     } catch (error) {
       if (error instanceof Error && /UNIQUE/.test(error.message)) {
@@ -72,32 +72,7 @@ export async function createApp(env: Env, actor: Actor, tenantId: string, nameIn
   }
   await initialize(env, row);
   await audit(env, actor, 'app.create', tenantId, row.id);
-  try { await ensureDomain(env, row); } catch {}
-  return appRow(env, row.id);
-}
-export async function ensureDomain(env: Env, row: AppRow): Promise<void> {
-  if (row.domain_state === 'attached') return;
-  try {
-    if (!env.PNEUMA_SPACE_CF_API_TOKEN) fail(503, 'domain_credentials', 'Domain provisioning credentials are not configured.');
-    const hostname = new URL(row.origin).hostname;
-    const endpoint = 'https://api.cloudflare.com/client/v4/accounts/' + env.PNEUMA_SPACE_ACCOUNT_ID + '/workers/domains';
-    const headers = { authorization: 'Bearer ' + env.PNEUMA_SPACE_CF_API_TOKEN, 'content-type': 'application/json' };
-    const currentResponse = await fetch(endpoint + '?hostname=' + encodeURIComponent(hostname), { headers, signal: AbortSignal.timeout(20000) });
-    const current = await currentResponse.json<{ success: boolean; result?: { hostname: string; service: string }[] }>();
-    if (!currentResponse.ok || !current.success) fail(503, 'domain_credentials', 'Could not verify existing Worker domains.');
-    const existing = current.result?.find(domain => domain.hostname === hostname);
-    if (existing && existing.service !== env.PNEUMA_SPACE_WORKER_NAME) fail(409, 'domain_conflict', 'This hostname belongs to another service.');
-    if (!existing) {
-      const response = await fetch(endpoint, { method: 'PUT', headers, body: JSON.stringify({ hostname, service: env.PNEUMA_SPACE_WORKER_NAME, zone_id: env.PNEUMA_SPACE_ZONE_ID }), signal: AbortSignal.timeout(20000) });
-      const value = await response.json<{ success: boolean; errors?: { message: string }[] }>();
-      if (!response.ok || !value.success) fail(503, 'domain_provisioning', value.errors?.[0]?.message ?? 'Application domain could not be provisioned.');
-    }
-    await env.PNEUMA_SPACE_DB.prepare("UPDATE apps SET domain_state='attached',domain_error=NULL WHERE id=?").bind(row.id).run();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Domain provisioning failed.';
-    await env.PNEUMA_SPACE_DB.prepare("UPDATE apps SET domain_state='failed',domain_error=? WHERE id=?").bind(message.slice(0, 300), row.id).run();
-    throw error;
-  }
+  return row;
 }
 export async function reserveCompute(env: Env, appId: string, bootId: string): Promise<void> {
   const app = await appRow(env, appId), db = env.PNEUMA_SPACE_DB;
@@ -112,25 +87,6 @@ export async function reserveCompute(env: Env, appId: string, bootId: string): P
   }));
   const result = await db.prepare('INSERT INTO compute(app_id,boot_id,started_at) SELECT ?,?,? WHERE (SELECT count(*) FROM compute c JOIN apps a ON a.id=c.app_id WHERE a.tenant_id=?)<(SELECT awake_limit FROM tenants WHERE id=?) ON CONFLICT(app_id) DO NOTHING').bind(appId, bootId, Date.now(), app.tenant_id, app.tenant_id).run();
   if (!result.meta.changes) fail(503, 'compute_quota', 'The space has reached its running application limit.');
-}
-export async function removeDomain(env: Env, app: AppRegistration): Promise<void> {
-  if (!env.PNEUMA_SPACE_CF_API_TOKEN) {
-    const row = await env.PNEUMA_SPACE_DB.prepare('SELECT domain_state FROM apps WHERE id=?').bind(app.id).first<{ domain_state: string }>();
-    if (row?.domain_state === 'attached') fail(503, 'domain_credentials', 'Domain cleanup credentials are not configured.');
-    return;
-  }
-  const hostname = new URL(app.origin).hostname;
-  const endpoint = 'https://api.cloudflare.com/client/v4/accounts/' + env.PNEUMA_SPACE_ACCOUNT_ID + '/workers/domains';
-  const headers = { authorization: 'Bearer ' + env.PNEUMA_SPACE_CF_API_TOKEN };
-  const listed = await fetch(endpoint + '?hostname=' + encodeURIComponent(hostname), { headers, signal: AbortSignal.timeout(20000) });
-  const domains = await listed.json<{ success: boolean; result?: { id: string; hostname: string; service: string }[] }>();
-  if (!listed.ok || !domains.success) fail(503, 'domain_cleanup', 'Could not inspect the application domain for cleanup.');
-  const domain = domains.result?.find(domain => domain.hostname === hostname);
-  if (!domain) return;
-  if (domain.service !== env.PNEUMA_SPACE_WORKER_NAME) fail(409, 'domain_conflict', 'The domain now belongs to another service.');
-  const removed = await fetch(endpoint + '/' + encodeURIComponent(domain.id), { method: 'DELETE', headers, signal: AbortSignal.timeout(20000) });
-  if (!removed.ok && removed.status !== 404) { await removed.body?.cancel(); fail(503, 'domain_cleanup', 'Application domain cleanup failed and will be retried.'); }
-  await removed.body?.cancel();
 }
 export async function releaseCompute(env: Env, appId: string, bootId: string): Promise<void> {
   await env.PNEUMA_SPACE_DB.prepare('DELETE FROM compute WHERE app_id=? AND boot_id=?').bind(appId, bootId).run();

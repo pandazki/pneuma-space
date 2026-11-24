@@ -44,12 +44,11 @@ export type Actor = { user: User } & (
   | { kind: 'token'; hash: string; tenantId: string; scopes: Action[]; appIds: string[] | null }
 );
 export type AppRow = {
-  id: string; name: string; tenant_id: string; owner_id: string; origin: string;
-  domain_state: 'pending' | 'attached' | 'failed'; domain_error: string | null;
+  id: string; name: string; tenant_id: string; owner_id: string;
   created_at: number; observed_status: string; observed_runtime: string;
   observed_release: number | null; observed_at: number | null;
 };
-export type AppRegistration = { id: string; name: string; tenantId: string; ownerId: string; origin: string; policy: Policy };
+export type AppRegistration = { id: string; name: string; tenantId: string; ownerId: string; policy: Policy };
 export type ExecutionScope = { appId: string; generation: number; bootId: string };
 export type AppStatus = 'draft' | 'registered' | 'removed' | 'purging' | 'purged';
 export type RuntimeStatus = {
