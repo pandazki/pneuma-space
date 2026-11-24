@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import http from 'node:http';
 import { once } from 'node:events';
-import { DEFAULT_POLICY } from '../src/model.ts';
+import { DEFAULT_POLICY, WAKE_PHASES } from '../src/model.ts';
 
 let mf: Miniflare;
 let triggerServer: http.Server;
@@ -37,6 +37,19 @@ before(async () => {
     import worker from './src/worker.ts';
     export {AppServices} from './src/app.ts';
     export class AppCell extends BaseAppCell {
+      container() {
+        if (!this.ctx.storage.kv.get('test:runner')) return super.container();
+        const cell = this;
+        return {
+          running: false, images: {base: 'runner'},
+          start(options) { cell.boot = options.env.PNEUMA_SPACE_BOOT_ID; },
+          async setInactivityTimeout() {},
+          getTcpPort() { return {fetch: async input => new URL(input.url ?? input).pathname === '/_pneuma-space/ready'
+            ? Response.json({bootId: cell.boot, digest: cell.state().current.digest, ready: true, uptime: 5, phases: {fetch: 30, unpack: 4, listen: 12}})
+            : new Response('woken')}; },
+        };
+      }
+      async startBinding(scope) { if (!this.ctx.storage.kv.get('test:runner')) return super.startBinding(scope); }
       async containerAcquire() {
         if (!this.ctx.storage.kv.get('test:trigger')) return super.containerAcquire();
         return {fetch: request => {
@@ -52,6 +65,7 @@ before(async () => {
           this.ctx.storage.kv.delete('platform:receipt:' + key);
           return new Response('{}');
         }
+        if (path === '/test/runner') { this.ctx.storage.kv.put('test:runner', true); return new Response('{}'); }
         if (path === '/test/deliveries') return Response.json({pending: this.deliveries?.size ?? 0});
         if (path === '/test/configure-kv') {
           const {boot} = await request.json();
@@ -372,4 +386,25 @@ test('CF-25 a sleeping Node app answers its static index without waking', async 
   assert.equal(await page.text(), 'Shell');
   const snapshot = await (await call(app, '/inspect')).json() as { runtime: { bootId: string | null }; usage: { requests: number; wakes: number } };
   assert.deepEqual([snapshot.runtime.bootId, snapshot.usage.wakes, snapshot.usage.requests], [null, 0, 1]);
+});
+async function requestWake() {
+  const { app } = await fixture();
+  await call(app, '/test/configure-kv', {});
+  await call(app, '/test/runner', {});
+  assert.equal(await (await call(app, '/_pneuma-space/invoke/')).text(), 'woken');
+  return app;
+}
+test('CF-28 a request wake records the duration of each phase in the app detail', async () => {
+  const app = await requestWake();
+  const { wake, runtime } = await (await call(app, '/inspect')).json() as { runtime: { bootId: string }; wake: { bootId: string; outcome: string; error: null; phases: Record<string, number | null> } };
+  assert.deepEqual([wake.bootId, wake.outcome, wake.error], [runtime.bootId, 'ready', null]);
+  assert.deepEqual(Object.keys(wake.phases), [...WAKE_PHASES]);
+  assert.deepEqual([wake.phases.fetch, wake.phases.unpack, wake.phases.listen], [30, 4, 12]);
+  for (const phase of ['reserve', 'container', 'confirm', 'respond']) assert.equal(typeof wake.phases[phase], 'number', phase);
+});
+test('CF-28 each wake appends an event carrying its record', async () => {
+  const app = await requestWake();
+  const { runtime } = await (await call(app, '/inspect')).json() as { runtime: { bootId: string } };
+  const events = await (await call(app, '/events')).json() as { items: { type: string; data?: { bootId: string; outcome: string } }[] };
+  assert.deepEqual(events.items.filter(event => event.type === 'wake-ready').map(event => [event.data?.bootId, event.data?.outcome]), [[runtime.bootId, 'ready']]);
 });

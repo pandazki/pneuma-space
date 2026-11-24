@@ -827,12 +827,32 @@ function runtimeState(app) {
     h('div',{ class:'grid metrics' },stat(tr('请求','Requests'),app.usage.requests,tr('应用累计','Application total')),stat(tr('错误','Errors'),app.usage.errors,tr('应用累计','Application total')),stat(tr('唤醒','Wakes'),app.usage.wakes,tr('应用累计','Application total')),stat(tr('休眠','Sleeps'),app.usage.sleeps,tr('应用累计','Application total'))),
     h('div',{ class:'card' },facts({ [tr('应用标识','App ID')]:h('code',{},app.id),[tr('运行状态开始','Runtime state since')]:time(app.runtime.since),[tr('最近访问','Last access')]:time(app.lastAccessAt),[tr('计划休眠','Scheduled sleep')]:app.runtime.sleepsAt ? time(app.runtime.sleepsAt) : tr('未安排','Not scheduled'),[tr('活动请求','Active requests')]:app.runtime.requests,[tr('活动连接','Active channels')]:app.runtime.channels,[tr('失败计数','Failures')]:app.runtime.failures,[tr('当前启动','Current boot')]:app.runtime.bootId ? h('code',{},app.runtime.bootId) : tr('无','None') })));
 }
+const wakePhases = [['reserve','预留运行名额','Reserve a runtime slot'],['container','启动容器','Start the container'],['fetch','从 R2 取应用包','Fetch the package from R2'],['unpack','解包','Unpack'],['listen','应用开始监听','App starts listening'],['confirm','确认就绪','Confirm readiness'],['respond','首个响应','First response']];
+function milliseconds(value) { return value == null ? '—' : value < 1000 ? `${number(value)} ms` : `${(value/1000).toFixed(value < 10000 ? 2 : 1)} s`; }
+function lastWake(app) {
+  if (app.current?.manifest.runtime === 'static') return empty(tr('静态应用不启动运行时。','A static app never starts a runtime.'));
+  const wake = app.wake;
+  if (!wake) return empty(tr('还没有唤醒记录。下一次请求或发布启动应用时，这里会记录每个阶段。','No wake recorded yet. The next request or release that starts the app records each phase here.'));
+  const total = wakePhases.reduce((sum,[key]) => sum+(wake.phases[key] ?? 0),0);
+  let offset = 0;
+  const rows = wakePhases.map(([key,zh,en]) => {
+    const value = wake.phases[key], track = h('span',{ class:'track' });
+    if (value != null && total) { const bar = h('i'); bar.style.left = `${offset/total*100}%`; bar.style.width = `${value/total*100}%`; track.append(bar); offset += value; }
+    return h('div',{},h('dt',{},tr(zh,en)),h('dd',{ class:'bar' },track),h('dd',{ class:'value' },milliseconds(value)));
+  });
+  const span = wake.outcome === 'waking' ? tr('已用时，仍在唤醒','so far, still waking') : wake.outcome === 'failed' ? tr('后失败','before failing') : wake.phases.respond == null ? tr('至就绪，没有等待中的请求','to ready, no request waiting') : tr('至首个响应','to the first response');
+  return h('div',{ class:'card stack' },
+    h('div',{ class:'toolbar' },statusBadge(wake.outcome),h('strong',{ class:'mono' },milliseconds(total)),h('span',{ class:'muted' },span),h('span',{ class:'hint' },time(wake.at)),h('code',{ class:'hint' },wake.bootId)),
+    wake.error ? h('div',{ class:'notice error' },wake.error) : null,
+    h('dl',{ class:'waterfall' },rows));
+}
 function runtimePage(panel,id) {
   const url = appUrl(id);
   append(panel,[section(1,tr('当前状态','Current state'),tr('此处读取应用单元的即时状态。','Read directly from the app cell.'),region(url,runtimeState,'state')),
-    section(2,tr('能力与清单','Capabilities & manifest'),tr('只有清单声明的能力可用于此项目。','Only capabilities declared in the manifest are available to this project.'),region(url,app => h('div',{ class:'card stack' },app.capabilities.length ? h('div',{ class:'toolbar' },app.capabilities.map(chip)) : null,app.current ? jsonView(app.current.manifest) : empty(tr('尚未发布清单。发布第一个版本后，这里会显示它声明的能力。','No manifest has been published. The first release shows its declared capabilities here.'),mayOperate(app) && ['draft','registered'].includes(app.status) ? navLink(tr('发布第一个版本','Publish the first release'),href('projects',{ app:app.id,tab:'publish' }),'btn primary') : null)),'facts')),
-    section(3,tr('运行策略','Runtime policy'),tr('以应用单元返回的有效策略为准。','Effective policy returned by the app cell.'),region(url,app => mayOperate(app) ? policyForm(app) : recordCards(app.policy),'form',{ once:true })),
-    section(4,tr('持久数据清单','Durable inventory'),tr('读取清单不会唤醒应用。','Reading the inventory does not wake the app.'),region(`${url}/state`,inventory,'facts'))]);
+    section(2,tr('最近一次唤醒','Last wake'),tr('从开始唤醒到首个响应，每个阶段的实际用时。','Measured time of each phase, from the start of the wake to the first response.'),region(url,lastWake,'facts')),
+    section(3,tr('能力与清单','Capabilities & manifest'),tr('只有清单声明的能力可用于此项目。','Only capabilities declared in the manifest are available to this project.'),region(url,app => h('div',{ class:'card stack' },app.capabilities.length ? h('div',{ class:'toolbar' },app.capabilities.map(chip)) : null,app.current ? jsonView(app.current.manifest) : empty(tr('尚未发布清单。发布第一个版本后，这里会显示它声明的能力。','No manifest has been published. The first release shows its declared capabilities here.'),mayOperate(app) && ['draft','registered'].includes(app.status) ? navLink(tr('发布第一个版本','Publish the first release'),href('projects',{ app:app.id,tab:'publish' }),'btn primary') : null)),'facts')),
+    section(4,tr('运行策略','Runtime policy'),tr('以应用单元返回的有效策略为准。','Effective policy returned by the app cell.'),region(url,app => mayOperate(app) ? policyForm(app) : recordCards(app.policy),'form',{ once:true })),
+    section(5,tr('持久数据清单','Durable inventory'),tr('读取清单不会唤醒应用。','Reading the inventory does not wake the app.'),region(`${url}/state`,inventory,'facts'))]);
 }
 function policyForm(app) {
   const fields = Object.fromEntries(Object.entries(app.policy).map(([key,value]) => [key,input({ type:'number',required:true,min:0,step:1,value })]));
@@ -1057,16 +1077,20 @@ function deliveryTable(rows) {
 const eventWords = {
   published:['发布','Published'], 'publish-failed':['发布失败','Publish failed'], wake:['唤醒','Wake'], sleep:['休眠','Sleep'], restart:['重启','Restart'], kill:['强制终止','Kill'],
   remove:['下线','Remove'], resume:['恢复','Resume'], unquarantine:['解除隔离','Lift quarantine'], rollback:['回滚','Rollback'], purge:['清除','Purge'], policy:['策略变更','Policy change'],
+  'wake-ready':['唤醒完成','Woke'], 'wake-failed':['唤醒失败','Wake failed'],
 };
 function eventMessage(row) {
   const release = /^Published release (\d+)$/.exec(row.message ?? '');
   if (release) return tr(`已发布版本 r${release[1]}。`,row.message);
   if (row.message === 'Application action completed.') return tr('操作已完成。',row.message);
+  const ready = /^Ready in (\d+) ms\.$/.exec(row.message ?? '');
+  if (ready) return tr(`${milliseconds(Number(ready[1]))} 后就绪。`,`Ready in ${milliseconds(Number(ready[1]))}.`);
+  if (row.message?.startsWith('Startup failed: ')) return tr('启动失败：','Startup failed: ')+row.message.slice(16);
   return row.message || row.action || row.type;
 }
 function diagnosticRows(rows,kind) {
   if (!rows.length) return empty(kind === 'logs' ? tr('还没有运行日志。应用处理请求时会写入这里。','No runtime logs yet. They appear when the app handles requests.') : tr('暂无记录。','No records yet.'));
-  return h('div',{},[...rows].sort((a,b) => b.at-a.at).map(row => h('div',{ class:'logline' },h('span',{ class:'hint mono' },time(row.at)),h('span',{ class:`level ${row.level ? 'mono' : ''} ${row.level === 'error' || row.type === 'publish-failed' ? 'bad' : row.level === 'warn' ? 'warn' : ''}` },row.level || (eventWords[row.type] ? tr(...eventWords[row.type]) : row.type) || kind),h('div',{ class:'wrap' },row.appName ? h('span',{ class:'chip' },row.appName) : null,row.appName ? ' ' : null,h('span',{ class:'message' },eventMessage(row)),row.data ? h('details',{},h('summary',{ class:'hint' },tr('详情','Details')),jsonView(row.data)) : null))));
+  return h('div',{},[...rows].sort((a,b) => b.at-a.at).map(row => h('div',{ class:'logline' },h('span',{ class:'hint mono' },time(row.at)),h('span',{ class:`level ${row.level ? 'mono' : ''} ${row.level === 'error' || row.type === 'publish-failed' || row.type === 'wake-failed' ? 'bad' : row.level === 'warn' ? 'warn' : ''}` },row.level || (eventWords[row.type] ? tr(...eventWords[row.type]) : row.type) || kind),h('div',{ class:'wrap' },row.appName ? h('span',{ class:'chip' },row.appName) : null,row.appName ? ' ' : null,h('span',{ class:'message' },eventMessage(row)),row.data ? h('details',{},h('summary',{ class:'hint' },tr('详情','Details')),jsonView(row.data)) : null))));
 }
 function diagnosticPage(panel,id,kind) {
   const endpoint = `${appUrl(id)}/${kind}`;

@@ -39,10 +39,10 @@ Control APIs use /api/v1, JSON errors with error.code/message, and list envelope
 | /admin/invitations | List, create with expiresAt, revoke by ID. New URL is shown once. |
 | /admin/accounts/:id, /admin/tenants/:id | PATCH account state/admin role or tenant quotas. Preserve the last administrator. |
 | /tenants/:t/members, /tokens | Membership and scoped credential management. Preserve the last tenant administrator. |
-| /tenants/:t/apps; /apps/:id | List/create with name; authoritative app detail. |
+| /tenants/:t/apps; /apps/:id | List/create with name; authoritative app detail. Its `wake` is the last wake: `bootId`, `at`, `outcome` (`waking`, `ready` or `failed`), `error`, and `phases` in milliseconds, null until measured: `reserve` (compute slot and service binding), `container` (start requested until the runner runs), `fetch` and `unpack` (the package), `listen` (app process until its port accepts), `confirm` (until the AppCell sees readiness) and `respond` (until the first response to the request that caused the wake). |
 | /apps/:id/uploads; /apps/:id/releases | Begin direct package upload with manifest/digest/bytes; publish uploadId; release history. |
 | /apps/:id/actions | Typed action from AppAction in model.ts; purge additionally confirms the name. |
-| /apps/:id/state, /logs, /events, /usage, /jobs | Actual inventory and diagnostics; POST jobs with name/payload invokes a trigger. |
+| /apps/:id/state, /logs, /events, /usage, /jobs | Actual inventory and diagnostics; each wake that ends adds a `wake-ready` or `wake-failed` event carrying its record. POST jobs with name/payload invokes a trigger. |
 | /apps/:id/data | Authorized bounded NativeCommand from model.ts. |
 | /tenants/:t/usage, /audit, /events | Role-filtered telemetry. |
 

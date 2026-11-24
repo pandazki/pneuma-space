@@ -4,7 +4,7 @@ import { admitRequest, appRow, observeApp, releaseCompute, reserveCompute } from
 import { artifactPurgeDeadline, prepareUploadArtifact, readPackage } from './artifacts.ts';
 import { NativeResources } from './resources.ts';
 import { nextSchedule } from './cron.ts';
-import { fail, type Actor, type AppAction, type AppRegistration, type AppSnapshot, type Artifact, type Capability, type Delivery, type EventRow, type ExecutionScope, type Json, type LogRow, type Release } from './model.ts';
+import { fail, WAKE_PHASES, type Actor, type AppAction, type AppRegistration, type AppSnapshot, type Artifact, type Capability, type Delivery, type EventRow, type ExecutionScope, type Json, type LogRow, type Release, type Wake } from './model.ts';
 import { errorResponse, id, input, integer, json, sha, text } from './util.ts';
 
 type Journal = { previous: Release | null; candidate: Release; key: string };
@@ -57,7 +57,7 @@ export class AppCell extends DurableObject<Env> {
     const leases = this.leases();
     snapshot.runtime = { ...snapshot.runtime, running: this.ctx.container?.running ?? false, requests: leases.filter(x => x.kind === 'request').length, channels: leases.filter(x => x.kind === 'channel').length };
     if (snapshot.runtime.state === 'awake' && !snapshot.runtime.running) snapshot.runtime.state = 'asleep';
-    return { ...snapshot, releases: this.items<Release>('platform:release:') };
+    return { ...snapshot, wake: snapshot.wake ?? null, releases: this.items<Release>('platform:release:') };
   }
   guard(scope: ExecutionScope | null, capability?: Capability): void {
     const state = this.state();
@@ -90,7 +90,20 @@ export class AppCell extends DurableObject<Env> {
     const rows = [...this.ctx.storage.kv.list({ prefix })];
     for (const [key] of rows.slice(0, Math.max(0, rows.length - limit))) this.ctx.storage.kv.delete(key);
   }
-  event(type: string, message: string): void { this.append<EventRow>('platform:event:', { id: id('evt'), at: Date.now(), type, message }); }
+  event(type: string, message: string, data?: Json): void { this.append<EventRow>('platform:event:', { id: id('evt'), at: Date.now(), type, message, data }); }
+  recordWake(wake: Wake): void {
+    const state = this.state();
+    state.wake = wake;
+    this.save(state);
+    if (wake.outcome === 'ready') this.event('wake-ready', 'Ready in ' + elapsed(wake) + ' ms.', wake);
+    if (wake.outcome === 'failed') this.event('wake-failed', 'Startup failed: ' + wake.error, wake);
+  }
+  private recordResponse(bootId: string): void {
+    const state = this.state();
+    if (state.wake?.bootId !== bootId || state.wake.outcome !== 'ready' || state.wake.phases.respond !== null) return;
+    state.wake.phases.respond = Math.max(0, Date.now() - state.wake.at - elapsed(state.wake));
+    this.save(state);
+  }
   private items<T>(prefix: string): T[] { return [...this.ctx.storage.kv.list<T>({ prefix })].map(([, value]) => value); }
   leases(): Lease[] { return this.items<Lease>('platform:lease:'); }
   async arm(): Promise<void> {
@@ -384,23 +397,26 @@ export class AppCell extends DurableObject<Env> {
         await admitRequest(this.env, this.state().tenantId);
       }
       this.admit();
+      const previous = this.state().runtime.bootId;
       let port: Fetcher;
       try { port = await this.containerAcquire(); }
       finally { if (delivery) delivery.generation = this.state().generation; }
       const state = this.state();
+      const woke = state.runtime.bootId !== previous ? state.runtime.bootId : null;
       const lease: Lease = { id: id('lease'), deadline: Date.now() + state.policy.requestSeconds * 1000, kind: request.headers.get('upgrade')?.toLowerCase() === 'websocket' ? 'channel' : 'request' };
       if (lease.kind === 'channel') this.guard(null, 'ws');
       this.ctx.storage.kv.put('platform:lease:' + lease.id, lease);
       if (delivery) this.ctx.storage.kv.put('platform:job:' + delivery.job.id, { ...delivery.job, nextAttemptAt: lease.deadline });
       state.runtime.sleepsAt = lease.deadline; this.save(state); await this.arm();
-      return { port, lease };
+      return { port, lease, woke };
     };
-    const { port, lease } = await this.serial(prepare);
+    const { port, lease, woke } = await this.serial(prepare);
     const url = new URL(request.url); url.hostname = 'container'; url.protocol = 'http:'; url.pathname = url.pathname.slice('/_pneuma-space/invoke'.length) || '/';
     const abort = new AbortController();
     this.cancellations.set(lease.id, () => abort.abort());
     try {
       const response = await port.fetch(new Request(url, { method: request.method, headers: request.headers, body: request.body, signal: AbortSignal.any([abort.signal, AbortSignal.timeout(Math.max(1, lease.deadline - Date.now()))]), redirect: 'manual' }));
+      if (woke) this.recordResponse(woke);
       if (response.webSocket) {
         const pair = new WebSocketPair(); const downstream = pair[1]; const upstream = response.webSocket;
         downstream.accept(); upstream.accept();
@@ -432,7 +448,7 @@ export class AppCell extends DurableObject<Env> {
         const value = await input(request) as unknown as AppRegistration;
         const old = this.ctx.storage.kv.get<State>(STATE);
         if (old) { if (old.id !== value.id) fail(409, 'identity', 'AppId differs.'); return json(this.snapshot()); }
-        const state: State = { ...value, status: 'draft', generation: 0, current: null, releaseSequence: 0, runtime: { state: 'asleep', running: false, bootId: null, since: Date.now(), sleepsAt: null, requests: 0, channels: 0, failures: 0 }, capabilities: [], lastAccessAt: null, usage: { requests: 0, errors: 0, wakes: 0, sleeps: 0 }, journal: null, schedules: {}, purgeAt: null, day: '', dayRequests: 0 };
+        const state: State = { ...value, status: 'draft', generation: 0, current: null, releaseSequence: 0, runtime: { state: 'asleep', running: false, bootId: null, since: Date.now(), sleepsAt: null, requests: 0, channels: 0, failures: 0 }, capabilities: [], lastAccessAt: null, usage: { requests: 0, errors: 0, wakes: 0, sleeps: 0 }, wake: null, journal: null, schedules: {}, purgeAt: null, day: '', dayRequests: 0 };
         this.save(state); return json(this.snapshot());
       });
       if (path === '/inspect') return json(this.snapshot());
@@ -531,6 +547,10 @@ export class AppCell extends DurableObject<Env> {
   webSocketError(socket: WebSocket): void { this.closeSubscriber(socket, 1011, 'Connection failed'); this.ctx.waitUntil(this.arm()); }
 }
 
+type RunnerReport = { bootId?: unknown; digest?: unknown; ready?: unknown; uptime?: unknown; phases?: Record<string, unknown> };
+const duration = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
+const elapsed = (wake: Wake): number => WAKE_PHASES.reduce((sum, phase) => sum + (wake.phases[phase] ?? 0), 0);
+
 class Runtime {
   private readonly app: AppCell;
   constructor(app: AppCell) { this.app = app; }
@@ -551,32 +571,43 @@ class Runtime {
     if (state.runtime.bootId) await this.app.retire(true);
     state = this.app.state();
     if (state.runtime.state === 'quarantined') fail(503, 'quarantined', 'Runtime is quarantined.');
-    const bootId = id('boot');
+    const bootId = id('boot'), digest = state.current!.digest;
     const scope = { appId: state.id, generation: state.generation, bootId };
+    const wake: Wake = { bootId, at: Date.now(), outcome: 'waking', error: null, phases: Object.fromEntries(WAKE_PHASES.map(phase => [phase, null])) as Wake['phases'] };
     state.runtime = { ...state.runtime, state: 'waking', bootId, since: Date.now(), sleepsAt: Date.now() + 60000 };
+    state.wake = wake;
     this.app.save(state);
     await this.app.arm();
     try {
       await reserveCompute(this.app.envForRuntime(), state.id, bootId);
       await this.app.startBinding(scope);
-      container.start({ image: container.images.base, instance: 'lite', enableInternet: false, env: { PNEUMA_SPACE_BOOT_ID: bootId, PNEUMA_SPACE_DIGEST: state.current!.digest } });
+      const requested = Date.now();
+      wake.phases.reserve = requested - wake.at;
+      container.start({ image: container.images.base, instance: 'lite', enableInternet: false, env: { PNEUMA_SPACE_BOOT_ID: bootId, PNEUMA_SPACE_DIGEST: digest } });
       await container.setInactivityTimeout((state.policy.requestSeconds + state.policy.idleSeconds + 60) * 1000);
       const port = container.getTcpPort(8080);
       for (const deadline = Date.now() + 45000; Date.now() < deadline;) {
         try {
           const response = await port.fetch('http://container/_pneuma-space/ready', { signal: AbortSignal.timeout(1000) });
-          if (response.ok) {
-            const ready = await response.json<{ bootId: string; digest: string; ready: boolean }>();
-            if (ready.ready && ready.bootId === bootId && ready.digest === state.current!.digest) {
-              state = this.app.state(); state.runtime.state = 'awake'; state.runtime.sleepsAt = Date.now() + state.policy.idleSeconds * 1000; state.usage.wakes++; this.app.save(state); await this.app.arm(); return port;
+          const report = await response.json<RunnerReport>();
+          if (report.bootId === bootId) {
+            const uptime = duration(report.uptime);
+            if (wake.phases.container === null && uptime !== null) wake.phases.container = Math.max(0, Date.now() - uptime - requested);
+            for (const phase of ['fetch', 'unpack', 'listen'] as const) wake.phases[phase] = duration(report.phases?.[phase]);
+            if (response.ok && report.ready === true && report.digest === digest) {
+              if (wake.phases.container !== null) wake.phases.confirm = Math.max(0, Date.now() - wake.at - elapsed(wake));
+              state = this.app.state(); state.runtime.state = 'awake'; state.runtime.sleepsAt = Date.now() + state.policy.idleSeconds * 1000; state.usage.wakes++; this.app.save(state);
+              this.app.recordWake({ ...wake, outcome: 'ready' });
+              await this.app.arm(); return port;
             }
-          } else await response.body?.cancel();
+          }
         } catch {}
         await scheduler.wait(200);
       }
       fail(503, 'startup', 'Application did not become ready.');
     } catch (error) {
       state = this.app.state(); state.runtime.failures++; this.app.save(state);
+      this.app.recordWake({ ...wake, outcome: 'failed', error: (error instanceof Error ? error.message : 'Startup failed.').slice(0, 200) });
       await this.app.retire(true); throw error;
     }
   }

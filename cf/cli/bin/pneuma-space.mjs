@@ -128,7 +128,7 @@ export async function benchmark(w,{awaitIdle=true}={}){
   const waitSeconds=before.policy.idleSeconds+90,links=()=>{log('ready','Open your app: '+appUrl(w));log('access','Use the browser where you are signed into '+client.origin+'. This app is private; a publishing token does not replace browser login.');log('stats','See real requests and wake/sleep counts: '+dashboard);};
   if(!awaitIdle){
     const after=await client.request(path);
-    const report={complete:false,reason:`Natural idle was not awaited. npm run bench waits for it, up to ${waitSeconds}s under this app's policy.`,at:new Date().toISOString(),appId:project.app.id,app:appUrl(w),dashboard,...timings,naturalIdleObserved:false,before:before.usage,after:after.usage};
+    const report={complete:false,reason:`Natural idle was not awaited. npm run bench waits for it, up to ${waitSeconds}s under this app's policy.`,at:new Date().toISOString(),appId:project.app.id,app:appUrl(w),dashboard,...timings,wake:after.wake,naturalIdleObserved:false,before:before.usage,after:after.usage};
     await save(join(w.privateDir,'bench.json'),report);
     console.log(JSON.stringify(report,null,2));
     links();
@@ -147,7 +147,7 @@ export async function benchmark(w,{awaitIdle=true}={}){
   if(resumed.boot===first.boot)throw Error('The probe returned the same process boot; automatic restart is not verified.');
   if(resumed.marker!==marker)throw Error('The saved marker did not survive idle.');
   const after=await client.request(path);
-  const report={complete:true,at:new Date().toISOString(),appId:project.app.id,app:appUrl(w),dashboard,initialState:before.runtime.state,...timings,naturalIdleObserved:true,idleObservedAfterMs:Date.now()-idleStart-resumed.ms,wakeRequestMs:resumed.ms,newBoot:true,dataRetained:true,before:before.usage,after:after.usage,delta:Object.fromEntries(['requests','errors','wakes','sleeps'].map(key=>[key,after.usage[key]-before.usage[key]]))};
+  const report={complete:true,at:new Date().toISOString(),appId:project.app.id,app:appUrl(w),dashboard,initialState:before.runtime.state,...timings,naturalIdleObserved:true,idleObservedAfterMs:Date.now()-idleStart-resumed.ms,wakeRequestMs:resumed.ms,wake:after.wake,newBoot:true,dataRetained:true,before:before.usage,after:after.usage,delta:Object.fromEntries(['requests','errors','wakes','sleeps'].map(key=>[key,after.usage[key]-before.usage[key]]))};
   await save(join(w.privateDir,'bench.json'),report);
   console.log(JSON.stringify(report,null,2));
   links();
