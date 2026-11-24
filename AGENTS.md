@@ -1,4 +1,4 @@
-PneumaSpace deploys stateful web apps on one trusted host (M1) or an organization's Kubernetes cluster (M2). Read `REQUIREMENTS.md`, `REQUIREMENTS-M2.md`, `DESIGN.md`, `docs/app-contract.md` and `docs/acceptance.md` before changing runtime behavior. Each fact lives in exactly one of them; link to it instead of restating it.
+PneumaSpace deploys stateful web apps on one trusted host (M1) or an organization's Kubernetes cluster (M2). Read `REQUIREMENTS.md`, `REQUIREMENTS-M2.md`, `REQUIREMENTS-M3.md`, `DESIGN.md`, `docs/app-contract.md` and `docs/acceptance.md` before changing runtime behavior. Each fact lives in exactly one of them; link to it instead of restating it.
 
 ## Boundaries that do not move
 

@@ -1,6 +1,6 @@
 # 总体设计（M1、M2、M3）
 
-PneumaSpace 把有状态的 web 应用部署到一台可信机器上，M2 起也部署到一个组织的 K8s 集群上。应用声明需要的能力，平台提供并注入；地址稳定，计算按需启动、闲置停止，数据只在清除时删除。目标、能力清单、应用类型、范围、验收数字和信任边界在 `REQUIREMENTS.md` 和 `REQUIREMENTS-M2.md`。应用看到的协议在 `docs/app-contract.md`。每个关键决定的理由在 `docs/adr/`。本文只写模型和结构。
+PneumaSpace 把有状态的 web 应用部署到一台可信机器上，M2 起也部署到一个组织的 K8s 集群上。应用声明需要的能力，平台提供并注入；地址稳定，计算按需启动、闲置停止，数据只在清除时删除。目标、能力清单、应用类型、范围、验收数字和信任边界在 `REQUIREMENTS.md`、`REQUIREMENTS-M2.md` 和 `REQUIREMENTS-M3.md`。应用看到的协议在 `docs/app-contract.md`。每个关键决定的理由在 `docs/adr/`。本文只写模型和结构。
 
 ## 1 领域模型
 

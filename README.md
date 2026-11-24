@@ -62,6 +62,10 @@ The organization edition runs the same platform on a Kubernetes cluster ([ADR 00
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/console/cluster-dark.png"><img alt="Cluster page on a one-node cluster: the node frame with CPU and memory requested, two gateway replicas with the leader marked, two runner replicas and six instance chips; below, the six awake instances of team-a and team-b with their placement, limits, and quiet Stop and Restart buttons beside a menu." src="docs/assets/console/cluster-light.png"></picture>
 
+## What builds on it
+
+[`examples/space-all-in-one`](https://github.com/pandazki/pneuma-framework/tree/main/examples/space-all-in-one) in pneuma-framework runs a governed change loop on top of PneumaSpace: every change to an app is recorded, checked and previewed, waits for the owner's approval when a rule says so, and can be undone. It publishes each preview as an ephemeral app ([ADR 0038](docs/adr/0038-ephemeral-apps.md)) and each release as a managed app that names it as the manager ([ADR 0039](docs/adr/0039-managed-apps.md)). The loop lives in that example; nothing in PneumaSpace depends on it.
+
 ## Compared with Vercel and Supabase
 
 Vercel and Supabase run your app on their infrastructure. PneumaSpace runs every app on a machine or a cluster you own.
@@ -87,6 +91,7 @@ Metering, billing, a CDN and isolation against hostile tenants are in neither ed
 
 - [`REQUIREMENTS.md`](REQUIREMENTS.md): goals, capabilities, app types and the trust boundary.
 - [`REQUIREMENTS-M2.md`](REQUIREMENTS-M2.md): users, tenants, the cluster and its operation in the organization edition.
+- [`REQUIREMENTS-M3.md`](REQUIREMENTS-M3.md): the SaaS baseline, which keeps every M1 and M2 capability.
 - [`DESIGN.md`](DESIGN.md): the model and the architecture.
 - [`docs/app-contract.md`](docs/app-contract.md): what an app sees.
 - [`docs/acceptance.md`](docs/acceptance.md): acceptance checks and thresholds.
