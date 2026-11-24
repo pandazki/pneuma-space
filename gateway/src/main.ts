@@ -4,7 +4,7 @@ import { parseAppsOrigin } from './address.ts';
 import { startAdmin } from './admin.ts';
 import { Docker } from './docker.ts';
 import { emit, events } from './events.ts';
-import { Instances } from './instances.ts';
+import { gatewayBuild, Instances } from './instances.ts';
 import { allows, Authority, parsePlatformAdmins } from './authz.ts';
 import { loadOrCreateSecret, LocalIdentity, parseIdentityEnv, UpstreamIdentity, type Identity } from './identity.ts';
 import { HostedIdentity, HOSTED_COOKIE_NAMES, HOSTED_IDENTITY_PATHS } from './identity-hosted.ts';
@@ -74,7 +74,8 @@ const store = storeUrl
   })
   : new SqliteStore(join(data, 'pneuma-space.sqlite3'), { volumeGb: config.volumeGb });
 const series = new Series();
-const instances = new Instances(store, { replica });
+const build = await gatewayBuild();
+const instances = new Instances(store, { replica, build });
 await instances.ready();
 await instances.start();
 const specFor = (app: AppId) => registry.runSpec(app);
@@ -233,7 +234,7 @@ void sample();
 const sampleNodes = () => nodes.sample().catch((error: Error) => log('nodes-sample-failed', { error: error.message }));
 const nodeSampler = setInterval(() => void sampleNodes(), NODES_MS);
 void sampleNodes();
-log('gateway-ready', { network, data, replica, store: storeUrl ? 'postgres' : 'sqlite' });
+log('gateway-ready', { network, data, replica, build, store: storeUrl ? 'postgres' : 'sqlite' });
 
 process.once('SIGTERM', async () => {
   clearInterval(flusher);
