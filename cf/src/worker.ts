@@ -1,5 +1,5 @@
 export { AppCell, AppServices } from './app.ts';
-import { authenticate, authRoute, authorizeApp, me, protectWrite, requireAdmin, requireSession } from './auth.ts';
+import { authenticate, authRoute, authorizeApp, me, permit, protectWrite, requireAdmin, requireSession } from './auth.ts';
 import { artifactUsage, beginUpload, publishUpload, staticResponse } from './artifacts.ts';
 import { controlRoute, operationKey } from './control.ts';
 import { admitRequest, appSummary, audit, cell, cellValue } from './directory.ts';
@@ -85,10 +85,12 @@ async function api(request: Request, env: Env, actor: Actor | null, path: string
 }
 async function control(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url), path = url.pathname;
+  const app = /^\/apps\/([^/]+)(\/.*)?$/.exec(path);
+  const found = app?.[2] ? env.PNEUMA_SPACE_DB.prepare('SELECT * FROM apps WHERE name=? AND purged_at IS NULL').bind(app[1]).first<AppRow>() : null;
+  found?.catch(() => {});
   const actor = await authenticate(request, env);
   if (path.startsWith('/api/v1/')) return api(request, env, actor, path.slice('/api/v1'.length));
-  const app = /^\/apps\/([^/]+)(\/.*)?$/.exec(path);
-  if (app) return app[2] ? application(request, env, actor, app[1], app[2]) : Response.redirect(url.origin + path + '/' + url.search, 308);
+  if (app) return found ? application(request, env, actor, found, app[2]) : Response.redirect(url.origin + path + '/' + url.search, 308);
   if (path === '/_pneuma-space/health') { method(request, 'GET'); return json({ service: 'pneuma-space-cf' }); }
   if (!['GET', 'HEAD'].includes(request.method)) fail(405, 'method', 'Use GET or HEAD.');
   if (path === '/') return Response.redirect(url.origin + (actor ? actor.user.platformAdmin ? '/admin' : '/dashboard' : '/login'), 303);
@@ -137,33 +139,43 @@ export function guestResponse(result: Response): Response {
   headers.set('referrer-policy', 'same-origin');
   return new Response(result.body, { status: result.status, statusText: result.statusText, headers, ...(result.webSocket ? { webSocket: result.webSocket } : {}) });
 }
-async function application(request: Request, env: Env, actor: Actor | null, name: string, path: string): Promise<Response> {
+async function application(request: Request, env: Env, actor: Actor | null, found: Promise<AppRow | null>, path: string): Promise<Response> {
   if (!actor) {
     if (request.method === 'GET' && !request.headers.has('authorization') && request.headers.get('upgrade') === null && request.headers.get('accept')?.includes('text/html')) return login(new URL(request.url));
     fail(401, 'unauthorized', 'Sign in to this application.');
   }
-  const row = await env.PNEUMA_SPACE_DB.prepare('SELECT id FROM apps WHERE name=? AND purged_at IS NULL').bind(name).first<{ id: string }>();
-  const app = await authorizeApp(env, actor, row?.id ?? fail(404, 'app_not_found', 'Application not found.'), 'invoke');
+  const spans: string[] = [];
+  let last = Date.now();
+  const lap = (span: string): void => { const now = Date.now(); spans.push(span + ';dur=' + (now - last)); last = now; };
+  const timed = (response: Response): Response => { const out = new Response(response.body, response); out.headers.set('server-timing', spans.join(', ')); return out; };
+  const app = await found ?? fail(404, 'app_not_found', 'Application not found.');
+  lap('lookup');
   if (actor.kind === 'session' && (!['GET', 'HEAD'].includes(request.method) || request.headers.get('upgrade')?.toLowerCase() === 'websocket') && request.headers.get('origin') !== env.PNEUMA_SPACE_CONTROL_ORIGIN) fail(403, 'origin', 'The request origin is not allowed.');
-  const snapshot = await cellValue<AppSnapshot>(env, app.id, '/inspect');
+  const [snapshot] = await Promise.all([cellValue<AppSnapshot>(env, app.id, '/inspect'), permit(env, actor, app, 'invoke')]);
+  lap('authorize');
   if (snapshot.status !== 'registered' || !snapshot.current) fail(409, 'inactive', 'Application is not active.');
-  await admitRequest(env, app.tenant_id);
+  const quota = admitRequest(env, app.tenant_id);
+  quota.catch(() => {});
   const realtime = /^\/_pneuma-space\/realtime\/([^/]+)$/.exec(path);
   if (realtime) {
     const target = new URL('/subscribe/' + realtime[1], 'https://cell');
     const headers = guestHeaders(request, actor, false, app);
     headers.set('x-pneuma-space-actor', encodeURIComponent(JSON.stringify({ kind: actor.kind, hash: actor.hash })));
+    await quota;
     return env.PNEUMA_SPACE_APPS.getByName(app.id).fetch(new Request(target, { method: 'GET', headers }));
   }
-  if (path.startsWith('/_pneuma-space/')) fail(404, 'reserved_path', 'This path is reserved.');
+  if (path.startsWith('/_pneuma-space/')) { await quota; fail(404, 'reserved_path', 'This path is reserved.'); }
   if (['GET', 'HEAD'].includes(request.method) && snapshot.capabilities.includes('static')) {
-    const response = await staticResponse(env, app.id, snapshot.current, request, path);
+    const [response] = await Promise.all([staticResponse(env, app.id, snapshot.current, request, path), quota]);
+    lap('static');
     if (response) {
       const admission = await cell(env, app.id, '/admit', { expectedGeneration: snapshot.generation });
       if (!admission.ok) { await response.body?.cancel(); return admission; }
-      return response;
+      lap('admit');
+      return timed(response);
     }
   }
+  await quota;
   if (snapshot.current.manifest.runtime === 'static') fail(404, 'not_found', 'File not found.');
   const body = request.body ? await boundedBody(request) : null;
   const url = new URL(request.url);
@@ -172,7 +184,8 @@ async function application(request: Request, env: Env, actor: Actor | null, name
     method: request.method, headers: guestHeaders(request, actor, snapshot.capabilities.includes('identity'), app), body,
     redirect: 'manual',
   }));
-  return guestResponse(result);
+  lap('app');
+  return timed(guestResponse(result));
 }
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {

@@ -147,11 +147,14 @@ export async function staticResponse(env: Env, appId: string, artifact: Artifact
   path = path.endsWith('/') || path === '' ? path + 'index.html' : path;
   if (!path || path.includes('\\') || path.split('/').some(part => !part || part === '.' || part === '..')) return null;
   const key = 'apps/' + appId + '/artifacts/' + artifact.digest + '/static/' + path;
-  const metadata = await env.PNEUMA_SPACE_ARTIFACTS.head(key);
+  const plain = request.method === 'GET' && !request.headers.has('range');
+  const whole = plain ? await env.PNEUMA_SPACE_ARTIFACTS.get(key) : null;
+  const metadata = plain ? whole : await env.PNEUMA_SPACE_ARTIFACTS.head(key);
   if (!metadata) return null;
   const headers = new Headers({ 'cache-control': 'private, no-cache', 'etag': metadata.httpEtag, 'accept-ranges': 'bytes', 'x-content-type-options': 'nosniff' });
   metadata.writeHttpMetadata(headers);
-  if (request.headers.get('if-none-match') === metadata.httpEtag) return new Response(null, { status: 304, headers });
+  if (request.headers.get('if-none-match') === metadata.httpEtag) { await whole?.body.cancel(); return new Response(null, { status: 304, headers }); }
+  if (whole) { headers.set('content-length', String(whole.size)); return new Response(whole.body, { headers }); }
   let offset = 0, length = metadata.size, status = 200;
   const range = request.headers.get('range');
   if (range) {

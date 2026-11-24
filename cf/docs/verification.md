@@ -75,3 +75,14 @@ The change passed TypeScript, 84 engine tests with the four Docker cases skipped
 - With two apps awake, a third answered 503 `compute_quota` until one slept. The tenant's running-app limit is unchanged by this work.
 
 Not verified on Cloudflare: WebSockets, SSE and native subscriptions under the prefix, the pages in a browser, the notebook example and `npm run verify`.
+
+## First screen and request path (2026-11-24)
+
+[ADR 0045](../../docs/adr/0045-cloudflare-first-screen-and-idle.md), deployed to a real instance and measured from one client whose requests entered at a US west location while the D1 database runs in APAC. Times are after the TLS handshake on a fresh connection, which itself took about 0.3 s; the health endpoint, which touches nothing, took about 0.28 s.
+
+- The starter published from the new template answered its page, stylesheet and script from R2 without a wake. `/style.css` at the root answered 404 and the console's stylesheet answered at its reserved path. A new app's policy showed 300 idle seconds.
+- One recorded wake: reserve 531 ms, container 3,715 ms, fetch 497 ms, unpack 12 ms, listen 326 ms, confirm 118 ms. Container start is most of a cold start.
+- Before the request path was shortened, a static file took about 1.3 s and a warm API call about 1.3 s. `Server-Timing` showed nine serial calls: two D1 reads to authenticate and find the app, two more to authorize, a D1 write for the daily quota, the app object's state, and an R2 head then get. Each D1 call cost about 120 ms and each R2 call about 200 ms.
+- After: the app row is read while the session is checked, the app object's state and the permission check run together, the quota write runs beside the static read, and a plain GET reads R2 once. A static file took about 0.57 s and a warm API call about 0.7 s. Unauthenticated requests still answered 401 and an unknown app 404.
+
+Not verified: the first screen in a browser on the real instance, a client entering near the database, and the cost of the static probe on API paths, which still spends one R2 read (about 200 ms) before Node is asked.
