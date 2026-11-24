@@ -371,7 +371,10 @@ test('AC-EPH-1 publish --ephemeral --ttl sends the marker with its ttl and print
 
 test('AC-EPH-1 publish --ttl without --ephemeral, or with a ttl that is not whole seconds, is a usage error before any request', async () => {
   const dir = source({ contract: 1, capabilities: { static: { dir: 'dist' } } }, { 'dist/index.html': '<h1>hi</h1>' });
-  for (const args of [['--ttl', '60'], ['--ephemeral', '--ttl', '1.5']]) assert.equal((await appctl(['publish', 'trial', dir, ...args])).code, 1);
+  for (const args of [['--ttl', '60'], ['--ephemeral', '--ttl', '1.5']]) {
+    const { code, stderr } = await appctl(['publish', 'trial', dir, ...args]);
+    assert.deepEqual([code, /--ttl takes whole seconds and needs --ephemeral/.test(stderr)], [1, true], stderr);
+  }
   assert.deepEqual(requests, []);
 });
 
@@ -413,7 +416,10 @@ test('AC-MGR-3 unmanage deletes the manager naming it', async () => {
 
 test('--manager-url without --manager, or a manager name outside the grammar, is a usage error before any request', async () => {
   const dir = source({ contract: 1, capabilities: { static: { dir: 'dist' } } }, { 'dist/index.html': '<h1>hi</h1>' });
-  for (const args of [['--manager-url', 'https://deploy.test/'], ['--manager', 'Deployer']]) assert.equal((await appctl(['publish', 'board', dir, ...args])).code, 1);
+  for (const [args, why] of [[['--manager-url', 'https://deploy.test/'], /--manager-url needs --manager/], [['--manager', 'Deployer'], /manager name "Deployer" must match/]] as const) {
+    const { code, stderr } = await appctl(['publish', 'board', dir, ...args]);
+    assert.deepEqual([code, why.test(stderr)], [1, true], stderr);
+  }
   assert.deepEqual(requests, []);
 });
 
