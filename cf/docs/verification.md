@@ -47,7 +47,7 @@ Not covered by that run: natural idle recovery, browser rendering, TURN and bill
 
 `scripts/install.mjs` replaces the manual deployment steps. A real install into an account that already held another deployment of this plane:
 
-- The first run without a token resolved the account and zone, printed the link and the token path, and made only read calls. The account owner opened the link, found both permissions preselected, and created the token.
+- The first run without a token resolved the account and zone, printed the link and the token path, and made only read calls. The account owner created the token from that link; the token then passed verification, Worker listing and R2 calls. Whether the dashboard form opened with both permissions preselected was not recorded.
 - The second run finished in one pass with exit 0: it created the D1 database and both buckets, applied the schema, provisioned the owner, deployed on the first attempt, attached the control domain and saw the health endpoint over valid HTTPS.
 - Afterwards the control origin redirected an unauthenticated visitor to /login, /api/v1/me answered 401, and the owner credentials signed in. The state directory was 0700 and its four files 0600. Nothing in the repository changed. The other deployment kept its version.
 - Running the same command again exited 0 and created and attached nothing. Running it with another prefix was refused.
