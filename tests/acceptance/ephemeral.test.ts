@@ -138,3 +138,21 @@ test('AC-EPH-6', { timeout: 120_000 }, async (t) => {
   const refused = await adminClient.publish(fourth, { ...release({ ephemeral: {} }), tenant } as never);
   assert.deepEqual([refused.status, refused.body.quota?.resource, refused.body.quota?.limit], [409, 'ephemeral', 3]);
 });
+
+test('AC-EPH-7', { timeout: 240_000 }, async (t) => {
+  const app = await ephemeral(t, { db: {} }, 30);
+  assert.ok((await adminClient.setAppPolicy(app.name, { db_backend: 'postgres' })).status < 300, 'db_backend postgres');
+  const expiry = async () => (await audit(app.name)).filter(([, action]: string[]) => action === 'app.expire');
+  compose('stop', 'postgres');
+  try {
+    await waitFor(async () => (await expiry()).some(([, , result]: string[]) => result === 'error'), 60_000, 'the end to fail');
+    assert.equal((await summary(app.name)).status, 'purging');
+    await sleep(35_000);
+    assert.deepEqual(await expiry(), [['platform', 'app.expire', 'started'], ['platform', 'app.expire', 'error']], 'sweeps failing the same way add no row');
+  } finally {
+    compose('--profile', 'postgres', 'up', '-d', 'postgres');
+  }
+  await waitFor(async () => (await summary(app.name)) === null, 60_000, 'the end once postgres is back');
+  const last = (await adminClient.audit(app.name)).body.find((r: any) => r.action === 'app.expire');
+  assert.deepEqual([last.actor, last.result, last.details.resumed], ['platform', 'ok', true]);
+});

@@ -386,11 +386,19 @@ export class PlatformRegistry implements Registry {
       const resumed = app.status === 'purging';
       if (!resumed) await audit('started');
       await this.#purge(app).catch(async (error: Error) => {
-        await audit('error', { error: error.message });
+        // Every sweep retries a failed end; the audit only grows, so a failure is written once until the outcome changes (ADR 0024 item 6).
+        if (!(await this.#failedAlike(app, error.message))) await audit('error', { error: error.message, ...(resumed && { resumed }) });
         throw error;
       });
       await audit('ok', resumed ? { resumed } : {});
     }).catch((error: Error) => log('expire-failed', view.name, { error: error.message }))));
+  }
+
+  /** Whether the app's last discard or expiry row already records this error. Rows of an earlier app of the same name are all older. */
+  async #failedAlike(app: App, error: string): Promise<boolean> {
+    const rows = await Promise.all((['app.expire', 'app.discard'] as const).map((action) => this.#store.audit({ action, target: app.name, limit: 1 })));
+    const last = rows.flat().filter((row) => row.details.appId === app.id).sort((a, b) => b.id - a.id)[0];
+    return last?.result === 'error' && last.details.error === error;
   }
 
   /** Persists purging first, so a restart finishes what this run does not (DESIGN 2.3). */

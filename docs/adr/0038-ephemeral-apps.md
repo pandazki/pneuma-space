@@ -24,7 +24,7 @@
 1. **声明在首次发布，之后不变。** 首次发布带标记（`appctl publish <name> <dir> --ephemeral [--ttl <seconds>]`，请求体 `"ephemeral": {"ttl_seconds": n}`）就建出临时应用。App 行持久化 `expires_at`，等于首次发布时刻加 TTL；持久应用的 `expires_at` 为空。之后每次发布都必须带同样的标记，与已有 App 不符的发布答 409，不落 Release。所以持久应用永远不会变成临时应用，临时应用也永远不会变成持久应用，写错名字的发布不会落到另一类应用上。之后的 `ttl_seconds` 被忽略，重发不延长寿命，因此一个应用的寿命有确定的上限。
 2. **TTL 由策略决定，超限拒绝，不截断。** 缺省值是全局策略 `ephemeral_ttl_seconds`（默认 600），上限是 `ephemeral_max_ttl_seconds`（默认 3600）。两个字段只能全局设置，缺省值大于上限时答 400。TTL 超过上限的发布答 400，不建 App。截断会让应用在调用方预期之前悄悄结束。
 3. **一个动作结束它。** 用 `POST /api/apps/<name>/discard` 或 `appctl discard <name>`。动作是 `app.discard`，级别是 `owner`，令牌可用。托管令牌需要 `remove` 范围：令牌原本能结束什么，现在仍是那些。不要确认体，也不用先 remove。持久应用答 409。它从 `registered`、`removed`、`purging` 任一状态进入 purge 的同一路径：先持久化 `purging`，再退役实例、销毁每条 Binding、删除没有别的应用引用的 bundle、删行。终态与 purge 相同。中断的丢弃由启动和接任领导者时的续跑完成，到期后的清扫也会完成它。详情的 `may` 只对临时应用列出 `app.discard`。
-4. **到期自行结束。** 领导者在接任时清扫一次，之后每 10 s 清扫一次：`expires_at` 已到的临时应用按第 3 项结束，状态不论。每个应用的清扫审计为 `app.expire`，主体 `platform`，先写 `started`，再写 `ok` 或 `error`；续跑一次未完成的结束时只写带 `resumed` 的 `ok` 或 `error`。停机期间到期的应用在重启后的第一次清扫中结束。
+4. **到期自行结束。** 领导者在接任时清扫一次，之后每 10 s 清扫一次：`expires_at` 已到的临时应用按第 3 项结束，状态不论。每个应用的清扫审计为 `app.expire`，主体 `platform`，先写 `started`，再写 `ok` 或 `error`；续跑一次未完成的结束时只写带 `resumed` 的 `ok` 或 `error`。失败的结束每次清扫都重试；这个应用上一行 `app.expire` 或 `app.discard` 已经是同样的 `error` 时不再写，结果变了才写，原因每次都写进日志。停机期间到期的应用在重启后的第一次清扫中结束。
 5. **单独计配额。** 临时应用不计入 `apps`，计入租户配额的新字段 `ephemeral`。`DEFAULT_QUOTA` 和托管个人租户为 3，`default` 租户不限，`null` 表示不限。迁移给已有租户补上这个字段：`default` 不限，其余为 3。迁移之后，滚动发布中仍在服务的旧网关（ADR 0025 第 8 条）建出的租户行没有这个字段；读租户时，缺的字段按 `DEFAULT_QUOTA` 补齐，所以它也是 3，缺字段不等于不限。运行时配额（`awake`、`cpu_millis`、`memory_mb`、`storage_gb`）照常适用。
 6. **访问固定为 `tenant`。** 建应用时就是 `tenant`，不受默认访问级别影响。access 命令改成其他值答 409。
 7. **不排日程。** Trigger 行和 Scheduler 视图里的 `schedule` 为空，只有建 Trigger 的函数里多一个分支，Scheduler 不变。按需 `invoke` 照常可用。
@@ -36,7 +36,7 @@
 - INV-2、DESIGN 1.4 和 AGENTS.md 中的"Only purge deletes, and only from `removed`"多了这个例外。
 - 到期不精确：应用在 `expires_at` 之后最多约 10 s 开始结束，purge 本身还要时间，领导者失联时再往后推迟。这个窗口里请求照常应答，Ingress 不检查到期。
 - 结束时会退役实例，进行中的请求最多再排空 `drain_timeout_seconds`。名字在结束后释放，任何人都可以再发布它，持久或临时都行。
-- 清扫失败（例如 Provider 不可用）时，行停在 `purging` 并留下 `error` 审计行；下一次清扫或续跑会重试。
+- 清扫失败（例如 Provider 不可用）时，行停在 `purging` 并留下 `error` 审计行；下一次清扫或续跑会重试。审计只追加、不清理（ADR 0024 第 6 条），所以一直失败的结束只留一行，不是每 10 s 一行。
 - 每次清扫只遍历本副本的 RouteView，在应用名的互斥里重读行，不另加索引或扫描。清扫不重叠，到期的应用并行结束。续跑也在互斥里重读行，不再处理清扫已结束的应用。
 - 回滚到没有本决定的网关时，旧网关会忽略 `expires_at` 和 `ephemeral`，临时应用变成不会到期、计入 `apps` 的普通应用。
 - 不做："某个应用的预览"这种关联、向临时应用复制数据、同一名字的第二个地址。调用方要数据就自己写进去。

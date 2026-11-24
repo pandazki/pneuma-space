@@ -752,6 +752,49 @@ test('ADR 0038 the sweep finishes an expired ephemeral app a failed discard left
   assert.deepEqual((await store.audit({ target: 'trial' })).map((r) => [r.action, r.result, r.details.resumed]), [['app.expire', 'ok', true]]);
 });
 
+test('ADR 0038 sweeps that keep failing to end an app audit the error once, and the end that finally succeeds as resumed', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  await temporary(registry, { kv: {} }, 1);
+  for (let sweep = 0; sweep < 3; sweep++) {
+    w.providers.get('redis')!.fail = 'destroy';
+    await registry.expire(Date.now() + 1000);
+  }
+  await registry.expire(Date.now() + 1000);
+  assert.equal(await store.app(trial), null);
+  assert.deepEqual((await store.audit({ target: 'trial' })).reverse().map((r) => [r.result, r.details.error, r.details.resumed]), [
+    ['started', undefined, undefined], ['error', 'redis destroy failed', undefined], ['ok', undefined, true],
+  ]);
+});
+
+test('ADR 0038 a sweep that resumes an end and fails audits the error as resumed, once while the error stays the same', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  await temporary(registry, { kv: {} }, 1);
+  w.providers.get('redis')!.fail = 'destroy';
+  await assert.rejects(registry.discard(trial), /redis destroy failed/);
+  for (let sweep = 0; sweep < 2; sweep++) {
+    w.providers.get('redis')!.fail = 'destroy';
+    await registry.expire(Date.now() + 1000);
+  }
+  assert.deepEqual((await store.audit({ target: 'trial' })).map((r) => [r.action, r.result, r.details.resumed]), [['app.expire', 'error', true]]);
+});
+
+test('ADR 0038 a sweep that fails as the discard before it did adds no row', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  const { app } = await temporary(registry, { kv: {} }, 1);
+  w.providers.get('redis')!.fail = 'destroy';
+  await assert.rejects(registry.discard(trial), /redis destroy failed/);
+  await store.insertAudit({
+    at: Date.now(), actor: 'local', actorTenant: null, tenant: DEFAULT_TENANT, action: 'app.discard', targetKind: 'app', target: 'trial', result: 'error',
+    details: { error: 'redis destroy failed', appId: app },
+  });
+  w.providers.get('redis')!.fail = 'destroy';
+  await registry.expire(Date.now() + 1000);
+  assert.deepEqual((await store.audit({ target: 'trial' })).map((r) => [r.action, r.result]), [['app.discard', 'error']]);
+});
+
 for (const end of ['discard', 'expire'] as const) {
   test(`ADR 0038 a removed ephemeral app still ends by ${end}, its bindings destroyed`, async () => {
     const w = world();
