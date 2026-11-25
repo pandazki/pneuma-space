@@ -1,6 +1,6 @@
 # ADR 0041：Cloudflare 是 M1 的第二个承载面
 
-状态：接受。2026-11-24。用户确认这项工作属于 M1，与本机 Docker 平行，并确认以下各项。修订 [ADR 0033](0033-hosted-fetch-profile.md)（Fetch 实验退出）和 G4 对层次的描述。[ADR 0044](0044-cloudflare-path-routing.md) 修订后果中“每个应用一个精确域名”一句。
+状态：接受。2026-11-24。用户确认这项工作属于 M1，与本机 Docker 平行，并确认以下各项。修订 [ADR 0033](0033-hosted-fetch-profile.md)（Fetch 实验退出）和 G4 对层次的描述。[ADR 0044](0044-cloudflare-path-routing.md) 修订后果中“每个应用一个精确域名”一句。[ADR 0046](0046-cloudflare-ephemeral-and-managed-apps.md) 修订“顺序”：临时应用和受管应用先于自述与授权。
 
 ## 背景
 
@@ -33,7 +33,7 @@
 
 ## 顺序
 
-本 ADR 和故事 → Cloudflare 版进主干并删除 `cloud/` → 一条命令安装 → 自述、授权、移除与恢复 → 临时应用和受管应用 → 评估不起容器的运行方式。每一步以真实账户上的验证收尾。
+本 ADR 和故事 → Cloudflare 版进主干并删除 `cloud/` → 一条命令安装 → 临时应用和受管应用（[ADR 0046](0046-cloudflare-ephemeral-and-managed-apps.md)） → 自述、授权、移除与恢复 → 评估不起容器的运行方式。每一步以真实账户上的验证收尾。
 
 ## 被拒绝的方案
 
