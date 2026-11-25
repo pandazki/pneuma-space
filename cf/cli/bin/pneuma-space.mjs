@@ -40,8 +40,8 @@ function apiClient(credentials){
   const origin=new URL(credentials.origin).origin;
   if(!origin.startsWith('https://'))throw Error('The workspace address must use HTTPS.');
   if(!/^[a-f0-9]{64}$/.test(credentials.token||''))throw Error('A publishing token is required. Create one in Dashboard → Create app.');
-  const request=async(path,body,method=body===undefined?'GET':'POST',key=randomUUID())=>{
-    const response=await fetch(origin+'/api/v1'+path,{method,headers:{authorization:'Bearer '+credentials.token,'content-type':'application/json','idempotency-key':key},body:body===undefined?undefined:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(180000)});
+  const request=async(path,body,method=body===undefined?'GET':'POST',key=randomUUID(),headers={})=>{
+    const response=await fetch(origin+'/api/v1'+path,{method,headers:{...headers,authorization:'Bearer '+credentials.token,'content-type':'application/json','idempotency-key':key},body:body===undefined?undefined:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(180000)});
     const value=response.status===204?null:await response.json();
     if(!response.ok){const hint=response.status===401?' Create a fresh token in Dashboard → Create app.':'';throw Object.assign(Error((value?.error?.message||'Request failed')+hint),{status:response.status,code:value?.error?.code});}
     return value;
@@ -88,27 +88,47 @@ export async function initialize(directory,options={}){
   return workspace(directory);
 }
 const appUrl=w=>w.client.origin+'/apps/'+w.project.app.name+'/';
-export async function publish(w){
-  const {project,client}=w,packed=await packageApp(w.directory);
+// --manager names the manager on each write and, on publish, also sets it (ADR 0039).
+const named=options=>options.manager?{'x-pneuma-space-manager':options.manager}:{};
+const managed=options=>options.manager?{manager:{name:options.manager,...(options['manager-url']!==undefined&&{url:options['manager-url']})}}:{};
+const forget=project=>Object.assign(project,{app:null,publishedDigest:null,upload:null,createKey:randomUUID()});
+export async function publish(w,options={}){
+  const {project,client}=w,packed=await packageApp(w.directory),ephemeral=options.ephemeral?{ephemeral:true}:{};
+  if(project.app?.expiresAt&&project.app.expiresAt<=Date.now()){log('publish',`The ephemeral app ${project.app.id} ended at ${new Date(project.app.expiresAt).toISOString()}; publishing creates a new one.`);forget(project);}
   if(!project.app){
-    project.app=await client.request('/tenants/'+project.tenant+'/apps',{name:project.name},'POST',project.createKey);await saveProject(w);
+    project.app=await client.request('/tenants/'+project.tenant+'/apps',{name:project.name,...(options.ephemeral&&{ephemeral:options.ttl?{ttlSeconds:Number(options.ttl)}:{}}),...managed(options)},'POST',project.createKey);await saveProject(w);
   }
   const path='/apps/'+project.app.id;
-  if(project.publishedDigest===packed.digest){
+  if(project.publishedDigest===packed.digest&&!options.manager){
     const snapshot=await client.request(path);
     if(snapshot.status==='registered'&&snapshot.current?.digest===packed.digest){log('publish','This exact version is already live.');return snapshot;}
   }
   if(!project.upload||project.upload.digest!==packed.digest||project.upload.expiresAt<Date.now()+15000){
-    const ticket=await client.request(path+'/uploads',{manifest:packed.manifest,digest:packed.digest,bytes:packed.bytes.length});
+    const ticket=await client.request(path+'/uploads',{manifest:packed.manifest,digest:packed.digest,bytes:packed.bytes.length,...ephemeral},'POST',undefined,named(options));
     project.upload={...ticket,digest:packed.digest,publishKey:randomUUID()};await saveProject(w);
   }
   const ticket=project.upload;
   log('publish',`Uploading ${(packed.bytes.length/1024).toFixed(1)} KiB directly to storage.`);
   const put=await fetch(ticket.url,{method:'PUT',headers:ticket.headers,body:packed.bytes,redirect:'error',signal:AbortSignal.timeout(60000)});
   if(!put.ok){await put.body?.cancel();throw Error('Direct upload failed ('+put.status+'). Run npm run deploy to retry.');}await put.body?.cancel();
-  const snapshot=await client.request(path+'/releases',{uploadId:ticket.uploadId},'POST',ticket.publishKey);
+  const snapshot=await client.request(path+'/releases',{uploadId:ticket.uploadId,...ephemeral,...managed(options)},'POST',ticket.publishKey,named(options));
   project.publishedDigest=packed.digest;project.upload=null;await saveProject(w);
-  log('publish',`Release ${snapshot.current.number} is live: ${appUrl(w)}`);return snapshot;
+  log('publish',`Release ${snapshot.current.number} of app ${snapshot.id} is live: ${appUrl(w)}`);
+  if(snapshot.expiresAt!==null)log('publish',`This ephemeral app ends at ${new Date(snapshot.expiresAt).toISOString()}.`);
+  return snapshot;
+}
+export async function discard(w,options={}){
+  const id=options.app||w.project.app?.id;
+  if(!id)throw Error('Nothing to discard: this project has no app yet.');
+  const result=await w.client.request('/apps/'+id+'/actions',{type:'discard'},'POST',undefined,named(options));
+  if(id===w.project.app?.id){forget(w.project);await saveProject(w);}
+  log('discard',result.pending?`App ${id} is ending; its last cleanup waits until ${new Date(result.retryAt).toISOString()}.`:`App ${id} is discarded; its data is deleted.`);
+  return result;
+}
+export async function unmanage(w,options={}){
+  if(!w.project.app)throw Error('This project has no app yet.');
+  await w.client.request('/apps/'+w.project.app.id+'/manager',undefined,'DELETE',undefined,named(options));
+  log('unmanage',`App ${w.project.app.id} has no manager.`);
 }
 export async function benchmark(w,{awaitIdle=true}={}){
   const {project,client}=w;if(!project.app)throw Error('Publish the project first with npm run deploy.');
@@ -155,16 +175,20 @@ export async function benchmark(w,{awaitIdle=true}={}){
 }
 async function main(){
   const [command='help',...args]=process.argv.slice(2),options={},pos=[];
-  for(let i=0;i<args.length;i++){if(args[i]==='--token-stdin'){options.tokenStdin=true;continue;}if(args[i].startsWith('--')){const key=args[i].slice(2);if(!['origin','tenant','name'].includes(key)||!args[i+1])throw Error('Unknown or incomplete option: '+args[i]);options[key]=args[++i];}else pos.push(args[i]);}
-  if(['help','--help','-h'].includes(command)){console.log('PneumaSpace\n  start DIRECTORY --origin URL [--tenant ID]   Scaffold, publish and measure requests; natural idle is left to bench\n  init DIRECTORY --origin URL [--tenant ID]    Scaffold without publishing\n  publish [DIRECTORY]                         Publish app/ with your saved token\n  bench [DIRECTORY]                           Verify warm requests, natural idle and retained state\n  status [DIRECTORY]                          Inspect real runtime and usage\n  package [DIRECTORY]                         Validate files without publishing\nToken: PNEUMA_SPACE_TOKEN from Dashboard → Create app. Node 22+ required.');return;}
-  if(!['start','init','publish','bench','status','package'].includes(command))throw Error('Unknown command. Run pneuma-space help.');
+  for(let i=0;i<args.length;i++){if(args[i]==='--token-stdin'){options.tokenStdin=true;continue;}if(args[i]==='--ephemeral'){options.ephemeral=true;continue;}if(args[i].startsWith('--')){const key=args[i].slice(2);if(!['origin','tenant','name','ttl','manager','manager-url','app'].includes(key)||!args[i+1])throw Error('Unknown or incomplete option: '+args[i]);options[key]=args[++i];}else pos.push(args[i]);}
+  if(options.ttl!==undefined&&(!options.ephemeral||!/^[1-9]\d*$/.test(options.ttl)))throw Error('--ttl takes whole seconds and needs --ephemeral.');
+  if(options['manager-url']!==undefined&&!options.manager)throw Error('--manager-url needs --manager.');
+  if(['help','--help','-h'].includes(command)){console.log('PneumaSpace\n  start DIRECTORY --origin URL [--tenant ID]   Scaffold, publish and measure requests; natural idle is left to bench\n  init DIRECTORY --origin URL [--tenant ID]    Scaffold without publishing\n  publish [DIRECTORY]                         Publish app/ with your saved token\n    --ephemeral [--ttl SECONDS]               A new app that ends by itself after SECONDS or the deployment default\n  discard [DIRECTORY] [--app ID]              End the ephemeral app of this project and delete its data\n  unmanage [DIRECTORY]                        Clear the manager of this app\n  bench [DIRECTORY]                           Verify warm requests, natural idle and retained state\n  --manager NAME [--manager-url URL]          Name the manager of a managed app on a write; publish also sets it\n  status [DIRECTORY]                          Inspect real runtime and usage\n  package [DIRECTORY]                         Validate files without publishing\nToken: PNEUMA_SPACE_TOKEN from Dashboard → Create app. Node 22+ required.');return;}
+  if(!['start','init','publish','bench','status','package','discard','unmanage'].includes(command))throw Error('Unknown command. Run pneuma-space help.');
   if(['start','init'].includes(command)&&!pos[0])throw Error('Choose a new project directory.');
   if(options.tokenStdin){let value='';for await(const chunk of process.stdin){value+=chunk;if(value.length>256)throw Error('Invalid token input.');}process.env.PNEUMA_SPACE_TOKEN=value.trim();}
   const directory=resolve(pos[0]||'.');
   if(command==='package'){const packed=await packageApp(directory);console.log(JSON.stringify({bytes:packed.bytes.length,digest:packed.digest}));return;}
   const w=['start','init'].includes(command)?await initialize(directory,options):await workspace(directory);
   if(command==='init'){log('next',`Read ${join(directory,'AGENTS.md')}. Edit app/, then run npm run deploy and npm run bench in this directory.`);return;}
-  if(['start','publish'].includes(command))await publish(w);
+  if(['start','publish'].includes(command))await publish(w,options);
+  if(command==='discard')await discard(w,options);
+  if(command==='unmanage')await unmanage(w,options);
   if(['start','bench'].includes(command))await benchmark(w,{awaitIdle:command==='bench'});
   if(command==='status')console.log(JSON.stringify(await w.client.request('/apps/'+w.project.app.id),null,2));
 }

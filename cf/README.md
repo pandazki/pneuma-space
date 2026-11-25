@@ -71,6 +71,13 @@ Use the same credentials file for app listings, inspection and authorized data c
     node scripts/cli.mjs action APP_ID remove
     node scripts/cli.mjs action APP_ID resume
 
+An ephemeral app ends by itself; a managed app's writes name its manager ([ADR 0046](../docs/adr/0046-cloudflare-ephemeral-and-managed-apps.md)):
+
+    node scripts/cli.mjs publish .build/notebook notebook-preview --ephemeral --ttl 1800
+    node scripts/cli.mjs discard notebook-preview --app APP_ID
+    node scripts/cli.mjs publish .build/notebook notebook --manager deployer --manager-url https://deploy.example.com/notebook
+    node scripts/cli.mjs unmanage notebook --manager deployer
+
 Create invitations in /admin and share each link with its intended tester. Redemption shows a new account key once. There is no public owner-creation or signup endpoint.
 
 ## Verify a deployment

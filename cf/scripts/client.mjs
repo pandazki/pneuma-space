@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 
-export async function connect(path = process.env.PNEUMA_SPACE_CREDENTIALS) {
+export async function connect(path = process.env.PNEUMA_SPACE_CREDENTIALS, headers = {}) {
   if (!path) throw new Error('Set PNEUMA_SPACE_CREDENTIALS to a private JSON file containing origin, account and key.');
   const credentials = JSON.parse(await readFile(path, 'utf8'));
   const origin = new URL(credentials.origin).origin;
@@ -9,7 +9,7 @@ export async function connect(path = process.env.PNEUMA_SPACE_CREDENTIALS) {
   async function api(path, body, method = body === undefined ? 'GET' : 'POST', key = randomUUID()) {
     const response = await fetch(origin + '/api/v1' + path, {
       method, redirect: 'error', signal: AbortSignal.timeout(180000),
-      headers: { origin, 'content-type': 'application/json', ...(cookie ? { cookie, 'x-pneuma-space-csrf': csrf } : {}), 'idempotency-key': key },
+      headers: { ...headers, origin, 'content-type': 'application/json', ...(cookie ? { cookie, 'x-pneuma-space-csrf': csrf } : {}), 'idempotency-key': key },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const value = response.status === 204 ? null : await response.json();
