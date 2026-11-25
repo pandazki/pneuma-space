@@ -27,7 +27,7 @@ async function fixture(expiresAt: number | null = null) {
   const bucket = await mf.getR2Bucket('PNEUMA_SPACE_ARTIFACTS') as unknown as R2Bucket;
   await bucket.put(key, packageBytes);
   const artifact = { digest, key, bytes: Buffer.byteLength(packageBytes), manifest };
-  const published = await call(app, '/publish', { actor, artifact, expectedGeneration: 0, idempotencyKey: 'publish' });
+  const published = await call(app, '/publish', { actor, artifact, expectedGeneration: 0, idempotencyKey: 'publish', ephemeral: expiresAt !== null });
   assert.equal(published.status, 200, await published.text());
   return { app, artifact };
 }
@@ -451,6 +451,14 @@ test('CF-29 an expiry that keeps failing writes one error row until its outcome 
   const rows = await expiries(app);
   assert.deepEqual([rows.map(row => row.result), JSON.parse(rows[2].detail).resumed], [['started', 'error', 'ok'], true]);
   assert.equal((await (await call(app, '/inspect')).json() as { status: string }).status, 'purged');
+});
+test('CF-29 an expiry whose audit row cannot be written still ends the app', async () => {
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  await db.prepare("CREATE TRIGGER audit_down BEFORE INSERT ON audit WHEN NEW.action='app.expire' AND NEW.result='started' BEGIN SELECT RAISE(ABORT, 'audit down'); END").run();
+  try {
+    const { app } = await fixture(Date.now() + 1500);
+    await until(async () => (await (await call(app, '/inspect')).json() as { status: string }).status === 'purged', 'The app did not end at its expiry.');
+  } finally { await db.prepare('DROP TRIGGER audit_down').run(); }
 });
 test('CF-29 an end the directory failed to record reaches it on a later alarm', async () => {
   const db = await mf.getD1Database('PNEUMA_SPACE_DB');

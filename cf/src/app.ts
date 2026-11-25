@@ -12,7 +12,7 @@ import { errorResponse, id, input, integer, json, sha, text } from './util.ts';
 type Journal = { previous: Release | null; candidate: Release; key: string };
 type Lease = { id: string; deadline: number; kind: 'request' | 'channel' };
 /** `expiry` is set once an expiry began, to audit how it ends (ADR 0038). `projectAt` is when the alarm next tells the directory that the app is ending, null once the directory has it (ADR 0046). */
-type State = Omit<AppSnapshot, 'releases'> & { releaseSequence: number; journal: Journal | null; schedules: Record<string, number>; purgeAt: number | null; day: string; dayRequests: number; expiry: { resumed: boolean; error: string | null } | null; projectAt: number | null };
+type State = Omit<AppSnapshot, 'releases'> & { releaseSequence: number; journal: Journal | null; schedules: Record<string, number>; purgeAt: number | null; day: string; dayRequests: number; expiry: { resumed: boolean; error: string | null; started: boolean } | null; projectAt: number | null };
 type Subscription = { kind: 'browser'; actor: CredentialProof; nextCheckAt: number } | { kind: 'execution'; scope: ExecutionScope } | { kind: 'closed' };
 type DeliveryAttempt = { job: Delivery; generation: number };
 type Receipt = { fingerprint: string; snapshot: boolean; result: unknown };
@@ -339,11 +339,11 @@ export class AppCell extends DurableObject<Env> {
       let state = this.state();
       for (const lease of this.leases()) if (lease.deadline <= Date.now()) this.releaseLease(lease.id, true);
       if (state.expiresAt !== null && state.expiresAt <= Date.now() && state.status !== 'purging' && state.status !== 'purged') {
-        await audit(this.env, 'platform', 'app.expire', state.tenantId, state.id, 'started', { expiresAt: state.expiresAt });
-        state.expiry = { resumed: false, error: null };
+        state.expiry = { resumed: false, error: null, started: false };
         this.save(state);
         await this.enterPurging();
       }
+      await this.announceExpiry();
       if (this.state().status === 'purging') await this.finishPurge();
       if (this.state().projectAt !== null) await this.project();
       if (this.state().status === 'purging' || this.state().status === 'purged') return [];
@@ -369,6 +369,14 @@ export class AppCell extends DurableObject<Env> {
       this.deliveries.add(attempt.job.id);
       this.ctx.waitUntil(this.deliver(attempt).finally(() => this.deliveries.delete(attempt.job.id)));
     }
+  }
+  /** The end is saved before its audit row is written, so a directory that is down delays the row, not the end. */
+  private async announceExpiry(): Promise<void> {
+    const state = this.state();
+    if (!state.expiry || state.expiry.started) return;
+    try { await audit(this.env, 'platform', 'app.expire', state.tenantId, state.id, 'started', { expiresAt: state.expiresAt }); }
+    catch (error) { console.error('Expiry audit failed', error); return; }
+    state.expiry.started = true; this.save(state);
   }
   /** A failed purge retries from the alarm; an expiry writes one error row per distinct failure, since audit only grows (ADR 0038). */
   private async finishPurge(): Promise<void> {
@@ -595,6 +603,8 @@ export class AppCell extends DurableObject<Env> {
           });
         } else if (path === '/publish') {
           await authorizeApp(this.env, actor, this.state().id, 'publish');
+          mustName(this.state(), (value.named ?? null) as string | null);
+          expectKind(this.state(), value.ephemeral === true);
           result = await this.once(value.idempotencyKey, { type: 'publish', artifact: value.artifact }, key => this.publish(actor, value.artifact as Artifact, key, value.expectedGeneration));
         } else if (path === '/action') {
           const action = value.action as AppAction;
