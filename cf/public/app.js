@@ -94,8 +94,8 @@ function errorLine(error, retry) {
     error.requestId ? h('div', { class: 'mono gap' }, error.requestId) : null),
     error.status === 401 ? link(tr('重新登录','Sign in again'),`/login?next=${encodeURIComponent(location.pathname+location.search)}`) : retry ? btn(tr('重试','Retry'),retry,'ghost small') : null);
 }
-async function api(path, body, method = body === undefined ? 'GET' : 'POST', signal) {
-  const headers = { Accept: 'application/json' };
+async function api(path, body, method = body === undefined ? 'GET' : 'POST', signal, extra = {}) {
+  const headers = { Accept: 'application/json', ...extra };
   if (method !== 'GET') {
     headers['Content-Type'] = 'application/json'; headers['Idempotency-Key'] = crypto.randomUUID();
     if (state.me?.csrf) headers['X-Pneuma-Space-CSRF'] = state.me.csrf;
@@ -278,18 +278,24 @@ function modal(label, ...content) {
   dialog.addEventListener('close',() => dialog.remove()); document.body.append(dialog); dialog.showModal();
   return dialog;
 }
-function approve({ title, description, confirmation = undefined, action, danger = true }) {
+const managerLink = manager => manager.url ? h('a',{ href:manager.url,target:'_blank',rel:'noopener noreferrer' },manager.name) : manager.name;
+// A write to a managed app names its manager once the person types it (ADR 0039); `action` receives the header.
+function approve({ title, description, confirmation = undefined, action, danger = true, manager = null }) {
   const typed = confirmation ? input({ autocomplete: 'off', placeholder: confirmation, 'aria-label': tr('输入名称确认','Type the name to confirm') }) : null;
+  const naming = manager ? input({ autocomplete: 'off', placeholder: manager.name, 'aria-label': tr('输入管理方名称','Type the manager name') }) : null;
+  const ready = () => (!typed || typed.value === confirmation) && (!naming || naming.value === manager.name);
   const result = h('div', { 'aria-live': 'polite' });
   const cancel = btn(tr('取消','Cancel'), () => dialog.close(), 'ghost');
   const confirm = btn(tr('继续','Continue'), async () => {
-    if (typed && typed.value !== confirmation) return;
+    if (!ready()) return;
     cancel.disabled = true;
-    try { await action(); dialog.close(); } catch (error) { fill(result,errorLine(error)); } finally { cancel.disabled = false; }
+    try { await action(manager ? { 'X-Pneuma-Space-Manager': manager.name } : {}); dialog.close(); } catch (error) { fill(result,errorLine(error)); } finally { cancel.disabled = false; }
   }, danger ? 'danger' : 'primary');
-  if (typed) { confirm.disabled = true; typed.addEventListener('input', () => confirm.disabled = typed.value !== confirmation); }
-  const dialog = modal(title, h('h2', {}, title), h('p', { class: 'muted' }, description), typed ? field(tr(`输入 ${confirmation} 以确认`,`Type ${confirmation} to confirm`),typed) : null,result,h('div',{ class: 'toolbar' },cancel,confirm));
-  (typed || cancel).focus();
+  confirm.disabled = !ready();
+  for (const node of [typed, naming]) node?.addEventListener('input', () => confirm.disabled = !ready());
+  const managed = manager ? h('div',{ class:'notice warn' },tr('这个项目由 ','This project is managed by '),managerLink(manager),tr(' 管理，它负责检查和记录发布。在这里操作会绕过它，它的记录将与线上不一致。','. It reviews and records each release; acting here goes around it, and its record will no longer match what is live.')) : null;
+  const dialog = modal(title, h('h2', {}, title), h('p', { class: 'muted' }, description), managed, typed ? field(tr(`输入 ${confirmation} 以确认`,`Type ${confirmation} to confirm`),typed) : null, naming ? field(tr(`输入管理方名称 ${manager.name} 以继续`,`Type the manager name ${manager.name} to continue`),naming) : null,result,h('div',{ class: 'toolbar' },cancel,confirm));
+  (typed || naming || cancel).focus();
 }
 function fileField(accept, receive) {
   const chosen = h('small', {}, tr('或将文件拖到这里','Or drop a file here')), picker = input({ type: 'file', accept, tabIndex: -1 });
@@ -382,7 +388,7 @@ function appRows(apps) {
   let remaining = [...apps];
   return h('div',{ class:'stack' },groups.map(([title,predicate]) => {
     const selected = remaining.filter(predicate); remaining = remaining.filter(app => !predicate(app));
-    return selected.length ? h('div',{ class:'stack' },h('div',{ class:'eyebrow gap' },title,' · ',selected.length),selected.map(app => h('a',{ href:projectLink(app),'data-nav':true,class:'card cardlink row' },h('span',{ class:'project-mark','aria-hidden':'true' },app.name.slice(0,2)),h('div',{ class:'grow' },h('div',{ class:'row-title mono' },app.name),h('div',{ class:'meta' },statusBadge(app.status),app.runtime?.state && app.status !== 'draft' ? statusBadge(app.runtime.state) : null,chip(app.release == null ? tr('无版本','No release') : `r${app.release}`),route().admin ? chip(app.tenantId) : null)),h('div',{ class:'hint' },app.observedAt == null ? tr('尚未观测','Not observed yet') : [tr('观测于 ','Observed '),time(app.observedAt)]),icon('next')))) : null;
+    return selected.length ? h('div',{ class:'stack' },h('div',{ class:'eyebrow gap' },title,' · ',selected.length),selected.map(app => h('a',{ href:projectLink(app),'data-nav':true,class:'card cardlink row' },h('span',{ class:'project-mark','aria-hidden':'true' },app.name.slice(0,2)),h('div',{ class:'grow' },h('div',{ class:'row-title mono' },app.name),h('div',{ class:'meta' },statusBadge(app.status),app.runtime?.state && app.status !== 'draft' ? statusBadge(app.runtime.state) : null,chip(app.release == null ? tr('无版本','No release') : `r${app.release}`),attributes(app,false),route().admin ? chip(app.tenantId) : null)),h('div',{ class:'hint' },app.observedAt == null ? tr('尚未观测','Not observed yet') : [tr('观测于 ','Observed '),time(app.observedAt)]),icon('next')))) : null;
   }));
 }
 function pager(path, first, draw) {
@@ -397,6 +403,7 @@ function pager(path, first, draw) {
 function usagePanel(usage) {
   const dimensions = [
     [tr('项目','Projects'),usage.used.apps,usage.quota.apps,number],
+    [tr('临时项目','Ephemeral projects'),usage.used.ephemeral,usage.quota.ephemeral,number],
     [tr('运行名额','Runtime slots'),usage.used.awake,usage.quota.awake,number],
     [tr('今日请求','Requests today'),usage.requestsToday,usage.quota.requestsPerDay,number],
     [tr('预留存储','Reserved storage'),usage.used.storageBytes,usage.quota.storageBytes,bytes],
@@ -507,6 +514,7 @@ const labels = {
   remove:['下线','Remove'],
 
   apps:['项目','Projects'],
+  ephemeral:['临时项目','Ephemeral projects'],
   accounts:['账号','Accounts'],
   tenants:['租户','Tenants'],
   requests:['请求','Requests'],
@@ -768,11 +776,13 @@ function appHead(app, placeholder = false) {
         entries.push({ label:tr('下线项目…','Remove project…'),note:tr('停止访问，保留所有数据','Deny access and retain all data'),danger:true,run:() => confirmAppAction('remove',app) });
       }
       if (app.status === 'removed') entries.push({ label:tr('永久清除…','Purge permanently…'),note:tr('删除项目和所有持久数据','Delete this project and all durable data'),danger:true,run:() => confirmAppAction('purge',app) });
+      if (app.expiresAt != null) entries.push({ label:tr('丢弃…','Discard…'),note:tr('现在结束这个临时项目并删除所有数据','End this ephemeral project now and delete all its data'),danger:true,run:() => confirmAppAction('discard',app) });
       if (entries.length) actions.push(moreMenu(entries));
     }
   }
   const head = pagehead(app ? app.name : tr('项目','Project'),app ? app.url : null,...actions);
   head.classList.add('apphead');
+  if (app && !placeholder && (app.expiresAt != null || app.manager)) head.querySelector('.grow').append(h('div',{ class:'meta gap-sm' },attributes(app,true)));
   head.querySelector('h1').before(navLink([icon('back'),tr('项目','Projects')],href('projects'),'crumb'));
   if (!app) head.querySelector('h1').replaceChildren(sk('big w30'));
   return head;
@@ -798,24 +808,31 @@ function projectPanel(panel, id, tab) {
   const panels = { runtime:runtimePage,publish:publishPage,releases:releasesPage,data:dataPage,jobs:jobsPage,logs:diagnosticPage,events:diagnosticPage,usage:appUsagePage };
   (panels[tab] || runtimePage)(panel,id,tab);
 }
-async function appAction(action,app) { return api(appPath('/actions',app),action); }
+async function appAction(action,app,headers) { return api(appPath('/actions',app),action,'POST',undefined,headers); }
+/** The ephemeral mark with its end, and the manager: a link in the detail, text in a card that is itself a link. */
+function attributes(app,linked) {
+  return [app.expiresAt != null ? h('span',{ class:'chip',title:new Date(app.expiresAt).toISOString() },tr('临时 · 结束于 ','Ephemeral · ends '),stamp(app.expiresAt)) : null,
+    app.manager ? h('span',{ class:'chip',title:app.manager.url || '' },tr('管理方 ','Managed by '),linked ? managerLink(app.manager) : app.manager.name) : null];
+}
+const NAMED = ['rollback','remove','resume','purge','discard','policy'];
 function confirmAppAction(type,app) {
   const text = {
     kill:[tr(`终止 ${app.name}？`,`Kill ${app.name}?`),tr('当前请求可能中断。持久数据保留。下一次访问可重新唤醒应用。','Current requests may be interrupted. Durable data is retained. A later request can wake the app.')],
     remove:[tr(`下线 ${app.name}？`,`Remove ${app.name}?`),tr('停止应用与任务并拒绝访问。所有持久数据和版本保留，可以恢复。','Stop the app and jobs and deny access. Durable data and releases are retained and can be resumed.')],
     purge:[tr(`永久清除 ${app.name}？`,`Permanently purge ${app.name}?`),tr('删除所有版本、数据库、键值、文件和对象。此操作不能撤销。尚未过期的上传票据可能延迟最终清理。','Delete all releases, SQL, KV, files and objects. This cannot be undone. Outstanding upload tickets may delay final cleanup.')],
+    discard:[tr(`丢弃 ${app.name}？`,`Discard ${app.name}?`),tr('现在结束这个临时项目：删除所有版本、数据库、键值、文件和对象，之后名字释放。此操作不能撤销。尚未过期的上传票据可能延迟最终清理。','End this ephemeral project now: delete all releases, SQL, KV, files and objects, then release its name. This cannot be undone. Outstanding upload tickets may delay final cleanup.')],
   };
-  approve({ title:text[type][0],description:text[type][1],confirmation:type === 'purge' ? app.name : undefined,action:async () => {
-    const result = await appAction(type === 'purge' ? { type,confirmation:app.name } : { type },app);
+  approve({ title:text[type][0],description:text[type][1],confirmation:type === 'purge' ? app.name : undefined,manager:NAMED.includes(type) ? app.manager : null,action:async headers => {
+    const result = await appAction(type === 'purge' ? { type,confirmation:app.name } : { type },app,headers);
     if (result.pending) { await refresh(); document.querySelector('#content')?.prepend(h('div',{ class:'notice' },tr('清除正在等待已有上传票据到期。','Purge is waiting for outstanding upload tickets to expire.'),' ',stamp(result.retryAt))); }
-    else if (type === 'purge') goto('projects'); else await refresh();
+    else if (type === 'purge' || type === 'discard') goto('projects'); else await refresh();
   } });
 }
 function runtimeState(app) {
   const controls = h('div',{ class:'toolbar' }), outcome = h('div',{ 'aria-live':'polite' });
   const actionButton = (label,type) => btn(label,async () => { fill(outcome); try { await appAction({ type },app); await refresh(); } catch (error) { fill(outcome,errorLine(error)); } },'ghost');
   if (mayOperate(app)) {
-    if (app.status === 'removed') controls.append(actionButton(tr('恢复项目','Resume project'),'resume'));
+    if (app.status === 'removed') controls.append(app.manager ? btn(tr('恢复项目','Resume project'),() => approve({ title:tr(`恢复 ${app.name}？`,`Resume ${app.name}?`),description:tr('重新开放访问并恢复计划任务。数据和版本保持原样。','Restore access and scheduled jobs. Data and releases stay as they are.'),danger:false,manager:app.manager,action:async headers => { await appAction({ type:'resume' },app,headers); await refresh(); } }),'ghost') : actionButton(tr('恢复项目','Resume project'),'resume'));
     if (app.status === 'registered' && app.current?.manifest.runtime !== 'static') {
       if (app.runtime.state === 'quarantined') controls.append(actionButton(tr('解除隔离','Lift quarantine'),'unquarantine'));
       else if (app.runtime.state === 'asleep') controls.append(actionButton(tr('唤醒','Wake'),'wake'));
@@ -857,8 +874,10 @@ function runtimePage(panel,id) {
 function policyForm(app) {
   const fields = Object.fromEntries(Object.entries(app.policy).map(([key,value]) => [key,input({ type:'number',required:true,min:0,step:1,value })]));
   return submitForm([h('div',{ class:'form-grid' },Object.entries(fields).map(([key,node]) => field(fieldName(key),node)))],async () => {
-    await appAction({ type:'policy',policy:Object.fromEntries(Object.entries(fields).map(([key,node]) => [key,Number(node.value)])) },app);
-    refresh();
+    const save = async headers => { await appAction({ type:'policy',policy:Object.fromEntries(Object.entries(fields).map(([key,node]) => [key,Number(node.value)])) },app,headers); refresh(); };
+    if (!app.manager) return save();
+    approve({ title:tr(`修改 ${app.name} 的运行策略？`,`Change the runtime policy of ${app.name}?`),description:tr('新的策略立即生效。','The new policy applies immediately.'),danger:false,manager:app.manager,action:save });
+    return false;
   },tr('保存策略','Save policy'));
 }
 function encode64(bytesValue) {
@@ -898,13 +917,20 @@ function publishForm(app) {
     const blob = new Blob([JSON.stringify(pkg)],{ type:'application/json' });
     if (blob.size > 4*1024*1024) throw new Error(tr('应用包不能超过 4 MiB。','The package cannot exceed 4 MiB.'));
     const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()))].map(byte => byte.toString(16).padStart(2,'0')).join('');
-    fill(progress,h('div',{ class:'notice' },tr('正在申请直接上传票据…','Requesting a direct upload ticket…')));
-    const ticket = await api(appPath('/uploads',app),{ manifest:pkg.manifest,digest,bytes:blob.size });
-    fill(progress,h('div',{ class:'notice' },tr('正在将应用包直接上传到 R2…','Uploading the package directly to R2…')));
-    await directPut(ticket,blob);
-    fill(progress,h('div',{ class:'notice' },tr('正在校验应用包并激活版本…','Verifying the package and activating the release…')));
-    await api(appPath('/releases',app),{ uploadId:ticket.uploadId });
-    goto('projects',{ app:app.id,tab:'releases' }); return false;
+    // Every publish states the kind it expects (ADR 0038).
+    const kind = app.expiresAt != null ? { ephemeral:true } : {};
+    const send = async headers => {
+      fill(progress,h('div',{ class:'notice' },tr('正在申请直接上传票据…','Requesting a direct upload ticket…')));
+      const ticket = await api(appPath('/uploads',app),{ manifest:pkg.manifest,digest,bytes:blob.size,...kind },'POST',undefined,headers);
+      fill(progress,h('div',{ class:'notice' },tr('正在将应用包直接上传到 R2…','Uploading the package directly to R2…')));
+      await directPut(ticket,blob);
+      fill(progress,h('div',{ class:'notice' },tr('正在校验应用包并激活版本…','Verifying the package and activating the release…')));
+      await api(appPath('/releases',app),{ uploadId:ticket.uploadId,...kind },'POST',undefined,headers);
+      goto('projects',{ app:app.id,tab:'releases' });
+    };
+    if (app.manager) approve({ title:tr(`发布 ${app.name} 的新版本？`,`Publish a release of ${app.name}?`),description:tr('新版本通过校验后立即上线，持久数据保留。','The release goes live once verified. Durable data is retained.'),danger:false,manager:app.manager,action:send });
+    else await send({});
+    return false;
   },tr('发布版本','Publish release'));
 }
 function releasesPage(panel,id) {
@@ -916,7 +942,7 @@ function releaseTable(app,releases) {
   const columns = [tr('版本','Release'),tr('运行时','Runtime'),tr('创建时间','Created'),tr('应用包','Package'),tr('操作','Action')];
   return h('div',{ class:'table-wrap' },h('table',{},h('thead',{},h('tr',{},columns.map(label => h('th',{},label)))),h('tbody',{},[...releases].sort((a,b) => b.number-a.number).map(release => {
     const values = [h('div',{ class:'toolbar' },chip(`r${release.number}`),release.number === app.current?.number ? statusBadge('active') : null),release.manifest.runtime,time(release.createdAt),h('span',{ class:'mono',title:release.digest },bytes(release.bytes),' · ',release.digest.slice(0,12)),
-      mayOperate(app) && release.number !== app.current?.number && app.status === 'registered' ? btn(tr('回滚至此版本','Roll back here'),() => approve({ title:tr(`回滚 ${app.name} 至 r${release.number}？`,`Roll back ${app.name} to r${release.number}?`),description:tr('应用代码回到此版本。持久数据保持当前内容。','App code returns to this release. Durable data keeps its current contents.'),danger:false,action:async () => { await appAction({ type:'rollback',release:release.number },app); await refresh(); } }),'ghost small') : h('span',{ class:'hint' },release.number === app.current?.number ? tr('当前版本','Current') : '')];
+      mayOperate(app) && release.number !== app.current?.number && app.status === 'registered' ? btn(tr('回滚至此版本','Roll back here'),() => approve({ title:tr(`回滚 ${app.name} 至 r${release.number}？`,`Roll back ${app.name} to r${release.number}?`),description:tr('应用代码回到此版本。持久数据保持当前内容。','App code returns to this release. Durable data keeps its current contents.'),danger:false,manager:app.manager,action:async headers => { await appAction({ type:'rollback',release:release.number },app,headers); await refresh(); } }),'ghost small') : h('span',{ class:'hint' },release.number === app.current?.number ? tr('当前版本','Current') : '')];
     return h('tr',{},values.map((value,index) => h('td',{ 'data-label':columns[index] },value)));
   }))));
 }
@@ -1076,13 +1102,14 @@ function deliveryTable(rows) {
 }
 const eventWords = {
   published:['发布','Published'], 'publish-failed':['发布失败','Publish failed'], wake:['唤醒','Wake'], sleep:['休眠','Sleep'], restart:['重启','Restart'], kill:['强制终止','Kill'],
-  remove:['下线','Remove'], resume:['恢复','Resume'], unquarantine:['解除隔离','Lift quarantine'], rollback:['回滚','Rollback'], purge:['清除','Purge'], policy:['策略变更','Policy change'],
+  remove:['下线','Remove'], resume:['恢复','Resume'], unquarantine:['解除隔离','Lift quarantine'], rollback:['回滚','Rollback'], purge:['清除','Purge'], policy:['策略变更','Policy change'], manager:['管理方','Manager'],
   'wake-ready':['唤醒完成','Woke'], 'wake-failed':['唤醒失败','Wake failed'],
 };
 function eventMessage(row) {
   const release = /^Published release (\d+)$/.exec(row.message ?? '');
   if (release) return tr(`已发布版本 r${release[1]}。`,row.message);
   if (row.message === 'Application action completed.') return tr('操作已完成。',row.message);
+  if (row.message === 'Manager cleared.') return tr('已清除管理方。',row.message);
   const ready = /^Ready in (\d+) ms\.$/.exec(row.message ?? '');
   if (ready) return tr(`${milliseconds(Number(ready[1]))} 后就绪。`,`Ready in ${milliseconds(Number(ready[1]))}.`);
   if (row.message?.startsWith('Startup failed: ')) return tr('启动失败：','Startup failed: ')+row.message.slice(16);
@@ -1186,6 +1213,7 @@ function tenantsPage(content) {
     if (!rows.length) return empty(tr('暂无租户。','No tenants.'));
     return h('div',{ class:'stack' },rows.map(tenant => h('div',{ class:'card stack' },h('div',{ class:'row' },h('div',{ class:'grow' },h('div',{ class:'row-title' },tenant.name),h('div',{ class:'meta' },h('code',{ class:'hint' },tenant.id),h('small',{},tr('创建于 ','Created '),time(tenant.createdAt)))),moreMenu([{ label:tr('修改配额…','Change quotas…'),note:tr('项目、并发运行、请求与存储额度','Apps, concurrent compute, requests and storage'),run:() => editQuota(tenant) }])),facts({
       [tr('项目 / 配额','Apps / quota')]:`${number(tenant.used.apps)} / ${number(tenant.quota.apps)}`,
+      [tr('临时项目 / 配额','Ephemeral apps / quota')]:`${number(tenant.used.ephemeral)} / ${number(tenant.quota.ephemeral)}`,
       [tr('运行预留 / 配额','Compute reservations / quota')]:`${number(tenant.used.awake)} / ${number(tenant.quota.awake)}`,
       [tr('存储预留 / 配额','Reserved storage / quota')]:`${bytes(tenant.used.storageBytes)} / ${bytes(tenant.quota.storageBytes)}`,
       [tr('每日请求配额','Daily request quota')]:number(tenant.quota.requestsPerDay),

@@ -48,7 +48,7 @@ The prefix names the Worker, the D1 database and the buckets `PREFIX-artifacts` 
 
 The first run stops at the one manual step. Wrangler's login cannot create the long-lived token the installer uses to create resources, attach the control domain and derive the Worker's R2 signing key, so the installer prints a link to Cloudflare's create-token form with Workers Scripts edit and Workers R2 Storage edit preselected. Create the token, save it alone in the file the installer names, and run the same command again. The installer prints the token's expiry; after it, the derived R2 key stops working, so publishing cannot upload packages and apps cannot hand out object upload or download URLs.
 
-The installer then creates the database and buckets, applies the schema and CORS, provisions the owner, deploys (retrying a failed deploy up to three times), removes an API token an earlier install left on the Worker, attaches the control domain unless another Worker holds it, and waits for valid HTTPS. Each step checks before it acts, so the same command resumes an interrupted install, and after a `git pull` it upgrades a finished one. An upgrade from per-app domains leaves those app hostnames attached to the Worker, where they now answer 404; detach them in the Cloudflare dashboard or through the Workers domains API. It ends with the console URL and the owner credentials file.
+The installer then creates the database and buckets, applies the schema and CORS, provisions the owner, deploys (retrying a failed deploy up to three times), removes an API token an earlier install left on the Worker, attaches the control domain unless another Worker holds it, and waits for valid HTTPS. Each step checks before it acts, so the same command resumes an interrupted install, and after a `git pull` it upgrades a finished one. An upgrade from per-app domains leaves those app hostnames attached to the Worker, where they now answer 404; detach them in the Cloudflare dashboard or through the Workers domains API. An upgrade keeps each existing space's storage quota, while new spaces get 80 MiB; raise a space still at 50 MiB under Tenants & quotas in `/admin`, or it has no room for ephemeral apps beside five durable ones. It ends with the console URL and the owner credentials file.
 
 Everything it generates stays in `~/.pneuma-space/hosts/DOMAIN/` (mode 0700): the Wrangler config, the API token, the Worker secrets and the owner credentials. The Worker itself holds no API token. To enable TURN, add `PNEUMA_SPACE_TURN_KEY_ID` and `PNEUMA_SPACE_TURN_API_TOKEN` to `worker-secrets.json` there and rerun; the installer keeps them.
 
@@ -70,6 +70,13 @@ Use the same credentials file for app listings, inspection and authorized data c
     node scripts/cli.mjs inspect APP_ID
     node scripts/cli.mjs action APP_ID remove
     node scripts/cli.mjs action APP_ID resume
+
+An ephemeral app ends by itself; a managed app's writes name its manager ([ADR 0046](../docs/adr/0046-cloudflare-ephemeral-and-managed-apps.md)):
+
+    node scripts/cli.mjs publish .build/notebook notebook-preview --ephemeral --ttl 1800
+    node scripts/cli.mjs discard notebook-preview --app APP_ID
+    node scripts/cli.mjs publish .build/notebook notebook --manager deployer --manager-url https://deploy.example.com/notebook
+    node scripts/cli.mjs unmanage notebook --manager deployer
 
 Create invitations in /admin and share each link with its intended tester. Redemption shows a new account key once. There is no public owner-creation or signup endpoint.
 

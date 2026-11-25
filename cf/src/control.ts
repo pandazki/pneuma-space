@@ -1,12 +1,12 @@
 import { createInvitation, createToken, requireAdmin, requireSession, tenantRole, user } from './auth.ts';
-import { appSummary, audit, cellValue, createApp, listApps } from './directory.ts';
+import { HOLDS_SLOT, appSummary, audit, cellValue, createApp, listApps } from './directory.ts';
 import { type Actor, type EventRow, type Quota, fail } from './model.ts';
 import { input, integer, json, record, text } from './util.ts';
 
-type TenantRow = { id: string; name: string; apps_limit: number; awake_limit: number; requests_limit: number; storage_limit: number; created_at: number; apps: number; awake: number; storage: number };
-const tenantSelect = 'SELECT t.*,(SELECT count(*) FROM apps a WHERE a.tenant_id=t.id AND a.purged_at IS NULL) AS apps,(SELECT count(*) FROM compute c JOIN apps a ON a.id=c.app_id WHERE a.tenant_id=t.id) AS awake,(SELECT coalesce(sum(storage_bytes),0) FROM apps a WHERE a.tenant_id=t.id AND a.purged_at IS NULL) AS storage FROM tenants t';
-const quota = (t: TenantRow): Quota => ({ apps: t.apps_limit, awake: t.awake_limit, requestsPerDay: t.requests_limit, storageBytes: t.storage_limit });
-const tenantView = (t: TenantRow) => ({ id: t.id, name: t.name, createdAt: t.created_at, quota: quota(t), used: { apps: t.apps, awake: t.awake, storageBytes: t.storage } });
+type TenantRow = { id: string; name: string; apps_limit: number; ephemeral_limit: number; awake_limit: number; requests_limit: number; storage_limit: number; created_at: number; apps: number; ephemeral: number; awake: number; storage: number };
+const tenantSelect = 'SELECT t.*,(SELECT count(*) FROM apps a WHERE a.tenant_id=t.id AND a.purged_at IS NULL AND a.expires_at IS NULL) AS apps,(SELECT count(*) FROM apps a WHERE a.tenant_id=t.id AND a.expires_at IS NOT NULL AND ' + HOLDS_SLOT + ') AS ephemeral,(SELECT count(*) FROM compute c JOIN apps a ON a.id=c.app_id WHERE a.tenant_id=t.id) AS awake,(SELECT coalesce(sum(storage_bytes),0) FROM apps a WHERE a.tenant_id=t.id AND a.purged_at IS NULL) AS storage FROM tenants t';
+const quota = (t: TenantRow): Quota => ({ apps: t.apps_limit, ephemeral: t.ephemeral_limit, awake: t.awake_limit, requestsPerDay: t.requests_limit, storageBytes: t.storage_limit });
+const tenantView = (t: TenantRow) => ({ id: t.id, name: t.name, createdAt: t.created_at, quota: quota(t), used: { apps: t.apps, ephemeral: t.ephemeral, awake: t.awake, storageBytes: t.storage } });
 export const operationKey = (request: Request): string => text(request.headers.get('idempotency-key') ?? crypto.randomUUID(), 'operation key', 120);
 function offset(url: URL): number {
   const value = url.searchParams.get('cursor');
@@ -87,8 +87,8 @@ async function adminRoute(request: Request, env: Env, actor: Actor, segments: st
     if (request.method === 'GET' && !target) return json(page((await db.prepare(tenantSelect + ' ORDER BY t.created_at,t.id LIMIT 101 OFFSET ?').bind(start).all<TenantRow>()).results.map(tenantView), start));
     if (request.method === 'PATCH' && target) {
       const values = record((await input(request, 2048)).quota);
-      const next = { apps: integer(values.apps, 'application limit', 0, 50), awake: integer(values.awake, 'awake limit', 0, 10), requestsPerDay: integer(values.requestsPerDay, 'request limit', 0, 1000000), storageBytes: integer(values.storageBytes, 'storage limit', 0, 1024 * 1024 * 1024) };
-      const changed = await db.prepare('UPDATE tenants SET apps_limit=?,awake_limit=?,requests_limit=?,storage_limit=? WHERE id=? AND (SELECT count(*) FROM apps WHERE tenant_id=? AND purged_at IS NULL)<=? AND (SELECT coalesce(sum(storage_bytes),0) FROM apps WHERE tenant_id=? AND purged_at IS NULL)<=? AND (SELECT count(*) FROM compute c JOIN apps a ON a.id=c.app_id WHERE a.tenant_id=?)<=?').bind(next.apps, next.awake, next.requestsPerDay, next.storageBytes, target, target, next.apps, target, next.storageBytes, target, next.awake).run();
+      const next = { apps: integer(values.apps, 'application limit', 0, 50), ephemeral: integer(values.ephemeral, 'ephemeral application limit', 0, 50), awake: integer(values.awake, 'awake limit', 0, 10), requestsPerDay: integer(values.requestsPerDay, 'request limit', 0, 1000000), storageBytes: integer(values.storageBytes, 'storage limit', 0, 1024 * 1024 * 1024) };
+      const changed = await db.prepare('UPDATE tenants SET apps_limit=?,ephemeral_limit=?,awake_limit=?,requests_limit=?,storage_limit=? WHERE id=? AND (SELECT count(*) FROM apps WHERE tenant_id=? AND purged_at IS NULL AND expires_at IS NULL)<=? AND (SELECT count(*) FROM apps WHERE tenant_id=? AND expires_at IS NOT NULL AND ' + HOLDS_SLOT + ')<=? AND (SELECT coalesce(sum(storage_bytes),0) FROM apps WHERE tenant_id=? AND purged_at IS NULL)<=? AND (SELECT count(*) FROM compute c JOIN apps a ON a.id=c.app_id WHERE a.tenant_id=?)<=?').bind(next.apps, next.ephemeral, next.awake, next.requestsPerDay, next.storageBytes, target, target, next.apps, target, next.ephemeral, target, next.storageBytes, target, next.awake).run();
       if (!changed.meta.changes) fail(409, 'quota_in_use', 'Space not found or the limit is below its current reservations.');
       await audit(env, actor, 'tenant.quota', target, null); return json({ quota: next });
     }
@@ -153,7 +153,7 @@ export async function controlRoute(request: Request, env: Env, actor: Actor, pat
   const [, tenantId, section, target] = segments;
   if (section === 'apps' && !target) {
     if (request.method === 'GET') return json({ items: (await listApps(env, actor, tenantId)).map(row => appSummary(env, row)) });
-    if (request.method === 'POST') return json(appSummary(env, await createApp(env, actor, tenantId, (await input(request, 2048)).name, operationKey(request))), 201);
+    if (request.method === 'POST') return json(appSummary(env, await createApp(env, actor, tenantId, await input(request, 4096), operationKey(request))), 201);
   }
   requireSession(actor);
   await tenantRole(env, actor, tenantId);

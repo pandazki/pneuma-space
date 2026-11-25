@@ -86,3 +86,20 @@ Not verified on Cloudflare: WebSockets, SSE and native subscriptions under the p
 - After: the app row is read while the session is checked, the app object's state and the permission check run together, the quota write runs beside the static read, and a plain GET reads R2 once. A static file took about 0.57 s and a warm API call about 0.7 s. Unauthenticated requests still answered 401 and an unknown app 404.
 
 Not verified: the first screen in a browser on the real instance, a client entering near the database, and the cost of the static probe on API paths, which still spends one R2 read (about 200 ms) before Node is asked.
+
+## Ephemeral and managed apps (2026-11-25)
+
+[ADR 0046](../../docs/adr/0046-cloudflare-ephemeral-and-managed-apps.md) brings ephemeral and managed apps to this plane. The local checks came first; the upgrade and the API paths below were then run on a real account.
+
+What passed locally: TypeScript, and 140 engine tests with the four Docker cases skipped, 46 of them new for CF-23, CF-29 and CF-30. Expiry ran on Miniflare's Durable Object alarm, a failed directory write as a D1 trigger, and the column upgrade on SQLite through `node:sqlite`; The console was rendered against a local Miniflare instance in headless Chrome at 1440 and 390 px in Chinese and English, the ephemeral app's page in dark and the rest in light: cards and the project head show the ephemeral mark, end time and manager, usage shows the ephemeral quota, no page overflowed horizontally, and a managed remove went through only after the manager's name was typed. Publish, rollback, resume, policy and discard approvals were not driven in the browser.
+
+On a real account, an installed deployment with five apps was upgraded by rerunning the installer from this change:
+
+- The installer finished on its first run. D1 gained `tenants.ephemeral_limit` and `apps.expires_at`, `manager_name` and `manager_url`; the existing space kept 50 MiB of storage and got an ephemeral limit of 3; the five existing apps were listed as before.
+- With five durable apps holding all 50 MiB, creating an ephemeral app answered 409 `ephemeral_quota`. After the space was raised to 80 MiB it was created.
+- An ephemeral app published with a TTL of 200 s returned its `expiresAt`. A release that stated the durable kind answered 409 `kind`, and a TTL of 7200 s answered 400 `ttl`.
+- With no caller it ended in the second of its `expiresAt`: the audit has `app.expire` `started` and `ok` by `platform` in that second, and it left the list.
+- A second ephemeral app was discarded right after its publish. The answer was `purging` with a `retryAt` about three minutes later, usage showed one ephemeral app in use while two existed, and after that time it left the list. Storage in use then matched the remaining durable apps.
+- A managed app refused a release, `remove` and clearing the manager without its name with 409 `managed`, and took `sleep` without it. With the name, `remove`, `resume` and clearing the manager succeeded and the audit carries `namedManager`. After the clearing, `remove` and `purge` needed no name.
+
+Not verified on Cloudflare: an expiry while D1 refuses writes, a failed purge that resumes, the malformed-header 400 (the CLI refused the name before sending it), `rollback`, `policy` and `discard` on a managed app, the ephemeral limit of 3 itself, the console pages, and `npm run verify`.

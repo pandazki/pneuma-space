@@ -1,17 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, stat, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 // @ts-expect-error The installer is a plain Node script.
-import { install, generateConfig, workerSecrets, statePaths, Stop } from '../scripts/install.mjs';
+import { install, generateConfig, workerSecrets, statePaths, columnUpgrades, Stop } from '../scripts/install.mjs';
 
 const cfDir = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const account = 'account-example', token = 'example-api-token';
 
-function cloudflare({ scripts = [] as string[], buckets = [] as string[], databases = [] as { name: string, uuid: string }[], domains = [] as { hostname: string, service: string }[], secrets = [] as string[], deploys = [0] } = {}) {
-  const calls: string[] = [], logs: string[] = [];
+function cloudflare({ scripts = [] as string[], buckets = [] as string[], databases = [] as { name: string, uuid: string }[], domains = [] as { hostname: string, service: string }[], secrets = [] as string[], deploys = [0], columns = {} as Record<string, string[]> } = {}) {
+  const calls: string[] = [], logs: string[] = [], upgrades: string[] = [];
   const reply = (result: unknown, status = 200) => Response.json({ success: status < 400, result, errors: status < 400 ? [] : [{ message: 'not found' }] }, { status });
   const fetch = async (url: string, init: RequestInit = {}) => {
     const { pathname, searchParams } = new URL(url), method = init.method ?? 'GET', path = pathname.replace('/client/v4', '');
@@ -39,11 +41,14 @@ function cloudflare({ scripts = [] as string[], buckets = [] as string[], databa
     calls.push('wrangler ' + (verb === 'd1' ? 'd1 ' + sub : verb));
     if (verb === 'whoami') return { status: 0, stdout: JSON.stringify({ loggedIn: true, accounts: [{ id: account, name: 'Example' }] }) };
     if (verb === 'auth') return { status: 0, stdout: JSON.stringify({ type: 'oauth', token: 'session' }) };
+    const option = (name: string) => args.includes(name) ? args[args.indexOf(name) + 1] : '';
+    if (verb === 'd1' && option('--command').startsWith('PRAGMA')) return { status: 0, stdout: JSON.stringify([...option('--command').matchAll(/table_info\((\w+)\)/g)].map(([, table]) => ({ results: (columns[table] ?? []).map(name => ({ name })) }))) };
+    if (verb === 'd1' && option('--file').endsWith('upgrade.sql')) upgrades.push(readFileSync(option('--file'), 'utf8'));
     if (verb === 'd1' && args.includes('--json')) return { status: 0, stdout: JSON.stringify([{ results: [{ owners: 1 }] }]) };
     if (verb === 'deploy') return { status: deploys.shift() ?? 0, stdout: '' };
     return { status: 0, stdout: '' };
   };
-  return { calls, logs, io: { fetch, run, sleep: async () => {}, log: (line: string) => logs.push(line) } };
+  return { calls, logs, upgrades, io: { fetch, run, sleep: async () => {}, log: (line: string) => logs.push(line) } };
 }
 
 async function host(saveToken = true) {
@@ -75,7 +80,7 @@ test('CF-23 a rerun after a complete install creates no resource and only redepl
     await install(options, cf.io);
     cf.calls.length = 0;
     await install(options, cf.io);
-    assert.deepEqual(writes(cf.calls).filter(call => !call.startsWith('PUT /accounts/' + account + '/r2/buckets/')), ['wrangler d1 execute', 'wrangler d1 execute', 'wrangler d1 execute', 'wrangler deploy']);
+    assert.deepEqual(writes(cf.calls).filter(call => !call.startsWith('PUT /accounts/' + account + '/r2/buckets/')), ['wrangler d1 execute', 'wrangler d1 execute', 'wrangler d1 execute', 'wrangler d1 execute', 'wrangler deploy']);
   } finally { await done(); }
 });
 
@@ -139,4 +144,51 @@ test('CF-23 worker secrets carry no API token, derive the R2 key from the token 
     PNEUMA_SPACE_TURN_KEY_ID: 'turn-key', PNEUMA_SPACE_R2_ACCESS_KEY_ID: 'token-id',
     PNEUMA_SPACE_R2_SECRET_ACCESS_KEY: createHash('sha256').update(token).digest('hex'),
   });
+});
+
+const schema = readFileSync(join(cfDir, 'schema.sql'), 'utf8');
+// The two tables as databases installed before ADR 0046 hold them.
+const before = `CREATE TABLE tenants (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, apps_limit INTEGER NOT NULL DEFAULT 5,
+  awake_limit INTEGER NOT NULL DEFAULT 2, requests_limit INTEGER NOT NULL DEFAULT 10000,
+  storage_limit INTEGER NOT NULL DEFAULT 52428800, created_at INTEGER NOT NULL
+);
+CREATE TABLE apps (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, tenant_id TEXT NOT NULL REFERENCES tenants(id),
+  owner_id TEXT NOT NULL REFERENCES users(id), origin TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL, create_key TEXT NOT NULL, storage_bytes INTEGER NOT NULL DEFAULT 10485760,
+  observed_status TEXT NOT NULL DEFAULT 'draft', observed_runtime TEXT NOT NULL DEFAULT 'asleep',
+  observed_release INTEGER, observed_at INTEGER, purged_at INTEGER,
+  UNIQUE(tenant_id,create_key)
+);`;
+const fresh = () => { const db = new DatabaseSync(':memory:'); db.exec(schema); return db; };
+const columnsOf = (db: DatabaseSync) => Object.fromEntries([...schema.matchAll(/CREATE TABLE IF NOT EXISTS (\w+) /g)].map(([, table]) => [table, db.prepare('SELECT name FROM pragma_table_info(?)').all(table).map(row => String(row.name))]));
+
+test('CF-23 a rerun adds to an existing database the columns schema.sql gained since it was installed', async () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(before);
+  db.exec("INSERT INTO tenants(id,name,created_at) VALUES('t','T',1)");
+  for (const statement of columnUpgrades(schema, columnsOf(db))) db.exec(statement);
+  db.exec(schema);
+  assert.deepEqual(columnsOf(db), columnsOf(fresh()));
+  assert.equal(db.prepare("SELECT ephemeral_limit FROM tenants WHERE id='t'").get()?.ephemeral_limit, 3);
+});
+
+test('CF-23 the installer runs the column upgrade for the columns the deployed database lacks', async () => {
+  const { options, done } = await host(), db = new DatabaseSync(':memory:');
+  db.exec(before);
+  const cf = cloudflare({ columns: { ...columnsOf(fresh()), ...columnsOf(db) } });
+  try {
+    await install(options, cf.io);
+    assert.deepEqual(cf.upgrades, [columnUpgrades(schema, columnsOf(db)).join('\n')]);
+    assert.match(cf.upgrades[0], /ALTER TABLE apps ADD COLUMN expires_at INTEGER;/);
+  } finally { await done(); }
+});
+
+test('CF-23 a first install upgrades no column', async () => {
+  const { options, done } = await host(), cf = cloudflare();
+  try {
+    await install(options, cf.io);
+    assert.deepEqual(cf.upgrades, []);
+  } finally { await done(); }
 });

@@ -17,17 +17,17 @@ const digest = createHash('sha256').update(packageBytes).digest('hex');
 async function call(app: string, path: string, body?: unknown, headers: Record<string, string> = {}) {
   return mf.dispatchFetch('http://test' + path, { method: body === undefined ? 'GET' : 'POST', headers: { 'x-test-app': app, 'content-type': 'application/json', ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
 }
-async function fixture() {
+async function fixture(expiresAt: number | null = null) {
   const app = 'app_' + crypto.randomUUID().replaceAll('-', '');
   const db = await mf.getD1Database('PNEUMA_SPACE_DB');
-  await db.prepare("INSERT INTO apps(id,name,tenant_id,owner_id,origin,created_at,create_key) VALUES(?,?,'tenant','owner',?,1,?)").bind(app, app, app, app).run();
-  const initialized = await call(app, '/initialize', { id: app, name: app, tenantId: 'tenant', ownerId: 'owner', policy: DEFAULT_POLICY });
+  await db.prepare("INSERT INTO apps(id,name,tenant_id,owner_id,origin,created_at,create_key,expires_at) VALUES(?,?,'tenant','owner',?,1,?,?)").bind(app, app, app, app, expiresAt).run();
+  const initialized = await call(app, '/initialize', { id: app, name: app, tenantId: 'tenant', ownerId: 'owner', policy: DEFAULT_POLICY, expiresAt, manager: null });
   assert.equal(initialized.status, 200, await initialized.text());
   const key = 'apps/' + app + '/artifacts/' + digest + '/package.json';
   const bucket = await mf.getR2Bucket('PNEUMA_SPACE_ARTIFACTS') as unknown as R2Bucket;
   await bucket.put(key, packageBytes);
   const artifact = { digest, key, bytes: Buffer.byteLength(packageBytes), manifest };
-  const published = await call(app, '/publish', { actor, artifact, expectedGeneration: 0, idempotencyKey: 'publish' });
+  const published = await call(app, '/publish', { actor, artifact, expectedGeneration: 0, idempotencyKey: 'publish', ephemeral: expiresAt !== null });
   assert.equal(published.status, 200, await published.text());
   return { app, artifact };
 }
@@ -50,6 +50,10 @@ before(async () => {
         };
       }
       async startBinding(scope) { if (!this.ctx.storage.kv.get('test:runner')) return super.startBinding(scope); }
+      native() {
+        const resources = super.native();
+        return this.ctx.storage.kv.get('test:fail-purge') ? Object.assign(Object.create(resources), {destroy: async () => { throw new Error('R2 unavailable'); }}) : resources;
+      }
       async containerAcquire() {
         if (!this.ctx.storage.kv.get('test:trigger')) return super.containerAcquire();
         return {fetch: request => {
@@ -66,6 +70,17 @@ before(async () => {
           return new Response('{}');
         }
         if (path === '/test/runner') { this.ctx.storage.kv.put('test:runner', true); return new Response('{}'); }
+        if (path === '/test/fail-purge') { const {fail} = await request.json(); if (fail) this.ctx.storage.kv.put('test:fail-purge', true); else this.ctx.storage.kv.delete('test:fail-purge'); return new Response('{}'); }
+        if (path === '/test/alarm') { await this.alarm(); return new Response('{}'); }
+        if (path === '/test/schedules') return Response.json(this.state().schedules);
+        if (path === '/test/configure-schedule') {
+          const state = this.state();
+          state.current.manifest.capabilities.cron = {triggers: {tick: {schedule: '* * * * *'}}};
+          state.capabilities.push('cron');
+          this.save(state);
+          this.native().ensure(state.current.manifest);
+          return new Response('{}');
+        }
         if (path === '/test/deliveries') return Response.json({pending: this.deliveries?.size ?? 0});
         if (path === '/test/configure-kv') {
           const {boot} = await request.json();
@@ -407,4 +422,65 @@ test('CF-28 each wake appends an event carrying its record', async () => {
   const { runtime } = await (await call(app, '/inspect')).json() as { runtime: { bootId: string } };
   const events = await (await call(app, '/events')).json() as { items: { type: string; data?: { bootId: string; outcome: string } }[] };
   assert.deepEqual(events.items.filter(event => event.type === 'wake-ready').map(event => [event.data?.bootId, event.data?.outcome]), [[runtime.bootId, 'ready']]);
+});
+
+async function expiries(app: string): Promise<{ user_id: string; result: string; detail: string }[]> {
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  return (await db.prepare("SELECT user_id,result,detail FROM audit WHERE app_id=? AND action='app.expire' ORDER BY at,id").bind(app).all<{ user_id: string; result: string; detail: string }>()).results;
+}
+async function until(check: () => Promise<boolean>, what: string) {
+  for (const deadline = Date.now() + 10000; Date.now() < deadline;) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 100)); }
+  assert.fail(what);
+}
+test('CF-29 an ephemeral app ends itself at its expiry with no caller, audited as the platform', async () => {
+  const { app } = await fixture(Date.now() + 1500);
+  await until(async () => (await (await call(app, '/inspect')).json() as { status: string }).status === 'purged', 'The app did not end at its expiry.');
+  assert.deepEqual((await expiries(app)).map(row => [row.user_id, row.result]), [['platform', 'started'], ['platform', 'ok']]);
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  assert.ok((await db.prepare('SELECT purged_at FROM apps WHERE id=?').bind(app).first<{ purged_at: number | null }>())?.purged_at);
+});
+test('CF-29 an expiry that keeps failing writes one error row until its outcome changes, then resumes to the end', async () => {
+  const { app } = await fixture(Date.now() + 1500);
+  await call(app, '/test/fail-purge', { fail: true });
+  await until(async () => (await expiries(app)).some(row => row.result === 'error'), 'The failed end was not audited.');
+  await call(app, '/test/alarm');
+  await call(app, '/test/alarm');
+  assert.deepEqual((await expiries(app)).map(row => row.result), ['started', 'error']);
+  await call(app, '/test/fail-purge', { fail: false });
+  await call(app, '/test/alarm');
+  const rows = await expiries(app);
+  assert.deepEqual([rows.map(row => row.result), JSON.parse(rows[2].detail).resumed], [['started', 'error', 'ok'], true]);
+  assert.equal((await (await call(app, '/inspect')).json() as { status: string }).status, 'purged');
+});
+test('CF-29 an expiry whose audit row cannot be written still ends the app', async () => {
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  await db.prepare("CREATE TRIGGER audit_down BEFORE INSERT ON audit WHEN NEW.action='app.expire' AND NEW.result='started' BEGIN SELECT RAISE(ABORT, 'audit down'); END").run();
+  try {
+    const { app } = await fixture(Date.now() + 1500);
+    await until(async () => (await (await call(app, '/inspect')).json() as { status: string }).status === 'purged', 'The app did not end at its expiry.');
+  } finally { await db.prepare('DROP TRIGGER audit_down').run(); }
+});
+test('CF-29 an end the directory failed to record reaches it on a later alarm', async () => {
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  const purgedAt = async (app: string) => (await db.prepare('SELECT purged_at FROM apps WHERE id=?').bind(app).first<{ purged_at: number | null }>())?.purged_at ?? null;
+  await db.prepare("CREATE TRIGGER directory_down BEFORE UPDATE OF purged_at ON apps WHEN NEW.purged_at IS NOT NULL BEGIN SELECT RAISE(ABORT, 'directory down'); END").run();
+  let app = '';
+  try {
+    ({ app } = await fixture(Date.now() + 1500));
+    await until(async () => (await (await call(app, '/inspect')).json() as { status: string }).status === 'purged', 'The app did not end at its expiry.');
+    await call(app, '/test/alarm');
+  } finally { await db.prepare('DROP TRIGGER directory_down').run(); }
+  assert.equal(await purgedAt(app), null);
+  await call(app, '/test/alarm');
+  assert.ok(await purgedAt(app));
+});
+test('CF-29 an ephemeral app schedules no trigger while a manual job still runs', async () => {
+  const { app } = await fixture(Date.now() + 600000);
+  await call(app, '/test/configure-schedule', {});
+  await call(app, '/action', { actor, action: { type: 'remove' }, idempotencyKey: 'remove' });
+  await call(app, '/action', { actor, action: { type: 'resume' }, idempotencyKey: 'resume' });
+  assert.deepEqual(await (await call(app, '/test/schedules')).json(), {});
+  const job = await call(app, '/jobs', { actor, name: 'tick', payload: null, idempotencyKey: 'manual' });
+  assert.equal(job.status, 200);
+  assert.equal((await job.json() as { name: string }).name, 'tick');
 });

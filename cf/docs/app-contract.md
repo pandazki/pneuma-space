@@ -22,7 +22,7 @@ An app is served at `<control origin>/apps/<name>/`, and `/apps/<name>` redirect
 | identity | Trusted subject/name/owner headers. Platform credentials and incoming reserved headers are removed. |
 | rtc | Expiring ICE configuration from a configured TURN provider. Unconfigured service refuses dependent publication. |
 
-The SDK calls the intercepted host pneuma-space.internal. Scope comes from trusted platform props, never app input. Every native mutation checks active lifecycle and execution generation. Publish and remove retain data. Purge requires removed status and exact name confirmation. Already-issued signed URLs remain valid until expiry; final object cleanup waits for outstanding upload tickets.
+The SDK calls the intercepted host pneuma-space.internal. Scope comes from trusted platform props, never app input. Every native mutation checks active lifecycle and execution generation. Publish and remove retain data. Purge requires removed status and exact name confirmation. An ephemeral app ([ADR 0038](../../docs/adr/0038-ephemeral-apps.md)) also ends by discard from any live status and by itself at `expiresAt`; a managed app ([ADR 0039](../../docs/adr/0039-managed-apps.md)) refuses with 409 the writes that do not name its manager in `X-Pneuma-Space-Manager`. [ADR 0046](../../docs/adr/0046-cloudflare-ephemeral-and-managed-apps.md) records which writes and how this plane differs. Already-issued signed URLs remain valid until expiry; final object cleanup waits for outstanding upload tickets.
 
 Failed cloud cleanup remains in purging and retries through its durable alarm.
 
@@ -30,20 +30,21 @@ The control origin is `PNEUMA_SPACE_CONTROL_ORIGIN`. /admin requires platform ad
 
 Every HTTP admission rechecks the credential. App responses carry `Server-Timing` with the platform's own spans (`lookup`, `authorize`, `static`, `admit` or `app`). Existing native browser subscriptions recheck it every 15 seconds and close after revocation or expiry. They survive an idle container stop; execution-scoped subscriptions retire with their container. Trusted display-name headers use percent encoding.
 
-Control APIs use /api/v1, JSON errors with error.code/message, and list envelopes with items and optional nextCursor. Mutations accept Idempotency-Key. Tokens have tenant, action, expiry and optional app restrictions, never platform/account/purge authority.
+Control APIs use /api/v1, JSON errors with error.code/message, and list envelopes with items and optional nextCursor. Mutations accept Idempotency-Key. Tokens have tenant, action, expiry and optional app restrictions, never platform/account/purge authority; `remove` also discards an ephemeral app.
 
 | API suffix | Behavior |
 | --- | --- |
 | /auth/login, /auth/redeem, /auth/logout; /me | Login with account/key; redeem invite/username/name and return accessKey once; current user, tenant roles, CSRF. |
 | /admin/overview, /accounts, /tenants, /apps, /resources, /audit | Platform-admin views, with actual observed data. |
 | /admin/invitations | List, create with expiresAt, revoke by ID. New URL is shown once. |
-| /admin/accounts/:id, /admin/tenants/:id | PATCH account state/admin role or tenant quotas. Preserve the last administrator. |
+| /admin/accounts/:id, /admin/tenants/:id | PATCH account state/admin role or tenant quotas (`apps`, `ephemeral`, `awake`, `requestsPerDay`, `storageBytes`). Preserve the last administrator. |
 | /tenants/:t/members, /tokens | Membership and scoped credential management. Preserve the last tenant administrator. |
-| /tenants/:t/apps; /apps/:id | List/create with name; authoritative app detail. Its `wake` is the last wake: `bootId`, `at`, `outcome` (`waking`, `ready` or `failed`), `error`, and `phases` in milliseconds, null until measured: `reserve` (compute slot and service binding), `container` (start requested until the runner runs), `fetch` and `unpack` (the package), `listen` (app process until its port accepts), `confirm` (until the AppCell sees readiness) and `respond` (until the first response to the request that caused the wake). |
-| /apps/:id/uploads; /apps/:id/releases | Begin direct package upload with manifest/digest/bytes; publish uploadId; release history. |
-| /apps/:id/actions | Typed action from AppAction in model.ts; purge additionally confirms the name. |
+| /tenants/:t/apps; /apps/:id | List/create with name, optional `ephemeral: {ttlSeconds?}` and `manager: {name, url?}`; authoritative app detail. Both carry `expiresAt` (null for a durable app) and `manager`. Its `wake` is the last wake: `bootId`, `at`, `outcome` (`waking`, `ready` or `failed`), `error`, and `phases` in milliseconds, null until measured: `reserve` (compute slot and service binding), `container` (start requested until the runner runs), `fetch` and `unpack` (the package), `listen` (app process until its port accepts), `confirm` (until the AppCell sees readiness) and `respond` (until the first response to the request that caused the wake). |
+| /apps/:id/uploads; /apps/:id/releases | Begin direct package upload with manifest/digest/bytes; publish uploadId, optionally setting `manager`; release history. Both writes state `ephemeral`, absent meaning false, and a mismatch with the app answers 409. |
+| /apps/:id/actions | Typed action from AppAction in model.ts; purge additionally confirms the name; discard ends an ephemeral app. |
+| /apps/:id/manager | DELETE clears the manager. |
 | /apps/:id/state, /logs, /events, /usage, /jobs | Actual inventory and diagnostics; each wake that ends adds a `wake-ready` or `wake-failed` event carrying its record. POST jobs with name/payload invokes a trigger. |
 | /apps/:id/data | Authorized bounded NativeCommand from model.ts. |
-| /tenants/:t/usage, /audit, /events | Role-filtered telemetry. |
+| /tenants/:t/usage, /audit, /events | Role-filtered telemetry. Usage counts durable and ephemeral apps apart, an ephemeral app until it starts ending. |
 
 Listings carry timestamped observed state. Precise details and operations consult AppCell. CF resource views do not fabricate Kubernetes nodes or utilization measurements.

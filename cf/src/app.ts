@@ -1,15 +1,18 @@
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import { authorizeApp, type CredentialProof } from './auth.ts';
-import { admitRequest, appRow, observeApp, releaseCompute, reserveCompute } from './directory.ts';
+import { admitRequest, appRow, audit, observeApp, releaseCompute, reserveCompute } from './directory.ts';
 import { artifactPurgeDeadline, prepareUploadArtifact, readPackage } from './artifacts.ts';
 import { NativeResources } from './resources.ts';
 import { nextSchedule } from './cron.ts';
-import { fail, WAKE_PHASES, type Actor, type AppAction, type AppRegistration, type AppSnapshot, type Artifact, type Capability, type Delivery, type EventRow, type ExecutionScope, type Json, type LogRow, type Release, type Wake } from './model.ts';
+import { expectKind } from './ephemeral.ts';
+import { NAMED_ACTIONS, managerAfter, mustName } from './manager.ts';
+import { actionScope, fail, WAKE_PHASES, type Actor, type AppAction, type AppRegistration, type AppSnapshot, type Artifact, type Capability, type Delivery, type EventRow, type ExecutionScope, type Json, type LogRow, type ManagerChange, type Policy, type Release, type Wake } from './model.ts';
 import { errorResponse, id, input, integer, json, sha, text } from './util.ts';
 
 type Journal = { previous: Release | null; candidate: Release; key: string };
 type Lease = { id: string; deadline: number; kind: 'request' | 'channel' };
-type State = Omit<AppSnapshot, 'releases'> & { releaseSequence: number; journal: Journal | null; schedules: Record<string, number>; purgeAt: number | null; day: string; dayRequests: number };
+/** `expiry` is set once an expiry began, to audit how it ends (ADR 0038). `projectAt` is when the alarm next tells the directory that the app is ending, null once the directory has it (ADR 0046). */
+type State = Omit<AppSnapshot, 'releases'> & { releaseSequence: number; journal: Journal | null; schedules: Record<string, number>; purgeAt: number | null; day: string; dayRequests: number; expiry: { resumed: boolean; error: string | null; started: boolean } | null; projectAt: number | null };
 type Subscription = { kind: 'browser'; actor: CredentialProof; nextCheckAt: number } | { kind: 'execution'; scope: ExecutionScope } | { kind: 'closed' };
 type DeliveryAttempt = { job: Delivery; generation: number };
 type Receipt = { fingerprint: string; snapshot: boolean; result: unknown };
@@ -30,6 +33,8 @@ export class AppCell extends DurableObject<Env> {
       if (!state) return;
       // Apps created under per-app domains stored their origin (ADR 0044).
       if (state.origin !== undefined) { delete state.origin; this.save(state); }
+      if (!('manager' in state)) { Object.assign(state, { expiresAt: null, manager: null, expiry: null }); this.save(state); }
+      if (state.projectAt === undefined) { state.projectAt = null; this.save(state); }
       if (state.journal) {
         state.current = state.journal.previous;
         state.capabilities = Object.keys(state.current?.manifest.capabilities ?? {}) as Capability[];
@@ -53,7 +58,7 @@ export class AppCell extends DurableObject<Env> {
     return result;
   }
   snapshot(): AppSnapshot {
-    const { journal, schedules, purgeAt, day, dayRequests, releaseSequence, ...snapshot } = this.state();
+    const { journal, schedules, purgeAt, day, dayRequests, releaseSequence, expiry, projectAt, ...snapshot } = this.state();
     const leases = this.leases();
     snapshot.runtime = { ...snapshot.runtime, running: this.ctx.container?.running ?? false, requests: leases.filter(x => x.kind === 'request').length, channels: leases.filter(x => x.kind === 'channel').length };
     if (snapshot.runtime.state === 'awake' && !snapshot.runtime.running) snapshot.runtime.state = 'asleep';
@@ -114,6 +119,8 @@ export class AppCell extends DurableObject<Env> {
       if (socket.readyState === WebSocket.OPEN && subscription?.kind === 'browser' && !this.checkingSubscribers.has(socket)) times.push(subscription.nextCheckAt);
     }
     if (state.purgeAt !== null) times.push(state.purgeAt);
+    if (state.projectAt !== null) times.push(state.projectAt);
+    if (state.expiresAt !== null && state.status !== 'purging' && state.status !== 'purged') times.push(state.expiresAt);
     if (state.runtime.bootId && !this.leases().length) times.push(state.runtime.sleepsAt ?? Date.now() + 1000);
     if (state.status === 'registered') {
       times.push(...Object.values(state.schedules));
@@ -153,7 +160,7 @@ export class AppCell extends DurableObject<Env> {
   async startBinding(scope: ExecutionScope): Promise<void> {
     await this.container().interceptOutboundHttp('pneuma-space.internal', this.ctx.exports.AppServices({ props: scope }));
   }
-  async publish(actor: Actor, artifact: Artifact, key: string, expectedGeneration: unknown, uploadId?: string): Promise<AppSnapshot> {
+  async publish(actor: Actor, artifact: Artifact, key: string, expectedGeneration: unknown, uploadId?: string, manager: ManagerChange | null = null): Promise<AppSnapshot> {
     await authorizeApp(this.env, actor, this.state().id, 'publish');
     if (this.state().status === 'removed' || this.state().status === 'purging' || this.state().status === 'purged') fail(409, 'inactive', 'Resume the application before publishing.');
     const committed = this.ctx.storage.kv.get<{ digest: string }>('platform:published:' + key);
@@ -196,6 +203,7 @@ export class AppCell extends DurableObject<Env> {
     this.ctx.storage.kv.put('platform:release:' + String(candidate.number).padStart(12, '0'), candidate);
     state.journal = null;
     state.schedules = this.schedule(candidate);
+    state.manager = managerAfter(state.manager, manager);
     this.save(state);
     this.ctx.storage.kv.put('platform:published:' + key, { digest: artifact.digest, uploadId });
     this.event('published', 'Published release ' + candidate.number);
@@ -203,6 +211,8 @@ export class AppCell extends DurableObject<Env> {
     return this.snapshot();
   }
   private schedule(release: Release | null): Record<string, number> {
+    // An ephemeral app's triggers run on demand only, so no schedule of the app it previews fires from it (ADR 0038).
+    if (this.state().expiresAt !== null) return {};
     return Object.fromEntries(Object.entries(release?.manifest.capabilities.cron?.triggers ?? {}).filter(([, trigger]) => trigger.schedule).map(([name, trigger]) => [name, nextSchedule(trigger.schedule!, Date.now())]));
   }
   private async purge(): Promise<{ pending: true; retryAt: number } | AppSnapshot> {
@@ -221,23 +231,50 @@ export class AppCell extends DurableObject<Env> {
         if (listed.objects.length) await this.env.PNEUMA_SPACE_ARTIFACTS.delete(listed.objects.map(x => x.key));
         cursor = listed.truncated ? listed.cursor : undefined;
       } while (cursor);
-      state.status = 'purged'; state.purgeAt = null; state.current = null; state.capabilities = [];
+      state.status = 'purged'; state.purgeAt = null; state.projectAt = Date.now(); state.current = null; state.capabilities = [];
       for (const [key] of this.ctx.storage.kv.list({ prefix: 'platform:release:' })) this.ctx.storage.kv.delete(key);
     }
     this.save(state);
     await this.arm();
     return state.purgeAt === null ? this.snapshot() : { pending: true, retryAt: state.purgeAt };
   }
-  private async action(actor: Actor, action: AppAction, key: string): Promise<unknown> {
-    await authorizeApp(this.env, actor, this.state().id, action.type === 'purge' || action.type === 'kill' ? action.type : action.type === 'remove' ? 'remove' : 'manage');
-    if (!['wake', 'sleep', 'restart', 'kill', 'remove', 'resume', 'unquarantine', 'rollback', 'purge', 'policy'].includes(action.type)) fail(400, 'action', 'Unknown application action.');
+  /** Purge's path from any live status; purging is saved first, so the alarm finishes what a call does not. */
+  private async enterPurging(): Promise<void> {
+    const state = this.state();
+    if (state.status === 'purging') return;
+    state.status = 'purging'; state.purgeAt = state.projectAt = Date.now(); state.schedules = {}; this.save(state);
+    await this.retire(true);
+  }
+  private async action(actor: Actor, action: AppAction, key: string, named: string | null): Promise<unknown> {
+    await authorizeApp(this.env, actor, this.state().id, actionScope(action.type));
+    if (!['wake', 'sleep', 'restart', 'kill', 'remove', 'resume', 'unquarantine', 'rollback', 'purge', 'policy', 'discard'].includes(action.type)) fail(400, 'action', 'Unknown application action.');
     let state = this.state();
     if (state.status === 'purged') fail(410, 'purged', 'Application was purged.');
+    // The request's own errors answer before the manager's 409, the same with or without its name (ADR 0039).
+    const release = action.type === 'rollback' ? this.ctx.storage.kv.get<Release>('platform:release:' + String(action.release).padStart(12, '0')) ?? fail(404, 'release', 'Release not found.') : null;
+    let policy: Policy | null = null;
+    if (action.type === 'policy') {
+      const allocation = await appRow(this.env, state.id);
+      if (action.policy.storageBytes !== undefined && action.policy.storageBytes > allocation.storage_bytes) fail(409, 'storage_quota', 'Policy exceeds the application storage allocation.');
+      const limits = { idleSeconds: [1, 3600], requestSeconds: [1, 900], drainSeconds: [0, 60], maxFailures: [1, 100], requestsPerDay: [1, 1000000], storageBytes: [1024, 1000000000] };
+      policy = { ...state.policy };
+      for (const [name, value] of Object.entries(action.policy)) {
+        if (!(name in limits)) fail(400, 'policy', 'Unknown policy field.');
+        const field = name as keyof typeof limits;
+        policy[field] = integer(value, name, limits[field][0], limits[field][1]);
+      }
+    }
+    if (action.type === 'purge' && action.confirmation !== state.name) fail(409, 'purge_confirmation', 'Remove first and confirm the exact application name.');
+    if (NAMED_ACTIONS.has(action.type)) mustName(state, named);
+    if (action.type === 'discard') {
+      if (state.expiresAt === null) fail(409, 'durable', 'Application ' + state.name + ' is durable; discard ends only an ephemeral app. Remove and purge end this one.');
+      await this.enterPurging();
+      return this.purge();
+    }
     if (state.status === 'purging') return action.type === 'purge' ? this.purge() : fail(409, 'purging', 'Application is being purged.');
     if (action.type === 'purge') {
-      if (state.status !== 'removed' || action.confirmation !== state.name) fail(409, 'purge_confirmation', 'Remove first and confirm the exact application name.');
-      state.status = 'purging'; state.purgeAt = Date.now(); this.save(state);
-      await this.retire(true);
+      if (state.status !== 'removed') fail(409, 'purge_confirmation', 'Remove first and confirm the exact application name.');
+      await this.enterPurging();
       return this.purge();
     }
     if (action.type === 'resume') {
@@ -250,20 +287,9 @@ export class AppCell extends DurableObject<Env> {
       }
     } else {
       this.guard(null);
-      if (action.type === 'rollback') {
-        const release = this.ctx.storage.kv.get<Release>('platform:release:' + String(action.release).padStart(12, '0')) ?? fail(404, 'release', 'Release not found.');
-        return this.publish(actor, release, key, state.generation);
-      }
-      if (action.type === 'policy') {
-        const allocation = await appRow(this.env, state.id);
-        if (action.policy.storageBytes !== undefined && action.policy.storageBytes > allocation.storage_bytes) fail(409, 'storage_quota', 'Policy exceeds the application storage allocation.');
-        const limits = { idleSeconds: [1, 3600], requestSeconds: [1, 900], drainSeconds: [0, 60], maxFailures: [1, 100], requestsPerDay: [1, 1000000], storageBytes: [1024, 1000000000] };
-        for (const [name, value] of Object.entries(action.policy)) {
-          if (!(name in limits)) fail(400, 'policy', 'Unknown policy field.');
-          const field = name as keyof typeof limits;
-          state.policy[field] = integer(value, name, limits[field][0], limits[field][1]);
-        }
-        this.save(state);
+      if (release) return this.publish(actor, release, key, state.generation);
+      if (policy) {
+        state.policy = policy; this.save(state);
       } else if (action.type === 'unquarantine') {
         state.runtime.failures = 0; state.runtime.state = 'asleep'; this.save(state);
       } else {
@@ -312,7 +338,15 @@ export class AppCell extends DurableObject<Env> {
     const deliveries = await this.serial(async (): Promise<DeliveryAttempt[]> => {
       let state = this.state();
       for (const lease of this.leases()) if (lease.deadline <= Date.now()) this.releaseLease(lease.id, true);
-      if (state.status === 'purging') { await this.purge(); await observeApp(this.env, this.snapshot()); return []; }
+      if (state.expiresAt !== null && state.expiresAt <= Date.now() && state.status !== 'purging' && state.status !== 'purged') {
+        state.expiry = { resumed: false, error: null, started: false };
+        this.save(state);
+        await this.enterPurging();
+      }
+      await this.announceExpiry();
+      if (this.state().status === 'purging') await this.finishPurge();
+      if (this.state().projectAt !== null) await this.project();
+      if (this.state().status === 'purging' || this.state().status === 'purged') return [];
       const deliveries: DeliveryAttempt[] = [];
       if (state.status === 'registered' && !state.journal) {
         for (const [name, due] of Object.entries(state.schedules)) if (due <= Date.now()) {
@@ -335,6 +369,45 @@ export class AppCell extends DurableObject<Env> {
       this.deliveries.add(attempt.job.id);
       this.ctx.waitUntil(this.deliver(attempt).finally(() => this.deliveries.delete(attempt.job.id)));
     }
+  }
+  /** The end is saved before its audit row is written, so a directory that is down delays the row, not the end. */
+  private async announceExpiry(): Promise<void> {
+    const state = this.state();
+    if (!state.expiry || state.expiry.started) return;
+    try { await audit(this.env, 'platform', 'app.expire', state.tenantId, state.id, 'started', { expiresAt: state.expiresAt }); }
+    catch (error) { console.error('Expiry audit failed', error); return; }
+    state.expiry.started = true; this.save(state);
+  }
+  /** A failed purge retries from the alarm; an expiry writes one error row per distinct failure, since audit only grows (ADR 0038). */
+  private async finishPurge(): Promise<void> {
+    let result: Awaited<ReturnType<AppCell['purge']>>;
+    try { result = await this.purge(); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : 'Purge failed.';
+      console.error(JSON.stringify({ event: 'purge-failed', app: this.state().id, message }));
+      const state = this.state();
+      if (state.expiry && state.expiry.error !== message) {
+        await audit(this.env, 'platform', 'app.expire', state.tenantId, state.id, 'error', { error: message, ...(state.expiry.resumed && { resumed: true }) });
+        state.expiry.error = message;
+      }
+      if (state.expiry) state.expiry.resumed = true;
+      state.purgeAt = Math.max(state.purgeAt ?? 0, Date.now() + 30000);
+      this.save(state);
+      await this.arm();
+      return;
+    }
+    const state = this.state();
+    if (state.expiry && 'pending' in result) { state.expiry.resumed = true; this.save(state); }
+    else if (state.expiry) await audit(this.env, 'platform', 'app.expire', state.tenantId, state.id, 'ok', state.expiry.resumed ? { resumed: true } : '');
+  }
+  /** The directory frees an ending app's ephemeral slot and a purged app's name from this projection, so a failed write is retried by the alarm (ADR 0046). */
+  private async project(): Promise<void> {
+    let projectAt: number | null = null;
+    try { await observeApp(this.env, this.snapshot()); }
+    catch (error) { console.error('Projection update failed', error); projectAt = Date.now() + 30000; }
+    const state = this.state();
+    state.projectAt = projectAt; this.save(state);
+    await this.arm();
   }
   private closeSubscriber(socket: WebSocket, code: number, reason: string): void {
     socket.serializeAttachment({ kind: 'closed' } satisfies Subscription);
@@ -448,8 +521,8 @@ export class AppCell extends DurableObject<Env> {
         const value = await input(request) as unknown as AppRegistration;
         const old = this.ctx.storage.kv.get<State>(STATE);
         if (old) { if (old.id !== value.id) fail(409, 'identity', 'AppId differs.'); return json(this.snapshot()); }
-        const state: State = { ...value, status: 'draft', generation: 0, current: null, releaseSequence: 0, runtime: { state: 'asleep', running: false, bootId: null, since: Date.now(), sleepsAt: null, requests: 0, channels: 0, failures: 0 }, capabilities: [], lastAccessAt: null, usage: { requests: 0, errors: 0, wakes: 0, sleeps: 0 }, wake: null, journal: null, schedules: {}, purgeAt: null, day: '', dayRequests: 0 };
-        this.save(state); return json(this.snapshot());
+        const state: State = { ...value, expiresAt: value.expiresAt ?? null, manager: value.manager ?? null, status: 'draft', generation: 0, current: null, releaseSequence: 0, runtime: { state: 'asleep', running: false, bootId: null, since: Date.now(), sleepsAt: null, requests: 0, channels: 0, failures: 0 }, capabilities: [], lastAccessAt: null, usage: { requests: 0, errors: 0, wakes: 0, sleeps: 0 }, wake: null, journal: null, schedules: {}, purgeAt: null, day: '', dayRequests: 0, expiry: null, projectAt: null };
+        this.save(state); await this.arm(); return json(this.snapshot());
       });
       if (path === '/inspect') return json(this.snapshot());
       if (path === '/inspect/state') return json(this.native().inventory());
@@ -512,7 +585,8 @@ export class AppCell extends DurableObject<Env> {
         let result: unknown;
         if (path === '/publish-upload') {
           await authorizeApp(this.env, actor, this.state().id, 'publish');
-          result = await this.once(value.idempotencyKey, { type: 'publish-upload', uploadId: value.uploadId }, async key => {
+          const manager = (value.manager ?? null) as ManagerChange | null;
+          result = await this.once(value.idempotencyKey, { type: 'publish-upload', uploadId: value.uploadId, ...(manager && { manager }) }, async key => {
             const uploadId = text(value.uploadId, 'upload', 80);
             const committed = this.ctx.storage.kv.get<{ uploadId?: string }>('platform:published:' + key);
             if (committed) {
@@ -521,16 +595,27 @@ export class AppCell extends DurableObject<Env> {
             }
             const state = this.state();
             if (state.status !== 'draft' && state.status !== 'registered') fail(409, 'inactive', 'Resume the application before publishing.');
-            const artifact = await prepareUploadArtifact(this.env, actor, state.id, uploadId, state.generation);
-            return this.publish(actor, artifact, key, state.generation, uploadId);
+            const artifact = await prepareUploadArtifact(this.env, actor, state.id, uploadId, state.generation, () => {
+              mustName(this.state(), value.named as string | null);
+              expectKind(this.state(), value.ephemeral === true);
+            });
+            return this.publish(actor, artifact, key, state.generation, uploadId, manager);
           });
         } else if (path === '/publish') {
           await authorizeApp(this.env, actor, this.state().id, 'publish');
+          mustName(this.state(), (value.named ?? null) as string | null);
+          expectKind(this.state(), value.ephemeral === true);
           result = await this.once(value.idempotencyKey, { type: 'publish', artifact: value.artifact }, key => this.publish(actor, value.artifact as Artifact, key, value.expectedGeneration));
         } else if (path === '/action') {
           const action = value.action as AppAction;
-          await authorizeApp(this.env, actor, this.state().id, action.type === 'purge' || action.type === 'kill' ? action.type : action.type === 'remove' ? 'remove' : 'manage');
-          result = await this.once(value.idempotencyKey, action, key => this.action(actor, action, key));
+          await authorizeApp(this.env, actor, this.state().id, actionScope(action.type));
+          result = await this.once(value.idempotencyKey, action, key => this.action(actor, action, key, (value.named ?? null) as string | null));
+        } else if (path === '/manager') {
+          await authorizeApp(this.env, actor, this.state().id, 'publish');
+          const state = this.state();
+          mustName(state, (value.named ?? null) as string | null);
+          if (state.manager) { state.manager = null; this.save(state); this.event('manager', 'Manager cleared.'); }
+          result = { manager: null };
         } else if (path === '/data') {
           await authorizeApp(this.env, actor, this.state().id, 'data'); result = await this.native().perform(value.command, null);
         } else if (path === '/jobs') {
@@ -538,7 +623,9 @@ export class AppCell extends DurableObject<Env> {
           result = await this.once(value.idempotencyKey, { name: value.name, payload: value.payload }, async key => this.job(value.name, (value.payload ?? null) as Json, 'manual_' + encodeURIComponent(key)));
           await this.arm();
         } else fail(404, 'route', 'Unknown application operation.');
-        this.ctx.waitUntil(observeApp(this.env, this.snapshot()).catch((error: unknown) => console.error('Projection update failed', error)));
+        // An ending app gives back its ephemeral slot, and a purged one its name, before the answer.
+        if (this.state().projectAt !== null) await this.project();
+        else this.ctx.waitUntil(observeApp(this.env, this.snapshot()).catch((error: unknown) => console.error('Projection update failed', error)));
         return json(result);
       });
     } catch (error) { return errorResponse(error); }

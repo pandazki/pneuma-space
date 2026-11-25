@@ -12,7 +12,9 @@
     "PNEUMA_SPACE_ACCOUNT_ID": "",
     "PNEUMA_SPACE_ARTIFACT_BUCKET": "pneuma-space-example-artifacts",
     "PNEUMA_SPACE_OBJECT_BUCKET": "pneuma-space-example-objects",
-    "PNEUMA_SPACE_MAX_ACCOUNTS": "20"
+    "PNEUMA_SPACE_MAX_ACCOUNTS": "20",
+    "PNEUMA_SPACE_EPHEMERAL_TTL_SECONDS": "600",
+    "PNEUMA_SPACE_EPHEMERAL_MAX_TTL_SECONDS": "3600"
   },
   "secrets": { "required": ["PNEUMA_SPACE_R2_ACCESS_KEY_ID", "PNEUMA_SPACE_R2_SECRET_ACCESS_KEY"] },
   "d1_databases": [{ "binding": "PNEUMA_SPACE_DB", "database_name": "pneuma-space-example", "database_id": "00000000-0000-0000-0000-000000000000" }],

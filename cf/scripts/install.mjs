@@ -183,6 +183,44 @@ async function ensureBucket(io, token, accountId, name, cors) {
   must(await api(io, token, 'PUT', '/accounts/' + accountId + '/r2/buckets/' + name + '/cors', cors), 'R2 CORS update');
 }
 
+/** Splits a CREATE TABLE body at its top-level commas. */
+function definitions(body) {
+  const parts = [''];
+  let depth = 0;
+  for (const char of body) {
+    depth += char === '(' ? 1 : char === ')' ? -1 : 0;
+    if (char === ',' && depth === 0) parts.push(''); else parts[parts.length - 1] += char;
+  }
+  return parts.map(part => part.trim().replace(/\s+/g, ' ')).filter(Boolean);
+}
+
+/** CREATE TABLE IF NOT EXISTS leaves an existing table as it is, so a column schema.sql gained since is added here. */
+export function columnUpgrades(schema, existing) {
+  const statements = [];
+  for (const [, table, body] of schema.matchAll(/CREATE TABLE IF NOT EXISTS (\w+) \(([\s\S]*?)\);/g)) {
+    if (!existing[table]?.length) continue;
+    for (const definition of definitions(body)) {
+      const column = /^\w+/.exec(definition)[0];
+      if (!/^(PRIMARY|UNIQUE|CHECK|FOREIGN|CONSTRAINT)$/i.test(column) && !existing[table].includes(column)) statements.push('ALTER TABLE ' + table + ' ADD COLUMN ' + definition + ';');
+    }
+  }
+  return statements;
+}
+
+async function upgradeColumns(wrangler, { configPath, database, schema, stateDir }) {
+  const tables = [...schema.matchAll(/CREATE TABLE IF NOT EXISTS (\w+) /g)].map(match => match[1]);
+  const listed = wrangler(['d1', 'execute', database, '--remote', '--command', tables.map(table => 'PRAGMA table_info(' + table + ');').join(' '), '--yes', '--json', '--config', configPath], true);
+  let results;
+  try { results = JSON.parse(listed.stdout); } catch {}
+  if (listed.status !== 0 || !Array.isArray(results) || results.length !== tables.length) throw new Stop('Reading the existing schema failed; rerun this command.');
+  const statements = columnUpgrades(schema, Object.fromEntries(tables.map((table, index) => [table, (results[index].results ?? []).map(row => row.name)])));
+  if (!statements.length) return;
+  const sqlPath = join(stateDir, 'upgrade.sql');
+  await writePrivate(sqlPath, statements.join('\n'));
+  try { if (wrangler(['d1', 'execute', database, '--remote', '--file', sqlPath, '--yes', '--config', configPath]).status !== 0) throw new Stop('Schema upgrade failed; rerun this command.'); }
+  finally { await rm(sqlPath, { force: true }); }
+}
+
 const quote = value => "'" + String(value).replaceAll("'", "''") + "'";
 
 async function provisionOwner(wrangler, { configPath, database, origin, username, credentialsPath }) {
@@ -253,6 +291,7 @@ export async function install(options, io = nodeIo, cfDir = CF_DIR) {
   await write(await ensureDatabase(io, session, accountId, names.database));
   await ensureBucket(io, token, accountId, names.artifacts, artifactCors(JSON.parse(await readFile(join(cfDir, 'deploy/artifact-cors.json'), 'utf8')), origin));
   await ensureBucket(io, token, accountId, names.objects, JSON.parse(await readFile(join(cfDir, 'deploy/object-cors.json'), 'utf8')));
+  await upgradeColumns(wrangler, { configPath: paths.config, database: names.database, schema: await readFile(join(cfDir, 'schema.sql'), 'utf8'), stateDir: options.stateDir });
   if (wrangler(['d1', 'execute', names.database, '--remote', '--file', join(cfDir, 'schema.sql'), '--yes', '--config', paths.config]).status !== 0) throw new Stop('Schema application failed; rerun this command.');
   await writePrivate(paths.secrets, JSON.stringify(workerSecrets(token, tokenId, JSON.parse(await readOptional(paths.secrets) ?? '{}')), null, 2) + '\n');
   const owner = await provisionOwner(wrangler, { configPath: paths.config, database: names.database, origin, username: options.owner, credentialsPath: paths.owner });
