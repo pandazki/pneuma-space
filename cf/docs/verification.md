@@ -102,4 +102,18 @@ On a real account, an installed deployment with five apps was upgraded by rerunn
 - A second ephemeral app was discarded right after its publish. The answer was `purging` with a `retryAt` about three minutes later, usage showed one ephemeral app in use while two existed, and after that time it left the list. Storage in use then matched the remaining durable apps.
 - A managed app refused a release, `remove` and clearing the manager without its name with 409 `managed`, and took `sleep` without it. With the name, `remove`, `resume` and clearing the manager succeeded and the audit carries `namedManager`. After the clearing, `remove` and `purge` needed no name.
 
-Not verified on Cloudflare: an expiry while D1 refuses writes, a failed purge that resumes, the malformed-header 400 (the CLI refused the name before sending it), `rollback`, `policy` and `discard` on a managed app, the ephemeral limit of 3 itself, the console pages, and `npm run verify`.
+Not verified on Cloudflare: an expiry while D1 refuses writes and a failed purge that resumes; both need a fault inside Cloudflare. The other gaps of this run were closed on a fresh install, below.
+
+## Ephemeral and managed apps on a fresh install (2026-11-25)
+
+A second deployment in the same account, freshly installed from this change, with no apps and the default quotas (80 MiB, 5 apps, 3 ephemeral, 2 awake):
+
+- `npm run verify` passed its eight checks and revoked its two tokens. Its two purges answered `pending`, due about two and five minutes later; 5 s after the later time neither app was listed.
+- A managed app refused `rollback` and `policy` without the manager's name with 409 `managed` and changed nothing; with the name both succeeded. An app both ephemeral and managed refused `discard` the same way and with the name answered `purging`. All three audit rows carry `namedManager`.
+- Sent as raw HTTP, a malformed `X-Pneuma-Space-Manager` (`Deployer`) and the valid header sent twice each answered 400 `manager_header`, on a managed and on an unmanaged app, and changed nothing. The header sent once on the same path answered 200.
+- With three live ephemeral apps, a fourth answered 409 `ephemeral_quota` with 40 of 80 MiB reserved. Discarding one left it `purging`; usage showed two ephemeral apps while storage still counted it, and a fourth was created 2 s later. A fifth then answered 409 `ephemeral_quota` with 50 MiB reserved.
+- An ephemeral app published with a TTL of 240 s ended with no caller: `app.expire` `started` by `platform` 34 ms after its `expiresAt` and `ok` 1.5 s later, and it left the list.
+- Headless Chrome signed in as the owner, at 1440 and 390 px in Chinese and English, light theme: the project list showed the ephemeral mark with its end time and the manager's name with its url as the tooltip; the managed app's page showed the manager as a link to that url; usage showed 3 / 3 ephemeral projects; no page overflowed horizontally. A policy change on the managed app opened an approval naming the manager whose Continue stayed disabled while the field was empty or held `deploye` and enabled at `deployer`; the policy changed and the four changes were audited with `namedManager`.
+- Every app was then discarded, or removed and purged with the manager's name after both answered 409 without it. The space held no apps and no reserved storage.
+
+Not verified: the publish, rollback, resume and discard approvals in the browser, and the dark theme on the real deployment.
