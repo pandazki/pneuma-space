@@ -37,7 +37,7 @@ export const DEFAULT_POLICY: Policy = {
   maxFailures: 5, requestsPerDay: 2000, storageBytes: 10 * 1024 * 1024,
 };
 export type Quota = { apps: number; ephemeral: number; awake: number; requestsPerDay: number; storageBytes: number };
-export const DEFAULT_QUOTA: Quota = { apps: 5, ephemeral: 3, awake: 2, requestsPerDay: 10000, storageBytes: 50 * 1024 * 1024 };
+export const DEFAULT_QUOTA: Quota = { apps: 5, ephemeral: 3, awake: 2, requestsPerDay: 10000, storageBytes: 80 * 1024 * 1024 };
 export type User = { id: string; username: string; name: string; platformAdmin: boolean; disabled: boolean; createdAt: number };
 export type Actor = { user: User } & (
   | { kind: 'session'; hash: string; csrf: string }

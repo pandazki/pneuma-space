@@ -1,4 +1,4 @@
-import { ACTIONS, type Action, type Actor, type AppRow, type Role, type User, fail } from './model.ts';
+import { ACTIONS, DEFAULT_QUOTA, type Action, type Actor, type AppRow, type Role, type User, fail } from './model.ts';
 import { cookie, id, input, integer, json, secret, sha, text } from './util.ts';
 
 const CONTROL_COOKIE = '__Host-pneuma-space-control';
@@ -118,8 +118,9 @@ export async function authRoute(request: Request, env: Env, path: string, actor:
     accessKey = secret();
     const condition = 'EXISTS(SELECT 1 FROM invitations WHERE id=? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at>?)';
     try {
+      // The storage is explicit because a database created earlier keeps the earlier column default.
       const result = await env.PNEUMA_SPACE_DB.batch([
-        env.PNEUMA_SPACE_DB.prepare('INSERT INTO tenants(id,name,created_at) SELECT ?,?,? WHERE ' + condition + ' AND (SELECT count(*) FROM users)<?').bind(row.tenant_id, name + "'s space", now, row.id, now, Number(env.PNEUMA_SPACE_MAX_ACCOUNTS)),
+        env.PNEUMA_SPACE_DB.prepare('INSERT INTO tenants(id,name,created_at,storage_limit) SELECT ?,?,?,? WHERE ' + condition + ' AND (SELECT count(*) FROM users)<?').bind(row.tenant_id, name + "'s space", now, DEFAULT_QUOTA.storageBytes, row.id, now, Number(env.PNEUMA_SPACE_MAX_ACCOUNTS)),
         env.PNEUMA_SPACE_DB.prepare('INSERT INTO users(id,username,name,key_hash,created_at) SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM tenants WHERE id=?) AND ' + condition).bind(row.user_id, username, name, await sha(accessKey), now, row.tenant_id, row.id, now),
         env.PNEUMA_SPACE_DB.prepare("INSERT INTO memberships(tenant_id,user_id,role) SELECT ?,?,'admin' WHERE EXISTS(SELECT 1 FROM users WHERE id=?) AND " + condition).bind(row.tenant_id, row.user_id, row.user_id, row.id, now),
         env.PNEUMA_SPACE_DB.prepare('UPDATE invitations SET consumed_at=? WHERE id=? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at>? AND EXISTS(SELECT 1 FROM users WHERE id=?)').bind(now, row.id, now, row.user_id),

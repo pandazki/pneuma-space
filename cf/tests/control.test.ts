@@ -352,10 +352,14 @@ test('CF-29 an ending ephemeral app keeps its name and storage until its cleanup
   await db.prepare('UPDATE tenants SET storage_limit=? WHERE id=?').bind(10 * 1024 * 1024, client.tenant).run();
   assert.deepEqual([taken.error.code, (await create('other-' + randomBytes(4).toString('hex'))).error.code], ['app_exists', 'ephemeral_quota']);
 });
+test('CF-29 a new space fits its whole application and ephemeral quotas in its default storage', async () => {
+  const client = await identity();
+  for (const body of [...Array(5).fill({}), ...Array(3).fill({ ephemeral: {} })]) await created(client, body);
+});
 test('CF-29 the ephemeral quota is edited with the other tenant quotas and reported in usage', async () => {
   const client = await identity();
   await created(client, { ephemeral: {} });
-  const quota = { apps: 5, ephemeral: 2, awake: 2, requestsPerDay: 10000, storageBytes: 52428800 };
+  const quota = { apps: 5, ephemeral: 2, awake: 2, requestsPerDay: 10000, storageBytes: 83886080 };
   assert.equal((await request('/admin/tenants/' + client.tenant, owner, { quota }, 'PATCH')).status, 200);
   const usage = await (await request('/tenants/' + client.tenant + '/usage', client)).json() as { quota: { ephemeral: number }; used: { apps: number; ephemeral: number } };
   assert.deepEqual([usage.quota.ephemeral, usage.used.ephemeral, usage.used.apps], [2, 1, 0]);
