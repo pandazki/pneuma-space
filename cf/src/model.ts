@@ -36,8 +36,8 @@ export const DEFAULT_POLICY: Policy = {
   idleSeconds: 300, requestSeconds: 120, drainSeconds: 10,
   maxFailures: 5, requestsPerDay: 2000, storageBytes: 10 * 1024 * 1024,
 };
-export type Quota = { apps: number; awake: number; requestsPerDay: number; storageBytes: number };
-export const DEFAULT_QUOTA: Quota = { apps: 5, awake: 2, requestsPerDay: 10000, storageBytes: 50 * 1024 * 1024 };
+export type Quota = { apps: number; ephemeral: number; awake: number; requestsPerDay: number; storageBytes: number };
+export const DEFAULT_QUOTA: Quota = { apps: 5, ephemeral: 3, awake: 2, requestsPerDay: 10000, storageBytes: 50 * 1024 * 1024 };
 export type User = { id: string; username: string; name: string; platformAdmin: boolean; disabled: boolean; createdAt: number };
 export type Actor = { user: User } & (
   | { kind: 'session'; hash: string; csrf: string }
@@ -47,8 +47,12 @@ export type AppRow = {
   id: string; name: string; tenant_id: string; owner_id: string;
   created_at: number; observed_status: string; observed_runtime: string;
   observed_release: number | null; observed_at: number | null;
+  expires_at: number | null; manager_name: string | null; manager_url: string | null;
 };
-export type AppRegistration = { id: string; name: string; tenantId: string; ownerId: string; policy: Policy };
+export type Manager = { name: string; url: string | null };
+/** An absent url keeps the current one while the name stays (ADR 0039). */
+export type ManagerChange = { name: string; url?: string | null };
+export type AppRegistration = { id: string; name: string; tenantId: string; ownerId: string; policy: Policy; expiresAt: number | null; manager: Manager | null };
 export type ExecutionScope = { appId: string; generation: number; bootId: string };
 export type AppStatus = 'draft' | 'registered' | 'removed' | 'purging' | 'purged';
 export type RuntimeStatus = {
@@ -68,10 +72,13 @@ export type AppSnapshot = AppRegistration & {
   wake: Wake | null;
 };
 export type AppAction =
-  | { type: 'wake' | 'sleep' | 'restart' | 'kill' | 'remove' | 'resume' | 'unquarantine' }
+  | { type: 'wake' | 'sleep' | 'restart' | 'kill' | 'remove' | 'resume' | 'unquarantine' | 'discard' }
   | { type: 'rollback'; release: number }
   | { type: 'purge'; confirmation: string }
   | { type: 'policy'; policy: Partial<Policy> };
+export function actionScope(type: AppAction['type']): Action | 'purge' | 'kill' {
+  return type === 'purge' || type === 'kill' ? type : type === 'remove' || type === 'discard' ? 'remove' : 'manage';
+}
 export type SqlValue = null | string | number;
 export type SqlStatement = { sql: string; params: SqlValue[] };
 export type NativeCommand =

@@ -2,6 +2,8 @@ import { CAPABILITIES, type Actor, type AppPackage, type AppRow, type AppSnapsho
 import { authorizeApp } from './auth.ts';
 import { cellValue, audit } from './directory.ts';
 import { nextSchedule } from './cron.ts';
+import { expectKind, statedEphemeral } from './ephemeral.ts';
+import { managerChange, mustName } from './manager.ts';
 import { signR2 } from './s3.ts';
 import { boundedBody, id, integer, record, safePath, sha, text } from './util.ts';
 
@@ -79,12 +81,14 @@ export async function readPackage(env: Env, artifact: Artifact): Promise<AppPack
   if (JSON.stringify(parsed.manifest) !== JSON.stringify(artifact.manifest)) fail(409, 'manifest', 'Package manifest does not match its release.');
   return parsed;
 }
-export async function beginUpload(env: Env, actor: Actor, app: AppRow, body: Record<string, unknown>): Promise<unknown> {
+export async function beginUpload(env: Env, actor: Actor, app: AppRow, body: Record<string, unknown>, named: string | null): Promise<unknown> {
   const manifest = parseManifest(body.manifest), digest = text(body.digest, 'digest', 64);
   if (!/^[a-f0-9]{64}$/.test(digest)) fail(400, 'digest', 'Use a SHA-256 digest.');
-  const bytes = integer(body.bytes, 'package size', 1, PACKAGE_LIMIT);
+  const bytes = integer(body.bytes, 'package size', 1, PACKAGE_LIMIT), ephemeral = statedEphemeral(body.ephemeral);
   if (manifest.capabilities.rtc && (!env.PNEUMA_SPACE_TURN_KEY_ID || !env.PNEUMA_SPACE_TURN_API_TOKEN)) fail(409, 'rtc_unconfigured', 'TURN has not been configured.');
   const snapshot = await cellValue<AppSnapshot>(env, app.id, '/inspect');
+  mustName(snapshot, named);
+  expectKind(snapshot, ephemeral);
   if (snapshot.status === 'purging' || snapshot.status === 'purged') fail(409, 'purging', 'Application is being purged.');
   const uploadId = id('up'), key = 'apps/' + app.id + '/uploads/' + uploadId + '.json';
   const ticket = await signR2(env, env.PNEUMA_SPACE_ARTIFACT_BUCKET, key, 'PUT', { contentType: 'application/json', contentLength: bytes, expiresSeconds: 180 });
@@ -108,16 +112,19 @@ export async function artifactUsage(env: Env, appId: string) {
   if (!row) fail(404, 'app_not_found', 'Application not found.');
   return { reservedBytes: row.bytes * 3, limitBytes: row.storage_bytes * 3, uploads: row.uploads, maxUploads: 200 };
 }
-export async function publishUpload(env: Env, actor: Actor, app: AppRow, uploadInput: unknown, operation: string): Promise<unknown> {
-  const result = await cellValue<AppSnapshot>(env, app.id, '/publish-upload', { actor, uploadId: text(uploadInput, 'upload', 80), idempotencyKey: operation });
-  await audit(env, actor, 'app.publish', app.tenant_id, app.id, 'ok', 'release ' + result.current?.number);
+export async function publishUpload(env: Env, actor: Actor, app: AppRow, body: Record<string, unknown>, named: string | null, operation: string): Promise<unknown> {
+  const uploadId = text(body.uploadId, 'upload', 80), ephemeral = statedEphemeral(body.ephemeral), manager = managerChange(body.manager);
+  const result = await cellValue<AppSnapshot>(env, app.id, '/publish-upload', { actor, uploadId, ephemeral, manager, named, idempotencyKey: operation });
+  await audit(env, actor, 'app.publish', app.tenant_id, app.id, 'ok', { release: result.current?.number, ...(manager && { manager }), ...(named && { namedManager: named }) });
   return result;
 }
-export async function prepareUploadArtifact(env: Env, actor: Actor, appId: string, uploadInput: unknown, generation: number): Promise<Artifact> {
+/** `admit` runs once the upload is known and before anything is written, so a refusal changes nothing. */
+export async function prepareUploadArtifact(env: Env, actor: Actor, appId: string, uploadInput: unknown, generation: number, admit: () => void): Promise<Artifact> {
   const uploadId = text(uploadInput, 'upload', 80);
   const upload = await env.PNEUMA_SPACE_DB.prepare('SELECT * FROM uploads WHERE id=? AND app_id=? AND actor_hash=?').bind(uploadId, appId, actor.hash).first<{ digest: string; bytes: number; manifest_json: string; object_key: string; generation: number; expires_at: number }>();
   if (!upload) fail(404, 'upload', 'Upload not found.');
   if (upload.generation !== generation) fail(409, 'retired', 'Application changed after this upload began.');
+  admit();
   const manifest = parseManifest(JSON.parse(upload.manifest_json));
   const key = 'apps/' + appId + '/artifacts/' + upload.digest + '/package.json';
   let object = await env.PNEUMA_SPACE_ARTIFACTS.get(key);

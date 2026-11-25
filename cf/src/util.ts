@@ -17,6 +17,7 @@ export function text(value: unknown, name: string, max = 200): string {
   if (typeof value !== 'string' || !value.length || value.length > max || /[\u0000-\u001f]/.test(value)) fail(400, 'input', 'Invalid ' + name + '.');
   return value;
 }
+export const NAME = /^[a-z][a-z0-9-]{0,39}$/;
 export function integer(value: unknown, name: string, min: number, max: number): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) fail(400, 'input', 'Invalid ' + name + '.');
   return value;

@@ -73,10 +73,10 @@ export async function permit(env: Env, actor: Actor, app: AppRow, action: Action
   return app;
 }
 export async function me(env: Env, actor: Actor) {
-  const rows = await env.PNEUMA_SPACE_DB.prepare('SELECT t.*,m.role FROM tenants t JOIN memberships m ON m.tenant_id=t.id WHERE m.user_id=? ORDER BY t.created_at,t.id').bind(actor.user.id).all<{ id: string; name: string; role: Role; apps_limit: number; awake_limit: number; requests_limit: number; storage_limit: number }>();
+  const rows = await env.PNEUMA_SPACE_DB.prepare('SELECT t.*,m.role FROM tenants t JOIN memberships m ON m.tenant_id=t.id WHERE m.user_id=? ORDER BY t.created_at,t.id').bind(actor.user.id).all<{ id: string; name: string; role: Role; apps_limit: number; ephemeral_limit: number; awake_limit: number; requests_limit: number; storage_limit: number }>();
   const tenants = rows.results.filter(row => actor.kind === 'session' || row.id === actor.tenantId).map(row => ({
     id: row.id, name: row.name, role: row.role,
-    quota: { apps: row.apps_limit, awake: row.awake_limit, requestsPerDay: row.requests_limit, storageBytes: row.storage_limit },
+    quota: { apps: row.apps_limit, ephemeral: row.ephemeral_limit, awake: row.awake_limit, requestsPerDay: row.requests_limit, storageBytes: row.storage_limit },
   }));
   return { user: actor.user, platformAdmin: actor.kind === 'session' && actor.user.platformAdmin, tenants, csrf: actor.kind === 'session' ? actor.csrf : null };
 }

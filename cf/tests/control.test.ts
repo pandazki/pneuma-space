@@ -57,7 +57,7 @@ before(async () => {
     durableObjects: { PNEUMA_SPACE_APPS: { className: 'AppCell', useSQLite: true } },
     d1Databases: ['PNEUMA_SPACE_DB'], r2Buckets: ['PNEUMA_SPACE_ARTIFACTS', 'PNEUMA_SPACE_OBJECTS'],
     serviceBindings: { PNEUMA_SPACE_UI: async (request: Request) => new Response('asset ' + new URL(request.url).pathname) },
-    bindings: { PNEUMA_SPACE_CONTROL_ORIGIN: origin, PNEUMA_SPACE_MAX_ACCOUNTS: '100', PNEUMA_SPACE_R2_ACCESS_KEY_ID: 'test-key', PNEUMA_SPACE_R2_SECRET_ACCESS_KEY: 'test-secret', PNEUMA_SPACE_ACCOUNT_ID: '00000000000000000000000000000000', PNEUMA_SPACE_ARTIFACT_BUCKET: 'artifacts' },
+    bindings: { PNEUMA_SPACE_CONTROL_ORIGIN: origin, PNEUMA_SPACE_MAX_ACCOUNTS: '100', PNEUMA_SPACE_R2_ACCESS_KEY_ID: 'test-key', PNEUMA_SPACE_R2_SECRET_ACCESS_KEY: 'test-secret', PNEUMA_SPACE_ACCOUNT_ID: '00000000000000000000000000000000', PNEUMA_SPACE_ARTIFACT_BUCKET: 'artifacts', PNEUMA_SPACE_EPHEMERAL_TTL_SECONDS: '600', PNEUMA_SPACE_EPHEMERAL_MAX_TTL_SECONDS: '3600' },
   }));
   const db = await mf.getD1Database('PNEUMA_SPACE_DB');
   await db.exec((await readFile(new URL('../schema.sql', import.meta.url).pathname, 'utf8')).replace(/\n/g, ' '));
@@ -232,4 +232,223 @@ test('CF-20 artifact reservations are atomic and expiry cannot release retained 
   assert.equal(state.artifacts.reservedBytes, 2304);
   assert.equal(state.artifacts.limitBytes, 3072);
   assert.equal(state.artifacts.uploads, 1);
+});
+
+type App = { id: string; name: string; status: string; createdAt: number; expiresAt: number | null; manager: { name: string; url: string | null } | null; releases: unknown[]; current: { number: number } | null; policy: { idleSeconds: number } };
+const named = (name: string) => ({ 'x-pneuma-space-manager': name });
+async function created(client: Client, body: Record<string, unknown> = {}): Promise<App> {
+  const response = await request('/tenants/' + client.tenant + '/apps', client, { name: 'app-' + randomBytes(4).toString('hex'), ...body });
+  assert.equal(response.status, 201, await response.clone().text());
+  return await response.json() as App;
+}
+async function detail(client: Client, app: { id: string }): Promise<App> {
+  return await (await request('/apps/' + app.id, client)).json() as App;
+}
+async function scoped(client: Client, scopes: string[]): Promise<Record<string, string>> {
+  const value = await (await request('/tenants/' + client.tenant + '/tokens', client, { label: 'scoped', scopes })).json() as Value;
+  return { authorization: 'Bearer ' + value.token };
+}
+const page = { contract: 'pneuma-space.cf/1', runtime: 'static', entry: 'public/index.html', capabilities: { static: { dir: 'public' } } };
+async function upload(client: Client, app: { id: string }, body: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
+  const bytes = JSON.stringify({ manifest: page, files: [{ path: 'public/index.html', body: Buffer.from('Page ' + randomBytes(4).toString('hex')).toString('base64'), contentType: 'text/html' }] });
+  const response = await request('/apps/' + app.id + '/uploads', client, { manifest: page, digest: hash(bytes), bytes: Buffer.byteLength(bytes), ...body }, 'POST', headers);
+  if (response.status !== 201) return { response, uploadId: '' };
+  const ticket = await response.json() as { url: string; uploadId: string };
+  const bucket = await mf.getR2Bucket('PNEUMA_SPACE_ARTIFACTS') as unknown as R2Bucket;
+  await bucket.put(new URL(ticket.url).pathname.slice('/artifacts/'.length), bytes);
+  return { response, uploadId: ticket.uploadId };
+}
+async function release(client: Client, app: App, body: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
+  const ephemeral = app.expiresAt !== null ? { ephemeral: true } : {};
+  const { uploadId } = await upload(client, app, ephemeral, headers);
+  assert.ok(uploadId, 'upload refused');
+  return request('/apps/' + app.id + '/releases', client, { uploadId, ...ephemeral, ...body }, 'POST', headers);
+}
+async function auditRows(app: { id: string }, action: string): Promise<{ user_id: string; result: string; detail: string }[]> {
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  return (await db.prepare('SELECT user_id,result,detail FROM audit WHERE app_id=? AND action=? ORDER BY at,id').bind(app.id, action).all<{ user_id: string; result: string; detail: string }>()).results;
+}
+/** Purge waits for the last signed upload URL to expire (CF-11); these tests start after it has. */
+async function ticketsExpired(app: { id: string }) {
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  await db.prepare('UPDATE uploads SET ticket_expires_at=0 WHERE app_id=?').bind(app.id).run();
+}
+
+test('CF-29 an app created ephemeral ends at creation plus the default lifetime, shown in list and detail', async () => {
+  const client = await identity(), app = await created(client, { ephemeral: {} }), durable = await created(client);
+  assert.equal(app.expiresAt, app.createdAt + 600000);
+  const listed = (await (await request('/tenants/' + client.tenant + '/apps', client)).json() as { items: App[] }).items;
+  assert.deepEqual([app.id, durable.id].map(id => listed.find(item => item.id === id)?.expiresAt), [app.expiresAt, null]);
+  assert.deepEqual([(await detail(client, app)).expiresAt, (await detail(client, durable)).expiresAt], [app.expiresAt, null]);
+});
+test('CF-29 a lifetime over the deployment maximum is refused and creates nothing', async () => {
+  const client = await identity();
+  assert.equal((await request('/tenants/' + client.tenant + '/apps', client, { name: 'too-long', ephemeral: { ttlSeconds: 3601 } })).status, 400);
+  assert.deepEqual((await (await request('/tenants/' + client.tenant + '/apps', client)).json() as Value).items, []);
+});
+test('CF-29 an upload that states the other kind is refused and reserves nothing', async () => {
+  const client = await identity(), ephemeral = await created(client, { ephemeral: { ttlSeconds: 60 } }), durable = await created(client);
+  assert.equal((await upload(client, ephemeral)).response.status, 409);
+  assert.equal((await upload(client, durable, { ephemeral: true })).response.status, 409);
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM uploads WHERE app_id IN(?,?)').bind(ephemeral.id, durable.id).first<{ n: number }>())?.n, 0);
+});
+test('CF-29 a release that states the other kind is refused and writes no release', async () => {
+  const client = await identity(), app = await created(client, { ephemeral: {} });
+  const { uploadId } = await upload(client, app, { ephemeral: true });
+  assert.equal((await request('/apps/' + app.id + '/releases', client, { uploadId })).status, 409);
+  assert.deepEqual((await detail(client, app)).releases, []);
+});
+test('CF-29 a token with the remove scope discards a published ephemeral app, which is then gone', async () => {
+  const client = await identity(), app = await created(client, { ephemeral: {} }), token = await scoped(client, ['remove']);
+  assert.equal((await release(client, app)).status, 200);
+  await ticketsExpired(app);
+  const discarded = await request('/apps/' + app.id + '/actions', undefined, { type: 'discard' }, 'POST', token);
+  assert.equal(discarded.status, 200, await discarded.clone().text());
+  assert.equal((await discarded.json() as App).status, 'purged');
+  assert.equal((await request('/apps/' + app.id, client)).status, 404);
+  assert.equal((await request('/apps/' + app.id + '/actions', undefined, { type: 'discard' }, 'POST', token)).status, 404);
+});
+test('CF-29 discard needs the remove scope', async () => {
+  const client = await identity(), app = await created(client, { ephemeral: {} });
+  assert.equal((await request('/apps/' + app.id + '/actions', undefined, { type: 'discard' }, 'POST', await scoped(client, ['read', 'publish', 'manage']))).status, 403);
+});
+test('CF-29 discarding a durable app answers 409 and changes nothing', async () => {
+  const client = await identity(), app = await staticApp(client);
+  assert.equal((await request('/apps/' + app.id + '/actions', client, { type: 'discard' })).status, 409);
+  assert.equal((await detail(client, app)).status, 'registered');
+});
+test('CF-29 discard ends an ephemeral app from draft and from removed', async () => {
+  const client = await identity(), draft = await created(client, { ephemeral: {} }), removed = await created(client, { ephemeral: {} });
+  await release(client, removed);
+  await ticketsExpired(removed);
+  assert.equal((await request('/apps/' + removed.id + '/actions', client, { type: 'remove' })).status, 200);
+  for (const app of [draft, removed]) assert.equal((await request('/apps/' + app.id + '/actions', client, { type: 'discard' })).status, 200);
+  assert.deepEqual(await Promise.all([draft, removed].map(async app => (await request('/apps/' + app.id, client)).status)), [404, 404]);
+});
+test('CF-29 ephemeral apps count toward the ephemeral quota, not the application quota', async () => {
+  const client = await identity(), db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  await db.prepare('UPDATE tenants SET apps_limit=1,ephemeral_limit=1 WHERE id=?').bind(client.tenant).run();
+  await created(client);
+  await created(client, { ephemeral: {} });
+  const create = async (body: Record<string, unknown>) => (await request('/tenants/' + client.tenant + '/apps', client, { name: 'over-' + randomBytes(4).toString('hex'), ...body })).json() as Promise<{ error: { code: string } }>;
+  assert.deepEqual([(await create({ ephemeral: {} })).error.code, (await create({})).error.code], ['ephemeral_quota', 'app_quota']);
+});
+test('CF-29 the ephemeral quota is edited with the other tenant quotas and reported in usage', async () => {
+  const client = await identity();
+  await created(client, { ephemeral: {} });
+  const quota = { apps: 5, ephemeral: 2, awake: 2, requestsPerDay: 10000, storageBytes: 52428800 };
+  assert.equal((await request('/admin/tenants/' + client.tenant, owner, { quota }, 'PATCH')).status, 200);
+  const usage = await (await request('/tenants/' + client.tenant + '/usage', client)).json() as { quota: { ephemeral: number }; used: { apps: number; ephemeral: number } };
+  assert.deepEqual([usage.quota.ephemeral, usage.used.ephemeral, usage.used.apps], [2, 1, 0]);
+});
+test('CF-29 creation records the end and discard is audited', async () => {
+  const client = await identity(), app = await created(client, { ephemeral: {} });
+  await request('/apps/' + app.id + '/actions', client, { type: 'discard' });
+  assert.equal(JSON.parse((await auditRows(app, 'app.create'))[0].detail).expiresAt, app.expiresAt);
+  assert.deepEqual((await auditRows(app, 'app.discard')).map(row => [row.user_id, row.result]), [[client.id, 'ok']]);
+});
+
+test('CF-30 an app created with a manager returns it in list and detail, its url as the URL parser writes it', async () => {
+  const client = await identity(), app = await created(client, { manager: { name: 'deployer', url: 'HTTPS://Deploy.Test/board' } });
+  const manager = { name: 'deployer', url: 'https://deploy.test/board' };
+  const listed = (await (await request('/tenants/' + client.tenant + '/apps', client)).json() as { items: App[] }).items;
+  assert.deepEqual([app.manager, listed.find(item => item.id === app.id)?.manager, (await detail(client, app)).manager], [manager, manager, manager]);
+});
+test('CF-30 a manager url that is not absolute http or https, too long or with control characters answers 400', async () => {
+  const client = await identity();
+  for (const url of ['javascript:alert(1)', '/relative', 'https://deploy.test/' + 'a'.repeat(2048), 'https://deploy.test/\u0007']) {
+    assert.equal((await request('/tenants/' + client.tenant + '/apps', client, { name: 'bad-url', manager: { name: 'deployer', url } })).status, 400, url);
+  }
+  assert.deepEqual((await (await request('/tenants/' + client.tenant + '/apps', client)).json() as Value).items, []);
+});
+test('CF-30 a write without the manager name answers 409 naming the manager, its url and how to name it', async () => {
+  const client = await identity(), app = await created(client, { manager: { name: 'deployer', url: 'https://deploy.test/board' } });
+  const response = await request('/apps/' + app.id + '/actions', client, { type: 'remove' });
+  const { error } = await response.json() as { error: { code: string; message: string } };
+  assert.equal(response.status, 409);
+  for (const part of ['deployer', 'https://deploy.test/board', 'goes around it', 'X-Pneuma-Space-Manager: deployer']) assert.ok(error.message.includes(part), part);
+});
+test('CF-30 every write that must name the manager answers 409 without it and changes nothing', async () => {
+  const client = await identity(), app = await created(client, { manager: { name: 'deployer' } });
+  assert.equal((await release(client, app, {}, named('deployer'))).status, 200);
+  const view = (value: App) => [value.status, value.releases.length, value.current?.number, value.manager, value.policy.idleSeconds];
+  const before = view(await detail(client, app));
+  const { uploadId } = await upload(client, app, {}, named('deployer'));
+  const writes = [
+    () => upload(client, app).then(result => result.response),
+    () => request('/apps/' + app.id + '/releases', client, { uploadId }),
+    ...[{ type: 'rollback', release: 1 }, { type: 'remove' }, { type: 'resume' }, { type: 'purge', confirmation: app.name }, { type: 'discard' }, { type: 'policy', policy: { idleSeconds: 60 } }].map(action => () => request('/apps/' + app.id + '/actions', client, action)),
+    () => request('/apps/' + app.id + '/manager', client, undefined, 'DELETE'),
+  ];
+  for (const write of writes) {
+    const response = await write();
+    assert.deepEqual([response.status, (await response.json() as { error: { code: string } }).error.code], [409, 'managed']);
+  }
+  assert.deepEqual(view(await detail(client, app)), before);
+});
+test('CF-30 naming the manager lets the write through and its audit records the name', async () => {
+  const client = await identity(), app = await created(client, { manager: { name: 'deployer' } });
+  await release(client, app, {}, named('deployer'));
+  assert.equal((await request('/apps/' + app.id + '/actions', client, { type: 'remove' }, 'POST', named('deployer'))).status, 200);
+  assert.equal(JSON.parse((await auditRows(app, 'app.remove'))[0].detail).namedManager, 'deployer');
+});
+test('CF-30 runtime actions and reads on a managed app need no name', async () => {
+  const client = await identity(), app = await created(client, { manager: { name: 'deployer' } });
+  await release(client, app, {}, named('deployer'));
+  for (const type of ['sleep', 'unquarantine']) assert.equal((await request('/apps/' + app.id + '/actions', client, { type })).status, 200, type);
+  for (const section of ['', '/releases', '/state', '/logs', '/events', '/usage', '/jobs']) assert.equal((await request('/apps/' + app.id + section, client)).status, 200, section);
+});
+test('CF-30 authorization answers before the manager 409', async () => {
+  const client = await identity(), app = await created(client, { manager: { name: 'deployer' } });
+  assert.equal((await request('/apps/' + app.id + '/actions', await identity(), { type: 'remove' })).status, 404);
+  assert.equal((await request('/apps/' + app.id + '/actions', undefined, { type: 'remove' }, 'POST', await scoped(client, ['read']))).status, 403);
+});
+test('CF-30 the request own errors answer the same with or without the manager name', async () => {
+  const client = await identity(), app = await created(client, { manager: { name: 'deployer' } });
+  await release(client, app, {}, named('deployer'));
+  for (const headers of [{}, named('deployer')]) {
+    assert.equal((await request('/apps/' + app.id + '/actions', client, { type: 'rollback', release: 99 }, 'POST', headers)).status, 404);
+    const policy = await request('/apps/' + app.id + '/actions', client, { type: 'policy', policy: { storageBytes: 1000000000 } }, 'POST', headers);
+    assert.equal((await policy.json() as { error: { code: string } }).error.code, 'storage_quota');
+  }
+});
+test('CF-30 a malformed manager header answers 400 on an unmanaged app', async () => {
+  const client = await identity(), app = await staticApp(client);
+  for (const value of ['Deployer', 'deployer, other']) assert.equal((await request('/apps/' + app.id + '/actions', client, { type: 'remove' }, 'POST', named(value))).status, 400, value);
+});
+test('CF-30 a release carrying a manager makes an unmanaged app managed', async () => {
+  const client = await identity(), app = await created(client);
+  assert.equal((await release(client, app, { manager: { name: 'deployer', url: 'https://deploy.test/' } })).status, 200);
+  assert.deepEqual((await detail(client, app)).manager, { name: 'deployer', url: 'https://deploy.test/' });
+  assert.equal((await request('/apps/' + app.id + '/actions', client, { type: 'remove' })).status, 409);
+});
+test('CF-30 a release that names a manager without a url keeps the url while the name stays', async () => {
+  const client = await identity(), app = await created(client, { manager: { name: 'deployer', url: 'https://deploy.test/' } });
+  await release(client, app, { manager: { name: 'deployer' } }, named('deployer'));
+  assert.deepEqual((await detail(client, app)).manager, { name: 'deployer', url: 'https://deploy.test/' });
+  await release(client, app, { manager: { name: 'releaser' } }, named('deployer'));
+  assert.deepEqual((await detail(client, app)).manager, { name: 'releaser', url: null });
+});
+test('CF-30 a release with an absent or null manager leaves it as it is', async () => {
+  const client = await identity(), manager = { name: 'deployer', url: 'https://deploy.test/' }, app = await created(client, { manager });
+  for (const body of [{}, { manager: null }]) {
+    assert.equal((await release(client, app, body, named('deployer'))).status, 200);
+    assert.deepEqual((await detail(client, app)).manager, manager);
+  }
+});
+test('CF-30 clearing the manager names it and is audited as app.manager', async () => {
+  const client = await identity(), app = await created(client, { manager: { name: 'deployer' } });
+  assert.equal((await request('/apps/' + app.id + '/manager', client, undefined, 'DELETE', named('deployer'))).status, 200);
+  assert.equal((await detail(client, app)).manager, null);
+  assert.deepEqual((await auditRows(app, 'app.manager')).map(row => JSON.parse(row.detail).namedManager), ['deployer']);
+});
+test('CF-30 clearing the manager needs the publish scope', async () => {
+  const client = await identity(), app = await created(client, { manager: { name: 'deployer' } });
+  assert.equal((await request('/apps/' + app.id + '/manager', undefined, undefined, 'DELETE', { ...await scoped(client, ['read', 'manage', 'remove']), ...named('deployer') })).status, 403);
+});
+test('CF-30 an ephemeral app can also be managed', async () => {
+  const client = await identity(), app = await created(client, { ephemeral: {}, manager: { name: 'deployer' } });
+  assert.equal((await request('/apps/' + app.id + '/actions', client, { type: 'discard' })).status, 409);
+  assert.equal((await request('/apps/' + app.id + '/actions', client, { type: 'discard' }, 'POST', named('deployer'))).status, 200);
 });

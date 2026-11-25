@@ -3,7 +3,8 @@ import { authenticate, authRoute, authorizeApp, me, permit, protectWrite, requir
 import { artifactUsage, beginUpload, publishUpload, staticResponse } from './artifacts.ts';
 import { controlRoute, operationKey } from './control.ts';
 import { admitRequest, appSummary, audit, cell, cellValue } from './directory.ts';
-import { type Actor, type AppAction, type AppRow, type AppSnapshot, type Policy, fail } from './model.ts';
+import { NAMED_ACTIONS, namedManager } from './manager.ts';
+import { type Actor, type AppAction, type AppRow, type AppSnapshot, type Policy, actionScope, fail } from './model.ts';
 import { boundedBody, errorResponse, input, json, record, text } from './util.ts';
 
 function method(request: Request, expected: string): void {
@@ -11,7 +12,7 @@ function method(request: Request, expected: string): void {
 }
 function action(value: Record<string, unknown>): AppAction {
   switch (value.type) {
-    case 'wake': case 'sleep': case 'restart': case 'kill': case 'remove': case 'resume': case 'unquarantine':
+    case 'wake': case 'sleep': case 'restart': case 'kill': case 'remove': case 'resume': case 'unquarantine': case 'discard':
       return { type: value.type };
     case 'purge': return { type: 'purge', confirmation: text(value.confirmation, 'application name', 40) };
     case 'rollback':
@@ -34,8 +35,11 @@ function action(value: Record<string, unknown>): AppAction {
 }
 async function appControl(request: Request, env: Env, actor: Actor, appId: string, section?: string): Promise<Response> {
   const next = section === 'actions' && request.method === 'POST' ? action(await input(request, 4096)) : null;
-  const permission = next ? next.type === 'purge' || next.type === 'kill' ? next.type : next.type === 'remove' ? 'remove' : 'manage' : section === 'data' ? 'data' : section === 'jobs' && request.method === 'POST' ? 'manage' : section === 'uploads' || (section === 'releases' && request.method === 'POST') ? 'publish' : 'read';
+  const publishing = section === 'uploads' || section === 'manager' || (section === 'releases' && request.method === 'POST');
+  const permission = next ? actionScope(next.type) : section === 'data' ? 'data' : section === 'jobs' && request.method === 'POST' ? 'manage' : publishing ? 'publish' : 'read';
   const app = await authorizeApp(env, actor, appId, permission);
+  const named = (next ? NAMED_ACTIONS.has(next.type) : publishing) ? namedManager(request) : null;
+  const detail = named ? { namedManager: named } : '';
   if (!section) {
     method(request, 'GET');
     const snapshot = await cellValue<AppSnapshot>(env, app.id, '/inspect');
@@ -44,18 +48,24 @@ async function appControl(request: Request, env: Env, actor: Actor, appId: strin
   if (section === 'actions') {
     method(request, 'POST');
     if (!next) fail(400, 'action', 'Choose an action.');
-    const result = await cellValue(env, app.id, '/action', { actor, action: next, idempotencyKey: operationKey(request) });
-    await audit(env, actor, 'app.' + next.type, app.tenant_id, app.id);
+    const result = await cellValue(env, app.id, '/action', { actor, action: next, named, idempotencyKey: operationKey(request) });
+    await audit(env, actor, 'app.' + next.type, app.tenant_id, app.id, 'ok', detail);
     return json(result);
   }
   if (section === 'uploads') {
     method(request, 'POST');
-    return json(await beginUpload(env, actor, app, await input(request, 8192)), 201);
+    return json(await beginUpload(env, actor, app, await input(request, 8192), named), 201);
   }
   if (section === 'releases') {
     if (request.method === 'GET') return json({ items: (await cellValue<AppSnapshot>(env, app.id, '/inspect')).releases });
     method(request, 'POST');
-    return json(await publishUpload(env, actor, app, (await input(request, 4096)).uploadId, operationKey(request)));
+    return json(await publishUpload(env, actor, app, await input(request, 8192), named, operationKey(request)));
+  }
+  if (section === 'manager') {
+    method(request, 'DELETE');
+    const result = await cellValue(env, app.id, '/manager', { actor, named });
+    await audit(env, actor, 'app.manager', app.tenant_id, app.id, 'ok', detail);
+    return json(result);
   }
   if (section === 'data') {
     method(request, 'POST');

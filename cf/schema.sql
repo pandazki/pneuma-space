@@ -1,4 +1,5 @@
 PRAGMA foreign_keys=ON;
+/* Rerunning the installer adds to an existing table each column below that it lacks, so a new column allows NULL or has a default (scripts/install.mjs). */
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
   key_hash TEXT NOT NULL UNIQUE, platform_admin INTEGER NOT NULL DEFAULT 0 CHECK(platform_admin IN(0,1)),
@@ -7,7 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS tenants (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, apps_limit INTEGER NOT NULL DEFAULT 5,
   awake_limit INTEGER NOT NULL DEFAULT 2, requests_limit INTEGER NOT NULL DEFAULT 10000,
-  storage_limit INTEGER NOT NULL DEFAULT 52428800, created_at INTEGER NOT NULL
+  storage_limit INTEGER NOT NULL DEFAULT 52428800, created_at INTEGER NOT NULL,
+  ephemeral_limit INTEGER NOT NULL DEFAULT 3
 );
 CREATE TABLE IF NOT EXISTS memberships (
   tenant_id TEXT NOT NULL REFERENCES tenants(id), user_id TEXT NOT NULL REFERENCES users(id),
@@ -34,6 +36,7 @@ CREATE TABLE IF NOT EXISTS apps (
   created_at INTEGER NOT NULL, create_key TEXT NOT NULL, storage_bytes INTEGER NOT NULL DEFAULT 10485760,
   observed_status TEXT NOT NULL DEFAULT 'draft', observed_runtime TEXT NOT NULL DEFAULT 'asleep',
   observed_release INTEGER, observed_at INTEGER, purged_at INTEGER,
+  expires_at INTEGER, manager_name TEXT, manager_url TEXT,
   UNIQUE(tenant_id,create_key)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS app_name ON apps(name) WHERE purged_at IS NULL;
