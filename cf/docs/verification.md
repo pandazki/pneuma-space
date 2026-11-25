@@ -86,3 +86,9 @@ Not verified on Cloudflare: WebSockets, SSE and native subscriptions under the p
 - After: the app row is read while the session is checked, the app object's state and the permission check run together, the quota write runs beside the static read, and a plain GET reads R2 once. A static file took about 0.57 s and a warm API call about 0.7 s. Unauthenticated requests still answered 401 and an unknown app 404.
 
 Not verified: the first screen in a browser on the real instance, a client entering near the database, and the cost of the static probe on API paths, which still spends one R2 read (about 200 ms) before Node is asked.
+
+## Ephemeral and managed apps (2026-11-25)
+
+[ADR 0046](../../docs/adr/0046-cloudflare-ephemeral-and-managed-apps.md) brings ephemeral and managed apps to this plane. Nothing in this change has been verified on a real Cloudflare account: no deployment, no installer run against an account and no `npm run verify`.
+
+What passed locally: TypeScript, and 135 engine tests with the four Docker cases skipped, 41 of them new for CF-23, CF-29 and CF-30. Expiry ran on Miniflare's Durable Object alarm and the column upgrade on SQLite through `node:sqlite`; whether real D1 accepts the installer's `PRAGMA table_info` read and the `ALTER TABLE` file is unverified. The console was rendered against a local Miniflare instance in headless Chrome at 1440 and 390 px in Chinese and English, the ephemeral app's page in dark and the rest in light: cards and the project head show the ephemeral mark, end time and manager, usage shows the ephemeral quota, no page overflowed horizontally, and a managed remove went through only after the manager's name was typed. Publish, rollback, resume, policy and discard approvals were not driven in the browser.
