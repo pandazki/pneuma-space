@@ -45,6 +45,6 @@ Control APIs use /api/v1, JSON errors with error.code/message, and list envelope
 | /apps/:id/manager | DELETE clears the manager. |
 | /apps/:id/state, /logs, /events, /usage, /jobs | Actual inventory and diagnostics; each wake that ends adds a `wake-ready` or `wake-failed` event carrying its record. POST jobs with name/payload invokes a trigger. |
 | /apps/:id/data | Authorized bounded NativeCommand from model.ts. |
-| /tenants/:t/usage, /audit, /events | Role-filtered telemetry. Usage counts durable and ephemeral apps apart. |
+| /tenants/:t/usage, /audit, /events | Role-filtered telemetry. Usage counts durable and ephemeral apps apart, an ephemeral app until it starts ending. |
 
 Listings carry timestamped observed state. Precise details and operations consult AppCell. CF resource views do not fabricate Kubernetes nodes or utilization measurements.

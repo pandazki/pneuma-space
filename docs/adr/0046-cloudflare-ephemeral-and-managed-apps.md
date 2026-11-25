@@ -15,7 +15,7 @@ Cloudflare 承载面的形状与网关不同：先建应用，再领上传票据
 3. **TTL 在 Worker 变量里。** 没有全局策略存储，缺省值和上限是 `wrangler.jsonc` 里的 `PNEUMA_SPACE_EPHEMERAL_TTL_SECONDS`（600）和 `PNEUMA_SPACE_EPHEMERAL_MAX_TTL_SECONDS`（3600），与 `PNEUMA_SPACE_MAX_ACCOUNTS` 同处。两个值不合法时建临时应用答 503。
 4. **丢弃是动作 `discard`。** 令牌要 `remove` 范围。动作按 id 寻址，id 不会落到同名的后一个应用上，网关的 `?app=<id>` 在这里是寻址本身，不另设；命令行的 `discard NAME --app ID` 直接用这个 id。
 5. **到期靠应用自己的闹钟。** AppCell 建立时就把闹钟设在 `expires_at`，未发布的应用也会到期，没有领导者和 10 s 清扫。审计行写进 D1，actor 是 `platform`：`started`，结束时 `ok`，等待过或失败过的带 `resumed`；同一个错误只写一行 `error`，30 s 后由闹钟重试。只有到期开始的结束写 `app.expire`；被丢弃后仍在 `purging` 的应用由闹钟清完，不写 `app.expire`。
-6. **配额。** 租户多一列 `ephemeral_limit`，默认 3，与其他配额一起在 `/admin/tenants/:id` 修改。这里没有不限额的 `default` 租户，也没有 `null`，取值范围同 `apps`。存储额度按持久应用的方式推导（`min(10 MiB, storage_limit / apps_limit)`），照常计入存储配额。
+6. **配额。** 租户多一列 `ephemeral_limit`，默认 3，与其他配额一起在 `/admin/tenants/:id` 修改。这里没有不限额的 `default` 租户，也没有 `null`，取值范围同 `apps`。存储额度按持久应用的方式推导（`min(10 MiB, storage_limit / apps_limit)`），照常计入存储配额。进入 `purging` 的临时应用不再占临时配额，存储预留和名字留到清除完成，所以预留总量仍在存储配额之内。
 7. **不排日程。** AppCell 不为临时应用计算 schedule；按需的 job 照常。
 8. **可见。** 列表和详情有 `expiresAt`；两个命令行发布时打印应用 id 和结束时刻；控制台在卡片和详情上显示标记和结束时刻，用量多一项临时项目，项目菜单多一项丢弃；审计 `app.create`（details 带 `expiresAt`）、`app.discard`、`app.expire`。
 9. **没有访问级别。** ADR 0038 第 6 条在这里没有对应：应用本来就只对租户管理员和 owner 开放。
@@ -31,7 +31,8 @@ Cloudflare 承载面的形状与网关不同：先建应用，再领上传票据
 
 ## 后果
 
-- 丢弃和到期走清除的路径，要等这个应用最后一个签名上传地址到期（领票据后 180 s，再加 2 s）才能删完（CF-11）。在此之前应用停在 `purging`、不应答请求，名字、临时配额和存储预留都不释放，丢弃答 `{"pending": true, "retryAt": …}`。网关的丢弃没有这段等待。
+- 丢弃和到期走清除的路径，要等这个应用最后一个签名上传地址到期（领票据后 180 s，再加 2 s）才能删完（CF-11）。在此之前应用停在 `purging`、不应答请求，名字和存储预留不释放，丢弃答 `{"pending": true, "retryAt": …}`。网关的丢弃没有这段等待。
+- 临时配额和名字按 D1 投影放出，所以进入 `purging` 和 `purged` 都要写到 D1：AppCell 记下目录尚未确认，在答复前或闹钟返回前写投影，写失败由闹钟每 30 s 重试，直到写成。D1 的计数只在写失败时落后，最多落后到 D1 恢复后 30 s。
 - 默认配额下 5 个持久应用正好占满 50 MiB 的存储，这时再建临时应用要先提高存储配额。
 - 已有部署：重新运行安装命令时，安装器比较 `schema.sql` 和库里的列，缺的列用 `ALTER TABLE ADD COLUMN` 补上，已有租户的 `ephemeral_limit` 取列的缺省值 3；已有应用的 AppCell 状态在下次加载时补上空的 `expiresAt` 和 `manager`。以后加的列也要能这样补：允许 NULL 或有缺省值。
 - 回滚到没有本决定的 Worker：旧代码忽略新列和状态字段，临时应用变成不会到期、计入 `apps` 的普通应用，受管应用变成普通应用。

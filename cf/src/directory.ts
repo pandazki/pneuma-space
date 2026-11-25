@@ -4,6 +4,8 @@ import { ttlSeconds } from './ephemeral.ts';
 import { managerAfter, managerChange } from './manager.ts';
 import { NAME, id, text } from './util.ts';
 
+/** An app holds a slot of its kind until purged, except that an ephemeral app gives its slot back once it is ending; its storage and name stay held (ADR 0046). */
+export const HOLDS_SLOT = "purged_at IS NULL AND (expires_at IS NULL OR observed_status IS NOT 'purging')";
 export const appUrl = (env: Env, name: string): string => env.PNEUMA_SPACE_CONTROL_ORIGIN + '/apps/' + name + '/';
 export async function appRow(env: Env, appId: string): Promise<AppRow & { storage_bytes: number }> {
   const row = await env.PNEUMA_SPACE_DB.prepare('SELECT * FROM apps WHERE id=? AND purged_at IS NULL').bind(appId).first<AppRow & { storage_bytes: number }>();
@@ -67,7 +69,7 @@ export async function createApp(env: Env, actor: Actor, tenantId: string, body: 
     // An ephemeral app's allocation is derived as a durable app's and counts toward storage as usual (ADR 0046).
     const bytes = Math.min(DEFAULT_POLICY.storageBytes, Math.floor(tenant.storage_limit / Math.max(tenant.apps_limit, 1)));
     try {
-      const created = await env.PNEUMA_SPACE_DB.prepare('INSERT INTO apps(id,name,tenant_id,owner_id,origin,created_at,create_key,storage_bytes,expires_at,manager_name,manager_url) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE (SELECT count(*) FROM apps WHERE tenant_id=? AND purged_at IS NULL AND (expires_at IS NOT NULL)=?)<(SELECT CASE WHEN ?=1 THEN ephemeral_limit ELSE apps_limit END FROM tenants WHERE id=?) AND (SELECT coalesce(sum(storage_bytes),0) FROM apps WHERE tenant_id=? AND purged_at IS NULL)+?<=(SELECT storage_limit FROM tenants WHERE id=?)').bind(appId, name, tenantId, actor.user.id, appId, now, operation, bytes, ttl === null ? null : now + ttl * 1000, manager?.name ?? null, manager?.url ?? null, tenantId, ephemeral, ephemeral, tenantId, tenantId, bytes, tenantId).run();
+      const created = await env.PNEUMA_SPACE_DB.prepare('INSERT INTO apps(id,name,tenant_id,owner_id,origin,created_at,create_key,storage_bytes,expires_at,manager_name,manager_url) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE (SELECT count(*) FROM apps WHERE tenant_id=? AND ' + HOLDS_SLOT + ' AND (expires_at IS NOT NULL)=?)<(SELECT CASE WHEN ?=1 THEN ephemeral_limit ELSE apps_limit END FROM tenants WHERE id=?) AND (SELECT coalesce(sum(storage_bytes),0) FROM apps WHERE tenant_id=? AND purged_at IS NULL)+?<=(SELECT storage_limit FROM tenants WHERE id=?)').bind(appId, name, tenantId, actor.user.id, appId, now, operation, bytes, ttl === null ? null : now + ttl * 1000, manager?.name ?? null, manager?.url ?? null, tenantId, ephemeral, ephemeral, tenantId, tenantId, bytes, tenantId).run();
       if (!created.meta.changes) fail(409, ephemeral ? 'ephemeral_quota' : 'app_quota', ephemeral ? 'The space has reached its ephemeral application or allocated storage limit.' : 'The space has reached its application or allocated storage limit.');
     } catch (error) {
       if (error instanceof Error && /UNIQUE/.test(error.message)) {

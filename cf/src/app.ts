@@ -11,8 +11,8 @@ import { errorResponse, id, input, integer, json, sha, text } from './util.ts';
 
 type Journal = { previous: Release | null; candidate: Release; key: string };
 type Lease = { id: string; deadline: number; kind: 'request' | 'channel' };
-/** `expiry` is set once an expiry began, to audit how it ends (ADR 0038). */
-type State = Omit<AppSnapshot, 'releases'> & { releaseSequence: number; journal: Journal | null; schedules: Record<string, number>; purgeAt: number | null; day: string; dayRequests: number; expiry: { resumed: boolean; error: string | null } | null };
+/** `expiry` is set once an expiry began, to audit how it ends (ADR 0038). `projectAt` is when the alarm next tells the directory that the app is ending, null once the directory has it (ADR 0046). */
+type State = Omit<AppSnapshot, 'releases'> & { releaseSequence: number; journal: Journal | null; schedules: Record<string, number>; purgeAt: number | null; day: string; dayRequests: number; expiry: { resumed: boolean; error: string | null } | null; projectAt: number | null };
 type Subscription = { kind: 'browser'; actor: CredentialProof; nextCheckAt: number } | { kind: 'execution'; scope: ExecutionScope } | { kind: 'closed' };
 type DeliveryAttempt = { job: Delivery; generation: number };
 type Receipt = { fingerprint: string; snapshot: boolean; result: unknown };
@@ -34,6 +34,7 @@ export class AppCell extends DurableObject<Env> {
       // Apps created under per-app domains stored their origin (ADR 0044).
       if (state.origin !== undefined) { delete state.origin; this.save(state); }
       if (!('manager' in state)) { Object.assign(state, { expiresAt: null, manager: null, expiry: null }); this.save(state); }
+      if (state.projectAt === undefined) { state.projectAt = null; this.save(state); }
       if (state.journal) {
         state.current = state.journal.previous;
         state.capabilities = Object.keys(state.current?.manifest.capabilities ?? {}) as Capability[];
@@ -57,7 +58,7 @@ export class AppCell extends DurableObject<Env> {
     return result;
   }
   snapshot(): AppSnapshot {
-    const { journal, schedules, purgeAt, day, dayRequests, releaseSequence, expiry, ...snapshot } = this.state();
+    const { journal, schedules, purgeAt, day, dayRequests, releaseSequence, expiry, projectAt, ...snapshot } = this.state();
     const leases = this.leases();
     snapshot.runtime = { ...snapshot.runtime, running: this.ctx.container?.running ?? false, requests: leases.filter(x => x.kind === 'request').length, channels: leases.filter(x => x.kind === 'channel').length };
     if (snapshot.runtime.state === 'awake' && !snapshot.runtime.running) snapshot.runtime.state = 'asleep';
@@ -118,6 +119,7 @@ export class AppCell extends DurableObject<Env> {
       if (socket.readyState === WebSocket.OPEN && subscription?.kind === 'browser' && !this.checkingSubscribers.has(socket)) times.push(subscription.nextCheckAt);
     }
     if (state.purgeAt !== null) times.push(state.purgeAt);
+    if (state.projectAt !== null) times.push(state.projectAt);
     if (state.expiresAt !== null && state.status !== 'purging' && state.status !== 'purged') times.push(state.expiresAt);
     if (state.runtime.bootId && !this.leases().length) times.push(state.runtime.sleepsAt ?? Date.now() + 1000);
     if (state.status === 'registered') {
@@ -229,7 +231,7 @@ export class AppCell extends DurableObject<Env> {
         if (listed.objects.length) await this.env.PNEUMA_SPACE_ARTIFACTS.delete(listed.objects.map(x => x.key));
         cursor = listed.truncated ? listed.cursor : undefined;
       } while (cursor);
-      state.status = 'purged'; state.purgeAt = null; state.current = null; state.capabilities = [];
+      state.status = 'purged'; state.purgeAt = null; state.projectAt = Date.now(); state.current = null; state.capabilities = [];
       for (const [key] of this.ctx.storage.kv.list({ prefix: 'platform:release:' })) this.ctx.storage.kv.delete(key);
     }
     this.save(state);
@@ -240,7 +242,7 @@ export class AppCell extends DurableObject<Env> {
   private async enterPurging(): Promise<void> {
     const state = this.state();
     if (state.status === 'purging') return;
-    state.status = 'purging'; state.purgeAt = Date.now(); state.schedules = {}; this.save(state);
+    state.status = 'purging'; state.purgeAt = state.projectAt = Date.now(); state.schedules = {}; this.save(state);
     await this.retire(true);
   }
   private async action(actor: Actor, action: AppAction, key: string, named: string | null): Promise<unknown> {
@@ -342,7 +344,9 @@ export class AppCell extends DurableObject<Env> {
         this.save(state);
         await this.enterPurging();
       }
-      if (this.state().status === 'purging') { await this.finishPurge(); return []; }
+      if (this.state().status === 'purging') await this.finishPurge();
+      if (this.state().projectAt !== null) await this.project();
+      if (this.state().status === 'purging' || this.state().status === 'purged') return [];
       const deliveries: DeliveryAttempt[] = [];
       if (state.status === 'registered' && !state.journal) {
         for (const [name, due] of Object.entries(state.schedules)) if (due <= Date.now()) {
@@ -387,7 +391,15 @@ export class AppCell extends DurableObject<Env> {
     const state = this.state();
     if (state.expiry && 'pending' in result) { state.expiry.resumed = true; this.save(state); }
     else if (state.expiry) await audit(this.env, 'platform', 'app.expire', state.tenantId, state.id, 'ok', state.expiry.resumed ? { resumed: true } : '');
-    await observeApp(this.env, this.snapshot());
+  }
+  /** The directory frees an ending app's ephemeral slot and a purged app's name from this projection, so a failed write is retried by the alarm (ADR 0046). */
+  private async project(): Promise<void> {
+    let projectAt: number | null = null;
+    try { await observeApp(this.env, this.snapshot()); }
+    catch (error) { console.error('Projection update failed', error); projectAt = Date.now() + 30000; }
+    const state = this.state();
+    state.projectAt = projectAt; this.save(state);
+    await this.arm();
   }
   private closeSubscriber(socket: WebSocket, code: number, reason: string): void {
     socket.serializeAttachment({ kind: 'closed' } satisfies Subscription);
@@ -501,7 +513,7 @@ export class AppCell extends DurableObject<Env> {
         const value = await input(request) as unknown as AppRegistration;
         const old = this.ctx.storage.kv.get<State>(STATE);
         if (old) { if (old.id !== value.id) fail(409, 'identity', 'AppId differs.'); return json(this.snapshot()); }
-        const state: State = { ...value, expiresAt: value.expiresAt ?? null, manager: value.manager ?? null, status: 'draft', generation: 0, current: null, releaseSequence: 0, runtime: { state: 'asleep', running: false, bootId: null, since: Date.now(), sleepsAt: null, requests: 0, channels: 0, failures: 0 }, capabilities: [], lastAccessAt: null, usage: { requests: 0, errors: 0, wakes: 0, sleeps: 0 }, wake: null, journal: null, schedules: {}, purgeAt: null, day: '', dayRequests: 0, expiry: null };
+        const state: State = { ...value, expiresAt: value.expiresAt ?? null, manager: value.manager ?? null, status: 'draft', generation: 0, current: null, releaseSequence: 0, runtime: { state: 'asleep', running: false, bootId: null, since: Date.now(), sleepsAt: null, requests: 0, channels: 0, failures: 0 }, capabilities: [], lastAccessAt: null, usage: { requests: 0, errors: 0, wakes: 0, sleeps: 0 }, wake: null, journal: null, schedules: {}, purgeAt: null, day: '', dayRequests: 0, expiry: null, projectAt: null };
         this.save(state); await this.arm(); return json(this.snapshot());
       });
       if (path === '/inspect') return json(this.snapshot());
@@ -601,9 +613,9 @@ export class AppCell extends DurableObject<Env> {
           result = await this.once(value.idempotencyKey, { name: value.name, payload: value.payload }, async key => this.job(value.name, (value.payload ?? null) as Json, 'manual_' + encodeURIComponent(key)));
           await this.arm();
         } else fail(404, 'route', 'Unknown application operation.');
-        const projection = observeApp(this.env, this.snapshot()).catch((error: unknown) => console.error('Projection update failed', error));
-        // A purged app releases its name and quota before the answer, so the next request about it gets 404.
-        if (this.state().status === 'purged') await projection; else this.ctx.waitUntil(projection);
+        // An ending app gives back its ephemeral slot, and a purged one its name, before the answer.
+        if (this.state().projectAt !== null) await this.project();
+        else this.ctx.waitUntil(observeApp(this.env, this.snapshot()).catch((error: unknown) => console.error('Projection update failed', error)));
         return json(result);
       });
     } catch (error) { return errorResponse(error); }

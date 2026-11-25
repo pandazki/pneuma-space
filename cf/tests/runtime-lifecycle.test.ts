@@ -452,6 +452,20 @@ test('CF-29 an expiry that keeps failing writes one error row until its outcome 
   assert.deepEqual([rows.map(row => row.result), JSON.parse(rows[2].detail).resumed], [['started', 'error', 'ok'], true]);
   assert.equal((await (await call(app, '/inspect')).json() as { status: string }).status, 'purged');
 });
+test('CF-29 an end the directory failed to record reaches it on a later alarm', async () => {
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  const purgedAt = async (app: string) => (await db.prepare('SELECT purged_at FROM apps WHERE id=?').bind(app).first<{ purged_at: number | null }>())?.purged_at ?? null;
+  await db.prepare("CREATE TRIGGER directory_down BEFORE UPDATE OF purged_at ON apps WHEN NEW.purged_at IS NOT NULL BEGIN SELECT RAISE(ABORT, 'directory down'); END").run();
+  let app = '';
+  try {
+    ({ app } = await fixture(Date.now() + 1500));
+    await until(async () => (await (await call(app, '/inspect')).json() as { status: string }).status === 'purged', 'The app did not end at its expiry.');
+    await call(app, '/test/alarm');
+  } finally { await db.prepare('DROP TRIGGER directory_down').run(); }
+  assert.equal(await purgedAt(app), null);
+  await call(app, '/test/alarm');
+  assert.ok(await purgedAt(app));
+});
 test('CF-29 an ephemeral app schedules no trigger while a manual job still runs', async () => {
   const { app } = await fixture(Date.now() + 600000);
   await call(app, '/test/configure-schedule', {});

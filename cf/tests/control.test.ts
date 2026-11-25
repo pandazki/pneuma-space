@@ -334,6 +334,24 @@ test('CF-29 ephemeral apps count toward the ephemeral quota, not the application
   const create = async (body: Record<string, unknown>) => (await request('/tenants/' + client.tenant + '/apps', client, { name: 'over-' + randomBytes(4).toString('hex'), ...body })).json() as Promise<{ error: { code: string } }>;
   assert.deepEqual([(await create({ ephemeral: {} })).error.code, (await create({})).error.code], ['ephemeral_quota', 'app_quota']);
 });
+test('CF-29 an ephemeral app that is ending gives its ephemeral slot back at once', async () => {
+  const client = await identity(), db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  await db.prepare('UPDATE tenants SET ephemeral_limit=1 WHERE id=?').bind(client.tenant).run();
+  const app = await created(client, { ephemeral: {} });
+  await upload(client, app, { ephemeral: true });
+  assert.equal((await (await request('/apps/' + app.id + '/actions', client, { type: 'discard' })).json() as { pending?: boolean }).pending, true);
+  await created(client, { ephemeral: {} });
+});
+test('CF-29 an ending ephemeral app keeps its name and storage until its cleanup ends', async () => {
+  const client = await identity(), db = await mf.getD1Database('PNEUMA_SPACE_DB'), app = await created(client, { ephemeral: {} });
+  await upload(client, app, { ephemeral: true });
+  await request('/apps/' + app.id + '/actions', client, { type: 'discard' });
+  const create = async (name: string) => (await request('/tenants/' + client.tenant + '/apps', client, { name, ephemeral: {} })).json() as Promise<{ error: { code: string } }>;
+  const taken = await create(app.name);
+  // The ending app still holds 10 MiB, so under a 10 MiB limit the 2 MiB a new app takes does not fit.
+  await db.prepare('UPDATE tenants SET storage_limit=? WHERE id=?').bind(10 * 1024 * 1024, client.tenant).run();
+  assert.deepEqual([taken.error.code, (await create('other-' + randomBytes(4).toString('hex'))).error.code], ['app_exists', 'ephemeral_quota']);
+});
 test('CF-29 the ephemeral quota is edited with the other tenant quotas and reported in usage', async () => {
   const client = await identity();
   await created(client, { ephemeral: {} });
