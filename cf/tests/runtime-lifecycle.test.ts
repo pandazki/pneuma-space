@@ -59,6 +59,7 @@ before(async () => {
           getTcpPort() { return {fetch: async input => {
             if (new URL(input.url ?? input).pathname !== '/_pneuma-space/ready') return new Response('woken');
             if (mode === 'unready') { skew += 46000; return Response.json({bootId: cell.boot, digest: cell.digest, ready: false, uptime: 5, phases: {fetch: 30, unpack: 4, listen: null}}, {status: 503}); }
+            if (mode === 'exits') return Response.json({bootId: cell.boot, digest: cell.digest, ready: false, exited: true, uptime: 5, phases: {fetch: 30, unpack: 4, listen: null}}, {status: 503});
             return Response.json({bootId: cell.boot, digest: cell.digest, ready: true, uptime: 5, phases: {fetch: 30, unpack: 4, listen: 12}});
           }}; },
         };
@@ -530,6 +531,13 @@ test('CF-37 a wake whose app never becomes ready counts a failure and quarantine
   assert.equal(await invoke(app), 'startup');
   assert.deepEqual([await runtimeOf(app), await failedWakes(app)], [{ state: 'quarantined', failures: 1, wake: 'failed' }, 1]);
   assert.equal(await invoke(app), 'quarantined');
+});
+test('CF-39 a wake whose app exits before it is ready fails at once, frees its slot and counts the failure', async () => {
+  const app = await nodeApp('exits');
+  const response = await call(app, '/_pneuma-space/invoke/');
+  assert.deepEqual([response.status, ((await response.json()) as { error: { message: string } }).error.message], [503, 'Application exited before it became ready.']);
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  assert.deepEqual([await runtimeOf(app), (await db.prepare('SELECT count(*) AS n FROM compute WHERE app_id=?').bind(app).first<{ n: number }>())?.n], [{ state: 'asleep', failures: 1, wake: 'failed' }, 0]);
 });
 test('CF-37 a successful wake clears the failure count', async () => {
   const app = await nodeApp('unready');
