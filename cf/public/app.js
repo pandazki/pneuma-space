@@ -425,7 +425,7 @@ function workspaceDetails(usage) {
 }
 function launchCard(first = false) {
   return h('div',{ class:'launch-intro' },h('div',{ class:'grow' },h('h2',{},first ? tr('你的第一个应用，从一句指令开始','Your first app starts with one command') : tr('下一个想法，直接做成应用','Turn your next idea into an app')),
-    h('p',{},tr('复制指令给你的 agent。脚手架、发布和休眠恢复验证，都已接好。','Give your agent one command. The starter, deployment and idle/recovery check are ready.'))),navLink(tr('创建应用','Create app'),href('launch'),'btn primary'));
+    h('p',{},tr('在终端运行一行初始化命令，再把一句话交给你的 agent。脚手架、发布和休眠恢复验证，都已接好。','Run one setup command in your terminal, then hand your agent one sentence. The starter, deployment and idle/recovery check are ready.'))),navLink(tr('创建应用','Create app'),href('launch'),'btn primary'));
 }
 function launchPage(content) {
   const tenant = state.tenant, progress = h('div',{ class:'launch-progress','aria-live':'polite' }), owner = scope;
@@ -439,26 +439,29 @@ function launchForm(distribution,tenant,progress,owner) {
   const name=input({value:existing?.name||'little-shelf',required:true,pattern:'[a-z][a-z0-9-]{0,39}',maxLength:40,autocomplete:'off','aria-label':tr('应用名称','App name')});
   const handoff=h('div',{class:'stack'});
   let active=existing,checking=false;
-  const command=entry=>`echo ${entry.token} | npx --yes --ignore-scripts --package=${location.origin}${distribution.path} pneuma-space start ${entry.name} --origin ${location.origin} --tenant ${tenant.id} --token-stdin`;
-  const prompt=entry=>tr(`请在一个新的项目目录里运行下面的命令。它会创建「拾页」有状态示例、安装项目指令和多平台 skill、发布应用并测量请求用时。命令包含发布 token，请不要输出或提交它。完成后进入 ${entry.name} 目录读取 AGENTS.md，然后给我应用地址、访问统计链接和测得的用时，提醒我在已登录工作空间的浏览器里打开。不要重复已经成功的发布。\n\n${command(entry)}`,`Run this command from a parent directory for a new project. It scaffolds Little Shelf, installs project instructions and skills, publishes the stateful app, and measures its requests. The command contains a publishing token; do not print or commit it. Afterwards, read AGENTS.md in ${entry.name}, then give me the app URL, the dashboard statistics link and the measured timings, reminding me to open them in the browser signed into my workspace. Do not repeat an already successful deployment.\n\n${command(entry)}`);
-  async function copy(value,event){const target=event.currentTarget;try{await navigator.clipboard.writeText(value);target.textContent=tr('已复制','Copied');}catch{const field=textarea(value,'handoff-copy');field.readOnly=true;fill(handoff,h('p',{},tr('请复制下面的内容：','Copy the text below:')),field);field.select();}}
+  const command=entry=>`echo ${entry.token} | npx --yes --ignore-scripts --package=${location.origin}${distribution.path} pneuma-space init ${entry.name} --origin ${location.origin} --tenant ${tenant.id} --token-stdin`;
+  const prompt=tr('这个文件夹是一个已初始化的 PneumaSpace 项目，发布 token 已私密保存在里面。请先读 AGENTS.md，用 npm run deploy 发布应用，再用 npm run bench 测量；bench 会等应用自然休眠，需要几分钟。完成后给我应用地址、访问统计链接和测得的用时，并提醒我在已登录工作空间的浏览器里打开。不要读取或输出保存的凭据，也不要重复已经成功的发布。','This folder is a PneumaSpace project that is already set up, with its publishing token stored privately. Read AGENTS.md, publish the app with npm run deploy, then measure it with npm run bench, which waits several minutes for the app to idle. Afterwards, give me the app URL, the dashboard statistics link and the measured timings, and remind me to open them in the browser signed into my workspace. Do not read or print the stored credentials, and do not repeat an already successful deployment.');
+  async function copy(value,event){const target=event.currentTarget;try{await navigator.clipboard.writeText(value);target.textContent=tr('已复制','Copied');}catch{const field=textarea(value,'handoff-copy');field.readOnly=true;target.closest('.toolbar').after(h('p',{},tr('请复制下面的内容：','Copy the text below:')),field);field.select();}}
+  const step=(title,note,preview,label,value)=>h('div',{class:'stack'},h('h3',{},title),h('p',{class:'muted'},note),h('pre',{class:'command-preview',tabIndex:0},preview),h('div',{class:'toolbar'},btn(label,event=>copy(value,event),'primary')));
   function drawHandoff(){
     if(!active)return;
-    const display=command({...active,token:'<YOUR_PUBLISH_TOKEN>'});
-    fill(handoff,h('div',{class:'handoff-card stack'},h('div',{},h('h2',{},tr('接下来，交给你的 agent','Next, hand this to your agent')),h('p',{class:'muted'},tr('Claude Code、Codex、Cursor、Gemini CLI 或其他能运行终端的编程工具。','Claude Code, Codex, Cursor, Gemini CLI, or another coding tool with terminal access.'))),h('pre',{class:'command-preview',tabIndex:0},display),h('div',{class:'toolbar'},btn(tr('复制给 agent','Copy for my agent'),event=>copy(prompt(active),event),'primary'),btn(tr('只复制一行命令','Copy command only'),event=>copy(command(active),event),'ghost')),h('small',{},tr('需要 Node.js 22+ 和 npm。','Requires Node.js 22+ and npm.')),h('small',{},tr('指令内含仅限当前工作空间的发布凭据；仅交给可信工具。到期时间：','The instruction contains a publishing token for this workspace; share it only with a trusted tool. Expires: '),stamp(active.expiresAt)),navLink(tr('凭据管理与撤销','Manage or revoke credentials'),href('team'))));
+    fill(handoff,h('div',{class:'handoff-card stack'},h('h2',{},tr('接下来两步','Two steps from here')),
+      step(tr('1. 在你自己的终端里运行','1. Run this in your own terminal'),tr(`它在当前目录下创建 ${active.name} 文件夹，把发布 token 私密保存在里面，并安装项目指令和多平台 skill。命令包含 token，请自己运行，不要贴进聊天。需要 Node.js 22+ 和 npm。`,`It creates the ${active.name} folder here, stores the publishing token privately inside it, and installs project instructions and skills. The command contains the token, so run it yourself and keep it out of chats. Requires Node.js 22+ and npm.`),command({...active,token:'<YOUR_PUBLISH_TOKEN>'}),tr('复制命令','Copy command'),command(active)),
+      step(tr(`2. 在 ${active.name} 文件夹里打开 agent，粘贴这句话`,`2. Open your agent in the ${active.name} folder and paste this`),tr('Claude Code、Codex、Cursor、Gemini CLI 或其他能运行终端的编程工具。这句话不含 token。','Claude Code, Codex, Cursor, Gemini CLI, or another coding tool with terminal access. It contains no token.'),prompt,tr('复制给 agent','Copy for my agent'),prompt),
+      h('small',{},tr('token 仅限当前工作空间。到期时间：','The token works only in this workspace. Expires: '),stamp(active.expiresAt)),navLink(tr('凭据管理与撤销','Manage or revoke credentials'),href('team'))));
   }
   const form=submitForm([field(tr('给应用起个名字','Name your app'),name,tr('同时作为新项目文件夹名称。','This will also be the new project folder name.')),h('div',{class:'starter-preview'},h('span',{class:'starter-mark','aria-hidden':'true'},'↳'),h('div',{},h('strong',{},tr('拾页 · 私人灵感收藏夹','Little Shelf · your private idea collection')),h('p',{},tr('可编辑的完整示例：分类、置顶、归档和搜索。内容保存在持久存储中，只有几 KB。','A complete editable starter with collections, pins, archive and search. Its sample state takes only a few KB.')))),h('small',{},tr('自动选择创建、发布、访问和查看状态所需的权限；不授予平台管理或清除权限。','Only create, publish, invoke and read access. No platform administration or purge permission.'))],async()=>{
     const apps=await api(tenantPath('/apps',tenant));
     if(apps.items.some(app=>app.name===name.value))throw Error(tr('这个名称已存在，请给新应用换个名字。','That app name is already used. Choose a new name.'));
     const token=await api(tenantPath('/tokens',tenant),{label:'Development tools / '+name.value,scopes:['read','publish','invoke'],appIds:null});
     active={...token,name:name.value};state.launches.set(tenant.id,active);drawHandoff();form.hidden=true;await poll();return false;
-  },tr('创建 token，生成指令','Create token & get command'));
+  },tr('创建 token，生成步骤','Create token & get the steps'));
   async function poll(){
     if(!active||checking||!progress.isConnected||document.hidden)return;
     checking=true;
     try{
       const list=await api(tenantPath('/apps',tenant),undefined,'GET',owner.controller.signal),app=list.items.find(app=>app.name===active.name);
-      if(!app){fill(progress,h('h3',{},tr('等待 agent 开始','Waiting for your agent')),h('p',{class:'muted'},tr('把指令粘贴给 agent。这一页会自动显示发布进展，无需反复刷新。','Paste the instruction into your agent. This page will show deployment progress automatically.')));return;}
+      if(!app){fill(progress,h('h3',{},tr('等待 agent 开始','Waiting for your agent')),h('p',{class:'muted'},tr('先在终端完成第 1 步，再把第 2 步粘贴给 agent。这一页会自动显示发布进展，无需反复刷新。','Run step 1 in your terminal, then paste step 2 into your agent. This page shows deployment progress automatically.')));return;}
       const detail=await api('/apps/'+pathId(app.id),undefined,'GET',owner.controller.signal);
       if(!detail.current){fill(progress,h('h3',{},tr('应用已创建，正在准备发布','App created. Preparing its first release.')),h('p',{class:'muted'},tr('agent 正在上传并发布第一个版本。','Your agent is uploading and publishing the first release.')));return;}
       const verified=detail.usage.sleeps>0&&detail.usage.wakes>1;
@@ -467,7 +470,7 @@ function launchForm(distribution,tenant,progress,owner) {
         h('div',{class:'toolbar'},h('a',{href:app.url,target:'_blank',rel:'noopener',class:'btn primary'},tr('打开我的应用 ↗','Open my app ↗')),navLink(tr('查看访问统计','See visit statistics'),projectLink(app,'usage')),btn(tr('再创建一个应用','Create another app'),()=>{state.launches.delete(tenant.id);render('replace');},'ghost')));
     }catch(error){if(error.name!=='AbortError')fill(progress,errorLine(error,poll));}finally{checking=false;}
   }
-  if(active){form.hidden=true;drawHandoff();poll();}else fill(progress,h('p',{class:'muted'},tr('生成指令后，这里会显示应用上线和休眠恢复的进展。','After you generate the instruction, this area follows deployment and idle/recovery progress.')));
+  if(active){form.hidden=true;drawHandoff();poll();}else fill(progress,h('p',{class:'muted'},tr('生成步骤后，这里会显示应用上线和休眠恢复的进展。','After you get the steps, this area follows deployment and idle/recovery progress.')));
   const timer=setInterval(poll,5000);owner.cleanup.push(()=>clearInterval(timer));
   return [form,handoff];
 }
