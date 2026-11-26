@@ -249,14 +249,14 @@ async function scoped(client: Client, scopes: string[]): Promise<Record<string, 
   return { authorization: 'Bearer ' + value.token };
 }
 const page = { contract: 'pneuma-space.cf/1', runtime: 'static', entry: 'public/index.html', capabilities: { static: { dir: 'public' } } };
-async function upload(client: Client, app: { id: string }, body: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
-  const bytes = JSON.stringify({ manifest: page, files: [{ path: 'public/index.html', body: Buffer.from('Page ' + randomBytes(4).toString('hex')).toString('base64'), contentType: 'text/html' }] });
-  const response = await request('/apps/' + app.id + '/uploads', client, { manifest: page, digest: hash(bytes), bytes: Buffer.byteLength(bytes), ...body }, 'POST', headers);
-  if (response.status !== 201) return { response, uploadId: '' };
+async function upload(client: Client, app: { id: string }, body: Record<string, unknown> = {}, headers: Record<string, string> = {}, files = [{ path: 'public/index.html', body: Buffer.from('Page ' + randomBytes(4).toString('hex')).toString('base64'), contentType: 'text/html' }]) {
+  const bytes = JSON.stringify({ manifest: page, files }), digest = hash(bytes);
+  const response = await request('/apps/' + app.id + '/uploads', client, { manifest: page, digest, bytes: Buffer.byteLength(bytes), ...body }, 'POST', headers);
+  if (response.status !== 201) return { response, uploadId: '', digest };
   const ticket = await response.json() as { url: string; uploadId: string };
   const bucket = await mf.getR2Bucket('PNEUMA_SPACE_ARTIFACTS') as unknown as R2Bucket;
   await bucket.put(new URL(ticket.url).pathname.slice('/artifacts/'.length), bytes);
-  return { response, uploadId: ticket.uploadId };
+  return { response, uploadId: ticket.uploadId, digest };
 }
 async function release(client: Client, app: App, body: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
   const ephemeral = app.expiresAt !== null ? { ephemeral: true } : {};
@@ -273,6 +273,35 @@ async function ticketsExpired(app: { id: string }) {
   const db = await mf.getD1Database('PNEUMA_SPACE_DB');
   await db.prepare('UPDATE uploads SET ticket_expires_at=0 WHERE app_id=?').bind(app.id).run();
 }
+const artifacts = async () => await mf.getR2Bucket('PNEUMA_SPACE_ARTIFACTS') as unknown as R2Bucket;
+
+test('CF-06 a release from an upload serves every file of its static directory', async () => {
+  const client = await identity(), app = await created(client);
+  const paths = ['index.html', 'style.css', 'app.js', 'icons/icon.svg'];
+  const { uploadId } = await upload(client, app, {}, {}, paths.map(path => ({ path: 'public/' + path, body: Buffer.from('File ' + path).toString('base64'), contentType: 'text/plain' })));
+  assert.equal((await request('/apps/' + app.id + '/releases', client, { uploadId })).status, 200);
+  for (const path of paths) assert.equal(await (await mf.dispatchFetch(origin + '/apps/' + app.name + '/' + path, { headers: { cookie: client.cookie } })).text(), 'File ' + path);
+});
+test('CF-06 a release from an upload stores the uploaded bytes as its package', async () => {
+  const client = await identity(), app = await created(client), { uploadId, digest } = await upload(client, app);
+  assert.equal((await request('/apps/' + app.id + '/releases', client, { uploadId })).status, 200);
+  const [first] = (await detail(client, app)).releases as { key: string }[];
+  assert.equal(hash(await (await (await artifacts()).get(first.key))!.text()), digest);
+});
+test('CF-07 a release whose stored package copy changed is refused and writes no release', async () => {
+  const client = await identity(), app = await created(client), { uploadId, digest } = await upload(client, app);
+  await (await artifacts()).put('apps/' + app.id + '/artifacts/' + digest + '/package.json', 'changed');
+  assert.equal((await request('/apps/' + app.id + '/releases', client, { uploadId })).status, 409);
+  assert.deepEqual((await detail(client, app)).releases, []);
+});
+test('CF-07 a rollback to a release whose stored package changed is refused and keeps the current release', async () => {
+  const client = await identity(), app = await created(client);
+  await release(client, app); await release(client, app);
+  const [first] = (await detail(client, app)).releases as { key: string }[];
+  await (await artifacts()).put(first.key, 'changed');
+  assert.equal((await request('/apps/' + app.id + '/actions', client, { type: 'rollback', release: 1 })).status, 409);
+  assert.equal((await detail(client, app)).current?.number, 2);
+});
 
 test('CF-29 an app created ephemeral ends at creation plus the default lifetime, shown in list and detail', async () => {
   const client = await identity(), app = await created(client, { ephemeral: {} }), durable = await created(client);

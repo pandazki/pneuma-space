@@ -165,7 +165,8 @@ export class AppCell extends DurableObject<Env> {
     if (this.state().status === 'removed' || this.state().status === 'purging' || this.state().status === 'purged') fail(409, 'inactive', 'Resume the application before publishing.');
     const committed = this.ctx.storage.kv.get<{ digest: string }>('platform:published:' + key);
     if (committed) { if (committed.digest !== artifact.digest) fail(409, 'idempotency', 'Key was already used for another package.'); return this.snapshot(); }
-    await readPackage(this.env, artifact);
+    // prepareUploadArtifact verified an upload's package earlier in this serial operation.
+    if (uploadId === undefined) await readPackage(this.env, artifact);
     for (const trigger of Object.values(artifact.manifest.capabilities.cron?.triggers ?? {})) if (trigger.schedule) nextSchedule(trigger.schedule, Date.now());
     await authorizeApp(this.env, actor, this.state().id, 'publish');
     if (integer(expectedGeneration, 'publication generation', 0, Number.MAX_SAFE_INTEGER) !== this.state().generation) fail(409, 'retired', 'Application changed after this upload began.');

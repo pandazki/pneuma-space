@@ -71,7 +71,9 @@ export function parsePackage(value: unknown): AppPackage {
   return { manifest, files };
 }
 export async function readPackage(env: Env, artifact: Artifact): Promise<AppPackage> {
-  const object = await env.PNEUMA_SPACE_ARTIFACTS.get(artifact.key);
+  return checkPackage(await env.PNEUMA_SPACE_ARTIFACTS.get(artifact.key), artifact);
+}
+async function checkPackage(object: R2ObjectBody | null, artifact: Artifact): Promise<AppPackage> {
   if (!object || object.size > PACKAGE_LIMIT || object.size !== artifact.bytes) fail(409, 'artifact', 'Application package is missing or has changed.');
   const bytes = new Uint8Array(await object.arrayBuffer());
   if (await sha(bytes) !== artifact.digest) fail(409, 'digest', 'Application package checksum does not match.');
@@ -127,25 +129,26 @@ export async function prepareUploadArtifact(env: Env, actor: Actor, appId: strin
   admit();
   const manifest = parseManifest(JSON.parse(upload.manifest_json));
   const key = 'apps/' + appId + '/artifacts/' + upload.digest + '/package.json';
-  let object = await env.PNEUMA_SPACE_ARTIFACTS.get(key);
-  if (!object) {
+  const artifact: Artifact = { digest: upload.digest, bytes: upload.bytes, key, manifest };
+  const stored = await env.PNEUMA_SPACE_ARTIFACTS.get(key);
+  let pkg: AppPackage, copy: Promise<unknown> | null = null;
+  if (stored) pkg = await checkPackage(stored, artifact);
+  else {
     if (upload.expires_at < Date.now()) fail(409, 'upload_expired', 'Upload has expired.');
-    object = await env.PNEUMA_SPACE_ARTIFACTS.get(upload.object_key);
+    const object = await env.PNEUMA_SPACE_ARTIFACTS.get(upload.object_key);
     if (!object || object.size !== upload.bytes || object.size > PACKAGE_LIMIT) fail(409, 'upload_missing', 'Package upload is missing or has an unexpected size.');
     const bytes = new Uint8Array(await object.arrayBuffer());
     if (await sha(bytes) !== upload.digest) fail(409, 'digest', 'Package checksum does not match.');
-    const pkg = parsePackage(JSON.parse(new TextDecoder().decode(bytes)));
+    pkg = parsePackage(JSON.parse(new TextDecoder().decode(bytes)));
     if (JSON.stringify(pkg.manifest) !== JSON.stringify(manifest)) fail(409, 'manifest', 'Uploaded manifest does not match.');
     await authorizeApp(env, actor, appId, 'publish');
-    await env.PNEUMA_SPACE_ARTIFACTS.put(key, bytes, { httpMetadata: { contentType: 'application/json' }, onlyIf: { etagDoesNotMatch: '*' } });
+    copy = env.PNEUMA_SPACE_ARTIFACTS.put(key, bytes, { httpMetadata: { contentType: 'application/json' }, onlyIf: { etagDoesNotMatch: '*' } });
   }
-  const artifact: Artifact = { digest: upload.digest, bytes: upload.bytes, key, manifest };
-  const pkg = await readPackage(env, artifact);
   const dir = manifest.capabilities.static?.dir;
-  if (dir) for (const file of pkg.files.filter(file => file.path.startsWith(dir + '/'))) {
-    const bytes = Uint8Array.from(atob(file.body), c => c.charCodeAt(0));
-    await env.PNEUMA_SPACE_ARTIFACTS.put('apps/' + appId + '/artifacts/' + artifact.digest + '/static/' + file.path.slice(dir.length + 1), bytes, { httpMetadata: { contentType: file.contentType }, onlyIf: { etagDoesNotMatch: '*' } });
-  }
+  // The writes are create-only under the digest, so their order does not matter, and in sequence their R2 round trips add up. All settle before a failure answers.
+  const writes = await Promise.allSettled([copy, ...(dir ? pkg.files.filter(file => file.path.startsWith(dir + '/')).map(file =>
+    env.PNEUMA_SPACE_ARTIFACTS.put('apps/' + appId + '/artifacts/' + artifact.digest + '/static/' + file.path.slice(dir.length + 1), Uint8Array.from(atob(file.body), c => c.charCodeAt(0)), { httpMetadata: { contentType: file.contentType }, onlyIf: { etagDoesNotMatch: '*' } })) : [])]);
+  for (const write of writes) if (write.status === 'rejected') throw write.reason;
   return artifact;
 }
 export async function staticResponse(env: Env, appId: string, artifact: Artifact, request: Request, pathname: string): Promise<Response | null> {
