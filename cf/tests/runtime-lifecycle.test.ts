@@ -424,6 +424,37 @@ test('CF-28 each wake appends an event carrying its record', async () => {
   assert.deepEqual(events.items.filter(event => event.type === 'wake-ready').map(event => [event.data?.bootId, event.data?.outcome]), [[runtime.bootId, 'ready']]);
 });
 
+/** Runs `work` with the shared tenant limited to one running app, and `holder` holding a slot from before. */
+async function oneSlot(holder: string, work: () => Promise<void>) {
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  await db.batch([
+    db.prepare("INSERT OR IGNORE INTO apps(id,name,tenant_id,owner_id,origin,created_at,create_key) VALUES(?,?,'tenant','owner',?,1,?)").bind(holder, holder, holder, holder),
+    db.prepare("INSERT INTO compute(app_id,boot_id,started_at) VALUES(?,'held',1)").bind(holder),
+    db.prepare("UPDATE tenants SET awake_limit=1 WHERE id='tenant'"),
+  ]);
+  try { await work(); } finally { await db.batch([db.prepare('DELETE FROM compute WHERE app_id=?').bind(holder), db.prepare("UPDATE tenants SET awake_limit=2 WHERE id='tenant'")]); }
+}
+test('CF-20 a wake beyond the running-app limit answers 503 compute_quota', async () => {
+  const { app } = await fixture();
+  await call(app, '/test/configure-kv', {});
+  await call(app, '/test/runner', {});
+  // An app whose cell cannot answer keeps its slot.
+  await oneSlot('app_held' + crypto.randomUUID().replaceAll('-', ''), async () => {
+    const response = await call(app, '/_pneuma-space/invoke/');
+    assert.deepEqual([response.status, (await response.json() as { error: { code: string } }).error.code], [503, 'compute_quota']);
+  });
+});
+test('CF-20 a wake takes the slot an asleep app still holds', async () => {
+  const { app: asleep } = await fixture(), { app } = await fixture();
+  await call(app, '/test/configure-kv', {});
+  await call(app, '/test/runner', {});
+  await oneSlot(asleep, async () => {
+    assert.equal(await (await call(app, '/_pneuma-space/invoke/')).text(), 'woken');
+    const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+    assert.equal((await db.prepare('SELECT count(*) AS n FROM compute WHERE app_id=?').bind(asleep).first<{ n: number }>())?.n, 0);
+  });
+});
+
 async function expiries(app: string): Promise<{ user_id: string; result: string; detail: string }[]> {
   const db = await mf.getD1Database('PNEUMA_SPACE_DB');
   return (await db.prepare("SELECT user_id,result,detail FROM audit WHERE app_id=? AND action='app.expire' ORDER BY at,id").bind(app).all<{ user_id: string; result: string; detail: string }>()).results;
