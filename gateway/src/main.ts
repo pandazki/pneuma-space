@@ -48,7 +48,10 @@ const setup = (() => {
     if (hosted && (!Number.isSafeInteger(signupLimit) || signupLimit < 0)) throw new Error('PNEUMA_SPACE_HOSTED_SIGNUP_LIMIT must be a nonnegative integer');
     const scaleMax = Number(process.env.PNEUMA_SPACE_SCALE_MAX || 10);
     if (!Number.isInteger(scaleMax) || scaleMax < 1) throw new Error(`PNEUMA_SPACE_SCALE_MAX must be a whole number of at least 1, got "${process.env.PNEUMA_SPACE_SCALE_MAX}"`);
-    return { pods, admins, upstream, consoleIdentity, hosted, signupLimit, scaleMax, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
+    const adminHosts = (process.env.PNEUMA_SPACE_ADMIN_HOSTS ?? '').split(',').map((name) => name.trim()).filter(Boolean);
+    const unnamed = adminHosts.find((name) => !/^[a-z0-9_.-]+$/i.test(name));
+    if (unnamed !== undefined) throw new Error(`PNEUMA_SPACE_ADMIN_HOSTS lists host names, without scheme or port, got "${unnamed}"`);
+    return { pods, admins, upstream, consoleIdentity, hosted, signupLimit, scaleMax, adminHosts, addressing: parseAppsOrigin(process.env.PNEUMA_SPACE_APPS_ORIGIN) };
   } catch (error) {
     console.error(`pneuma-space: ${(error as Error).message}`);
     process.exit(1);
@@ -222,7 +225,7 @@ const peers = process.env.PNEUMA_SPACE_PEERS
   : undefined;
 const admin = await startAdmin({
   registry, bundles, runtime, guard, metrics, nodes, infra, scaleMax: setup.scaleMax, requests, replica, peers, store, ingressPort, upstream, providers,
-  current: () => instances.current(),
+  current: () => instances.current(), adminHosts: setup.adminHosts,
   hosted: setup.hosted ? { controlOrigin: setup.hosted.controlOrigin, identityPaths: HOSTED_IDENTITY_PATHS } : undefined,
 }, { port: ADMIN_PORT, host: '0.0.0.0' });
 const exporter = await serveMetrics(process.env.PNEUMA_SPACE_METRICS_PORT, () => metrics.prometheus());
