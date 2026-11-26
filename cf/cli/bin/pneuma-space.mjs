@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {readFile,writeFile,mkdir,readdir,lstat,cp,chmod,realpath} from 'node:fs/promises';
+import {readFile,writeFile,mkdir,readdir,lstat,copyFile,chmod,realpath,constants} from 'node:fs/promises';
 import {resolve,join,basename,extname,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash,randomUUID} from 'node:crypto';
@@ -53,6 +53,29 @@ async function workspace(directory){
   return {directory,privateDir,project:await jsonFile(join(privateDir,'project.json')),client:apiClient(await jsonFile(join(privateDir,'credentials.json')))};
 }
 async function saveProject(w){await save(join(w.privateDir,'project.json'),w.project);}
+const keepExisting=error=>{if(error.code!=='EEXIST')throw error;};
+const create=(path,text)=>writeFile(path,text,{flag:'wx'}).catch(keepExisting);
+async function copyTree(from,to,{replace=false}={}){
+  await mkdir(to,{recursive:true});
+  for(const entry of await readdir(from,{withFileTypes:true})){
+    const source=join(from,entry.name),target=join(to,entry.name);
+    if(entry.isDirectory())await copyTree(source,target,{replace});
+    else await copyFile(source,target,replace?0:constants.COPYFILE_EXCL).catch(keepExisting);
+  }
+}
+// Each step keeps the files that exist, so running it again finishes whatever an earlier run left; setup:'complete' comes last.
+async function scaffold(directory,project){
+  const privateDir=join(directory,'.pneuma-space');
+  await copyTree(join(toolRoot,'templates','demo'),directory);
+  await copyTree(toolRoot,join(privateDir,'tool'),{replace:true});
+  for(const folder of ['.agents','.claude','.cursor','.gemini','.github'])await copyTree(join(toolRoot,'templates','skill'),join(directory,folder,'skills','pneuma-space'));
+  for(const file of ['CLAUDE.md','GEMINI.md','.github/copilot-instructions.md'])await create(join(directory,file),'Read AGENTS.md before changing or deploying this application.\n');
+  await create(join(directory,'.gitignore'),'.pneuma-space/\nnode_modules/\n.env\n.env.*\n*.key\n*.pem\n');
+  await create(join(directory,'package.json'),JSON.stringify({name:project.name,private:true,type:'module',scripts:{deploy:'node .pneuma-space/tool/bin/pneuma-space.mjs publish',bench:'node .pneuma-space/tool/bin/pneuma-space.mjs bench',status:'node .pneuma-space/tool/bin/pneuma-space.mjs status'}},null,2)+'\n');
+  await save(join(privateDir,'project.json'),{...project,setup:'complete'});
+  log('setup',`Created ${directory}. Project instructions and skills are installed for Codex, Claude Code, Cursor, Gemini CLI and Copilot.`);
+  return workspace(directory);
+}
 export async function initialize(directory,options={}){
   const privateDir=join(directory,'.pneuma-space'),projectFile=join(privateDir,'project.json');
   if(await exists(projectFile)){
@@ -60,9 +83,14 @@ export async function initialize(directory,options={}){
     if(options.origin&&new URL(options.origin).origin!==old.origin||options.tenant&&options.tenant!==old.tenant)throw Error('This directory belongs to a different workspace. Choose a new directory.');
     if(process.env.PNEUMA_SPACE_TOKEN)await save(join(privateDir,'credentials.json'),{origin:old.origin,token:process.env.PNEUMA_SPACE_TOKEN});
     delete process.env.PNEUMA_SPACE_TOKEN;
+    // An earlier CLI wrote no marker. Its project got past setup once publish had created an app, which leaves an app key, null after a discard.
+    if(old.setup!=='complete'){
+      if(!('app' in old)){log('setup','Finishing an interrupted setup. Files that already exist are kept.');return scaffold(directory,old);}
+      await save(projectFile,{...old,setup:'complete'});
+    }
     log('setup','Existing project retained. Continuing without replacing your files.');return workspace(directory);
   }
-  if(await exists(directory)&&(await readdir(directory)).length)throw Error('The directory is not empty. Choose a new project directory; no files were replaced.');
+  if(await exists(directory)&&(await readdir(directory)).some(name=>name!=='.pneuma-space'))throw Error('The directory is not empty. Choose a new project directory; no files were replaced.');
   const name=options.name||basename(directory);
   if(!/^[a-z][a-z0-9-]{0,39}$/.test(name))throw Error('Choose a project name with lowercase letters, digits and hyphens, starting with a letter.');
   if(!options.origin)throw Error('Use the complete command from Dashboard → Create app. The workspace address is missing.');
@@ -74,18 +102,7 @@ export async function initialize(directory,options={}){
   await save(join(privateDir,'credentials.json'),{origin:client.origin,token:process.env.PNEUMA_SPACE_TOKEN});delete process.env.PNEUMA_SPACE_TOKEN;
   const project={name,tenant,origin:client.origin,createKey:randomUUID()};
   await save(projectFile,project);
-  await cp(join(toolRoot,'templates','demo'),directory,{recursive:true,force:false,errorOnExist:true});
-  await cp(toolRoot,join(privateDir,'tool'),{recursive:true});
-  const skill=await readFile(join(toolRoot,'templates','skill','SKILL.md'),'utf8');
-  for(const folder of ['.agents','.claude','.cursor','.gemini','.github']){
-    const target=join(directory,folder,'skills','pneuma-space');await mkdir(target,{recursive:true});await writeFile(join(target,'SKILL.md'),skill);
-    await cp(join(toolRoot,'templates','skill','references'),join(target,'references'),{recursive:true});
-  }
-  for(const file of ['CLAUDE.md','GEMINI.md','.github/copilot-instructions.md'])await writeFile(join(directory,file),'Read AGENTS.md before changing or deploying this application.\n');
-  await writeFile(join(directory,'.gitignore'),'.pneuma-space/\nnode_modules/\n.env\n.env.*\n*.key\n*.pem\n');
-  await writeFile(join(directory,'package.json'),JSON.stringify({name,private:true,type:'module',scripts:{deploy:'node .pneuma-space/tool/bin/pneuma-space.mjs publish',bench:'node .pneuma-space/tool/bin/pneuma-space.mjs bench',status:'node .pneuma-space/tool/bin/pneuma-space.mjs status'}},null,2)+'\n');
-  log('setup',`Created ${directory}. Project instructions and skills are installed for Codex, Claude Code, Cursor, Gemini CLI and Copilot.`);
-  return workspace(directory);
+  return scaffold(directory,project);
 }
 const appUrl=w=>w.client.origin+'/apps/'+w.project.app.name+'/';
 // --manager names the manager on each write and, on publish, also sets it (ADR 0039).
