@@ -89,6 +89,8 @@ export async function beginUpload(env: Env, actor: Actor, app: AppRow, body: Rec
   if (!/^[a-f0-9]{64}$/.test(digest)) fail(400, 'digest', 'Use a SHA-256 digest.');
   const bytes = integer(body.bytes, 'package size', 1, PACKAGE_LIMIT), ephemeral = statedEphemeral(body.ephemeral);
   if (manifest.capabilities.rtc && (!env.PNEUMA_SPACE_TURN_KEY_ID || !env.PNEUMA_SPACE_TURN_API_TOKEN)) fail(409, 'rtc_unconfigured', 'TURN has not been configured.');
+  // Here and not in parseManifest, which also reads releases published before ADR 0050; they boot their whole package.
+  if (manifest.runtime === 'node' && manifest.capabilities.static && manifest.entry.startsWith(manifest.capabilities.static.dir + '/')) fail(400, 'entry', 'The entry must lie outside the static directory: its files are served from storage and are not in the container.');
   const snapshot = await cellValue<AppSnapshot>(env, app.id, '/inspect');
   mustName(snapshot, named);
   expectKind(snapshot, ephemeral);
@@ -146,9 +148,17 @@ export async function prepareUploadArtifact(env: Env, actor: Actor, appId: strin
     copy = env.PNEUMA_SPACE_ARTIFACTS.put(key, bytes, { httpMetadata: { contentType: 'application/json' }, onlyIf: { etagDoesNotMatch: '*' } });
   }
   const dir = manifest.capabilities.static?.dir;
+  let code: Promise<unknown> | null = null;
+  if (dir && manifest.runtime === 'node') {
+    const bytes = new TextEncoder().encode(JSON.stringify({ manifest: pkg.manifest, files: pkg.files.filter(file => !file.path.startsWith(dir + '/')) }));
+    const digest = await sha(bytes);
+    // Named by its own digest: the same upload published again after its encoding changed gets a new object, not a stale one.
+    artifact.code = { key: 'apps/' + appId + '/artifacts/' + artifact.digest + '/code/' + digest + '.json', digest };
+    code = env.PNEUMA_SPACE_ARTIFACTS.put(artifact.code.key, bytes, { httpMetadata: { contentType: 'application/json' }, onlyIf: { etagDoesNotMatch: '*' } });
+  }
   // The writes are create-only under the digest, so their order does not matter, and in sequence their R2 round trips add up. All settle before a failure answers.
   // Not Uint8Array.from(atob(body), fn): it first builds a JavaScript array with one element per byte, about 25 MiB of heap for a 3 MiB file.
-  const writes = await Promise.allSettled([copy, ...(dir ? pkg.files.filter(file => file.path.startsWith(dir + '/')).map(file =>
+  const writes = await Promise.allSettled([copy, code, ...(dir ? pkg.files.filter(file => file.path.startsWith(dir + '/')).map(file =>
     env.PNEUMA_SPACE_ARTIFACTS.put('apps/' + appId + '/artifacts/' + artifact.digest + '/static/' + file.path.slice(dir.length + 1), Uint8Array.fromBase64(file.body), { httpMetadata: { contentType: file.contentType }, onlyIf: { etagDoesNotMatch: '*' } })) : [])]);
   for (const write of writes) if (write.status === 'rejected') throw write.reason;
   return artifact;

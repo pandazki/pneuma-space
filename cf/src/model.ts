@@ -26,7 +26,8 @@ export type Manifest = {
 };
 export type PackageFile = { path: string; body: string; contentType: string };
 export type AppPackage = { manifest: Manifest; files: PackageFile[] };
-export type Artifact = { digest: string; bytes: number; key: string; manifest: Manifest };
+/** When present, `code` is the package the runner boots: the files outside the static directory (ADR 0050). Without it the runner boots the whole package. */
+export type Artifact = { digest: string; bytes: number; key: string; manifest: Manifest; code?: { key: string; digest: string } };
 export type Release = Artifact & { number: number; createdAt: number; createdBy: string };
 export type Policy = {
   idleSeconds: number; requestSeconds: number; drainSeconds: number;

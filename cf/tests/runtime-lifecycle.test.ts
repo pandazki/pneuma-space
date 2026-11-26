@@ -2,11 +2,15 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions, type WebSocket as LocalWebSocket } from 'miniflare';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import http from 'node:http';
 import { once } from 'node:events';
+import { tmpdir } from 'node:os';
+import { join, relative } from 'node:path';
 import { DEFAULT_POLICY, WAKE_PHASES } from '../src/model.ts';
+// @ts-expect-error The runner is executed directly by Node in its image.
+import { extractPackage } from '../runner/package.mjs';
 
 let mf: Miniflare;
 let triggerServer: http.Server;
@@ -42,10 +46,10 @@ before(async () => {
         const cell = this;
         return {
           running: false, images: {base: 'runner'},
-          start(options) { cell.boot = options.env.PNEUMA_SPACE_BOOT_ID; },
+          start(options) { cell.boot = options.env.PNEUMA_SPACE_BOOT_ID; cell.digest = options.env.PNEUMA_SPACE_DIGEST; },
           async setInactivityTimeout() {},
           getTcpPort() { return {fetch: async input => new URL(input.url ?? input).pathname === '/_pneuma-space/ready'
-            ? Response.json({bootId: cell.boot, digest: cell.state().current.digest, ready: true, uptime: 5, phases: {fetch: 30, unpack: 4, listen: 12}})
+            ? Response.json({bootId: cell.boot, digest: cell.digest, ready: true, uptime: 5, phases: {fetch: 30, unpack: 4, listen: 12}})
             : new Response('woken')}; },
         };
       }
@@ -70,6 +74,7 @@ before(async () => {
           return new Response('{}');
         }
         if (path === '/test/runner') { this.ctx.storage.kv.put('test:runner', true); return new Response('{}'); }
+        if (path === '/test/started') return Response.json({digest: this.digest});
         if (path === '/test/fail-purge') { const {fail} = await request.json(); if (fail) this.ctx.storage.kv.put('test:fail-purge', true); else this.ctx.storage.kv.delete('test:fail-purge'); return new Response('{}'); }
         if (path === '/test/alarm') { await this.alarm(); return new Response('{}'); }
         if (path === '/test/schedules') return Response.json(this.state().schedules);
@@ -422,6 +427,42 @@ test('CF-28 each wake appends an event carrying its record', async () => {
   const { runtime } = await (await call(app, '/inspect')).json() as { runtime: { bootId: string } };
   const events = await (await call(app, '/events')).json() as { items: { type: string; data?: { bootId: string; outcome: string } }[] };
   assert.deepEqual(events.items.filter(event => event.type === 'wake-ready').map(event => [event.data?.bootId, event.data?.outcome]), [[runtime.bootId, 'ready']]);
+});
+
+const nodeManifest = { contract: 'pneuma-space.cf/1', runtime: 'node', entry: 'server.mjs', capabilities: { static: { dir: 'public' } } };
+const nodeBytes = JSON.stringify({ manifest: nodeManifest, files: ['server.mjs', 'lib/store.mjs', 'public/index.html', 'public/images/photo.bin'].map(path => ({ path, body: Buffer.from('File ' + path).toString('base64'), contentType: 'application/octet-stream' })) });
+const nodeDigest = createHash('sha256').update(nodeBytes).digest('hex');
+/** The files the runner writes for the current boot: what `/boot` serves, verified against the digest the container was started with. */
+async function bootedFiles(app: string): Promise<string[]> {
+  const { generation, runtime } = await (await call(app, '/inspect')).json() as { generation: number; runtime: { bootId: string } };
+  const bytes = Buffer.from(await (await call(app, '/boot', { scope: { appId: app, generation, bootId: runtime.bootId } })).arrayBuffer());
+  const { digest } = await (await call(app, '/test/started')).json() as { digest: string };
+  const directory = await mkdtemp(join(tmpdir(), 'pneuma-cf-boot-'));
+  try {
+    await extractPackage(bytes, digest, directory);
+    return (await readdir(directory, { recursive: true, withFileTypes: true })).filter(entry => entry.isFile()).map(entry => relative(directory, join(entry.parentPath, entry.name))).sort();
+  } finally { await rm(directory, { recursive: true, force: true }); }
+}
+test('CF-34 a Node release published from an upload boots its files outside the static directory and none inside', async () => {
+  const { app } = await fixture(), uploadId = 'up_' + crypto.randomUUID(), key = 'apps/' + app + '/uploads/' + uploadId;
+  await call(app, '/test/runner', {});
+  const { generation } = await (await call(app, '/inspect')).json() as { generation: number };
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  await db.prepare('INSERT INTO uploads(id,app_id,actor_hash,digest,bytes,manifest_json,generation,object_key,created_at,expires_at,ticket_expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(uploadId, app, actor.hash, nodeDigest, Buffer.byteLength(nodeBytes), JSON.stringify(nodeManifest), generation, key, Date.now(), Date.now() + 60000, Date.now() + 60000).run();
+  await (await mf.getR2Bucket('PNEUMA_SPACE_ARTIFACTS') as unknown as R2Bucket).put(key, nodeBytes);
+  const published = await call(app, '/publish-upload', { actor, uploadId, idempotencyKey: 'node' });
+  assert.equal(published.status, 200, await published.clone().text());
+  assert.deepEqual(await bootedFiles(app), ['lib/store.mjs', 'server.mjs']);
+});
+test('CF-34 a release stored before ADR 0050, without a code package, boots its whole package', async () => {
+  const { app } = await fixture(), key = 'apps/' + app + '/artifacts/' + nodeDigest + '/package.json';
+  await call(app, '/test/runner', {});
+  await (await mf.getR2Bucket('PNEUMA_SPACE_ARTIFACTS') as unknown as R2Bucket).put(key, nodeBytes);
+  const { generation } = await (await call(app, '/inspect')).json() as { generation: number };
+  const artifact = { digest: nodeDigest, key, bytes: Buffer.byteLength(nodeBytes), manifest: nodeManifest };
+  const published = await call(app, '/publish', { actor, artifact, expectedGeneration: generation, idempotencyKey: 'stored' });
+  assert.equal(published.status, 200, await published.clone().text());
+  assert.deepEqual(await bootedFiles(app), ['lib/store.mjs', 'public/images/photo.bin', 'public/index.html', 'server.mjs']);
 });
 
 /** Runs `work` with the shared tenant limited to one running app, and `holder` holding a slot from before. */
