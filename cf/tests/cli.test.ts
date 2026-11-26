@@ -1,8 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,symlink,rm,readFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,symlink,rm,readFile,readdir,cp} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join,relative,dirname} from 'node:path';
 import {execFileSync} from 'node:child_process';
 const cli=new URL('../cli/bin/pneuma-space.mjs',import.meta.url).pathname;
 async function fixture(){const dir=await mkdtemp(join(tmpdir(),'pneuma-space-cli-test-'));await mkdir(join(dir,'app'));await writeFile(join(dir,'pneuma-space.json'),JSON.stringify({contract:'pneuma-space.cf/1',runtime:'node',entry:'server.mjs',capabilities:{kv:{}}}));await writeFile(join(dir,'app/server.mjs'),'console.log("application")');return dir;}
@@ -129,4 +129,92 @@ test('CF-30 the packaged CLI --manager names the manager on upload and release a
 });
 test('CF-29 the packaged CLI refuses --ttl without --ephemeral before reading the project',async()=>{
  await assert.rejects(run(process.execPath,[cli,'publish',tmpdir(),'--ttl','60']),/--ttl takes whole seconds and needs --ephemeral/);
+});
+
+const cliRoot=new URL('../cli/',import.meta.url).pathname,setupToken='a'.repeat(64);
+const files=async(dir:string)=>(await readdir(dir,{recursive:true,withFileTypes:true})).filter(entry=>!entry.isDirectory()).map(entry=>relative(dir,join(entry.parentPath,entry.name))).sort();
+const projectFiles=async(dir:string)=>(await files(dir)).filter(file=>!/^\.pneuma-space\/[^/]+\.json$/.test(file));
+/** Every file a whole project made from the CLI package at `tool` holds, apart from its private JSON state. */
+async function whole(tool:string){
+ const skill=await files(join(tool,'templates/skill'));
+ return [...await files(join(tool,'templates/demo')),...['.agents','.claude','.cursor','.gemini','.github'].flatMap(folder=>skill.map(file=>folder+'/skills/pneuma-space/'+file)),'CLAUDE.md','GEMINI.md','.github/copilot-instructions.md','.gitignore','package.json',...(await files(tool)).map(file=>'.pneuma-space/tool/'+file)].sort();
+}
+/** The control API, storage and app that `start` reaches. A preload sends the CLI's https://space.test requests here. */
+async function setupSpace(){
+ const calls:string[]=[];
+ const server=http.createServer(async(req,res)=>{
+  for await(const _chunk of req);
+  const key=req.method+' '+req.url;calls.push(key);
+  const routes:Record<string,unknown>={
+   'GET /api/v1/me':{tenants:[{id:'t'}]},
+   'POST /api/v1/tenants/t/apps':{id:'a_new',name:'demo',expiresAt:null},
+   'POST /api/v1/apps/a_new/uploads':{uploadId:'up',url:'https://space.test/r2',headers:{},expiresAt:Date.now()+60000},
+   'PUT /r2':{},
+   'POST /api/v1/apps/a_new/releases':{id:'a_new',current:{number:1},expiresAt:null},
+   'GET /api/v1/apps/a_new':{current:{manifest:{runtime:'node'}},policy:{idleSeconds:300},runtime:{state:'running'},wake:null,usage:{}},
+   'POST /apps/demo/api/proof':{boot:'b'},'GET /apps/demo/api/proof':{boot:'b'},
+  };
+  res.writeHead(key in routes?200:404,{'content-type':'application/json'});res.end(JSON.stringify(routes[key]??{error:{message:'Not found.'}}));
+ });
+ server.listen(0,'127.0.0.1');await once(server,'listening');
+ const address=server.address(),origin='http://127.0.0.1:'+(address&&typeof address!=='string'?address.port:0);
+ const root=await mkdtemp(join(tmpdir(),'pneuma-space-setup-')),preload=join(root,'space.mjs'),dir=join(root,'demo');
+ await writeFile(preload,`const send=globalThis.fetch;globalThis.fetch=(url,init)=>send(String(url).replace('https://space.test',${JSON.stringify(origin)}),init);\n`);
+ const cli=(command:string,{node=process.execPath,tool=cliRoot}={})=>{
+  const child=run(node,['--import',preload,join(tool,'bin/pneuma-space.mjs'),command,dir,'--origin','https://space.test','--tenant','t','--token-stdin']);
+  child.child.stdin!.end(setupToken);return child;
+ };
+ return {calls,root,dir,cli,close:async()=>{server.closeAllConnections();server.close();await rm(root,{recursive:true,force:true});}};
+}
+test('CF-33 start sets up, publishes and measures a project in an empty directory',async()=>{
+ const s=await setupSpace();try{
+  await s.cli('start');
+  assert.deepEqual(await projectFiles(s.dir),await whole(cliRoot));
+  assert.ok(s.calls.includes('POST /api/v1/apps/a_new/releases'));
+ }finally{await s.close();}
+});
+test('CF-33 a start that fails while copying the template finishes on rerun and keeps the files changed in between',async()=>{
+ const s=await setupSpace(),tool=join(s.root,'tool'),broken=join(tool,'templates/demo/interrupt'),changed=['AGENTS.md','app/server.mjs','package.json','.claude/skills/pneuma-space/SKILL.md'];try{
+  await cp(cliRoot,tool,{recursive:true});await symlink(join(s.root,'missing'),broken);
+  await assert.rejects(s.cli('start',{tool}),/ENOENT/);
+  await rm(broken);
+  for(const file of changed){await mkdir(dirname(join(s.dir,file)),{recursive:true});await writeFile(join(s.dir,file),'Changed by the person.\n');}
+  await s.cli('start',{tool});
+  assert.deepEqual(await projectFiles(s.dir),await whole(tool));
+  for(const file of changed)assert.equal(await readFile(join(s.dir,file),'utf8'),'Changed by the person.\n');
+  assert.ok(s.calls.includes('POST /api/v1/apps/a_new/releases'));
+ }finally{await s.close();}
+});
+test('CF-33 start finishes a directory whose setup stopped with only its setup state',async t=>{
+ const credentials={origin:'https://space.test',token:setupToken},states:Record<string,Record<string,unknown>>={
+  'after the state folder':{'credentials.json':credentials},
+  'after project.json, as an earlier CLI left it':{'credentials.json':credentials,'project.json':{name:'demo',tenant:'t',origin:'https://space.test',createKey:'k'}},
+ };
+ for(const [stopped,state] of Object.entries(states))await t.test(stopped,async()=>{
+  const s=await setupSpace();try{
+   await mkdir(join(s.dir,'.pneuma-space'),{recursive:true});
+   for(const [file,value] of Object.entries(state))await writeFile(join(s.dir,'.pneuma-space',file),JSON.stringify(value));
+   await s.cli('start');
+   assert.deepEqual(await projectFiles(s.dir),await whole(cliRoot));
+   assert.ok(s.calls.includes('POST /api/v1/apps/a_new/releases'));
+  }finally{await s.close();}
+ });
+});
+test('CF-33 init refuses a non-empty directory without setup state and changes nothing',async()=>{
+ const s=await setupSpace();try{
+  await mkdir(s.dir);await writeFile(join(s.dir,'notes.txt'),'Mine.\n');
+  await assert.rejects(s.cli('init'),/not empty/);
+  assert.deepEqual(await files(s.dir),['notes.txt']);assert.equal(await readFile(join(s.dir,'notes.txt'),'utf8'),'Mine.\n');
+ }finally{await s.close();}
+});
+test('CF-33 init sets up a whole project on each Node release line the CLI admits that npx has cached',async t=>{
+ const minimum=Number(/\d+/.exec(JSON.parse(await readFile(join(cliRoot,'package.json'),'utf8')).engines.node)![0]);
+ for(let major=minimum;major<=Number(process.versions.node.split('.')[0]);major++)await t.test('node@'+major,async t=>{
+  const node=await run('npx',['--offline','--yes','node@'+major,'-p','process.execPath']).then(result=>result.stdout.trim(),()=>null);
+  if(!node)return t.skip('not in the npx cache; run npx --yes node@'+major+' -v once to include it');
+  const s=await setupSpace();try{
+   await s.cli('init',{node});
+   assert.deepEqual(await projectFiles(s.dir),await whole(cliRoot));
+  }finally{await s.close();}
+ });
 });
