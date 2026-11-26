@@ -75,8 +75,8 @@ test('CF-35 run reports a failed attempt with its error and exits 1', async () =
   assert.equal(code, 1);
   assert.match(out.text(), /Attempt 1 of tidy failed: Trigger returned HTTP 500\. The platform retries it/);
 });
-test('CF-35 run explains a token without the manage permission and an undeclared job', async () => {
-  for (const [code, message] of [['token_scope', /needs the manage permission/], ['trigger', /live release has no job tidy/]] as const) {
+test('CF-35 run explains a token without the publish or manage permission and an undeclared job', async () => {
+  for (const [code, message] of [['token_scope', /needs the publish or manage permission/], ['trigger', /live release has no job tidy/]] as const) {
     const { w } = workspace(() => { throw Object.assign(new Error('refused'), { code }); });
     await assert.rejects(runJobNow(w, 'tidy', { interval: 5 }), message);
   }

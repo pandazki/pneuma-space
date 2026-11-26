@@ -205,7 +205,7 @@ export async function runJobNow(w,name,{interval=1000,timeout=180000}={}){
   const path=live(w),since=Date.now();let job;
   try{job=await w.client.request(path+'/jobs',{name,payload:null});}
   catch(error){
-    if(error.code==='token_scope')throw Error('This token cannot run jobs on demand: that needs the manage permission, which the token from Dashboard → Create app does not include. Scheduled deliveries still run; follow them with the jobs command.');
+    if(error.code==='token_scope')throw Error('This token cannot run jobs on demand: that needs the publish or manage permission. Scheduled deliveries still run; follow them with the jobs command.');
     if(error.code==='trigger'||error.code==='capability')throw Error(`The live release has no job ${name}. Declare it in pneuma-space.json, write app/jobs/${name}.mjs and run npm run deploy.`);
     throw error;
   }

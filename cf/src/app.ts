@@ -6,7 +6,7 @@ import { NativeResources } from './resources.ts';
 import { nextSchedule } from './cron.ts';
 import { expectKind } from './ephemeral.ts';
 import { NAMED_ACTIONS, managerAfter, mustName } from './manager.ts';
-import { actionScope, fail, WAKE_PHASES, type Actor, type AppAction, type AppRegistration, type AppSnapshot, type Artifact, type Capability, type Delivery, type EventRow, type ExecutionScope, type Json, type LogRow, type ManagerChange, type Policy, type Release, type Wake } from './model.ts';
+import { actionScope, fail, jobScope, WAKE_PHASES, type Actor, type AppAction, type AppRegistration, type AppSnapshot, type Artifact, type Capability, type Delivery, type EventRow, type ExecutionScope, type Json, type LogRow, type ManagerChange, type Policy, type Release, type Wake } from './model.ts';
 import { errorResponse, id, input, integer, json, sha, text } from './util.ts';
 
 type Journal = { previous: Release | null; candidate: Release; key: string };
@@ -621,7 +621,7 @@ export class AppCell extends DurableObject<Env> {
         } else if (path === '/data') {
           await authorizeApp(this.env, actor, this.state().id, 'data'); result = await this.native().perform(value.command, null);
         } else if (path === '/jobs') {
-          await authorizeApp(this.env, actor, this.state().id, 'manage');
+          await authorizeApp(this.env, actor, this.state().id, jobScope(actor));
           result = await this.once(value.idempotencyKey, { name: value.name, payload: value.payload }, async key => this.job(value.name, (value.payload ?? null) as Json, 'manual_' + encodeURIComponent(key)));
           await this.arm();
         } else fail(404, 'route', 'Unknown application operation.');

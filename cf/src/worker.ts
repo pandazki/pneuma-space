@@ -4,7 +4,7 @@ import { artifactUsage, beginUpload, publishUpload, staticResponse } from './art
 import { controlRoute, operationKey } from './control.ts';
 import { admitRequest, appSummary, audit, auditFailure, cell, cellValue } from './directory.ts';
 import { NAMED_ACTIONS, namedManager } from './manager.ts';
-import { type Actor, type AppAction, type AppRow, type AppSnapshot, type Policy, actionScope, fail } from './model.ts';
+import { type Actor, type AppAction, type AppRow, type AppSnapshot, type Policy, actionScope, fail, jobScope } from './model.ts';
 import { boundedBody, errorResponse, input, json, record, text } from './util.ts';
 
 function method(request: Request, expected: string): void {
@@ -36,7 +36,7 @@ function action(value: Record<string, unknown>): AppAction {
 async function appControl(request: Request, env: Env, actor: Actor, appId: string, section?: string): Promise<Response> {
   const next = section === 'actions' && request.method === 'POST' ? action(await input(request, 4096)) : null;
   const publishing = section === 'uploads' || section === 'manager' || (section === 'releases' && request.method === 'POST');
-  const permission = next ? actionScope(next.type) : section === 'data' ? 'data' : section === 'jobs' && request.method === 'POST' ? 'manage' : publishing ? 'publish' : 'read';
+  const permission = next ? actionScope(next.type) : section === 'data' ? 'data' : section === 'jobs' && request.method === 'POST' ? jobScope(actor) : publishing ? 'publish' : 'read';
   const app = await authorizeApp(env, actor, appId, permission);
   const named = (next ? NAMED_ACTIONS.has(next.type) : publishing) ? namedManager(request) : null;
   const detail = named ? { namedManager: named } : '';
