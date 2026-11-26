@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -190,4 +191,39 @@ test('CF-10 purge preserves the platform alarm storage and fence', async () => {
   assert.equal((await call('alarm', { action: 'read-alarm' })).fields.alarm, alarm.fields.alarm);
   assert.deepEqual(record((await call('alarm', { action: 'inventory' })).fields.db).tables, []);
   assert.deepEqual((await call('alarm', { action: 'platform' })).data, [['platform:generation', 2]]);
+});
+const reference = () => readFile(fileURLToPath(new URL('../cli/templates/skill/references/native-api.md', import.meta.url).href), 'utf8');
+function replyCell(doc: string, type: string): string {
+  const row = doc.split('\n').find(line => line.startsWith('|') && line.includes("{type:'" + type + "'"));
+  assert.ok(row, type + ' has no table row in native-api.md');
+  return row.split('|').slice(2).join('|');
+}
+test('CF-21 the native API reference has one table row for each command the broker accepts', async () => {
+  const doc = await reference();
+  const accepted = Array.from((await readFile(fileURLToPath(new URL('../src/resources.ts', import.meta.url).href), 'utf8')).matchAll(/case '(\w+\.\w+)'/g), match => match[1]);
+  const documented = Array.from(doc.matchAll(/\{type:'(\w+\.\w+)'/g), match => match[1]);
+  assert.deepEqual([...new Set(documented)].sort(), [...new Set(accepted)].sort());
+  for (const type of accepted) replyCell(doc, type);
+});
+test('CF-21 the native API reference names every field of the kv and files replies', async () => {
+  const doc = await reference();
+  await ensure('reference');
+  const large = 'x'.repeat(90000), body = btoa(large.slice(0, 65536));
+  const commands = [
+    ...[0, 1, 2, 3].map(n => ({ type: 'kv.put', key: 'large' + n, value: large, ttl: 60 })),
+    { type: 'kv.get', key: 'large0' }, { type: 'kv.get', key: 'absent' }, { type: 'kv.list' },
+    { type: 'kv.increment', key: 'count', amount: 1 }, { type: 'kv.publish', channel: 'changes', value: 1 }, { type: 'kv.delete', key: 'count' },
+    ...[0, 1, 2, 3].map(n => ({ type: 'files.put', path: 'large' + n, body })),
+    { type: 'files.get', path: 'large0' }, { type: 'files.get', path: 'absent' }, { type: 'files.list' }, { type: 'files.delete', path: 'large0' },
+  ];
+  for (const command of commands) {
+    const { status, data } = await run('reference', command);
+    assert.equal(status, 200, JSON.stringify(data));
+    const cell = replyCell(doc, command.type);
+    if (data === null) { assert.match(cell, /\bnull\b/, command.type + ' can reply null'); continue; }
+    const reply = record(data);
+    if (command.type.endsWith('.list')) assert.equal(typeof reply.nextCursor, 'string');
+    const item = Array.isArray(reply.items) ? record(reply.items[0]) : {};
+    for (const field of [...Object.keys(reply), ...Object.keys(item)]) assert.match(cell, new RegExp('\\b' + field + '\\b'), command.type + ' replies ' + field);
+  }
 });
