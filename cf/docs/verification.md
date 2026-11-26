@@ -208,3 +208,37 @@ Medians in ms; fetch and unpack over 16 wakes per cell (8 by request, 8 by publi
 - The owner's five apps, all published before the deploy, each woke `ready` after it when opened; they boot their whole package until they are republished. The largest, a 2.4 MB package, spent 256 ms fetching and 539 ms unpacking. Opening them one after another exposed a defect that predates this change ([#67](https://github.com/pandazki/pneuma-space/issues/67)): while two apps of the space were awake, a wake refused with 503 `compute_quota` counted as a startup failure, and the opening client's retries quarantined two apps after five refusals each. They were unquarantined, then each was opened once when a slot was free, and each was returned to asleep.
 
 Not verified: an app whose server reads its static directory (none was found in the repository, the agent-app-governance template or the 7 CF Node projects on the operator's machine), the Docker runner tests (the runner did not change), and a wake from a browser.
+
+## Runner image rollout (2026-11-27)
+
+A deploy that changes `cf/runner/` pushes a new container image. The first such deploy, of the runner that reports an app's exit ([ADR 0053](../../docs/adr/0053-cloudflare-runner-reports-app-exit.md)), made healthy wakes slower, and it was rolled back after 35 minutes. This run measured how long a new runner image keeps wakes slow.
+
+Each sample is one run of `node scripts/bench-wake.mjs --sizes 30000 --rounds 12`: a fresh ephemeral app with a 0.03 MiB Node package, put to sleep and woken by one request 12 times, then discarded. There were two samples on the old image. Then `origin/main` at `e14e0ad` was deployed at 18:35 UTC by a plain installer rerun, and a sample followed every 15 minutes for 3 hours. The new image had already been pushed at 17:49 by the trial deploy and had run until 18:22, so the installer skipped the push. "Fast" counts the wakes whose app listened within 175 ms; every wake on the old image did, at 157 to 172 ms.
+
+Medians in ms, times in UTC:
+
+| Time | Minutes after deploy | Image | Client | Reserve | Container | Fetch | Listen | Confirm | Fast |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 18:32 | before | old | 1394 | 131 | 495 | 105 | 163 | 41 | 12 of 12 |
+| 18:33 | before | old | 1347 | 120 | 521 | 101 | 161 | 38 | 12 of 12 |
+| 18:35 | 0 | new | 1616 | 103 | 758 | 133 | 222 | 45 | 0 of 12 |
+| 18:50 | 15 | new | 1698 | 120 | 734 | 144 | 225 | 30 | 0 of 12 |
+| 19:06 | 30 | new | 1906 | 99 | 943 | 163 | 299 | 54 | 0 of 12 |
+| 19:21 | 45 | new | 1892 | 132 | 814 | 155 | 271 | 36 | 1 of 12 |
+| 19:36 | 60 | new | 1582 | 125 | 667 | 156 | 221 | 40 | 3 of 12 |
+| 19:51 | 75 | new | 1846 | 105 | 851 | 176 | 273 | 43 | 0 of 12 |
+| 20:06 | 90 | new | 1666 | 93 | 757 | 174 | 274 | 34 | 0 of 12 |
+| 20:21 | 105 | new | 1775 | 148 | 748 | 171 | 269 | 40 | 0 of 12 |
+| 20:36 | 120 | new | 1821 | 124 | 795 | 135 | 271 | 41 | 0 of 12 |
+| 20:51 | 135 | new | 1493 | 118 | 667 | 117 | 214 | 44 | 5 of 12 |
+| 21:06 | 150 | new | 1542 | 88 | 687 | 139 | 221 | 32 | 4 of 12 |
+| 21:21 | 165 | new | 1525 | 134 | 667 | 122 | 219 | 46 | 0 of 12 |
+| 21:36 | 181 | new | 1834 | 131 | 778 | 144 | 274 | 33 | 0 of 12 |
+
+- The cost did not end within 3 hours. The median client time stayed at 1.49 to 1.91 s, against 1.35 to 1.39 s before, so a wake took 100 to 560 ms longer.
+- The slow phases run inside the container: the container start (150 to 450 ms more), the package fetch (10 to 75 ms more) and the app's listen (50 to 140 ms more). The compute reservation and the readiness confirmation, which the AppCell measures on its own side, did not change.
+- The runner's code is not the cause. On a healthy wake the new runner differs only by one field in its readiness report, and ten interleaved local runs of each image took 1761 and 1762 ms. On the deployment the images alternated within 15 minutes with the same result each time: new at 18:20 (1636 ms), old at 18:23 (1332 ms) and at 18:32 (1394 ms), new at 18:35 (1616 ms).
+- All 48 wakes measured on the old image that day listened within 157 to 172 ms. Only 13 of 156 wakes on the new image did. The others fell into separate groups near 220, 270 and 340 ms, not a spread. Separate groups suggest that containers of the new image start on other, slower machines; that is a guess. The share of fast wakes rose to 5 of 12 at 135 minutes and fell back to 0 of 12 by 180, so it shows no steady trend.
+- During the slow period, an app published on the old image woke on the new one in 1.7 s. An app that exits at startup answered 503 `startup` after 2.7 s, held its compute slot about 1.8 s and counted the failure. 25 on-demand runs of one job left the newest 20 in a listing of 20.
+
+Every runner change meets this cost. Deploy runner changes when apps are least used, and expect slower wakes for at least three hours. Not measured: whether the cost ends after more hours or more wakes, and what Cloudflare does differently with a new image.
