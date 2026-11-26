@@ -83,7 +83,11 @@ export async function initialize(directory,options={}){
     if(options.origin&&new URL(options.origin).origin!==old.origin||options.tenant&&options.tenant!==old.tenant)throw Error('This directory belongs to a different workspace. Choose a new directory.');
     if(process.env.PNEUMA_SPACE_TOKEN)await save(join(privateDir,'credentials.json'),{origin:old.origin,token:process.env.PNEUMA_SPACE_TOKEN});
     delete process.env.PNEUMA_SPACE_TOKEN;
-    if(old.setup!=='complete'){log('setup','Finishing an interrupted setup. Files that already exist are kept.');return scaffold(directory,old);}
+    // An earlier CLI wrote no marker. Its project got past setup once publish had created an app, which leaves an app key, null after a discard.
+    if(old.setup!=='complete'){
+      if(!('app' in old)){log('setup','Finishing an interrupted setup. Files that already exist are kept.');return scaffold(directory,old);}
+      await save(projectFile,{...old,setup:'complete'});
+    }
     log('setup','Existing project retained. Continuing without replacing your files.');return workspace(directory);
   }
   if(await exists(directory)&&(await readdir(directory)).some(name=>name!=='.pneuma-space'))throw Error('The directory is not empty. Choose a new project directory; no files were replaced.');

@@ -200,6 +200,24 @@ test('CF-33 start finishes a directory whose setup stopped with only its setup s
   }finally{await s.close();}
  });
 });
+test('CF-33 start adds nothing to a project an earlier CLI set up and published',async t=>{
+ const project={name:'demo',tenant:'t',origin:'https://space.test',createKey:'k'},states:Record<string,Record<string,unknown>>={
+  'with its app':{...project,app:{id:'a_new',name:'demo',expiresAt:null},publishedDigest:'old',upload:null},
+  'after its app was discarded':{...project,app:null,publishedDigest:null,upload:null},
+ };
+ for(const [published,state] of Object.entries(states))await t.test(published,async()=>{
+  const s=await setupSpace();try{
+   await cp(join(cliRoot,'templates/demo'),s.dir,{recursive:true});await rm(join(s.dir,'DESIGN.md'));
+   await mkdir(join(s.dir,'.pneuma-space'));
+   await writeFile(join(s.dir,'.pneuma-space/credentials.json'),JSON.stringify({origin:'https://space.test',token:setupToken}));
+   await writeFile(join(s.dir,'.pneuma-space/project.json'),JSON.stringify(state));
+   const before=await projectFiles(s.dir);
+   await s.cli('start');
+   assert.deepEqual(await projectFiles(s.dir),before);
+   assert.ok(s.calls.includes('POST /api/v1/apps/a_new/releases'));
+  }finally{await s.close();}
+ });
+});
 test('CF-33 init refuses a non-empty directory without setup state and changes nothing',async()=>{
  const s=await setupSpace();try{
   await mkdir(s.dir);await writeFile(join(s.dir,'notes.txt'),'Mine.\n');
