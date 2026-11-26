@@ -1,6 +1,6 @@
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import { authorizeApp, type CredentialProof } from './auth.ts';
-import { admitRequest, appRow, audit, observeApp, releaseCompute, reserveCompute } from './directory.ts';
+import { admitRequest, appRow, audit, auditFailure, observeApp, releaseCompute, reserveCompute } from './directory.ts';
 import { artifactPurgeDeadline, prepareUploadArtifact, readPackage } from './artifacts.ts';
 import { NativeResources } from './resources.ts';
 import { nextSchedule } from './cron.ts';
@@ -17,6 +17,7 @@ type Subscription = { kind: 'browser'; actor: CredentialProof; nextCheckAt: numb
 type DeliveryAttempt = { job: Delivery; generation: number };
 type Receipt = { fingerprint: string; snapshot: boolean; result: unknown };
 const STATE = 'platform:state';
+const CONTROL_WRITES = new Set(['/initialize', '/publish-upload', '/publish', '/action', '/manager', '/data', '/jobs']);
 
 export class AppCell extends DurableObject<Env> {
   private queue: Promise<unknown> = Promise.resolve();
@@ -629,7 +630,10 @@ export class AppCell extends DurableObject<Env> {
         else this.ctx.waitUntil(observeApp(this.env, this.snapshot()).catch((error: unknown) => console.error('Projection update failed', error)));
         return json(result);
       });
-    } catch (error) { return errorResponse(error); }
+    } catch (error) {
+      const path = new URL(request.url).pathname, state = this.ctx.storage.kv.get<State>(STATE);
+      return errorResponse(error, request.method === 'POST' && CONTROL_WRITES.has(path) ? auditFailure(this.env, 'AppCell ' + path, state?.tenantId ?? null, state?.id ?? null) : undefined);
+    }
   }
   webSocketClose(socket: WebSocket): void { this.closeSubscriber(socket, 1000, 'Closed'); this.ctx.waitUntil(this.arm()); }
   webSocketError(socket: WebSocket): void { this.closeSubscriber(socket, 1011, 'Connection failed'); this.ctx.waitUntil(this.arm()); }

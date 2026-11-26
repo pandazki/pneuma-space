@@ -2,7 +2,7 @@ export { AppCell, AppServices } from './app.ts';
 import { authenticate, authRoute, authorizeApp, me, permit, protectWrite, requireAdmin, requireSession } from './auth.ts';
 import { artifactUsage, beginUpload, publishUpload, staticResponse } from './artifacts.ts';
 import { controlRoute, operationKey } from './control.ts';
-import { admitRequest, appSummary, audit, cell, cellValue } from './directory.ts';
+import { admitRequest, appSummary, audit, auditFailure, cell, cellValue } from './directory.ts';
 import { NAMED_ACTIONS, namedManager } from './manager.ts';
 import { type Actor, type AppAction, type AppRow, type AppSnapshot, type Policy, actionScope, fail } from './model.ts';
 import { boundedBody, errorResponse, input, json, record, text } from './util.ts';
@@ -202,6 +202,10 @@ export default {
     try {
       if (new URL(request.url).origin !== env.PNEUMA_SPACE_CONTROL_ORIGIN) fail(404, 'host', 'Unknown hostname.');
       return await control(request, env);
-    } catch (error) { return errorResponse(error); }
+    } catch (error) {
+      const path = new URL(request.url).pathname, ids = /^\/api\/v1\/(tenants|apps)\/([a-z]_[0-9a-f]{32})(?:\/|$)/.exec(path);
+      const write = path.startsWith('/api/v1/') && !['GET', 'HEAD'].includes(request.method);
+      return errorResponse(error, write ? auditFailure(env, request.method + ' ' + path.slice(0, 300), ids?.[1] === 'tenants' ? ids[2] : null, ids?.[1] === 'apps' ? ids[2] : null) : undefined);
+    }
   },
 } satisfies ExportedHandler<Env>;

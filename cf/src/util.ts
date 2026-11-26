@@ -3,11 +3,15 @@ import { HttpError, fail } from './model.ts';
 export function json(value: unknown, status = 200): Response {
   return Response.json(value, { status, headers: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' } });
 }
-export function errorResponse(error: unknown): Response {
-  if (error instanceof HttpError) return json({ error: { code: error.code, message: error.message } }, error.status);
-  const id = crypto.randomUUID();
-  console.error(JSON.stringify({ event: 'request-error', id, message: error instanceof Error ? error.message : 'Unknown error' }));
-  return json({ error: { code: 'internal', message: 'The request could not be completed.', requestId: id } }, 500);
+export type Failure = { requestId: string; error: string };
+/** `keep` stores an unexpected failure where the operator can read it: Workers Logs are sampled and need an API token. */
+export async function errorResponse(error: unknown, keep?: (failure: Failure) => Promise<unknown>): Promise<Response> {
+  if (error instanceof HttpError) return json({ error: { code: error.code, message: error.message, ...(error.requestId && { requestId: error.requestId }) } }, error.status);
+  const failure: Failure = { requestId: crypto.randomUUID(), error: (error instanceof Error ? error.name + ': ' + error.message : 'Unknown error').slice(0, 1000) };
+  console.error(JSON.stringify({ event: 'request-error', id: failure.requestId, message: failure.error }));
+  // A parser's SyntaxError quotes its input, which can come from the request.
+  await keep?.(error instanceof SyntaxError ? { ...failure, error: 'SyntaxError' } : failure).catch((reason: unknown) => console.error(JSON.stringify({ event: 'request-error-unkept', id: failure.requestId, message: String(reason).slice(0, 1000) })));
+  return json({ error: { code: 'internal', message: 'The request could not be completed.', requestId: failure.requestId } }, 500);
 }
 export function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail(400, 'input', 'Expected an object.');
