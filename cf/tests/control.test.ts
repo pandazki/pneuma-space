@@ -178,6 +178,11 @@ test('CF-24 the control session serves an app at its path on the control origin'
   assert.equal(page.status, 200);
   assert.equal(await page.text(), app.contents);
 });
+test('CF-12 a static file revalidated with the weak form of its ETag answers 304', async () => {
+  const client = await identity(), app = await staticApp(client);
+  const etag = (await mf.dispatchFetch(app.url, { headers: { cookie: client.cookie } })).headers.get('etag');
+  assert.equal((await mf.dispatchFetch(app.url, { headers: { cookie: client.cookie, 'if-none-match': 'W/' + etag } })).status, 304);
+});
 test('CF-24 an app path without its trailing slash redirects to the slash form', async () => {
   const response = await mf.dispatchFetch(origin + '/apps/some-app?view=all', { redirect: 'manual' });
   assert.equal(response.status, 308);

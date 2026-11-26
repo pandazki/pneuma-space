@@ -690,7 +690,7 @@ class Runtime {
             }
           }
         } catch {}
-        await scheduler.wait(200);
+        await scheduler.wait(50);
       }
       fail(503, 'startup', 'Application did not become ready.');
     } catch (error) {

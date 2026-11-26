@@ -151,6 +151,11 @@ export async function prepareUploadArtifact(env: Env, actor: Actor, appId: strin
   for (const write of writes) if (write.status === 'rejected') throw write.reason;
   return artifact;
 }
+/** If-None-Match compares weakly (RFC 9110 13.1.2): Cloudflare weakens the ETag of a response it compresses, so browsers send it back as W/"…". */
+function notModified(tags: string | null, etag: string): boolean {
+  const opaque = (tag: string) => tag.trim().replace(/^W\//, '');
+  return tags !== null && (tags.trim() === '*' || tags.split(',').some(tag => opaque(tag) === opaque(etag)));
+}
 export async function staticResponse(env: Env, appId: string, artifact: Artifact, request: Request, pathname: string): Promise<Response | null> {
   let path: string;
   try { path = decodeURIComponent(pathname).slice(1); } catch { return null; }
@@ -163,7 +168,7 @@ export async function staticResponse(env: Env, appId: string, artifact: Artifact
   if (!metadata) return null;
   const headers = new Headers({ 'cache-control': 'private, no-cache', 'etag': metadata.httpEtag, 'accept-ranges': 'bytes', 'x-content-type-options': 'nosniff' });
   metadata.writeHttpMetadata(headers);
-  if (request.headers.get('if-none-match') === metadata.httpEtag) { await whole?.body.cancel(); return new Response(null, { status: 304, headers }); }
+  if (notModified(request.headers.get('if-none-match'), metadata.httpEtag)) { await whole?.body.cancel(); return new Response(null, { status: 304, headers }); }
   if (whole) { headers.set('content-length', String(whole.size)); return new Response(whole.body, { headers }); }
   let offset = 0, length = metadata.size, status = 200;
   const range = request.headers.get('range');

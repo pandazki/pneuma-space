@@ -85,10 +85,16 @@ export async function createApp(env: Env, actor: Actor, tenantId: string, body: 
   return row;
 }
 export async function reserveCompute(env: Env, appId: string, bootId: string): Promise<void> {
-  const app = await appRow(env, appId), db = env.PNEUMA_SPACE_DB;
-  const existing = await db.prepare('SELECT boot_id FROM compute WHERE app_id=?').bind(appId).first<{ boot_id: string }>();
-  if (existing?.boot_id === bootId) return;
-  const others = (await db.prepare('SELECT c.app_id,c.boot_id FROM compute c JOIN apps a ON a.id=c.app_id WHERE a.tenant_id=? AND c.app_id<>?').bind(app.tenant_id, appId).all<{ app_id: string; boot_id: string }>()).results;
+  const db = env.PNEUMA_SPACE_DB;
+  // One round trip for the three reads: each is a trip to the database's region, on the path of every wake.
+  const [apps, existing, held] = await db.batch<Record<string, unknown>>([
+    db.prepare('SELECT * FROM apps WHERE id=? AND purged_at IS NULL').bind(appId),
+    db.prepare('SELECT boot_id FROM compute WHERE app_id=?').bind(appId),
+    db.prepare('SELECT c.app_id,c.boot_id FROM compute c JOIN apps a ON a.id=c.app_id WHERE a.tenant_id=(SELECT tenant_id FROM apps WHERE id=?) AND c.app_id<>?').bind(appId, appId),
+  ]);
+  const app = (apps.results[0] as AppRow | undefined) ?? fail(404, 'app_not_found', 'Application not found.');
+  if ((existing.results[0] as { boot_id: string } | undefined)?.boot_id === bootId) return;
+  const others = held.results as { app_id: string; boot_id: string }[];
   await Promise.all(others.map(async other => {
     try {
       const snapshot = await cellValue<AppSnapshot>(env, other.app_id, '/inspect');
