@@ -146,8 +146,9 @@ export async function prepareUploadArtifact(env: Env, actor: Actor, appId: strin
   }
   const dir = manifest.capabilities.static?.dir;
   // The writes are create-only under the digest, so their order does not matter, and in sequence their R2 round trips add up. All settle before a failure answers.
+  // Not Uint8Array.from(atob(body), fn): it first builds a JavaScript array with one element per byte, about 25 MiB of heap for a 3 MiB file.
   const writes = await Promise.allSettled([copy, ...(dir ? pkg.files.filter(file => file.path.startsWith(dir + '/')).map(file =>
-    env.PNEUMA_SPACE_ARTIFACTS.put('apps/' + appId + '/artifacts/' + artifact.digest + '/static/' + file.path.slice(dir.length + 1), Uint8Array.from(atob(file.body), c => c.charCodeAt(0)), { httpMetadata: { contentType: file.contentType }, onlyIf: { etagDoesNotMatch: '*' } })) : [])]);
+    env.PNEUMA_SPACE_ARTIFACTS.put('apps/' + appId + '/artifacts/' + artifact.digest + '/static/' + file.path.slice(dir.length + 1), Uint8Array.fromBase64(file.body), { httpMetadata: { contentType: file.contentType }, onlyIf: { etagDoesNotMatch: '*' } })) : [])]);
   for (const write of writes) if (write.status === 'rejected') throw write.reason;
   return artifact;
 }
