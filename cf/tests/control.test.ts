@@ -51,6 +51,8 @@ async function staticApp(client: Client) {
 }
 before(async () => {
   const bundled = await build({ entryPoints: [new URL('../src/worker.ts', import.meta.url).pathname], bundle: true, write: false, format: 'esm', platform: 'browser', target: 'esnext', external: ['cloudflare:workers'] });
+  // A Cloudflare isolate's 128 MiB is shared with other objects. With 16 MiB, a release at the package limit fits only if it holds no per-byte or repeated copies of the package.
+  process.env.MINIFLARE_WORKERD_V8_FLAGS = '--max-old-space-size=16';
   mf = new Miniflare(convertV4MiniflareOptions({
     name: 'control-tests', modules: true, script: bundled.outputFiles[0].text,
     compatibilityDate: '2026-11-13', compatibilityFlags: ['nodejs_compat'],
@@ -286,6 +288,35 @@ test('CF-06 a release from an upload serves every file of its static directory',
   const { uploadId } = await upload(client, app, {}, {}, paths.map(path => ({ path: 'public/' + path, body: Buffer.from('File ' + path).toString('base64'), contentType: 'text/plain' })));
   assert.equal((await request('/apps/' + app.id + '/releases', client, { uploadId })).status, 200);
   for (const path of paths) assert.equal(await (await mf.dispatchFetch(origin + '/apps/' + app.name + '/' + path, { headers: { cookie: client.cookie } })).text(), 'File ' + path);
+});
+test('CF-06 a package at the size limit whose static directory holds a 3 MiB file publishes it byte for byte', async () => {
+  const client = await identity(), app = await created(client), blob = randomBytes(3 * 1024 * 1024 - 1024);
+  const { uploadId } = await upload(client, app, {}, {}, [{ path: 'public/index.html', body: Buffer.from('Page').toString('base64'), contentType: 'text/html' }, { path: 'public/blob.bin', body: blob.toString('base64'), contentType: 'application/octet-stream' }]);
+  assert.equal((await request('/apps/' + app.id + '/releases', client, { uploadId })).status, 200);
+  const served = await mf.dispatchFetch(origin + '/apps/' + app.name + '/blob.bin', { headers: { cookie: client.cookie } });
+  assert.ok(Buffer.from(await served.arrayBuffer()).equals(blob));
+});
+test('CF-32 a release that fails unexpectedly answers 500 with a request id that the audit keeps with the error', async () => {
+  const client = await identity(), app = await created(client), { uploadId } = await upload(client, app);
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  await db.exec('ALTER TABLE uploads RENAME TO uploads_hidden');
+  let response: Awaited<ReturnType<typeof request>>;
+  try { response = await request('/apps/' + app.id + '/releases', client, { uploadId }); } finally { await db.exec('ALTER TABLE uploads_hidden RENAME TO uploads'); }
+  const { error } = await response.json() as { error: { code: string; requestId: string } };
+  assert.deepEqual([response.status, error.code], [500, 'internal']);
+  const rows = await db.prepare("SELECT user_id,tenant_id,result,detail FROM audit WHERE app_id=? AND action='request.error'").bind(app.id).all<{ user_id: string; tenant_id: string; result: string; detail: string }>();
+  assert.equal(rows.results.length, 1);
+  const [row] = rows.results, detail = JSON.parse(row.detail) as Record<string, string>;
+  assert.deepEqual([row.user_id, row.tenant_id, row.result, detail.requestId, detail.route], ['platform', client.tenant, 'error', error.requestId, 'AppCell /publish-upload']);
+  assert.match(detail.error, /^Error: .*no such table: uploads/);
+});
+test('CF-07 a release whose uploaded package is not JSON answers 400 and writes no release', async () => {
+  const client = await identity(), app = await created(client), bytes = 'not a package';
+  const ticket = await (await request('/apps/' + app.id + '/uploads', client, { manifest: page, digest: hash(bytes), bytes: bytes.length })).json() as { url: string; uploadId: string };
+  await (await artifacts()).put(new URL(ticket.url).pathname.slice('/artifacts/'.length), bytes);
+  const response = await request('/apps/' + app.id + '/releases', client, { uploadId: ticket.uploadId });
+  assert.deepEqual([response.status, (await response.json() as { error: { code: string } }).error.code], [400, 'package']);
+  assert.deepEqual((await detail(client, app)).releases, []);
 });
 test('CF-06 a release from an upload stores the uploaded bytes as its package', async () => {
   const client = await identity(), app = await created(client), { uploadId, digest } = await upload(client, app);

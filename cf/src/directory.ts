@@ -1,8 +1,8 @@
-import { DEFAULT_POLICY, type Actor, type AppRow, type AppSnapshot, type AppRegistration, fail } from './model.ts';
+import { DEFAULT_POLICY, HttpError, type Actor, type AppRow, type AppSnapshot, type AppRegistration, fail } from './model.ts';
 import { authorizeApp, requireAdmin, tenantRole } from './auth.ts';
 import { ttlSeconds } from './ephemeral.ts';
 import { managerAfter, managerChange } from './manager.ts';
-import { NAME, id, text } from './util.ts';
+import { NAME, id, text, type Failure } from './util.ts';
 
 /** An app holds a slot of its kind until purged, except that an ephemeral app gives its slot back once it is ending; its storage and name stay held (ADR 0046). */
 export const HOLDS_SLOT = "purged_at IS NULL AND (expires_at IS NULL OR observed_status IS NOT 'purging')";
@@ -26,8 +26,8 @@ export async function cell(env: Env, appId: string, path: string, value?: unknow
 }
 export async function cellValue<T>(env: Env, appId: string, path: string, value?: unknown): Promise<T> {
   const response = await cell(env, appId, path, value);
-  const body = await response.json<{ error?: { code?: string; message?: string } }>();
-  if (!response.ok) fail(response.status, body.error?.code ?? 'app_error', body.error?.message ?? 'Application operation failed.');
+  const body = await response.json<{ error?: { code?: string; message?: string; requestId?: string } }>();
+  if (!response.ok) throw new HttpError(response.status, body.error?.code ?? 'app_error', body.error?.message ?? 'Application operation failed.', body.error?.requestId);
   return body as T;
 }
 export async function initialize(env: Env, row: AppRow & { storage_bytes: number }): Promise<void> {
@@ -43,6 +43,9 @@ export async function audit(env: Env, actor: Actor | 'platform', action: string,
   const text = typeof detail === 'string' ? detail : JSON.stringify(detail);
   await env.PNEUMA_SPACE_DB.prepare('INSERT INTO audit(id,at,user_id,tenant_id,app_id,action,result,detail) VALUES(?,?,?,?,?,?,?,?)').bind(id('e'), Date.now(), actor === 'platform' ? actor : actor.user.id, tenantId, appId, action, result, text.slice(0, 4096)).run();
 }
+/** The audit keeps an unexpected failure of a control write with the request id its 500 carries. */
+export const auditFailure = (env: Env, route: string, tenantId: string | null, appId: string | null) => (failure: Failure): Promise<void> =>
+  audit(env, 'platform', 'request.error', tenantId, appId, 'error', { ...failure, route });
 export async function listApps(env: Env, actor: Actor, tenantId?: string): Promise<AppRow[]> {
   if (!tenantId) {
     requireAdmin(actor);
