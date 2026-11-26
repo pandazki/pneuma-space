@@ -1,7 +1,7 @@
 import type { Json, NativeCommand, SqlStatement, SqlValue } from '../src/model.ts';
 
 export type Revisioned = { value: Json; revision: number };
-export type KvRecord = Revisioned & { expiresAt: number | null };
+export type KvRecord = Revisioned & { key: string; expiresAt: number | null };
 export type FileRecord = { path: string; body: string; revision: number; bytes: number };
 export type ObjectRecord = { key: string; bytes: number; contentType: string; etag: string; uploadedAt: number };
 export type Ticket = { id: string; url: string; headers: Record<string, string>; expiresAt: number };
@@ -37,7 +37,7 @@ export const space = {
     get: (key: string) => command<KvRecord | null>({ type: 'kv.get', key }),
     put: (key: string, value: Json, options: { expected?: number | null; ttl?: number } = {}) => command<Revisioned>({ type: 'kv.put', key, value, ...options }),
     delete: (key: string, options: { expected?: number } = {}) => command<{ deleted: boolean }>({ type: 'kv.delete', key, ...options }),
-    list: (options: { prefix?: string; cursor?: string } = {}) => command<List<KvRecord & { key: string }>>({ type: 'kv.list', ...options }),
+    list: (options: { prefix?: string; cursor?: string } = {}) => command<List<KvRecord>>({ type: 'kv.list', ...options }),
     increment: (key: string, amount = 1) => command<Revisioned>({ type: 'kv.increment', key, amount }),
     publish: (channel: string, value: Json) => command<{ subscribers: number }>({ type: 'kv.publish', channel, value }),
   },
