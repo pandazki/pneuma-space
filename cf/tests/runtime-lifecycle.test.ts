@@ -40,17 +40,27 @@ before(async () => {
     import {AppCell as BaseAppCell} from './src/app.ts';
     import worker from './src/worker.ts';
     export {AppServices} from './src/app.ts';
+    // A runner whose app never listens moves this clock past the readiness deadline instead of waiting it out.
+    const now = Date.now;
+    let skew = 0;
+    Date.now = () => now() + skew;
     export class AppCell extends BaseAppCell {
       container() {
-        if (!this.ctx.storage.kv.get('test:runner')) return super.container();
+        const mode = this.ctx.storage.kv.get('test:runner');
+        if (!mode) return super.container();
         const cell = this;
         return {
           running: false, images: {base: 'runner'},
-          start(options) { cell.boot = options.env.PNEUMA_SPACE_BOOT_ID; cell.digest = options.env.PNEUMA_SPACE_DIGEST; },
+          start(options) {
+            if (mode === 'no-start') throw new Error('No container instance is available.');
+            cell.boot = options.env.PNEUMA_SPACE_BOOT_ID; cell.digest = options.env.PNEUMA_SPACE_DIGEST;
+          },
           async setInactivityTimeout() {},
-          getTcpPort() { return {fetch: async input => new URL(input.url ?? input).pathname === '/_pneuma-space/ready'
-            ? Response.json({bootId: cell.boot, digest: cell.digest, ready: true, uptime: 5, phases: {fetch: 30, unpack: 4, listen: 12}})
-            : new Response('woken')}; },
+          getTcpPort() { return {fetch: async input => {
+            if (new URL(input.url ?? input).pathname !== '/_pneuma-space/ready') return new Response('woken');
+            if (mode === 'unready') { skew += 46000; return Response.json({bootId: cell.boot, digest: cell.digest, ready: false, uptime: 5, phases: {fetch: 30, unpack: 4, listen: null}}, {status: 503}); }
+            return Response.json({bootId: cell.boot, digest: cell.digest, ready: true, uptime: 5, phases: {fetch: 30, unpack: 4, listen: 12}});
+          }}; },
         };
       }
       async startBinding(scope) { if (!this.ctx.storage.kv.get('test:runner')) return super.startBinding(scope); }
@@ -73,7 +83,7 @@ before(async () => {
           this.ctx.storage.kv.delete('platform:receipt:' + key);
           return new Response('{}');
         }
-        if (path === '/test/runner') { this.ctx.storage.kv.put('test:runner', true); return new Response('{}'); }
+        if (path === '/test/runner') { const {mode = 'ready'} = await request.json(); this.ctx.storage.kv.put('test:runner', mode); return new Response('{}'); }
         if (path === '/test/started') return Response.json({digest: this.digest});
         if (path === '/test/fail-purge') { const {fail} = await request.json(); if (fail) this.ctx.storage.kv.put('test:fail-purge', true); else this.ctx.storage.kv.delete('test:fail-purge'); return new Response('{}'); }
         if (path === '/test/alarm') { await this.alarm(); return new Response('{}'); }
@@ -111,7 +121,7 @@ before(async () => {
           this.native().ensure(state.current.manifest);
           return new Response('{}');
         }
-        return super.fetch(request);
+        try { return await super.fetch(request); } finally { skew = 0; }
       }
     }
     export default {fetch(request, env) {
@@ -475,15 +485,76 @@ async function oneSlot(holder: string, work: () => Promise<void>) {
   ]);
   try { await work(); } finally { await db.batch([db.prepare('DELETE FROM compute WHERE app_id=?').bind(holder), db.prepare("UPDATE tenants SET awake_limit=2 WHERE id='tenant'")]); }
 }
-test('CF-20 a wake beyond the running-app limit answers 503 compute_quota', async () => {
+type Runtime = { runtime: { state: string; failures: number }; wake: { outcome: string } | null };
+const runtimeOf = async (app: string) => { const { runtime, wake } = await (await call(app, '/inspect')).json() as Runtime; return { state: runtime.state, failures: runtime.failures, wake: wake?.outcome ?? null }; };
+const failedWakes = async (app: string) => ((await (await call(app, '/events')).json()) as { items: { type: string }[] }).items.filter(event => event.type === 'wake-failed').length;
+const invoke = async (app: string) => { const response = await call(app, '/_pneuma-space/invoke/'); return response.ok ? await response.text() : ((await response.json()) as { error: { code: string } }).error.code; };
+const setPolicy = async (app: string, policy: Record<string, number>) => assert.equal((await call(app, '/action', { actor, action: { type: 'policy', policy }, idempotencyKey: 'policy-' + crypto.randomUUID() })).status, 200);
+async function nodeApp(mode = 'ready') {
   const { app } = await fixture();
   await call(app, '/test/configure-kv', {});
-  await call(app, '/test/runner', {});
+  await call(app, '/test/runner', { mode });
+  return app;
+}
+test('CF-35 a wake refused for lack of a slot answers 503 compute_quota with Retry-After, costs the app nothing, and wakes once a slot frees', async () => {
+  const app = await nodeApp();
   // An app whose cell cannot answer keeps its slot.
   await oneSlot('app_held' + crypto.randomUUID().replaceAll('-', ''), async () => {
-    const response = await call(app, '/_pneuma-space/invoke/');
-    assert.deepEqual([response.status, (await response.json() as { error: { code: string } }).error.code], [503, 'compute_quota']);
+    const replies: [number, string, string | null][] = [];
+    for (let i = 0; i <= DEFAULT_POLICY.maxFailures; i++) {
+      const response = await call(app, '/_pneuma-space/invoke/');
+      replies.push([response.status, ((await response.json()) as { error: { code: string } }).error.code, response.headers.get('retry-after')]);
+    }
+    assert.deepEqual(replies.map(([status, code]) => [status, code]), replies.map(() => [503, 'compute_quota']));
+    assert.deepEqual(replies.map(([, , retry]) => retry), replies.map(() => '30'));
+    assert.deepEqual([await runtimeOf(app), await failedWakes(app)], [{ state: 'asleep', failures: 0, wake: null }, 0]);
   });
+  assert.equal(await invoke(app), 'woken');
+});
+test('CF-35 a trigger delivery refused for lack of a slot is retried 30 s later without using an attempt', async () => {
+  const app = await nodeApp();
+  await call(app, '/test/configure-schedule', {});
+  await oneSlot('app_held' + crypto.randomUUID().replaceAll('-', ''), async () => {
+    assert.equal((await call(app, '/jobs', { actor, name: 'tick', payload: null, idempotencyKey: 'refused-job' })).status, 200);
+    let job: { state: string; attempts: number; nextAttemptAt: number; error: string | null } | undefined;
+    await until(async () => { [job] = ((await (await call(app, '/jobs')).json()) as { items: NonNullable<typeof job>[] }).items; return job?.error != null; }, 'The delivery must meet the full space.');
+    assert.deepEqual([job!.state, job!.attempts], ['due', 0]);
+    assert.ok(job!.nextAttemptAt - Date.now() > 25000, 'retried about 30 s later');
+  });
+});
+test('CF-35 a wake whose app never becomes ready counts a failure and quarantines the app at maxFailures', async () => {
+  const app = await nodeApp('unready');
+  await setPolicy(app, { maxFailures: 1 });
+  assert.equal(await invoke(app), 'startup');
+  assert.deepEqual([await runtimeOf(app), await failedWakes(app)], [{ state: 'quarantined', failures: 1, wake: 'failed' }, 1]);
+  assert.equal(await invoke(app), 'quarantined');
+});
+test('CF-35 a successful wake clears the failure count', async () => {
+  const app = await nodeApp('unready');
+  assert.equal(await invoke(app), 'startup');
+  assert.equal((await runtimeOf(app)).failures, 1);
+  await call(app, '/test/runner', { mode: 'ready' });
+  assert.equal(await invoke(app), 'woken');
+  assert.deepEqual(await runtimeOf(app), { state: 'asleep', failures: 0, wake: 'ready' });
+});
+test('CF-35 a wake that fails before the app runs is recorded without counting a failure', async () => {
+  const app = await nodeApp('no-start');
+  await setPolicy(app, { maxFailures: 1 });
+  assert.equal((await call(app, '/_pneuma-space/invoke/')).status, 500);
+  assert.deepEqual([await runtimeOf(app), await failedWakes(app)], [{ state: 'asleep', failures: 0, wake: 'failed' }, 1]);
+});
+test('CF-35 a publication whose release never becomes ready leaves the previous release uncounted', async () => {
+  const app = await nodeApp();
+  await setPolicy(app, { maxFailures: 1 });
+  const { generation } = await (await call(app, '/inspect')).json() as { generation: number };
+  const key = 'apps/' + app + '/artifacts/' + nodeDigest + '/package.json';
+  await (await mf.getR2Bucket('PNEUMA_SPACE_ARTIFACTS') as unknown as R2Bucket).put(key, nodeBytes);
+  await call(app, '/test/runner', { mode: 'unready' });
+  const published = await call(app, '/publish', { actor, artifact: { digest: nodeDigest, key, bytes: Buffer.byteLength(nodeBytes), manifest: nodeManifest }, expectedGeneration: generation, idempotencyKey: 'unready' });
+  assert.equal(published.status, 503);
+  assert.deepEqual(await runtimeOf(app), { state: 'asleep', failures: 0, wake: 'failed' });
+  await call(app, '/test/runner', { mode: 'ready' });
+  assert.equal(await invoke(app), 'woken');
 });
 test('CF-20 a wake takes the slot an asleep app still holds', async () => {
   const { app: asleep } = await fixture(), { app } = await fixture();
