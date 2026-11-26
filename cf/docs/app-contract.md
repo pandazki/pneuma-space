@@ -47,7 +47,7 @@ Control APIs use /api/v1, JSON errors with error.code/message, and list envelope
 | /apps/:id/uploads; /apps/:id/releases | Begin direct package upload with manifest/digest/bytes; publish uploadId, optionally setting `manager`; release history. Both writes state `ephemeral`, absent meaning false, and a mismatch with the app answers 409. |
 | /apps/:id/actions | Typed action from AppAction in model.ts; purge additionally confirms the name; discard ends an ephemeral app. |
 | /apps/:id/manager | DELETE clears the manager. |
-| /apps/:id/state, /logs, /events, /usage, /jobs | Actual inventory and diagnostics; each wake that ends adds a `wake-ready` or `wake-failed` event carrying its record. POST jobs with name/payload invokes a trigger and needs `publish` or `manage`: whoever may publish the app's code can already make it do anything, and `invoke`, which every tenant member holds, is not enough. |
+| /apps/:id/state, /logs, /events, /usage, /jobs | Actual inventory and diagnostics; each wake that ends adds a `wake-ready` or `wake-failed` event carrying its record. POST jobs with name/payload invokes a trigger and needs `publish` or `manage`: whoever may publish the app's code can already make it do anything, and `invoke`, which every tenant member holds, is not enough. An app keeps every delivery that is due or delivering and, for each trigger, the 20 most recent that ended (`done`, `failed` or `cancelled`); GET jobs returns the newest 100 by `scheduledFor` ([ADR 0052](../../docs/adr/0052-cloudflare-delivery-retention.md)). |
 | /apps/:id/data | Authorized bounded NativeCommand from model.ts. |
 | /tenants/:t/usage, /audit, /events | Role-filtered telemetry. Usage counts durable and ephemeral apps apart, an ephemeral app until it starts ending. |
 

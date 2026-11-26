@@ -98,6 +98,8 @@ before(async () => {
           return new Response('{}');
         }
         if (path === '/test/deliveries') return Response.json({pending: this.deliveries?.size ?? 0});
+        if (path === '/test/seed-jobs') { for (const job of (await request.json()).jobs) this.ctx.storage.kv.put('platform:job:' + job.id, job); return new Response('{}'); }
+        if (path === '/test/restart') this.ctx.abort('test restart');
         if (path === '/test/configure-kv') {
           const {boot} = await request.json();
           const state = this.state();
@@ -657,4 +659,34 @@ test('CF-35 a token with only invoke and read cannot run a job on demand', async
   const job = await runJobWith(app, ['invoke', 'read']);
   assert.equal(job.status, 403);
   assert.equal((await job.json() as { error: { code: string } }).error.code, 'token_scope');
+});
+
+type Job = { id: string; name: string; state: string; scheduledFor: number };
+const delivery = (name: string, state: string, scheduledFor: number) => ({ id: name + '_' + scheduledFor, name, payload: null, state, attempts: 1, scheduledFor, nextAttemptAt: Date.now() + 86400000, error: null });
+const listedJobs = async (app: string) => ((await (await call(app, '/jobs')).json()) as { items: Job[] }).items;
+test('CF-38 an app with many ended deliveries keeps the 20 newest of each trigger once its cell starts again', async () => {
+  const { app } = await fixture(), start = Date.now() - 86400000;
+  const tick = Array.from({ length: 30 }, (_, i) => delivery('tick', i % 3 ? 'done' : 'failed', start + i * 60000));
+  await call(app, '/test/seed-jobs', { jobs: [...tick, delivery('nightly', 'cancelled', start), delivery('nightly', 'done', start + 1), delivery('tick', 'due', start - 1)] });
+  await call(app, '/test/restart').catch(() => {});
+  const items = await listedJobs(app);
+  assert.deepEqual(items.filter(job => job.name === 'tick' && job.state !== 'due').map(job => job.scheduledFor), tick.slice(10).map(job => job.scheduledFor).reverse());
+  assert.deepEqual([items.filter(job => job.name === 'nightly').length, items.filter(job => job.state === 'due').length], [2, 1]);
+});
+test('CF-38 a delivery that ends deletes the ended deliveries of its trigger beyond the newest 20', async () => {
+  const { app } = await fixture(), start = Date.now() - 86400000;
+  await call(app, '/test/configure-cron', {});
+  await call(app, '/test/seed-jobs', { jobs: Array.from({ length: 20 }, (_, i) => delivery('tick', 'done', start + i)) });
+  assert.equal((await call(app, '/jobs', { actor, name: 'tick', payload: null, idempotencyKey: 'twenty-first' })).status, 200);
+  await until(async () => (await (await call(app, '/test/trigger/started')).json() as { started: boolean }).started, 'The trigger did not start.');
+  await call(app, '/test/trigger/release', {});
+  await until(async () => (await listedJobs(app)).some(job => job.id.startsWith('manual_') && job.state === 'done'), 'The delivery did not end.');
+  const items = await listedJobs(app);
+  assert.deepEqual([items.length, items[0].id.startsWith('manual_'), items.some(job => job.scheduledFor === start)], [20, true, false]);
+});
+test('CF-38 GET jobs returns the newest 100 deliveries by scheduledFor', async () => {
+  const { app } = await fixture(), start = Date.now() - 86400000;
+  await call(app, '/test/seed-jobs', { jobs: Array.from({ length: 120 }, (_, i) => delivery('tick', 'due', start + i)) });
+  const items = await listedJobs(app);
+  assert.deepEqual(items.map(job => job.scheduledFor), Array.from({ length: 100 }, (_, i) => start + 119 - i));
 });
