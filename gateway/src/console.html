@@ -1626,6 +1626,8 @@ async function api(method, path, body, contentType = 'application/json', extra =
 }
 
 const appPath = (name) => `/api/apps/${encodeURIComponent(name)}`;
+/** A write from a page that read the app carries its id, so it changes nothing once the name belongs to a later app (ADR 0038 item 10). */
+const pinned = (app) => `?app=${encodeURIComponent(app.id)}`;
 /** A write to a managed app names its manager (ADR 0039); sent only after the person typed the name in the approval card. */
 const naming = (manager) => (manager ? { 'X-Pneuma-Space-Manager': manager.name } : {});
 /** Where a person acts through the manager; the server admits only http and https URLs, and the page links nothing else either. A URL stored before the server normalised it parses the same. */
@@ -1659,6 +1661,19 @@ function segmented(items, current, onPick, label) {
 }
 
 /**
+ * A list that would leave the viewport moves to its trigger's other edge, then only as far as it must: a menu anchored to the right
+ * edge of a trigger that a wrapped toolbar puts near the left of the screen would open past it.
+ */
+function keepInView(wrap, list) {
+  const margin = 8;
+  const { left, width } = list.getBoundingClientRect();
+  if (left >= margin && left + width <= innerWidth - margin) return;
+  const at = wrap.getBoundingClientRect().left;
+  list.style.left = `${Math.max(Math.min(0, innerWidth - margin - at - width), margin - at)}px`;
+  list.style.right = 'auto';
+}
+
+/**
  * A list that opens under its trigger and closes on Escape, a pick or a click outside; arrows move between its buttons.
  * `build(close)` returns the list element.
  */
@@ -1685,6 +1700,7 @@ function popover(wrap, button, build) {
     if (list) return close();
     list = build(close);
     wrap.append(list);
+    keepInView(wrap, list);
     button.setAttribute('aria-expanded', 'true');
     (list.querySelector('input') ?? list.querySelector('[aria-selected="true"]') ?? list.querySelector('button:not([disabled])'))?.focus();
     document.addEventListener('pointerdown', outside, true);
@@ -3639,7 +3655,7 @@ function policyForm(app, effective, reload) {
     if (Object.keys(patch).length === 0) return void (message.textContent = t('p.nothing'));
     if (app.manager && !(await approve({ title: t('mg.policyTitle', { name: app.name }), body: t('sec.policyDesc'), manager: app.manager, action: t('p.save') }))) return;
     try {
-      await api('PUT', `${appPath(app.name)}/policy`, patch, undefined, naming(app.manager));
+      await api('PUT', `${appPath(app.name)}/policy${pinned(app)}`, patch, undefined, naming(app.manager));
       await reload();
     } catch (error) {
       message.className = 'msg err';
@@ -3718,7 +3734,7 @@ async function detail(name) {
 
   /** Every operation confirms through the approval card, which shows the server's refusal in place; the page reloads after. */
   const op = async (card, call, after = reload) => { if (await approve({ ...card, submit: call })) await after(); };
-  const post = (kind, headers) => () => api('POST', `${appPath(app.name)}/${kind}`, undefined, undefined, headers);
+  const post = (kind, headers) => () => api('POST', `${appPath(app.name)}/${kind}${pinned(app)}`, undefined, undefined, headers);
   const lift = () => op({ title: t('d.liftTitle', { name: app.name }), body: t('d.liftBody') }, post('unquarantine'));
   /** Stop and restart are safe and frequent: they act at once and report under the actions. */
   const now = (kind) => async () => {
@@ -3743,11 +3759,10 @@ async function detail(name) {
   const purge = () => op({
     title: t('d.purgeTitle', { name: app.name }), body: t('d.purgeBody'), danger: true, action: t('d.purge'),
     confirmText: session.me.hosted ? app.name : null, manager: app.manager, facts: doomed(),
-  }, () => api('POST', `${appPath(app.name)}/purge`, session.me.hosted ? { confirm: app.name } : undefined, undefined, naming(app.manager)), () => { location.hash = '#/apps'; });
-  /** The id keeps the discard off a later app the name may be published as meanwhile (ADR 0038). */
+  }, () => api('POST', `${appPath(app.name)}/purge${pinned(app)}`, session.me.hosted ? { confirm: app.name } : undefined, undefined, naming(app.manager)), () => { location.hash = '#/apps'; });
   const discard = () => op({
     title: t('d.discardTitle', { name: app.name }), body: t('d.discardBody'), danger: true, action: t('d.discard'), manager: app.manager, facts: doomed(),
-  }, () => api('POST', `${appPath(app.name)}/discard?app=${encodeURIComponent(app.id)}`, undefined, undefined, naming(app.manager)), () => { location.hash = '#/apps'; });
+  }, post('discard', naming(app.manager)), () => { location.hash = '#/apps'; });
   const access = () => {
     let pick = app.access;
     // `access` decides whether a request arrives, the current release's `identity` whether it must sign in (docs/app-contract.md, Access).
@@ -3762,12 +3777,12 @@ async function detail(name) {
       paint();
     }, t('ac.label')));
     paint();
-    return op({ title: t('ac.title', { name: app.name }), body: note, control, action: t('ac.save'), manager: app.manager }, async () => { if (pick !== app.access) await api('PUT', `${appPath(app.name)}/access`, { access: pick }, undefined, naming(app.manager)); });
+    return op({ title: t('ac.title', { name: app.name }), body: note, control, action: t('ac.save'), manager: app.manager }, async () => { if (pick !== app.access) await api('PUT', `${appPath(app.name)}/access${pinned(app)}`, { access: pick }, undefined, naming(app.manager)); });
   };
   const move = () => {
     let to = others[0];
     const control = h('div', { class: 'field' }, h('span', {}, t('mv.to')), listbox({ label: t('mv.to'), options: others.map((x) => ({ value: x, label: x })), value: to, onPick: (v) => { to = v; }, wide: true }));
-    return op({ title: t('mv.title', { name: app.name }), body: t('mv.body'), control, action: t('mv.action'), manager: app.manager }, () => api('PUT', `${appPath(app.name)}/tenant`, { tenant: to }, undefined, naming(app.manager)));
+    return op({ title: t('mv.title', { name: app.name }), body: t('mv.body'), control, action: t('mv.action'), manager: app.manager }, () => api('PUT', `${appPath(app.name)}/tenant${pinned(app)}`, { tenant: to }, undefined, naming(app.manager)));
   };
 
   const head = h('div', { class: 'grow' });

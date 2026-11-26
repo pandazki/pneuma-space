@@ -117,6 +117,14 @@ function mustName(app: App, named: ManagerName | null | undefined): void {
   );
 }
 
+/**
+ * A command whose caller was checked against, or named, one app never acts on a later app the name was published as since: a lagging
+ * replica's view, or a retry after a lost answer, may still hold the earlier one (ADR 0038). `id` absent, the name decides.
+ */
+function mustBe(app: App, id: AppId | null | undefined): void {
+  if (id && app.id !== id) throw new Conflict(`app "${app.name}" is now ${app.id}, not ${id}: the name belongs to a later app; nothing was changed`);
+}
+
 /** The manager a publish leaves: the one it gives, keeping the url while the name stays and none is given; otherwise the app's. */
 function managerAfter(app: App | null, given: ManagerChange | null | undefined): Manager | null {
   if (!given) return app?.manager ?? null;
@@ -339,9 +347,10 @@ export class PlatformRegistry implements Registry {
     );
   }
 
-  remove(name: AppName, named?: ManagerName | null): Promise<void> {
+  remove(name: AppName, named?: ManagerName | null, id?: AppId | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
+      mustBe(app, id);
       mustName(app, named);
       if (app.status === 'removed') return this.#converge(name);
       if (app.status === 'purging') throw new Conflict(`app "${name}" is being purged`);
@@ -355,9 +364,10 @@ export class PlatformRegistry implements Registry {
     });
   }
 
-  purge(name: AppName, named?: ManagerName | null): Promise<void> {
+  purge(name: AppName, named?: ManagerName | null, id?: AppId | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
+      mustBe(app, id);
       mustName(app, named);
       if (app.status === 'registered') throw new Conflict(`app "${name}" is registered; remove it before purging`);
       await this.#purge(app);
@@ -367,8 +377,7 @@ export class PlatformRegistry implements Registry {
   discard(name: AppName, named?: ManagerName | null, id?: AppId | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
-      // A retry after a lost answer may meet a later app the name was published as since; the id the publish returned tells them apart (ADR 0038).
-      if (id && app.id !== id) throw new Conflict(`app "${name}" is now ${app.id}, not ${id}: the name belongs to a later app; nothing was discarded`);
+      mustBe(app, id);
       mustName(app, named);
       if (app.expiresAt === null) throw new Conflict(`app "${name}" is durable; discard ends only an ephemeral app, remove and purge end this one`);
       await this.#purge(app);
@@ -396,11 +405,33 @@ export class PlatformRegistry implements Registry {
     }).catch((error: Error) => log('expire-failed', view.name, { error: error.message }))));
   }
 
-  /** Whether the app's last discard or expiry row already records this error. Rows of an earlier app of the same name are all older. */
+  /** Whether the app's last purge, discard or expiry row already records this error. */
   async #failedAlike(app: App, error: string): Promise<boolean> {
-    const rows = await Promise.all((['app.expire', 'app.discard'] as const).map((action) => this.#store.audit({ action, target: app.name, limit: 1 })));
-    const last = rows.flat().filter((row) => row.details.appId === app.id).sort((a, b) => b.id - a.id)[0];
+    const last = await this.#lastEnd(app);
     return last?.result === 'error' && last.details.error === error;
+  }
+
+  /** The app's last purge, discard or expiry row. Rows of an earlier app of the same name are all older. */
+  async #lastEnd(app: App): Promise<AuditRecord | undefined> {
+    const rows = await Promise.all((['app.expire', 'app.discard', 'app.purge'] as const).map((action) => this.#store.audit({ action, target: app.name, limit: 1 })));
+    return rows.flat().filter((row) => row.details.appId === app.id).sort((a, b) => b.id - a.id)[0];
+  }
+
+  /**
+   * Finishes an end a purge, discard or expiry left `purging`, audited as `resumed` under that end's action by `platform`: without the row
+   * the app's last one would stay the `error` or `started` of the end that was cut short (ADR 0038).
+   */
+  async #resumeEnd(app: App): Promise<void> {
+    const action = (await this.#lastEnd(app))?.action ?? 'app.purge';
+    const audit = (result: AuditRecord['result'], details: Record<string, unknown> = {}) => this.#store.insertAudit({
+      at: Date.now(), actor: 'platform', actorTenant: null, tenant: app.tenant, action, targetKind: 'app', target: app.name, result,
+      details: { appId: app.id, resumed: true, ...details },
+    });
+    await this.#finishPurge(app).catch(async (error: Error) => {
+      if (!(await this.#failedAlike(app, error.message))) await audit('error', { error: error.message });
+      throw error;
+    });
+    await audit('ok');
   }
 
   /** Persists purging first, so a restart finishes what this run does not (DESIGN 2.3). */
@@ -460,10 +491,11 @@ export class PlatformRegistry implements Registry {
     return next;
   }
 
-  setAppPolicy(name: AppName, patch: PolicyPatch, named?: ManagerName | null): Promise<PolicyOverride> {
+  setAppPolicy(name: AppName, patch: PolicyPatch, named?: ManagerName | null, id?: AppId | null): Promise<PolicyOverride> {
     const fields = parsePolicyPatch(patch, 'app');
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
+      mustBe(app, id);
       const { quota } = await this.#mustTenant(this.#store, app.tenant);
       for (const field of ['cpu_millis', 'memory_mb'] as const) {
         const value = fields[field];
@@ -505,15 +537,16 @@ export class PlatformRegistry implements Registry {
     });
   }
 
-  async setOwner(name: AppName, owner: Subject, named?: ManagerName | null): Promise<void> {
-    await this.#updateApp(name, (app) => (mustName(app, named), { ...app, owner }));
+  async setOwner(name: AppName, owner: Subject, named?: ManagerName | null, id?: AppId | null): Promise<void> {
+    await this.#updateApp(name, (app) => (mustBe(app, id), mustName(app, named), { ...app, owner }));
     await this.#refresh(name);
     log('owner', name, { owner });
   }
 
-  clearManager(name: AppName, named?: ManagerName | null): Promise<void> {
+  clearManager(name: AppName, named?: ManagerName | null, id?: AppId | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
+      mustBe(app, id);
       mustName(app, named);
       if (app.manager) await this.#manage(name, null);
     });
@@ -633,8 +666,9 @@ export class PlatformRegistry implements Registry {
     if (!force && admins.length === 1 && admins[0]!.user === leaving) throw new Conflict(`"${leaving}" is the last admin of tenant "${tenant}"; make another member admin first`);
   }
 
-  async setAccess(name: AppName, access: Access, named?: ManagerName | null): Promise<void> {
+  async setAccess(name: AppName, access: Access, named?: ManagerName | null, id?: AppId | null): Promise<void> {
     await this.#updateApp(name, (app) => {
+      mustBe(app, id);
       mustName(app, named);
       if (app.expiresAt !== null && access !== 'tenant') throw new Conflict(`app "${name}" is ephemeral; its access stays tenant`);
       return { ...app, access };
@@ -643,9 +677,10 @@ export class PlatformRegistry implements Registry {
     log('access', name, { access });
   }
 
-  moveApp(name: AppName, tenant: TenantName, named?: ManagerName | null): Promise<void> {
+  moveApp(name: AppName, tenant: TenantName, named?: ManagerName | null, id?: AppId | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
+      mustBe(app, id);
       await this.#mustTenant(this.#store, tenant);
       mustName(app, named);
       if (app.status === 'purging') throw new Conflict(`app "${name}" is being purged`);
@@ -658,16 +693,19 @@ export class PlatformRegistry implements Registry {
     });
   }
 
-  stop(name: AppName): Promise<void> {
+  stop(name: AppName, id?: AppId | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
-      await this.#runtime.retire((await this.#mustApp(name)).id);
+      const app = await this.#mustApp(name);
+      mustBe(app, id);
+      await this.#runtime.retire(app.id);
       log('stop', name);
     });
   }
 
-  restart(name: AppName): Promise<void> {
+  restart(name: AppName, id?: AppId | null): Promise<void> {
     return this.#store.exclusive(name, async () => {
       const app = await this.#mustApp(name);
+      mustBe(app, id);
       if (app.status !== 'registered') throw new Conflict(`app "${name}" is ${app.status}; only a registered app restarts`);
       await this.#runtime.retire(app.id);
       this.#runtime.release(await this.#runtime.acquire(app.id, 'trigger'));
@@ -675,8 +713,10 @@ export class PlatformRegistry implements Registry {
     });
   }
 
-  async kill(name: AppName): Promise<void> {
-    await this.#runtime.kill((await this.#mustApp(name)).id);
+  async kill(name: AppName, id?: AppId | null): Promise<void> {
+    const app = await this.#mustApp(name);
+    mustBe(app, id);
+    await this.#runtime.kill(app.id);
     log('kill', name);
   }
 
@@ -786,7 +826,7 @@ export class PlatformRegistry implements Registry {
     const work = apps.map((listed) => this.#store.exclusive(listed.name, async () => {
       const app = await this.#store.app(listed.name);
       if (app?.id !== listed.id) return;
-      if (app.status === 'purging') await this.#finishPurge(app);
+      if (app.status === 'purging') await this.#resumeEnd(app);
       else await this.#converge(app.name);
     }).catch((error: Error) => log('resume-failed', listed.name, { error: error.message })));
     await Promise.all(work);

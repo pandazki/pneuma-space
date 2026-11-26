@@ -446,6 +446,35 @@ test('ADR 0038 POST /api/apps/<name>/discard?app=<id> answers 409 for another id
   assert.equal(registry.view(appName('trial')), null);
 });
 
+test('ADR 0038 item 10 a per-app write with ?app= of another app answers 409 and changes nothing; with the app\'s own id it acts', async (t) => {
+  const { call, server, registry } = await admin();
+  t.after(() => server.close());
+  const { body: release } = await call('PUT', '/api/apps/survey/release', kvApp);
+  const other = '0123456789ab';
+  const writes: [string, string, unknown?][] = [
+    ['PUT', 'policy', { idle_seconds: 5 }], ['PUT', 'access', { access: 'public' }], ['PUT', 'owner', { owner: 'user:bo' }], ['POST', 'stop'], ['POST', 'restart'], ['POST', 'unquarantine'], ['POST', 'remove'],
+  ];
+  for (const [method, path, body] of writes) assert.equal((await call(method, `/api/apps/survey/${path}?app=${other}`, body)).status, 409, path);
+  assert.deepEqual([registry.view(appName('survey'))?.status, registry.view(appName('survey'))?.access], ['registered', 'org']);
+  assert.equal((await call('POST', `/api/apps/survey/remove?app=${release.app}`)).status, 200);
+});
+
+test('ADR 0038 item 10 a write checked against the app a lagging view still shows answers 409 and leaves the later app of the name alone', async (t) => {
+  const { call, server, registry } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  const stale = registry.view(appName('survey'));
+  await call('POST', '/api/apps/survey/remove');
+  await call('POST', '/api/apps/survey/purge');
+  await call('PUT', '/api/apps/survey/release', { ...kvApp, owner: 'user:bo' });
+  // Another replica purged and published the name again; this one has not followed yet.
+  const view = registry.view.bind(registry);
+  registry.view = (name) => (name === 'survey' ? stale : view(name));
+  const reply = await call('POST', '/api/apps/survey/remove');
+  assert.deepEqual([reply.status, /belongs to a later app/.test(reply.body.error)], [409, true]);
+  assert.equal(view(appName('survey'))?.status, 'registered');
+});
+
 test('AC-EPH-2 POST /api/apps/<name>/discard on a durable app answers 409', async (t) => {
   const { call, server, registry } = await admin();
   t.after(() => server.close());
@@ -517,6 +546,20 @@ test('ADR 0039 a manager url is stored as the URL parser writes it, and one with
   assert.equal((await call('PUT', '/api/apps/survey/release', { ...kvApp, manager: { name: 'deployer', url: 'https://deploy.test/\u0000x' } })).status, 400);
   assert.equal((await call('PUT', '/api/apps/survey/release', { ...kvApp, manager: { name: 'deployer', url: ' HTTPS://Deploy.test/x' } })).status, 200);
   assert.deepEqual((await call('GET', '/api/apps/survey')).body.app.manager, { name: 'deployer', url: 'https://deploy.test/x' });
+});
+
+test('a NUL in a tenant display name, a token label, a path segment or a query answers 400 and stores nothing, since PostgreSQL TEXT takes none', async (t) => {
+  const { call, server, store } = await admin();
+  t.after(() => server.close());
+  const refused = [
+    await call('POST', '/api/tenants', { name: 'blue', display: 'B\u0000lue', admins: ['ann'] }),
+    await call('POST', '/api/tenants/default/tokens', { kind: 'service', name: 'ci', label: 'c\u0000i' }),
+    await call('POST', '/api/tenants', { name: 'gr\u0000een', admins: ['ann'] }),
+    await call('PUT', '/api/tenants/default/members/a%00n', { role: 'member' }),
+    await call('GET', '/api/audit?actor=a%00n'),
+  ];
+  assert.deepEqual(refused.map((r) => [r.status, r.body.error]), Array(5).fill([400, 'the NUL character is not accepted in a request']));
+  assert.deepEqual([(await store.tenants()).map((x) => x.name), await store.tokens(DEFAULT_TENANT)], [[DEFAULT_TENANT], []]);
 });
 
 test('ADR 0039 a manager outside the name grammar, a url that is not absolute http or https, or a malformed header answers 400', async (t) => {
