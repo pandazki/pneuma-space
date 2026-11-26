@@ -218,12 +218,14 @@ test('CF-33 start adds nothing to a project an earlier CLI set up and published'
   }finally{await s.close();}
  });
 });
-test('CF-21 a directory set up with init publishes with npm run deploy and its stored token',async()=>{
+test('CF-21 the project CLI start in a directory set up with init publishes and measures with its stored token',async()=>{
  const s=await setupSpace();try{
   await s.cli('init');
   const {PNEUMA_SPACE_TOKEN:_unset,...env}=process.env;
-  await run('npm',['run','deploy'],{cwd:s.dir,env:{...env,NODE_OPTIONS:'--import='+join(s.root,'space.mjs')}});
+  await run(process.execPath,['--import',join(s.root,'space.mjs'),'.pneuma-space/tool/bin/pneuma-space.mjs','start','.'],{cwd:s.dir,env});
   assert.ok(s.calls.includes('POST /api/v1/apps/a_new/releases'));
+  const report=JSON.parse(await readFile(join(s.dir,'.pneuma-space/bench.json'),'utf8'));
+  assert.deepEqual([report.complete,report.warmSamplesMs.length],[false,5]);
  }finally{await s.close();}
 });
 test('CF-33 init refuses a non-empty directory without setup state and changes nothing',async()=>{
