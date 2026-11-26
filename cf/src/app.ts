@@ -18,6 +18,9 @@ type DeliveryAttempt = { job: Delivery; generation: number };
 type Receipt = { fingerprint: string; snapshot: boolean; result: unknown };
 const STATE = 'platform:state';
 const CONTROL_WRITES = new Set(['/initialize', '/publish-upload', '/publish', '/action', '/manager', '/data', '/jobs']);
+/** Ended deliveries kept per trigger, and deliveries one jobs reply returns (ADR 0052). */
+const KEPT_DELIVERIES = 20, LISTED_DELIVERIES = 100;
+const active = (job: Delivery): boolean => job.state === 'due' || job.state === 'delivering';
 
 export class AppCell extends DurableObject<Env> {
   private queue: Promise<unknown> = Promise.resolve();
@@ -36,6 +39,7 @@ export class AppCell extends DurableObject<Env> {
       if (state.origin !== undefined) { delete state.origin; this.save(state); }
       if (!('manager' in state)) { Object.assign(state, { expiresAt: null, manager: null, expiry: null }); this.save(state); }
       if (state.projectAt === undefined) { state.projectAt = null; this.save(state); }
+      this.retainDeliveries();
       if (state.journal) {
         state.current = state.journal.previous;
         state.capabilities = Object.keys(state.current?.manifest.capabilities ?? {}) as Capability[];
@@ -111,6 +115,15 @@ export class AppCell extends DurableObject<Env> {
     this.save(state);
   }
   private items<T>(prefix: string): T[] { return [...this.ctx.storage.kv.list<T>({ prefix })].map(([, value]) => value); }
+  /** An ended delivery only shows what recently ran. Deleting it cannot run it again: a scheduled id names a slot that has passed, and a retried manual run is answered from its receipt. */
+  private retainDeliveries(): void {
+    const kept = new Map<string, number>();
+    const ended = [...this.ctx.storage.kv.list<Delivery>({ prefix: 'platform:job:' })].filter(([, job]) => !active(job)).sort(([, a], [, b]) => b.scheduledFor - a.scheduledFor);
+    for (const [key, job] of ended) {
+      kept.set(job.name, (kept.get(job.name) ?? 0) + 1);
+      if (kept.get(job.name)! > KEPT_DELIVERIES) this.ctx.storage.kv.delete(key);
+    }
+  }
   leases(): Lease[] { return this.items<Lease>('platform:lease:'); }
   async arm(): Promise<void> {
     const state = this.state();
@@ -125,7 +138,7 @@ export class AppCell extends DurableObject<Env> {
     if (state.runtime.bootId && !this.leases().length) times.push(state.runtime.sleepsAt ?? Date.now() + 1000);
     if (state.status === 'registered') {
       times.push(...Object.values(state.schedules));
-      for (const job of this.items<Delivery>('platform:job:')) if (job.state === 'due' || job.state === 'delivering') times.push(job.nextAttemptAt);
+      for (const job of this.items<Delivery>('platform:job:')) if (active(job)) times.push(job.nextAttemptAt);
     }
     times.push(...this.leases().map(x => x.deadline));
     if (times.length) await this.ctx.storage.setAlarm(Math.max(Date.now() + 100, Math.min(...times)));
@@ -288,7 +301,8 @@ export class AppCell extends DurableObject<Env> {
       if (state.status !== 'removed') {
         state.status = 'removed'; state.schedules = {}; this.save(state);
         await this.retire(); this.native().suspend();
-        for (const [key, job] of this.ctx.storage.kv.list<Delivery>({ prefix: 'platform:job:' })) if (job.state === 'due' || job.state === 'delivering') this.ctx.storage.kv.put(key, { ...job, state: 'cancelled' });
+        for (const [key, job] of this.ctx.storage.kv.list<Delivery>({ prefix: 'platform:job:' })) if (active(job)) this.ctx.storage.kv.put(key, { ...job, state: 'cancelled' });
+        this.retainDeliveries();
       }
     } else {
       this.guard(null);
@@ -359,7 +373,7 @@ export class AppCell extends DurableObject<Env> {
           state.schedules[name] = nextSchedule(state.current!.manifest.capabilities.cron!.triggers[name].schedule!, Date.now());
         }
         this.save(state);
-        for (const job of this.items<Delivery>('platform:job:').filter(x => !this.deliveries.has(x.id) && (x.state === 'due' || x.state === 'delivering') && x.nextAttemptAt <= Date.now()).slice(0, 10)) {
+        for (const job of this.items<Delivery>('platform:job:').filter(x => !this.deliveries.has(x.id) && active(x) && x.nextAttemptAt <= Date.now()).slice(0, 10)) {
           job.state = 'delivering'; job.attempts++; job.nextAttemptAt = Date.now() + (state.policy.requestSeconds + 60) * 1000;
           this.ctx.storage.kv.put('platform:job:' + job.id, job);
           deliveries.push({ job, generation: state.generation });
@@ -445,6 +459,7 @@ export class AppCell extends DurableObject<Env> {
       current.error = error;
       if (error !== null) current.nextAttemptAt = Date.now() + (retryAfter ?? Math.min(3600, 2 ** current.attempts)) * 1000;
       this.ctx.storage.kv.put('platform:job:' + job.id, current);
+      if (!active(current)) this.retainDeliveries();
       await this.arm();
     });
   }
@@ -536,7 +551,7 @@ export class AppCell extends DurableObject<Env> {
       if (path === '/usage') return json(this.snapshot().usage);
       if (path === '/logs' && request.method === 'GET') return json({ items: this.items<LogRow>('platform:log:') });
       if (path === '/events') return json({ items: this.items<EventRow>('platform:event:') });
-      if (path === '/jobs' && request.method === 'GET') return json({ items: this.items<Delivery>('platform:job:') });
+      if (path === '/jobs' && request.method === 'GET') return json({ items: this.items<Delivery>('platform:job:').sort((a, b) => b.scheduledFor - a.scheduledFor).slice(0, LISTED_DELIVERIES) });
       if (path.startsWith('/subscribe/') || path.startsWith('/scoped-subscribe/')) {
         const scoped = path.startsWith('/scoped-subscribe/');
         let subscription: Subscription;
