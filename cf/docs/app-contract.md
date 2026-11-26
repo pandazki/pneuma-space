@@ -22,6 +22,8 @@ An app is served at `<control origin>/apps/<name>/`, and `/apps/<name>` redirect
 | identity | Trusted subject/name/owner headers. Platform credentials and incoming reserved headers are removed. |
 | rtc | Expiring ICE configuration from a configured TURN provider. Unconfigured service refuses dependent publication. |
 
+A trigger delivery is `POST /_pneuma-space/trigger/<name>` to Node, waking it if it sleeps, with the stable delivery ID in `X-Pneuma-Space-Delivery`, the attempt number in `X-Pneuma-Space-Delivery-Attempt` and the payload as a JSON body, null for a schedule. A 2xx answer completes the delivery; any other outcome retries it after 2^attempt seconds, and the fifth failure ends it as failed. An ephemeral app's schedules never fire.
+
 The SDK calls the intercepted host pneuma-space.internal. Scope comes from trusted platform props, never app input. Every native mutation checks active lifecycle and execution generation. Publish and remove retain data. Purge requires removed status and exact name confirmation. An ephemeral app ([ADR 0038](../../docs/adr/0038-ephemeral-apps.md)) also ends by discard from any live status and by itself at `expiresAt`; a managed app ([ADR 0039](../../docs/adr/0039-managed-apps.md)) refuses with 409 the writes that do not name its manager in `X-Pneuma-Space-Manager`. [ADR 0046](../../docs/adr/0046-cloudflare-ephemeral-and-managed-apps.md) records which writes and how this plane differs. Already-issued signed URLs remain valid until expiry; final object cleanup waits for outstanding upload tickets.
 
 Failed cloud cleanup remains in purging and retries through its durable alarm.
@@ -43,7 +45,7 @@ Control APIs use /api/v1, JSON errors with error.code/message, and list envelope
 | /apps/:id/uploads; /apps/:id/releases | Begin direct package upload with manifest/digest/bytes; publish uploadId, optionally setting `manager`; release history. Both writes state `ephemeral`, absent meaning false, and a mismatch with the app answers 409. |
 | /apps/:id/actions | Typed action from AppAction in model.ts; purge additionally confirms the name; discard ends an ephemeral app. |
 | /apps/:id/manager | DELETE clears the manager. |
-| /apps/:id/state, /logs, /events, /usage, /jobs | Actual inventory and diagnostics; each wake that ends adds a `wake-ready` or `wake-failed` event carrying its record. POST jobs with name/payload invokes a trigger. |
+| /apps/:id/state, /logs, /events, /usage, /jobs | Actual inventory and diagnostics; each wake that ends adds a `wake-ready` or `wake-failed` event carrying its record. POST jobs with name/payload invokes a trigger and needs `publish` or `manage`: whoever may publish the app's code can already make it do anything, and `invoke`, which every tenant member holds, is not enough. |
 | /apps/:id/data | Authorized bounded NativeCommand from model.ts. |
 | /tenants/:t/usage, /audit, /events | Role-filtered telemetry. Usage counts durable and ephemeral apps apart, an ephemeral app until it starts ending. |
 

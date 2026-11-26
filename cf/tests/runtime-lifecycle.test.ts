@@ -116,7 +116,7 @@ before(async () => {
     }
     export default {fetch(request, env) {
       if (new URL(request.url).pathname.startsWith('/test/trigger/')) return env.TEST_TRIGGER.fetch(request);
-      if (new URL(request.url).pathname.startsWith('/apps/')) return worker.fetch(request, env);
+      if (['/apps/', '/api/v1/'].some(prefix => new URL(request.url).pathname.startsWith(prefix))) return worker.fetch(request, env);
       return env.PNEUMA_SPACE_APPS.getByName(request.headers.get('x-test-app')).fetch(request);
     }};
   `;
@@ -555,4 +555,27 @@ test('CF-29 an ephemeral app schedules no trigger while a manual job still runs'
   const job = await call(app, '/jobs', { actor, name: 'tick', payload: null, idempotencyKey: 'manual' });
   assert.equal(job.status, 200);
   assert.equal((await job.json() as { name: string }).name, 'tick');
+});
+// The control API as the CLI calls it: a Bearer token, checked by the Worker and again by the AppCell.
+async function runJobWith(app: string, scopes: string[]) {
+  const secret = crypto.randomUUID().replaceAll('-', '').repeat(2), db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  await db.prepare("INSERT INTO memberships(tenant_id,user_id,role) VALUES('tenant','owner','admin') ON CONFLICT DO NOTHING").run();
+  await db.prepare("INSERT INTO tokens(id,hash,tenant_id,user_id,label,scopes_json,app_ids_json,expires_at,created_at) VALUES(?,?,'tenant','owner','jobs',?,NULL,?,1)").bind('k_' + secret.slice(0, 16), createHash('sha256').update(secret).digest('hex'), JSON.stringify(scopes), Date.now() + 60000).run();
+  return mf.dispatchFetch('http://test/api/v1/apps/' + app + '/jobs', { method: 'POST', headers: { authorization: 'Bearer ' + secret, 'content-type': 'application/json', 'idempotency-key': secret }, body: JSON.stringify({ name: 'tick' }) });
+}
+test('CF-35 a token with publish or with manage runs a declared job on demand', async () => {
+  const { app } = await fixture();
+  await call(app, '/test/configure-schedule', {});
+  for (const scopes of [['publish'], ['manage']]) {
+    const job = await runJobWith(app, scopes);
+    assert.equal(job.status, 201, await job.clone().text());
+    assert.equal((await job.json() as { name: string }).name, 'tick');
+  }
+});
+test('CF-35 a token with only invoke and read cannot run a job on demand', async () => {
+  const { app } = await fixture();
+  await call(app, '/test/configure-schedule', {});
+  const job = await runJobWith(app, ['invoke', 'read']);
+  assert.equal(job.status, 403);
+  assert.equal((await job.json() as { error: { code: string } }).error.code, 'token_scope');
 });
