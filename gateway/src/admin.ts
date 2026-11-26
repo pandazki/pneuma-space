@@ -78,6 +78,16 @@ type Route = {
 };
 type AuditResult = AuditRecord['result'];
 
+/**
+ * PostgreSQL TEXT takes no NUL, and a write's audit row is stored before its route reads the input, so a NUL anywhere in a request
+ * answers 400 at the door instead of 500 from the store (#41).
+ */
+const NUL = 'the NUL character is not accepted in a request';
+const noNul = (key: string, value: unknown): unknown => {
+  if (key.includes('\0') || (typeof value === 'string' && value.includes('\0'))) throw new InputError(NUL);
+  return value;
+};
+
 async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -88,9 +98,9 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
   }
   let body: unknown;
   try {
-    body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  } catch {
-    throw new InputError('request body must be JSON');
+    body = JSON.parse(Buffer.concat(chunks).toString('utf8'), noNul);
+  } catch (error) {
+    throw error instanceof InputError ? error : new InputError('request body must be JSON');
   }
   if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new InputError('request body must be a JSON object');
   return body as Record<string, unknown>;
@@ -177,11 +187,21 @@ function namedOf({ request }: Ctx): ManagerName | null {
   return managerName(raw);
 }
 
-/** `?app=<id>`: the `app` of the release a publish returned, so a discard never ends a later app of the same name (ADR 0038). */
+/** `?app=<id>`: the `app` of the release a publish returned, so a write never lands on a later app of the same name (ADR 0038). */
 function appIdOf(query: URLSearchParams): AppId | null {
   const raw = query.get('app');
   if (raw === '') throw new InputError('app must be the id of the app, the app field of the release its publish returned');
   return raw as AppId | null;
+}
+
+/**
+ * The app a per-app write must find under the name: the one its caller was checked against, which `?app=<id>` may name as well. This
+ * replica's view can lag a purge and a new publish of the name elsewhere, and a client's id a reuse of the name (ADR 0038 item 10).
+ */
+function intended({ query, params: [name] }: Ctx, { appId }: Scope): AppId | null {
+  const given = appIdOf(query);
+  if (given !== null && appId !== undefined && given !== appId) throw new Conflict(`app "${name}" is now ${appId}, not ${given}: the name belongs to another app; nothing was changed`);
+  return given ?? appId ?? null;
 }
 
 function userId(raw: unknown): string {
@@ -414,53 +434,55 @@ function routes({ registry, bundles, runtime, guard, metrics, nodes, infra, scal
       audit: { action: 'policy.global', target: () => ({ kind: 'policy', id: 'global', tenant: null }), details: (patch) => ({ patch }) },
       handle: ({ body }) => registry.setGlobalPolicy(body),
     },
-    appRoute('PUT', ADMIN_PATHS.appPolicy('<name>'), 'app.policy', (ctx) => registry.setAppPolicy(app(ctx.params[0]), ctx.body, namedOf(ctx)), {
+    appRoute('PUT', ADMIN_PATHS.appPolicy('<name>'), 'app.policy', (ctx, scope) => registry.setAppPolicy(app(ctx.params[0]), ctx.body, namedOf(ctx), intended(ctx, scope)), {
       json: true, audit: onAppAudit('app.policy', (patch) => ({ patch })),
     }),
-    appRoute('PUT', ADMIN_PATHS.access('<name>'), 'app.access', async (ctx) => {
+    appRoute('PUT', ADMIN_PATHS.access('<name>'), 'app.access', async (ctx, scope) => {
       const { params: [name], body } = ctx;
       if (!(ACCESS_LEVELS as readonly unknown[]).includes(body.access)) throw new InputError(`access must be one of ${ACCESS_LEVELS.join(', ')}`);
-      await registry.setAccess(app(name), body.access as Access, namedOf(ctx));
+      await registry.setAccess(app(name), body.access as Access, namedOf(ctx), intended(ctx, scope));
       return { access: body.access };
     }, { json: true, audit: onAppAudit('app.access', (body) => ({ access: body.access })) }),
-    appRoute('PUT', ADMIN_PATHS.owner('<name>'), 'app.owner', async (ctx) => {
+    appRoute('PUT', ADMIN_PATHS.owner('<name>'), 'app.owner', async (ctx, scope) => {
       const owner = subject(String(ctx.body.owner));
-      await registry.setOwner(app(ctx.params[0]), owner, namedOf(ctx));
+      await registry.setOwner(app(ctx.params[0]), owner, namedOf(ctx), intended(ctx, scope));
       return { owner };
     }, { json: true, audit: onAppAudit('app.owner', (body) => ({ owner: body.owner })) }),
-    appRoute('PUT', ADMIN_PATHS.move('<name>'), 'app.move', async (ctx) => {
+    appRoute('PUT', ADMIN_PATHS.move('<name>'), 'app.move', async (ctx, scope) => {
       const tenant = tenantName(String(ctx.body.tenant));
-      await registry.moveApp(app(ctx.params[0]), tenant, namedOf(ctx));
+      await registry.moveApp(app(ctx.params[0]), tenant, namedOf(ctx), intended(ctx, scope));
       return { tenant };
     }, { json: true, audit: onAppAudit('app.move', (body) => ({ to: body.tenant })) }),
-    appRoute('POST', ADMIN_PATHS.remove('<name>'), 'app.remove', async (ctx) => (await registry.remove(app(ctx.params[0]), namedOf(ctx)), { status: 'removed' }), {
+    appRoute('POST', ADMIN_PATHS.remove('<name>'), 'app.remove', async (ctx, scope) => (await registry.remove(app(ctx.params[0]), namedOf(ctx), intended(ctx, scope)), { status: 'removed' }), {
       audit: onAppAudit('app.remove'),
     }),
-    appRoute('POST', ADMIN_PATHS.unquarantine('<name>'), 'app.remove', async ({ params: [name] }) => {
+    appRoute('POST', ADMIN_PATHS.unquarantine('<name>'), 'app.remove', async (ctx, scope) => {
+      const [name] = ctx.params;
+      intended(ctx, scope);
       await guard.unquarantine(found(registry.view(app(name)), name).app);
       return { quarantine: null };
     }, { audit: onAppAudit('app.unquarantine') }),
-    appRoute('POST', ADMIN_PATHS.stop('<name>'), 'app.stop', async ({ params: [name] }) => (await registry.stop(app(name)), { instance: 'asleep' }), {
+    appRoute('POST', ADMIN_PATHS.stop('<name>'), 'app.stop', async (ctx, scope) => (await registry.stop(app(ctx.params[0]), intended(ctx, scope)), { instance: 'asleep' }), {
       audit: onAppAudit('app.stop'),
     }),
-    appRoute('POST', ADMIN_PATHS.restart('<name>'), 'app.stop', async ({ params: [name] }) => (await registry.restart(app(name)), { instance: 'awake' }), {
+    appRoute('POST', ADMIN_PATHS.restart('<name>'), 'app.stop', async (ctx, scope) => (await registry.restart(app(ctx.params[0]), intended(ctx, scope)), { instance: 'awake' }), {
       audit: onAppAudit('app.restart'),
     }),
-    appRoute('POST', ADMIN_PATHS.kill('<name>'), 'app.kill', async ({ params: [name] }) => (await registry.kill(app(name)), { instance: 'asleep' }), {
+    appRoute('POST', ADMIN_PATHS.kill('<name>'), 'app.kill', async (ctx, scope) => (await registry.kill(app(ctx.params[0]), intended(ctx, scope)), { instance: 'asleep' }), {
       audit: onAppAudit('app.kill'),
     }),
-    appRoute('POST', ADMIN_PATHS.purge('<name>'), 'app.purge', async (ctx) => {
+    appRoute('POST', ADMIN_PATHS.purge('<name>'), 'app.purge', async (ctx, scope) => {
       const { params: [name], body } = ctx;
       if (hosted && body.confirm !== name) throw new InputError('type the app name to confirm purge');
-      await registry.purge(app(name), namedOf(ctx));
+      await registry.purge(app(name), namedOf(ctx), intended(ctx, scope));
       return { status: 'purged' };
     }, {
       ...(hosted && { json: true as const }), audit: onAppAudit('app.purge'),
     }),
-    appRoute('POST', ADMIN_PATHS.discard('<name>'), 'app.discard', async (ctx) => (await registry.discard(app(ctx.params[0]), namedOf(ctx), appIdOf(ctx.query)), { status: 'discarded' }), {
+    appRoute('POST', ADMIN_PATHS.discard('<name>'), 'app.discard', async (ctx, scope) => (await registry.discard(app(ctx.params[0]), namedOf(ctx), intended(ctx, scope)), { status: 'discarded' }), {
       audit: onAppAudit('app.discard'),
     }),
-    appRoute('DELETE', ADMIN_PATHS.manager('<name>'), 'app.release', async (ctx) => (await registry.clearManager(app(ctx.params[0]), namedOf(ctx)), { manager: null }), {
+    appRoute('DELETE', ADMIN_PATHS.manager('<name>'), 'app.release', async (ctx, scope) => (await registry.clearManager(app(ctx.params[0]), namedOf(ctx), intended(ctx, scope)), { manager: null }), {
       audit: onAppAudit('app.manager'),
     }),
     { method: 'GET', path: at(ADMIN_PATHS.tenants), action: 'tenants', handle: () => store.tenants() },
@@ -672,6 +694,7 @@ export function createAdmin(deps: AdminDeps): Server {
       for (const route of table) {
         const match = route.path.exec(path);
         if (!match || route.method !== request.method) continue;
+        if (path.includes('%00') || [...url.searchParams].some(([key, value]) => key.includes('\0') || value.includes('\0'))) throw new InputError(NUL);
         if (route.method !== 'GET' && deps.current && !(await deps.current())) {
           response.setHeader('retry-after', '2');
           return send(response, 503, { error: 'the platform is upgrading; retry in a few seconds' });
