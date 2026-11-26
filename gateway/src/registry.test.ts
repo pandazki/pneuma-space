@@ -721,6 +721,60 @@ test('ADR 0038 a discard given the id of an earlier app of the name is refused a
   assert.equal(await store.app(trial), null);
 });
 
+test('ADR 0038 item 10 every write given the id of an earlier app of the name is refused and changes nothing', async () => {
+  const w = world();
+  const { registry, store } = await w.open();
+  const { app: earlier } = await publish(registry, { kv: {} });
+  await registry.remove(survey);
+  await registry.purge(survey);
+  await publish(registry, { kv: {} });
+  await registry.createTenant(tenantName('blue'), 'Blue', ['ann']);
+  const writes: [string, () => Promise<unknown>][] = [
+    ['remove', () => registry.remove(survey, null, earlier)],
+    ['policy', () => registry.setAppPolicy(survey, { idle_seconds: 5 }, null, earlier)],
+    ['access', () => registry.setAccess(survey, 'public', null, earlier)],
+    ['owner', () => registry.setOwner(survey, subject('user:bo'), null, earlier)],
+    ['move', () => registry.moveApp(survey, tenantName('blue'), null, earlier)],
+    ['manager', () => registry.clearManager(survey, null, earlier)],
+    ['stop', () => registry.stop(survey, earlier)],
+    ['restart', () => registry.restart(survey, earlier)],
+    ['kill', () => registry.kill(survey, earlier)],
+  ];
+  const before = await store.app(survey);
+  const calls = w.calls.length;
+  for (const [what, write] of writes) await assert.rejects(write(), (error) => error instanceof Conflict && /belongs to a later app/.test(error.message), what);
+  assert.deepEqual([await store.app(survey), w.calls.length], [before, calls]);
+  await registry.remove(survey);
+  await assert.rejects(registry.purge(survey, null, earlier), Conflict);
+  assert.equal((await store.app(survey))?.status, 'removed');
+});
+
+test('ADR 0038 an end that failed and a restart finishes is audited ok as resumed, by platform, under the action of that end', async () => {
+  const w = world();
+  const { registry } = await w.open();
+  await temporary(registry, { kv: {} }, 1);
+  w.providers.get('redis')!.fail = 'destroy';
+  await registry.expire(Date.now() + 1000);
+  const restarted = await w.open();
+  await restarted.registry.resume();
+  assert.equal(await restarted.store.app(trial), null);
+  assert.deepEqual((await restarted.store.audit({ target: 'trial' })).reverse().map((r) => [r.actor, r.action, r.result, r.details.resumed]), [
+    ['platform', 'app.expire', 'started', undefined], ['platform', 'app.expire', 'error', undefined], ['platform', 'app.expire', 'ok', true],
+  ]);
+});
+
+test('ADR 0038 a purge a restart finishes, with no row of the end it continues, is audited app.purge ok as resumed', async () => {
+  const w = world();
+  const { registry } = await w.open();
+  const { app } = await publish(registry, { kv: {} });
+  await registry.remove(survey);
+  w.providers.get('redis')!.fail = 'destroy';
+  await assert.rejects(registry.purge(survey), /redis destroy failed/);
+  const restarted = await w.open();
+  await restarted.registry.resume();
+  assert.deepEqual((await restarted.store.audit({ target: 'survey' })).map((r) => [r.actor, r.action, r.result, r.details.resumed, r.details.appId]), [['platform', 'app.purge', 'ok', true, app]]);
+});
+
 test('ADR 0038 a discard interrupted after the first destroy finishes on resume after restart', async () => {
   const w = world();
   const { registry } = await w.open();
