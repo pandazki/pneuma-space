@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { isIP, type AddressInfo } from 'node:net';
 import { emit } from './events.ts';
 import type { Metrics } from './metrics.ts';
 import type { NodeView } from './nodes.ts';
@@ -39,6 +39,8 @@ export type AdminDeps = {
   readonly upstream?: { readonly identity: Pick<Identity, 'identify' | 'challenge' | 'serve'>; readonly authority: Pick<Authority, 'callerOf'> };
   /** Whether this replica runs the current build, which alone takes writes (ADR 0040 item 3); absent, it always does. */
   readonly current?: () => Promise<boolean>;
+  /** `PNEUMA_SPACE_ADMIN_HOSTS`: host names the admin API answers to under `local` besides IP addresses and localhost (ADR 0048). */
+  readonly adminHosts?: readonly string[];
 };
 
 const BODY_LIMIT = 1024 * 1024;
@@ -659,6 +661,31 @@ function authorize(route: Route, ctx: Ctx, scope: Scope): void {
   throw new Forbidden(verdict.reason);
 }
 
+/**
+ * Under `local` nothing authenticates, so what a web page can send is refused before routing (ADR 0048). A browser marks every
+ * write with `Origin` and cannot remove it; a program sends neither it nor `Sec-Fetch-Site`. A page whose name an attacker's DNS
+ * points at this port sends same-origin requests, its reads unmarked: the name it uses is what refuses them.
+ */
+function refuseWebPages(request: IncomingMessage, names: ReadonlySet<string>): void {
+  const host = (request.headers.host ?? '').toLowerCase();
+  const name = host.replace(/:\d+$/, '');
+  const { origin } = request.headers;
+  const site = request.headers['sec-fetch-site'];
+  const marked = origin !== undefined || site !== undefined;
+  // No DNS answer moves an IP address or localhost; a single label, a compose service's name, resolves on this machine or its network only.
+  if (!(name === 'localhost' || isIP(name.replace(/^\[(.*)\]$/, '$1')) || names.has(name) || (!marked && /^[a-z0-9_-]+$/.test(name)))) {
+    throw new Forbidden(
+      `the admin API answers to localhost, an IP address or a name in PNEUMA_SPACE_ADMIN_HOSTS, and a program also to a single-label name such as a compose service's; ` +
+        `not to "${name}", a name a web page can point at this port`,
+    );
+  }
+  if (READS.has(request.method ?? '')) return;
+  if (site !== undefined && site !== 'same-origin' && site !== 'none') throw new Forbidden(`a write from a web page must come from the console's own page, not Sec-Fetch-Site: ${site}`);
+  if (origin !== undefined && origin.toLowerCase() !== `http://${host}` && origin.toLowerCase() !== `https://${host}`) {
+    throw new Forbidden(`a write from a web page must come from the console's own origin, not ${origin}`);
+  }
+}
+
 function answer(response: ServerResponse, reply: Answer, why: string): void {
   if (reply.status === 303) return void response.writeHead(303, { location: reply.location }).end();
   send(response, reply.status, { error: reply.status === 401 ? `not signed in: ${why}` : reply.error });
@@ -668,6 +695,7 @@ export function createAdmin(deps: AdminDeps): Server {
   if (deps.hosted && !deps.upstream) throw new InputError('hosted admin requires authentication');
   const table = routes(deps);
   const consoleFile = deps.consoleFile ?? new URL('./console.html', import.meta.url);
+  const adminHosts = new Set((deps.adminHosts ?? []).map((name) => name.toLowerCase()));
   const callerOf = async (request: IncomingMessage, response: ServerResponse): Promise<Caller | null> => {
     if (!deps.upstream) return LOCAL_CALLER;
     const auth = await deps.upstream.identity.identify(request);
@@ -685,6 +713,7 @@ export function createAdmin(deps: AdminDeps): Server {
     const path = url.pathname;
     try {
       if (path === ADMIN_PATHS.healthz && READS.has(request.method ?? '')) return void response.writeHead(200).end();
+      if (!deps.upstream) refuseWebPages(request, adminHosts);
       if (deps.hosted && request.headers.host !== new URL(deps.hosted.controlOrigin).host) return send(response, 400, { error: 'invalid control host' });
       if ((path === LOGOUT_PATH || deps.hosted?.identityPaths.includes(path)) && deps.upstream) return await deps.upstream.identity.serve(request, response);
       if (request.method === 'GET' && path === '/') {

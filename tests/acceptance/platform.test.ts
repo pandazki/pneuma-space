@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { request } from 'node:http';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  OWNER, adminClient, adminUrl, appctl, appJson, appPut, appUrl, bucketExists, cleanup, connect, containerIp, deploy, docker, images, inNetwork,
+  OWNER, adminClient, adminUrl, appctl, appJson, appPut, appUrl, bucketExists, chrome, cleanup, connect, containerIp, deploy, docker, fixtureDir, images, inNetwork,
   median, publish, restartGateway, runningContainerFor, scratch, serviceToken, setIdle, setupSuite, sleep, stack, summary, teardownSuite,
   uniqueName, volumeExists, waitFor, waitInstance,
 } from './harness.ts';
@@ -151,6 +152,26 @@ test('AC-P-16', { timeout: 60_000 }, async (t) => {
 });
 
 const CLOCK_SKEW_MS = 250;
+
+/** The status of one request with the Host header given, which fetch does not let a caller set. */
+const withHost = (method: string, path: string, headers: Record<string, string>) => new Promise<number>((resolve, reject) => {
+  request(adminUrl + path, { method, headers }, (response) => (response.resume(), resolve(response.statusCode!))).on('error', reject).end();
+});
+
+test('AC-P-17', { timeout: 120_000 }, async (t) => {
+  const app = await deploy(t, { image: null, capabilities: {}, staticDir: fixtureDir('static-site') });
+  const page = await chrome(t);
+  const appPage = await page(appUrl(app.name, '/'));
+  await appPage.evaluate(`fetch('${adminUrl}/api/apps/${app.name}/remove', { method: 'POST', mode: 'no-cors' }).then(() => 'sent', String)`);
+  assert.equal((await summary(app.name)).status, 'registered', "an app page's POST to the admin API changed nothing");
+  const port = new URL(adminUrl).port;
+  assert.equal(await withHost('GET', '/api/apps', { host: `evil.test:${port}` }), 403, "a rebinding page's read");
+  assert.equal(await withHost('POST', `/api/apps/${app.name}/stop`, { host: `evil.test:${port}`, origin: `http://evil.test:${port}` }), 403, "a rebinding page's write");
+  assert.equal(inNetwork(`console.log(JSON.stringify((await fetch('http://gateway:8081/api/apps/${app.name}/stop', { method: 'POST' })).status))`), 200, 'a container by service name');
+  const consolePage = await page(`${adminUrl}/`);
+  assert.equal(await consolePage.evaluate(`fetch('/api/apps/${app.name}/remove', { method: 'POST' }).then((r) => r.status)`), 200, "the console's own write");
+  assert.equal((await summary(app.name)).status, 'removed');
+});
 
 test('AC-P-14', { timeout: 90_000 }, async (t) => {
   const app = await deploy(t, { image: images.echo, capabilities: { ws: {} } });
