@@ -612,3 +612,52 @@ test('ADR 0040 item 3: a read from a replica not on the current build answers as
   t.after(() => server.close());
   assert.equal((await call('GET', '/api/apps')).status, 200);
 });
+
+/** The headers a browser adds to a request from a page, which a program does not send. */
+const fromPage = (origin: string, site: string) => ({ origin, 'sec-fetch-site': site });
+
+test('ADR 0048 under local a write marked as coming from another site or origin answers 403 before routing and changes nothing', async (t) => {
+  const { base, call, server, registry, store } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  const host = new URL(base).host;
+  const refused = [
+    fromPage('http://evil.test', 'cross-site'), fromPage(`http://127.0.0.1:18080`, 'same-site'), { origin: 'http://evil.test' }, { 'sec-fetch-site': 'cross-site' }, { origin: 'null' },
+  ];
+  for (const headers of refused) {
+    const reply = await hostedFetch(`${base}/api/apps/survey/remove`, { method: 'POST', headers: { host, 'content-type': 'text/plain', ...headers } });
+    assert.equal(reply.status, 403, JSON.stringify(headers));
+  }
+  assert.deepEqual([registry.view(appName('survey'))?.status, (await audit(store, 'survey')).map((r) => r.action)], ['registered', ['app.publish', 'app.publish']]);
+});
+
+test('ADR 0048 under local the console\'s own same-origin write and a program\'s write without browser headers both pass', async (t) => {
+  const { base, call, server, registry } = await admin();
+  t.after(() => server.close());
+  await call('PUT', '/api/apps/survey/release', kvApp);
+  const host = new URL(base).host;
+  assert.equal((await hostedFetch(`${base}/api/apps/survey/stop`, { method: 'POST', headers: { host, ...fromPage(`http://${host}`, 'same-origin') } })).status, 200);
+  assert.equal((await hostedFetch(`${base}/api/apps/survey/remove`, { method: 'POST', headers: { host: 'gateway:8081' } })).status, 200);
+  assert.equal(registry.view(appName('survey'))?.status, 'removed');
+});
+
+test('ADR 0048 under local a request under a name a page could point at the port answers 403, reads included; a single-label name passes only without browser headers', async (t) => {
+  const { base, server } = await admin();
+  t.after(() => server.close());
+  const get = async (host: string, headers: Record<string, string> = {}) => (await hostedFetch(`${base}/api/apps`, { headers: { host, ...headers } })).status;
+  assert.deepEqual(
+    [await get('evil.test:8081'), await get('host.docker.internal:8081'), await get('gateway:8081', fromPage('http://gateway:8081', 'same-origin'))],
+    [403, 403, 403],
+  );
+  assert.deepEqual([await get('localhost:8081'), await get('[::1]:8081'), await get('172.18.0.4:8081'), await get('gateway:8081')], [200, 200, 200, 200]);
+  const write = await hostedFetch(`${base}/api/apps/survey/stop`, { method: 'POST', headers: { host: 'evil.test:8081', ...fromPage('http://evil.test:8081', 'same-origin') } });
+  assert.equal(write.status, 403);
+  assert.match((write.json() as { error: string }).error, /not to "evil\.test"/);
+});
+
+test('ADR 0048 PNEUMA_SPACE_ADMIN_HOSTS adds names a browser may call the admin API by', async (t) => {
+  const { base, server } = await admin({ overrides: { adminHosts: ['Space.Internal'] } });
+  t.after(() => server.close());
+  const reply = await hostedFetch(`${base}/api/apps`, { headers: { host: 'space.internal:8081', ...fromPage('http://space.internal:8081', 'same-origin') } });
+  assert.equal(reply.status, 200);
+});
