@@ -186,3 +186,25 @@ The release rows before the move are the release study's medians over 32 release
 A 304 saves the body, not the time: each revalidation still passes the credential check, the app's state, the R2 read beside the request count write (54) and the admission (40), and these assets are 0.1 to 2.7 KB, so the reload took as long as after the move. The reservation and the confirmation together took about 80 less per wake. The asleep open did not get faster because the container start and the runner's listen took about 300 longer this time (680 to 1179 against 580 to 710 for the container start); both happen in Cloudflare's container and the app's runner, which neither change touches, so this is read as placement, not as the change (inferred). The awake starter's first visit lies within the spread of runs on different apps (1120 to 1419 against 1281 to 1557), and is not attributed to either change. The release change took 0.8 s off a first release, 0.2 s off a release while awake and 0.7 s off a static-only one. It was expected to save about 2.8 s when each of the R2 writes it now makes at once cost about 0.65 s across the Pacific; with the data in wnam those writes cost little, so less was left to save (inferred).
 
 Not verified: an ephemeral release, an app with more static files, where the parallel writes should matter most, and a browser keeping its cache across sessions.
+
+## Wake without static files (2026-11-27)
+
+A developer suspected that a wake also fetched and unpacked the static directory. It did: the runner fetched the whole package, every file in base64, and wrote every file to disk. Since [ADR 0050](../../docs/adr/0050-cloudflare-code-only-boot-package.md) a Node release with a static directory boots a package of its other files. The runs below are on the deployment of the two previous sections, from the operator's machine in Japan entering at SEA, between 01:03 and 01:22 JST, made with `node scripts/bench-wake.mjs`.
+
+The script publishes one release of a minimal Node app per package size into one ephemeral app; the rest of each package is random static files of at most 512 KiB. Each cycle rolls back to a size, which wakes the app once during publication, then sleeps the app and wakes it with one GET that reaches Node. The order rotates each round, for 8 rounds. A wake counts only when the reply is 200 with a new process id and the app's last wake is new and `ready`; every wake counted, before and after. An ephemeral app wakes through the same `Runtime.acquire` as a durable one, and the owner's durable slots were full. Before and after are two apps, so their containers may have landed in different places.
+
+Medians in ms; fetch and unpack over 16 wakes per cell (8 by request, 8 by publication), the client's time over the 8 by request:
+
+| Package | Fetch + unpack, before | After | Unpack, before | After | Client, before | After |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0.03 MiB | 122 | 137 | 5 | 3 | 1339 | 1370 |
+| 1.0 MiB | 196 | 124 | 56 | 4 | 1535 | 1331 |
+| 2.4 MiB | 339 | 120 | 153 | 4 | 1559 | 1361 |
+| 3.9 MiB | 375 | 118 | 167 | 3 | 1598 | 1366 |
+
+- Before, fetch and unpack grew 70 ms per MiB of package, about 90 ms per MiB of static files, and the client's time grew with them. At 2.4 MiB that is 0.2 s, about a third of the developer's estimate. A second app measured just before the deploy grew 111 ms per MiB. The same 3.9 MiB package unpacks in 25 ms on the operator's machine against 167 ms on the container's `lite` instance, so unpack is limited by the container's CPU (inferred). After, the growth is -3 ms per MiB: none.
+- The small app shows no measurable difference: 122 and 137 ms for fetch and unpack (rank-sum p 0.43), 1339 and 1370 ms for the client (p 0.09). The 31 ms between the client medians lie in the compute reservation, the container start, the fetch and the network, none of which the change touches; its runner now receives 0.5 KB instead of 30 KB.
+- An app published just before the deploy, with releases at 0.03 and 3.9 MiB, was rolled back between them after it: 10 of 10 wakes were ready, and they still boot the whole package (fetch and unpack 217 and 771 ms on that app's slower placement).
+- The owner's five apps, all published before the deploy, each woke `ready` after it when opened; they boot their whole package until they are republished. The largest, a 2.4 MB package, spent 256 ms fetching and 539 ms unpacking. Opening them one after another exposed a defect that predates this change ([#67](https://github.com/pandazki/pneuma-space/issues/67)): while two apps of the space were awake, a wake refused with 503 `compute_quota` counted as a startup failure, and the opening client's retries quarantined two apps after five refusals each. They were unquarantined, then each was opened once when a slot was free, and each was returned to asleep.
+
+Not verified: an app whose server reads its static directory (none was found in the repository, the agent-app-governance template or the 7 CF Node projects on the operator's machine), the Docker runner tests (the runner did not change), and a wake from a browser.
