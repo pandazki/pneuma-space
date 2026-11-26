@@ -155,3 +155,34 @@ The warm rows are one keep-alive connection entering at SJC both times; a health
 An hour after the switch the old database and buckets still held exactly what was copied (551 audit rows, 314 sessions, 66 artifacts with the same key, size and ETag digest), and all 551 audit rows were in the new database unchanged, which by then also held the owner's own activity. `--remove-previous` found the deployed Worker bound to the new database and buckets alone, appended nothing, deleted the 66 objects, both old buckets and the old database in 14 s, and did not redeploy. Wrangler then listed only the new database and buckets, and the current version binds only them.
 
 Not verified: a move while apps are used, an upload in flight across the switch, a client entering outside western North America, and where Cloudflare runs the containers.
+
+## Open and release paths after the move (2026-11-26)
+
+The release-path change (the package copy and the static files written at once, the package read once) and the open-path change (`If-None-Match` compared weakly, a compute slot reserved in one D1 round trip, readiness polled every 50 ms), deployed by a plain rerun of the installer from `main` over the relocated deployment of the previous section. Three apps of the owner, all managed by the governance Host; the owner was using the deployment, and their apps were asleep at each check.
+
+Before: no app purging or waking, no ephemeral app, no upload ticket outstanding.
+
+- The rerun recorded the data as wnam, printed that requests from this machine enter at SJC (wnam), where the Worker runs, and printed no relocation command. It created no database, bucket or secret: the schema's 17 statements and the column check wrote no rows, the container image was already in Cloudflare's registry and was not pushed, and the Worker deployed bound to the same database and buckets.
+- Afterwards the owner's three apps were listed at the same releases (10, 10 and 5) and each page answered signed in.
+- Reloading the ten-asset page, all 60 asset requests (6 reloads of 10) came back without a body: Chrome's Resource Timing reports each with status 200 and a 300-byte transfer, where before the move and after it each carried the full body. Asked directly, a stylesheet, a script and an image each answered 304 without a body to its weak ETag and to the strong form, and 200 with the body to another ETag.
+
+The same measurements as in the previous section, from the same machine (medians in ms; browser runs in a fresh context each, signed in; this deploy's runs 05:58 to 06:10, entering at SJC and SEA; "data" is the end of the page's first API call):
+
+| Measurement | Before the move | After the move | After this deploy |
+| --- | --- | --- | --- |
+| Ten assets, reload: assets answered without a body | 0 of 60 | 0 of 60 | 60 of 60 |
+| Ten assets, reload: last asset | 2203 | 1225 | 1237 |
+| Starter awake, first visit: data | 1724 | 1397 | 1174 |
+| Starter awake, reload: data | 1618 | 1152 | 1074 |
+| Starter asleep: data | 4096 | 2499 | 2581 |
+| Wake: compute reservation / readiness confirmed | 491 / 202 | 156 / 108 | 114 / 68 |
+| Wake: container start / runner listening | 1022 / 275 | 627 / 165 | 812 / 279 |
+| `POST /releases`, Node app, first release (s) | 8.3 | 3.3 | 2.5 |
+| `POST /releases`, Node app, while awake (s) | 9.9 | 3.7 | 3.5 |
+| `POST /releases`, static-only app (s) | 5.9 | 1.7 | 0.9 |
+
+The release rows before the move are the release study's medians over 32 releases; the other release cells are three releases each. The wake rows are the starter apps' wakes (7, 8 and 7).
+
+A 304 saves the body, not the time: each revalidation still passes the credential check, the app's state, the R2 read beside the request count write (54) and the admission (40), and these assets are 0.1 to 2.7 KB, so the reload took as long as after the move. The reservation and the confirmation together took about 80 less per wake. The asleep open did not get faster because the container start and the runner's listen took about 300 longer this time (680 to 1179 against 580 to 710 for the container start); both happen in Cloudflare's container and the app's runner, which neither change touches, so this is read as placement, not as the change (inferred). The awake starter's first visit lies within the spread of runs on different apps (1120 to 1419 against 1281 to 1557), and is not attributed to either change. The release change took 0.8 s off a first release, 0.2 s off a release while awake and 0.7 s off a static-only one. It was expected to save about 2.8 s when each of the R2 writes it now makes at once cost about 0.65 s across the Pacific; with the data in wnam those writes cost little, so less was left to save (inferred).
+
+Not verified: an ephemeral release, an app with more static files, where the parallel writes should matter most, and a browser keeping its cache across sessions.
