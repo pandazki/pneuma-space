@@ -573,7 +573,7 @@ test('ADR 0040 item 3: a read from a replica not on the current build answers as
 /** The headers a browser adds to a request from a page, which a program does not send. */
 const fromPage = (origin: string, site: string) => ({ origin, 'sec-fetch-site': site });
 
-test('ADR 0047 under local a write marked as coming from another site or origin answers 403 before routing and changes nothing', async (t) => {
+test('ADR 0048 under local a write marked as coming from another site or origin answers 403 before routing and changes nothing', async (t) => {
   const { base, call, server, registry, store } = await admin();
   t.after(() => server.close());
   await call('PUT', '/api/apps/survey/release', kvApp);
@@ -588,7 +588,7 @@ test('ADR 0047 under local a write marked as coming from another site or origin 
   assert.deepEqual([registry.view(appName('survey'))?.status, (await audit(store, 'survey')).map((r) => r.action)], ['registered', ['app.publish', 'app.publish']]);
 });
 
-test('ADR 0047 under local the console\'s own same-origin write and a program\'s write without browser headers both pass', async (t) => {
+test('ADR 0048 under local the console\'s own same-origin write and a program\'s write without browser headers both pass', async (t) => {
   const { base, call, server, registry } = await admin();
   t.after(() => server.close());
   await call('PUT', '/api/apps/survey/release', kvApp);
@@ -598,7 +598,7 @@ test('ADR 0047 under local the console\'s own same-origin write and a program\'s
   assert.equal(registry.view(appName('survey'))?.status, 'removed');
 });
 
-test('ADR 0047 under local a request under a name a page could point at the port answers 403, reads included; a single-label name passes only without browser headers', async (t) => {
+test('ADR 0048 under local a request under a name a page could point at the port answers 403, reads included; a single-label name passes only without browser headers', async (t) => {
   const { base, server } = await admin();
   t.after(() => server.close());
   const get = async (host: string, headers: Record<string, string> = {}) => (await hostedFetch(`${base}/api/apps`, { headers: { host, ...headers } })).status;
@@ -612,7 +612,7 @@ test('ADR 0047 under local a request under a name a page could point at the port
   assert.match((write.json() as { error: string }).error, /not to "evil\.test"/);
 });
 
-test('ADR 0047 PNEUMA_SPACE_ADMIN_HOSTS adds names a browser may call the admin API by', async (t) => {
+test('ADR 0048 PNEUMA_SPACE_ADMIN_HOSTS adds names a browser may call the admin API by', async (t) => {
   const { base, server } = await admin({ overrides: { adminHosts: ['Space.Internal'] } });
   t.after(() => server.close());
   const reply = await hostedFetch(`${base}/api/apps`, { headers: { host: 'space.internal:8081', ...fromPage('http://space.internal:8081', 'same-origin') } });

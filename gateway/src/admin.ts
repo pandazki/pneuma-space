@@ -39,7 +39,7 @@ export type AdminDeps = {
   readonly upstream?: { readonly identity: Pick<Identity, 'identify' | 'challenge' | 'serve'>; readonly authority: Pick<Authority, 'callerOf'> };
   /** Whether this replica runs the current build, which alone takes writes (ADR 0040 item 3); absent, it always does. */
   readonly current?: () => Promise<boolean>;
-  /** `PNEUMA_SPACE_ADMIN_HOSTS`: host names the admin API answers to under `local` besides IP addresses and localhost (ADR 0047). */
+  /** `PNEUMA_SPACE_ADMIN_HOSTS`: host names the admin API answers to under `local` besides IP addresses and localhost (ADR 0048). */
   readonly adminHosts?: readonly string[];
 };
 
@@ -640,7 +640,7 @@ function authorize(route: Route, ctx: Ctx, scope: Scope): void {
 }
 
 /**
- * Under `local` nothing authenticates, so what a web page can send is refused before routing (ADR 0047). A browser marks every
+ * Under `local` nothing authenticates, so what a web page can send is refused before routing (ADR 0048). A browser marks every
  * write with `Origin` and cannot remove it; a program sends neither it nor `Sec-Fetch-Site`. A page whose name an attacker's DNS
  * points at this port sends same-origin requests, its reads unmarked: the name it uses is what refuses them.
  */
