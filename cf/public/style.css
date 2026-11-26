@@ -169,7 +169,7 @@ a { text-underline-offset: 3px; }
 .command-preview { margin: 0; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--inset); border-radius: 8px; line-height: 21px; }
 .handoff-copy { min-height: 260px; }
 .launch-progress { display: grid; gap: 12px; max-width: 860px; }
-.launch-progress h3 { font-size: 16px; line-height: 24px; }
+.launch-progress h3, .handoff-card h3 { font-size: 16px; line-height: 24px; }
 @media(max-width:680px) { .launch-banner { padding: 0 20px 20px; } .launch-intro { flex-direction: column; align-items: flex-start; padding: 20px; gap: 16px; } .handoff-card { padding: 16px; } }
 .usage-toolbar { padding: 0 32px 24px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
 @media(max-width:680px) { .usage-toolbar { padding: 0 20px 20px; } }
