@@ -1,12 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
+import { once } from 'node:events';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // @ts-expect-error The packaged CLI is a plain Node script.
-import { runJobNow, showJobs } from '../cli/bin/pneuma-space.mjs';
+import { runJobNow, showJobs, getPath } from '../cli/bin/pneuma-space.mjs';
 
 const run = promisify(execFile), cli = new URL('../cli/bin/pneuma-space.mjs', import.meta.url).pathname;
 type Job = { id: string; name: string; state: string; attempts: number; scheduledFor: number; error: string | null };
@@ -91,4 +93,18 @@ test('CF-35 jobs lists the declared schedules, only the last 10 deliveries newes
   assert.match(out.text(), /Last 10 of 12 deliveries/);
   assert.match(out.text(), /tidy {2}failed {2}attempts 5 {2}scheduled_1_tidy_11 {2}Trigger returned HTTP 500/);
   assert.deepEqual(out.text().match(/line \d+/g), Array.from({ length: 20 }, (_, i) => 'line ' + (i + 5)));
+});
+test('CF-36 get requests a path of the app with the token as a Bearer header only and prints the status and the start of the reply', async () => {
+  const seen: { url: string; authorization?: string }[] = [];
+  const server = http.createServer((req, res) => { seen.push({ url: req.url!, authorization: req.headers.authorization }); res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ items: ['x'.repeat(3000)] })); });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const origin = 'http://127.0.0.1:' + (server.address() as { port: number }).port, { w } = workspace(() => ({}), origin), out = capture();
+  try {
+    assert.equal(await getPath(w, '/api/items?limit=2'), 200);
+    for (const outside of ['../../api/v1/me', 'https://elsewhere.test/']) await assert.rejects(getPath(w, outside), /inside this app/);
+  } finally { out.restore(); server.close(); }
+  assert.deepEqual(seen, [{ url: '/apps/demo/api/items?limit=2', authorization: 'Bearer ' + 'f'.repeat(64) }]);
+  assert.match(out.text(), /GET \/apps\/demo\/api\/items\?limit=2: 200, application\/json, 3014 bytes/);
+  assert.match(out.text(), /\{"items":\["x{1989}\n\[first 2000 of 3014 bytes\]/);
+  assert.doesNotMatch(out.text(), /f{64}/);
 });
