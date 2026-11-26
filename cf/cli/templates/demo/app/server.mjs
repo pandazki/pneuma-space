@@ -1,5 +1,6 @@
 import http from 'node:http';
 import {randomUUID} from 'node:crypto';
+import {native,runJob,JOB_PATH} from './space.mjs';
 const boot=randomUUID(),startedAt=Date.now();
 const seed=[
   {id:'first-screen',title:'The one-screen project',note:'A small tool for one everyday problem. What would you build if it had only one screen?',category:'Ideas',url:'',pinned:true,archived:false},
@@ -7,7 +8,6 @@ const seed=[
   {id:'saturday',title:'A Saturday without a plan',note:'Walk somewhere new. Find a bookshop. Leave room for a good coffee. This is a sample entry; make it your own.',category:'Life',url:'',pinned:false,archived:false},
   {id:'future-you',title:'Leave a note for future you',note:'Save why a link matters, not just where it goes. Your future self will appreciate the context.',category:'Reading',url:'',pinned:false,archived:false},
 ];
-async function native(command){const r=await fetch('http://pneuma-space.internal/broker',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(command)});const value=await r.json();if(!r.ok)throw Object.assign(Error(value.error?.message||'Storage unavailable'),{status:r.status});return value;}
 async function input(req){let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>16384)throw Object.assign(Error('Keep your shelf under 16 KiB.'),{status:413});}try{return JSON.parse(raw||'{}');}catch{throw Object.assign(Error('Invalid request.'),{status:400});}}
 function validate(items){
   if(!Array.isArray(items)||items.length>24)throw Object.assign(Error('This little shelf holds up to 24 entries.'),{status:400});
@@ -21,6 +21,7 @@ http.createServer(async(req,res)=>{
   const json=(value,status=200)=>{res.writeHead(status,{'content-type':'application/json','cache-control':'no-store'});res.end(JSON.stringify(value));};
   try{
     const path=new URL(req.url,'http://app').pathname;
+    if(path.startsWith(JOB_PATH))return runJob(req,res);
     if(path==='/api/proof'){
       if(req.method==='POST'){const body=await input(req);if(typeof body.marker!=='string'||body.marker.length>100)return json({error:'Invalid proof'},400);await native({type:'kv.put',key:'demo:proof',value:body.marker});}
       else if(req.method!=='GET')return json({error:'Method not allowed'},405);

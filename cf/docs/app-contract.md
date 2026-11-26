@@ -22,6 +22,8 @@ An app is served at `<control origin>/apps/<name>/`, and `/apps/<name>` redirect
 | identity | Trusted subject/name/owner headers. Platform credentials and incoming reserved headers are removed. |
 | rtc | Expiring ICE configuration from a configured TURN provider. Unconfigured service refuses dependent publication. |
 
+A trigger delivery is `POST /_pneuma-space/trigger/<name>` to Node, waking it if it sleeps, with the stable delivery ID in `X-Pneuma-Space-Delivery`, the attempt number in `X-Pneuma-Space-Delivery-Attempt` and the payload as a JSON body, null for a schedule. A 2xx answer completes the delivery; any other outcome retries it after 2^attempt seconds, and the fifth failure ends it as failed. An ephemeral app's schedules never fire.
+
 The SDK calls the intercepted host pneuma-space.internal. Scope comes from trusted platform props, never app input. Every native mutation checks active lifecycle and execution generation. Publish and remove retain data. Purge requires removed status and exact name confirmation. An ephemeral app ([ADR 0038](../../docs/adr/0038-ephemeral-apps.md)) also ends by discard from any live status and by itself at `expiresAt`; a managed app ([ADR 0039](../../docs/adr/0039-managed-apps.md)) refuses with 409 the writes that do not name its manager in `X-Pneuma-Space-Manager`. [ADR 0046](../../docs/adr/0046-cloudflare-ephemeral-and-managed-apps.md) records which writes and how this plane differs. Already-issued signed URLs remain valid until expiry; final object cleanup waits for outstanding upload tickets.
 
 Failed cloud cleanup remains in purging and retries through its durable alarm.
