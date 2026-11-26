@@ -53,6 +53,7 @@ const USAGE = `usage:
   appctl audit [--tenant <t>] [--since 7d|24h|2026-11-01] [--action <action>] [--actor <subject>] [--json]
 admin API: PNEUMA_SPACE_ADMIN (default http://127.0.0.1:${ADMIN_PORT}), PNEUMA_SPACE_TOKEN sent as Authorization: Bearer
 managed apps: --manager <name> names an app's manager, which every write to it needs; on publish it also sets it
+app id: --app <id> on a write to one app refuses it, changing nothing, when the name now belongs to another app
 registry: --registry or PNEUMA_SPACE_REGISTRY; publish pushes a local image there and sends its digest`;
 
 const usage = (why: string) => new Failure(EXIT.usage, `${why}\n${USAGE}`);
@@ -60,6 +61,8 @@ const admin = (process.env.PNEUMA_SPACE_ADMIN ?? `http://127.0.0.1:${ADMIN_PORT}
 const bearer: Record<string, string> = process.env.PNEUMA_SPACE_TOKEN ? { authorization: `Bearer ${process.env.PNEUMA_SPACE_TOKEN}` } : {};
 /** `--manager` as the header on every request (ADR 0039). */
 let named: Record<string, string> = {};
+/** `--app <id>` as `?app=<id>` on a write to one app, which then changes nothing once the name belongs to another app (ADR 0038). */
+let pinned = '';
 
 type Options = {
   owner?: string; tag?: string; manifest?: string; registry?: string; container?: boolean; static?: boolean; yes?: boolean; tail?: string; ephemeral?: boolean; ttl?: string;
@@ -346,7 +349,7 @@ async function purge(args: string[], options: Options): Promise<void> {
     prompt.close();
     if (answer.trim() !== name) throw new Failure(EXIT.usage, 'purge not confirmed');
   }
-  await api('POST', ADMIN_PATHS.purge(name));
+  await api('POST', ADMIN_PATHS.purge(name) + pinned);
   console.log(`purged ${name}`);
 }
 
@@ -365,14 +368,14 @@ function fields(pairs: string[], what: string): Record<string, string | number |
 
 async function policy(args: string[]): Promise<void> {
   const name = args[0] && !args[0].includes('=') ? appName(args[0]) : null;
-  const result = await api('PUT', name ? ADMIN_PATHS.appPolicy(name) : ADMIN_PATHS.policy, fields(name ? args.slice(1) : args, 'policy'));
+  const result = await api('PUT', name ? ADMIN_PATHS.appPolicy(name) + pinned : ADMIN_PATHS.policy, fields(name ? args.slice(1) : args, 'policy'));
   console.log(JSON.stringify(result, null, 2));
 }
 
 async function owner(args: string[]): Promise<void> {
   if (args.length !== 2) throw usage('owner takes <name> <subject>');
   const name = appName(args[0]);
-  await api('PUT', ADMIN_PATHS.owner(name), { owner: subject(args[1]) });
+  await api('PUT', ADMIN_PATHS.owner(name) + pinned, { owner: subject(args[1]) });
   console.log(`${name} owner ${args[1]}`);
 }
 
@@ -478,23 +481,23 @@ const COMMANDS: Record<string, (args: string[], options: Options) => unknown> = 
   },
   unquarantine: async (args) => {
     const name = one(args, 'unquarantine');
-    await api('POST', ADMIN_PATHS.unquarantine(name));
+    await api('POST', ADMIN_PATHS.unquarantine(name) + pinned);
     console.log(`${name} unquarantined; the next request wakes it`);
   },
   remove: async (args) => {
     const name = one(args, 'remove');
-    await api('POST', ADMIN_PATHS.remove(name));
+    await api('POST', ADMIN_PATHS.remove(name) + pinned);
     console.log(`removed ${name}; data kept, purge deletes it`);
   },
   purge,
-  discard: async (args, options) => {
+  discard: async (args) => {
     const name = one(args, 'discard');
-    await api('POST', ADMIN_PATHS.discard(name) + (options.app === undefined ? '' : `?app=${encodeURIComponent(options.app)}`));
+    await api('POST', ADMIN_PATHS.discard(name) + pinned);
     console.log(`discarded ${name}; its data is deleted`);
   },
   unmanage: async (args) => {
     const name = one(args, 'unmanage');
-    await api('DELETE', ADMIN_PATHS.manager(name));
+    await api('DELETE', ADMIN_PATHS.manager(name) + pinned);
     console.log(`${name} has no manager`);
   },
   policy,
@@ -502,7 +505,7 @@ const COMMANDS: Record<string, (args: string[], options: Options) => unknown> = 
   access: async (args) => {
     if (args.length !== 2) throw usage('access takes <name> tenant|org|public');
     const name = appName(args[0]);
-    await api('PUT', ADMIN_PATHS.access(name), { access: args[1] });
+    await api('PUT', ADMIN_PATHS.access(name) + pinned, { access: args[1] });
     console.log(`${name} access ${args[1]}`);
   },
   whoami,
@@ -548,6 +551,7 @@ async function main(argv: string[]): Promise<void> {
     throw usage((error as Error).message);
   }
   if (parsed.values.manager !== undefined) named = { [MANAGER_HEADER]: managerName(parsed.values.manager) };
+  if (parsed.values.app !== undefined) pinned = `?app=${encodeURIComponent(parsed.values.app)}`;
   const [command, ...args] = parsed.positionals;
   const run = command !== undefined && Object.hasOwn(COMMANDS, command) ? COMMANDS[command] : null;
   if (!run) throw usage(command ? `unknown command "${command}"` : 'no command');

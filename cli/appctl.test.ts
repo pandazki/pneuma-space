@@ -397,6 +397,16 @@ test('ADR 0038 discard --app sends the id the publish printed, so a retry never 
   assert.deepEqual(requests.map((r) => `${r.method} ${r.url}`), ['POST /api/apps/trial/discard?app=a1b2c3']);
 });
 
+test('ADR 0038 item 10 --app sends the id on every write to one app', async () => {
+  for (const args of [['remove', 'board'], ['purge', 'board', '--yes'], ['unquarantine', 'board'], ['unmanage', 'board'], ['policy', 'board', 'idle_seconds=5'], ['owner', 'board', 'user:bo'], ['access', 'board', 'org']]) {
+    assert.equal((await appctl([...args, '--app', 'a1b2c3'])).code, 0, args.join(' '));
+  }
+  assert.deepEqual(requests.map((r) => `${r.method} ${r.url}`), [
+    'POST /api/apps/board/remove?app=a1b2c3', 'POST /api/apps/board/purge?app=a1b2c3', 'POST /api/apps/board/unquarantine?app=a1b2c3', 'DELETE /api/apps/board/manager?app=a1b2c3',
+    'PUT /api/apps/board/policy?app=a1b2c3', 'PUT /api/apps/board/owner?app=a1b2c3', 'PUT /api/apps/board/access?app=a1b2c3',
+  ]);
+});
+
 test('AC-MGR-1 publish --manager --manager-url sets the manager in the body and names it in the header', async () => {
   const dir = source({ contract: 1, capabilities: { static: { dir: 'dist' } } }, { 'dist/index.html': '<h1>hi</h1>' });
   const result = await appctl(['publish', 'board', dir, '--manager', 'deployer', '--manager-url', 'https://deploy.test/board']);

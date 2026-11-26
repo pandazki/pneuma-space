@@ -174,6 +174,8 @@ These rows cover [ADR 0038](adr/0038-ephemeral-apps.md) and US-P-17 and run in `
 | AC-EPH-7 | An ephemeral app whose postgres database cannot be dropped, because the postgres service is stopped when it ends, stays `purging`, and while later sweeps fail the same way the audit gains no row after one `app.expire` error. Once postgres starts again it ends within 60 s, and its last audit row is `app.expire` ok with `resumed`. |
 | AC-EPH-8 | `appctl publish --ephemeral` prints the app's id. After the app is discarded and its name published again as ephemeral, `POST /api/apps/<name>/discard?app=<first id>` answers 409 and the second app stays registered; `appctl discard <name> --app <second id>` ends it. |
 | AC-EPH-9 | In Chrome, the console's detail of an ephemeral app offers Discard behind ⋯; its approval card names the app and, on Continue, sends the discard with the app's id, after which the app leaves the listing, its volume is gone and the audit holds `app.discard` started and ok. |
+| AC-EPH-10 | An ephemeral app on postgres whose discard fails because the postgres service is stopped stays `purging`. After postgres starts again and the gateway restarts, the app is gone, and its last audit row is `app.discard` ok with `resumed`, by `platform`. |
+| AC-EPH-11 | After an ephemeral app is discarded and its name published again, stop, remove, a policy change and an owner change sent with `?app=<first id>`, and `appctl remove <name> --app <first id>`, answer 409 and the second app keeps its status, owner and policy. In Chrome, Remove on the console's detail of the second app sends `?app=<second id>` and removes it. |
 
 ## Managed apps
 

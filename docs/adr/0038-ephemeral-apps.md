@@ -1,6 +1,6 @@
 # ADR 0038：临时应用
 
-状态：接受。2026-11-24。修订 DESIGN 1.4 的"只能从 `removed` 进入 `purging`"和 INV-2 的同一句：临时应用的丢弃和到期例外。
+状态：接受。2026-11-24。修订 DESIGN 1.4 的"只能从 `removed` 进入 `purging`"和 INV-2 的同一句：临时应用的丢弃和到期例外。2026-11-26 补第 3 条续跑的审计和第 10 条（#41）。
 
 ## 背景
 
@@ -23,13 +23,14 @@
 
 1. **声明在首次发布，之后不变。** 首次发布带标记（`appctl publish <name> <dir> --ephemeral [--ttl <seconds>]`，请求体 `"ephemeral": {"ttl_seconds": n}`）就建出临时应用。App 行持久化 `expires_at`，等于首次发布时刻加 TTL；持久应用的 `expires_at` 为空。之后每次发布都必须带同样的标记，与已有 App 不符的发布答 409，不落 Release。所以持久应用永远不会变成临时应用，临时应用也永远不会变成持久应用，写错名字的发布不会落到另一类应用上。之后的 `ttl_seconds` 被忽略，重发不延长寿命，因此一个应用的寿命有确定的上限。
 2. **TTL 由策略决定，超限拒绝，不截断。** 缺省值是全局策略 `ephemeral_ttl_seconds`（默认 600），上限是 `ephemeral_max_ttl_seconds`（默认 3600）。两个字段只能全局设置，缺省值大于上限时答 400。TTL 超过上限的发布答 400，不建 App。截断会让应用在调用方预期之前悄悄结束。
-3. **一个动作结束它。** 用 `POST /api/apps/<name>/discard` 或 `appctl discard <name>`。动作是 `app.discard`，级别是 `owner`，令牌可用。托管令牌需要 `remove` 范围：令牌原本能结束什么，现在仍是那些。不要确认体，也不用先 remove。持久应用答 409。可以带前置条件 `?app=<id>`（发布返回的 Release 里的 `app`，`appctl publish` 也打印它；`appctl discard <name> --app <id>`），应用的 id 不同就答 409，什么都不删。结束之后再丢弃答 404；但名字结束后就释放了（见后果），同名的后一个应用可能已经发布，不带 id 的重试会结束它，所以要重试的调用方带上 id。它从 `registered`、`removed`、`purging` 任一状态进入 purge 的同一路径：先持久化 `purging`，再退役实例、销毁每条 Binding、删除没有别的应用引用的 bundle、删行。终态与 purge 相同。中断的丢弃由启动和接任领导者时的续跑完成，到期后的清扫也会完成它。详情的 `may` 只对临时应用列出 `app.discard`。
-4. **到期自行结束。** 领导者在接任时清扫一次，之后每 10 s 清扫一次：`expires_at` 已到的临时应用按第 3 项结束，状态不论。每个应用的清扫审计为 `app.expire`，主体 `platform`，先写 `started`，再写 `ok` 或 `error`；续跑一次未完成的结束时只写带 `resumed` 的 `ok` 或 `error`。失败的结束每次清扫都重试；这个应用上一行 `app.expire` 或 `app.discard` 已经是同样的 `error` 时不再写，结果变了才写，原因每次都写进日志。停机期间到期的应用在重启后的第一次清扫中结束。
+3. **一个动作结束它。** 用 `POST /api/apps/<name>/discard` 或 `appctl discard <name>`。动作是 `app.discard`，级别是 `owner`，令牌可用。托管令牌需要 `remove` 范围：令牌原本能结束什么，现在仍是那些。不要确认体，也不用先 remove。持久应用答 409。可以带前置条件 `?app=<id>`（发布返回的 Release 里的 `app`，`appctl publish` 也打印它；`appctl discard <name> --app <id>`），应用的 id 不同就答 409，什么都不删。结束之后再丢弃答 404；但名字结束后就释放了（见后果），同名的后一个应用可能已经发布，不带 id 的重试会结束它，所以要重试的调用方带上 id。它从 `registered`、`removed`、`purging` 任一状态进入 purge 的同一路径：先持久化 `purging`，再退役实例、销毁每条 Binding、删除没有别的应用引用的 bundle、删行。终态与 purge 相同。中断的丢弃由启动和接任领导者时的续跑完成，到期后的清扫也会完成它。续跑完成一次中断的结束（丢弃、到期，或持久应用的 purge）时写一行带 `resumed` 的 `ok`，失败写 `error`（与这个应用上一行相同时不写），主体 `platform`，动作沿用它续完的那次结束，没有那次的行时是 `app.purge`；否则这个应用的最后一行停在被打断的 `error` 或 `started`，读审计的人会以为它没有结束。详情的 `may` 只对临时应用列出 `app.discard`。
+4. **到期自行结束。** 领导者在接任时清扫一次，之后每 10 s 清扫一次：`expires_at` 已到的临时应用按第 3 项结束，状态不论。每个应用的清扫审计为 `app.expire`，主体 `platform`，先写 `started`，再写 `ok` 或 `error`；续跑一次未完成的结束时只写带 `resumed` 的 `ok` 或 `error`。失败的结束每次清扫都重试；这个应用上一行 `app.expire`、`app.discard` 或 `app.purge` 已经是同样的 `error` 时不再写，结果变了才写，原因每次都写进日志。停机期间到期的应用在重启后的第一次清扫中结束。
 5. **单独计配额。** 临时应用不计入 `apps`，计入租户配额的新字段 `ephemeral`。`DEFAULT_QUOTA` 和托管个人租户为 3，`default` 租户不限，`null` 表示不限。迁移给已有租户补上这个字段：`default` 不限，其余为 3。迁移之后，滚动发布中仍在服务的旧网关（ADR 0025 第 8 条）建出的租户行没有这个字段；读租户时，缺的字段按 `DEFAULT_QUOTA` 补齐，所以它也是 3，缺字段不等于不限。运行时配额（`awake`、`cpu_millis`、`memory_mb`、`storage_gb`）照常适用。
 6. **访问固定为 `tenant`。** 建应用时就是 `tenant`，不受默认访问级别影响。access 命令改成其他值答 409。
 7. **不排日程。** Trigger 行和 Scheduler 视图里的 `schedule` 为空，只有建 Trigger 的函数里多一个分支，Scheduler 不变。按需 `invoke` 照常可用。
 8. **可见。** 列表和详情带 `expiresAt`，持久应用为 `null`；`appctl publish` 和 `appctl list` 打印结束时刻，`appctl publish` 还打印应用 id。审计记录创建（`app.publish` 的 details 带标记）、`app.discard` 和 `app.expire`。控制台项目卡片多一个标记和结束时刻，配额多一项。
 9. **其余不变。** 地址、发布、运行时、能力、remove 都照旧。临时应用 remove 后仍会到期，也仍可 discard；管理员的 purge 对它照常。
+10. **按应用的写都核对应用 id。** 第 3 条的前置条件推广到其他按应用的写：remove、purge、unquarantine、stop、restart、kill，改 policy、access、owner、tenant，以及清除 manager，持久应用也一样。`?app=<id>` 是可选的，应用的 id 不同就答 409，什么都不改；不带它的旧客户端照旧。控制台在读过应用的页面上（详情页和它的 policy 表单）的每个写都带上它；`appctl` 的这些命令接受 `--app <id>`。网关也自己核对一次：授权按本副本的视图判定，多副本下视图可能还没跟上另一副本上的 purge 和同名的新发布，于是"按旧应用授权、对新应用执行"。所以命令在应用名的互斥里读行时，id 必须是授权时视图里的那个，否则答 409；请求带的 id 和视图里的不同也答 409。publish 不在其内：它在事务里按最新的行重新授权，首次发布也没有 id 可比。
 
 ## 后果
 
@@ -40,3 +41,4 @@
 - 每次清扫只遍历本副本的 RouteView，在应用名的互斥里重读行，不另加索引或扫描。清扫不重叠，到期的应用并行结束。续跑也在互斥里重读行，不再处理清扫已结束的应用。
 - 回滚到没有本决定的网关时，旧网关会忽略 `expires_at` 和 `ephemeral`，临时应用变成不会到期、计入 `apps` 的普通应用。
 - 不做："某个应用的预览"这种关联、向临时应用复制数据、同一名字的第二个地址。调用方要数据就自己写进去。
+- 名字刚在另一副本被重新发布、本副本还没跟上时，不带 id 的写也答 409，跟上之后（ADR 0025 第 5 条）重试即可。单副本上只有并发的丢弃加重新发布会碰到。

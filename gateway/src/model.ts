@@ -1086,22 +1086,23 @@ export type IssuedToken = { readonly id: string; readonly token: string; readonl
 
 /**
  * Hides the platform rows behind commands; the only writer of everything but Delivery and Stats. `named` is the manager a request names:
- * a command that changes a managed app refuses with Conflict unless it is the app's (ADR 0039).
+ * a command that changes a managed app refuses with Conflict unless it is the app's (ADR 0039). `id`, given, is the app a command must find
+ * under the name, else it refuses with Conflict and changes nothing (ADR 0038).
  */
 export interface Registry {
   publish(request: PublishRequest): Promise<Release>;
-  remove(name: AppName, named?: ManagerName | null): Promise<void>;
+  remove(name: AppName, named?: ManagerName | null, id?: AppId | null): Promise<void>;
   /** Only from removed; otherwise Conflict. */
-  purge(name: AppName, named?: ManagerName | null): Promise<void>;
-  /** Purge from any status, for an ephemeral app only; Conflict for a durable one, or when `id` is given and the app has another (ADR 0038). */
+  purge(name: AppName, named?: ManagerName | null, id?: AppId | null): Promise<void>;
+  /** Purge from any status, for an ephemeral app only; Conflict for a durable one (ADR 0038). */
   discard(name: AppName, named?: ManagerName | null, id?: AppId | null): Promise<void>;
   /** The leader's sweep: discards every ephemeral app whose end is at or before `now`, whatever its status (ADR 0038). */
   expire(now?: number): Promise<void>;
   setGlobalPolicy(patch: Partial<Policy>): Promise<Policy>;
-  setAppPolicy(name: AppName, patch: PolicyPatch, named?: ManagerName | null): Promise<PolicyOverride>;
-  setOwner(name: AppName, owner: Subject, named?: ManagerName | null): Promise<void>;
+  setAppPolicy(name: AppName, patch: PolicyPatch, named?: ManagerName | null, id?: AppId | null): Promise<PolicyOverride>;
+  setOwner(name: AppName, owner: Subject, named?: ManagerName | null, id?: AppId | null): Promise<void>;
   /** Clearing an unmanaged app's manager changes nothing. */
-  clearManager(name: AppName, named?: ManagerName | null): Promise<void>;
+  clearManager(name: AppName, named?: ManagerName | null, id?: AppId | null): Promise<void>;
   /** `local` only: a service token in DEFAULT_TENANT (ADR 0022 item 4). */
   issueToken(name: string): Promise<IssuedToken>;
   /** Copies DEFAULT_QUOTA; `admins` are user ids, at least one. */
@@ -1113,15 +1114,15 @@ export interface Registry {
   issueTenantToken(tenant: TenantName, subject: Subject, label: string, createdBy: Subject | 'local', restrictions?: TokenRestrictions): Promise<IssuedToken>;
   registerHostedIdentity(identity: VerifiedHostedIdentity, signup: HostedSignup): Promise<HostedAccount>;
   revokeToken(tenant: TenantName, id: string): Promise<void>;
-  setAccess(name: AppName, access: Access, named?: ManagerName | null): Promise<void>;
+  setAccess(name: AppName, access: Access, named?: ManagerName | null, id?: AppId | null): Promise<void>;
   /** Retires the instance, then moves the row, so quota, labels and tokens switch at once (ADR 0022 item 3). */
-  moveApp(name: AppName, tenant: TenantName, named?: ManagerName | null): Promise<void>;
+  moveApp(name: AppName, tenant: TenantName, named?: ManagerName | null, id?: AppId | null): Promise<void>;
   /** Retires the instance; the next request wakes it (ADR 0026 item 3). */
-  stop(name: AppName): Promise<void>;
+  stop(name: AppName, id?: AppId | null): Promise<void>;
   /** Retires the instance and wakes it again at once. */
-  restart(name: AppName): Promise<void>;
+  restart(name: AppName, id?: AppId | null): Promise<void>;
   /** Runtime.kill, outside the command lock so a command stuck on the instance cannot hold it back. */
-  kill(name: AppName): Promise<void>;
+  kill(name: AppName, id?: AppId | null): Promise<void>;
   /** Stops every instance the sampler places on `node`, one at a time, past a failure. */
   drain(node: string): Promise<{ readonly stopped: readonly AppName[]; readonly failed: readonly { readonly app: AppName; readonly error: string }[] }>;
   /** Infra.scale, refused with Stranded before it while an instance row names as home a replica the count would remove (ADR 0032). */
