@@ -571,7 +571,7 @@ export class AppCell extends DurableObject<Env> {
       if (path === '/boot') {
         this.guard(value.scope as ExecutionScope);
         const release = this.state().current!;
-        const object = await this.env.PNEUMA_SPACE_ARTIFACTS.get(release.key);
+        const object = await this.env.PNEUMA_SPACE_ARTIFACTS.get((release.code ?? release).key);
         this.guard(value.scope as ExecutionScope);
         if (!object) fail(404, 'artifact', 'Package is unavailable.');
         return new Response(object.body, { headers: { 'content-type': 'application/json' } });
@@ -663,7 +663,7 @@ class Runtime {
     if (state.runtime.bootId) await this.app.retire(true);
     state = this.app.state();
     if (state.runtime.state === 'quarantined') fail(503, 'quarantined', 'Runtime is quarantined.');
-    const bootId = id('boot'), digest = state.current!.digest;
+    const bootId = id('boot'), { digest } = state.current!.code ?? state.current!;
     const scope = { appId: state.id, generation: state.generation, bootId };
     const wake: Wake = { bootId, at: Date.now(), outcome: 'waking', error: null, phases: Object.fromEntries(WAKE_PHASES.map(phase => [phase, null])) as Wake['phases'] };
     state.runtime = { ...state.runtime, state: 'waking', bootId, since: Date.now(), sleepsAt: Date.now() + 60000 };

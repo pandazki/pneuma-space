@@ -318,6 +318,14 @@ test('CF-07 a release whose uploaded package is not JSON answers 400 and writes 
   assert.deepEqual([response.status, (await response.json() as { error: { code: string } }).error.code], [400, 'package']);
   assert.deepEqual((await detail(client, app)).releases, []);
 });
+test('CF-34 an upload whose Node entry lies inside the static directory answers 400 and issues no ticket', async () => {
+  const client = await identity(), app = await created(client);
+  const manifest = { contract: 'pneuma-space.cf/1', runtime: 'node', entry: 'public/server.mjs', capabilities: { static: { dir: 'public' } } };
+  const response = await request('/apps/' + app.id + '/uploads', client, { manifest, digest: hash('package'), bytes: 100 });
+  assert.deepEqual([response.status, (await response.json() as { error: { code: string } }).error.code], [400, 'entry']);
+  const db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  assert.equal((await db.prepare('SELECT count(*) AS count FROM uploads WHERE app_id=?').bind(app.id).first<{ count: number }>())?.count, 0);
+});
 test('CF-06 a release from an upload stores the uploaded bytes as its package', async () => {
   const client = await identity(), app = await created(client), { uploadId, digest } = await upload(client, app);
   assert.equal((await request('/apps/' + app.id + '/releases', client, { uploadId })).status, 200);
