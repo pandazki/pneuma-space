@@ -30,7 +30,7 @@ The control origin is `PNEUMA_SPACE_CONTROL_ORIGIN`. /admin requires platform ad
 
 Every HTTP admission rechecks the credential. App responses carry `Server-Timing` with the platform's own spans (`lookup`, `authorize`, `static`, `admit` or `app`). Existing native browser subscriptions recheck it every 15 seconds and close after revocation or expiry. They survive an idle container stop; execution-scoped subscriptions retire with their container. Trusted display-name headers use percent encoding.
 
-Control APIs use /api/v1, JSON errors with error.code/message, and list envelopes with items and optional nextCursor. Mutations accept Idempotency-Key. Tokens have tenant, action, expiry and optional app restrictions, never platform/account/purge authority; `remove` also discards an ephemeral app.
+Control APIs use /api/v1, JSON errors with error.code/message, and list envelopes with items and optional nextCursor. An unexpected failure answers 500 `internal` with error.requestId; when it ends a mutation, the audit keeps that id as `request.error` (result `error`) with the route, the app when known, and the error's name and message. Mutations accept Idempotency-Key. Tokens have tenant, action, expiry and optional app restrictions, never platform/account/purge authority; `remove` also discards an ephemeral app.
 
 | API suffix | Behavior |
 | --- | --- |

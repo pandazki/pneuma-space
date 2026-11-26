@@ -109,8 +109,9 @@ export type LogRow = { id: string; at: number; level: string; message: string };
 export class HttpError extends Error {
   readonly status: number;
   readonly code: string;
-  constructor(status: number, code: string, message: string) {
-    super(message); this.status = status; this.code = code;
+  readonly requestId: string | undefined;
+  constructor(status: number, code: string, message: string, requestId?: string) {
+    super(message); this.status = status; this.code = code; this.requestId = requestId;
   }
 }
 export function fail(status: number, code: string, message: string): never { throw new HttpError(status, code, message); }
