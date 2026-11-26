@@ -310,6 +310,14 @@ test('CF-32 a release that fails unexpectedly answers 500 with a request id that
   assert.deepEqual([row.user_id, row.tenant_id, row.result, detail.requestId, detail.route], ['platform', client.tenant, 'error', error.requestId, 'AppCell /publish-upload']);
   assert.match(detail.error, /^Error: .*no such table: uploads/);
 });
+test('CF-07 a release whose uploaded package is not JSON answers 400 and writes no release', async () => {
+  const client = await identity(), app = await created(client), bytes = 'not a package';
+  const ticket = await (await request('/apps/' + app.id + '/uploads', client, { manifest: page, digest: hash(bytes), bytes: bytes.length })).json() as { url: string; uploadId: string };
+  await (await artifacts()).put(new URL(ticket.url).pathname.slice('/artifacts/'.length), bytes);
+  const response = await request('/apps/' + app.id + '/releases', client, { uploadId: ticket.uploadId });
+  assert.deepEqual([response.status, (await response.json() as { error: { code: string } }).error.code], [400, 'package']);
+  assert.deepEqual((await detail(client, app)).releases, []);
+});
 test('CF-06 a release from an upload stores the uploaded bytes as its package', async () => {
   const client = await identity(), app = await created(client), { uploadId, digest } = await upload(client, app);
   assert.equal((await request('/apps/' + app.id + '/releases', client, { uploadId })).status, 200);

@@ -73,13 +73,14 @@ export function parsePackage(value: unknown): AppPackage {
 export async function readPackage(env: Env, artifact: Artifact): Promise<AppPackage> {
   return checkPackage(await env.PNEUMA_SPACE_ARTIFACTS.get(artifact.key), artifact);
 }
+function packageJson(bytes: Uint8Array): unknown {
+  try { return JSON.parse(new TextDecoder().decode(bytes)); } catch { return fail(400, 'package', 'Package is not valid JSON.'); }
+}
 async function checkPackage(object: R2ObjectBody | null, artifact: Artifact): Promise<AppPackage> {
   if (!object || object.size > PACKAGE_LIMIT || object.size !== artifact.bytes) fail(409, 'artifact', 'Application package is missing or has changed.');
   const bytes = new Uint8Array(await object.arrayBuffer());
   if (await sha(bytes) !== artifact.digest) fail(409, 'digest', 'Application package checksum does not match.');
-  let value: unknown;
-  try { value = JSON.parse(new TextDecoder().decode(bytes)); } catch { return fail(400, 'package', 'Package is not valid JSON.'); }
-  const parsed = parsePackage(value);
+  const parsed = parsePackage(packageJson(bytes));
   if (JSON.stringify(parsed.manifest) !== JSON.stringify(artifact.manifest)) fail(409, 'manifest', 'Package manifest does not match its release.');
   return parsed;
 }
@@ -139,7 +140,7 @@ export async function prepareUploadArtifact(env: Env, actor: Actor, appId: strin
     if (!object || object.size !== upload.bytes || object.size > PACKAGE_LIMIT) fail(409, 'upload_missing', 'Package upload is missing or has an unexpected size.');
     const bytes = new Uint8Array(await object.arrayBuffer());
     if (await sha(bytes) !== upload.digest) fail(409, 'digest', 'Package checksum does not match.');
-    pkg = parsePackage(JSON.parse(new TextDecoder().decode(bytes)));
+    pkg = parsePackage(packageJson(bytes));
     if (JSON.stringify(pkg.manifest) !== JSON.stringify(manifest)) fail(409, 'manifest', 'Uploaded manifest does not match.');
     await authorizeApp(env, actor, appId, 'publish');
     copy = env.PNEUMA_SPACE_ARTIFACTS.put(key, bytes, { httpMetadata: { contentType: 'application/json' }, onlyIf: { etagDoesNotMatch: '*' } });

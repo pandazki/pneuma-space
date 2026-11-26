@@ -9,7 +9,8 @@ export async function errorResponse(error: unknown, keep?: (failure: Failure) =>
   if (error instanceof HttpError) return json({ error: { code: error.code, message: error.message, ...(error.requestId && { requestId: error.requestId }) } }, error.status);
   const failure: Failure = { requestId: crypto.randomUUID(), error: (error instanceof Error ? error.name + ': ' + error.message : 'Unknown error').slice(0, 1000) };
   console.error(JSON.stringify({ event: 'request-error', id: failure.requestId, message: failure.error }));
-  await keep?.(failure).catch((reason: unknown) => console.error(JSON.stringify({ event: 'request-error-unkept', id: failure.requestId, message: String(reason).slice(0, 1000) })));
+  // A parser's SyntaxError quotes its input, which can come from the request.
+  await keep?.(error instanceof SyntaxError ? { ...failure, error: 'SyntaxError' } : failure).catch((reason: unknown) => console.error(JSON.stringify({ event: 'request-error-unkept', id: failure.requestId, message: String(reason).slice(0, 1000) })));
   return json({ error: { code: 'internal', message: 'The request could not be completed.', requestId: failure.requestId } }, 500);
 }
 export function record(value: unknown): Record<string, unknown> {
