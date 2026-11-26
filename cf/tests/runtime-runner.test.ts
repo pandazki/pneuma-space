@@ -38,7 +38,7 @@ test('CF-39 runner keeps answering after the app exits during startup and report
   broker.listen(0, '127.0.0.1'); await once(broker, 'listening');
   const probe = http.createServer().listen(0, '127.0.0.1'); await once(probe, 'listening');
   const port = (probe.address() as AddressInfo).port; await new Promise(resolve => probe.close(resolve));
-  const runner = spawn(process.execPath, [new URL('../runner/boot.mjs', import.meta.url).pathname], { stdio: 'ignore', env: { PATH: process.env.PATH, PNEUMA_SPACE_BROKER: 'http://127.0.0.1:' + (broker.address() as AddressInfo).port, PNEUMA_SPACE_SUPERVISOR_PORT: String(port), PNEUMA_SPACE_BOOT_ID: 'exit-boot', PNEUMA_SPACE_DIGEST: digest } });
+  const runner = spawn(process.execPath, [new URL('../runner/boot.mjs', import.meta.url).pathname], { stdio: 'ignore', env: { ...process.env, PNEUMA_SPACE_BROKER: 'http://127.0.0.1:' + (broker.address() as AddressInfo).port, PNEUMA_SPACE_SUPERVISOR_PORT: String(port), PNEUMA_SPACE_BOOT_ID: 'exit-boot', PNEUMA_SPACE_DIGEST: digest } });
   try {
     let report: { bootId?: string; ready?: boolean; exited?: boolean; phases?: { unpack: number | null } } = {};
     for (let i = 0; i < 100 && report.exited !== true; i++) {
