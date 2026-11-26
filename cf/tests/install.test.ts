@@ -1,64 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, stat, rm } from 'node:fs/promises';
+import { readFile, readdir, stat, rm } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 // @ts-expect-error The installer is a plain Node script.
 import { install, generateConfig, workerSecrets, statePaths, columnUpgrades, Stop } from '../scripts/install.mjs';
+import { account, token, cloudflare, host, writes } from './fake-account.ts';
 
 const cfDir = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
-const account = 'account-example', token = 'example-api-token';
-
-function cloudflare({ scripts = [] as string[], buckets = [] as string[], databases = [] as { name: string, uuid: string }[], domains = [] as { hostname: string, service: string }[], secrets = [] as string[], deploys = [0], columns = {} as Record<string, string[]> } = {}) {
-  const calls: string[] = [], logs: string[] = [], upgrades: string[] = [];
-  const reply = (result: unknown, status = 200) => Response.json({ success: status < 400, result, errors: status < 400 ? [] : [{ message: 'not found' }] }, { status });
-  const fetch = async (url: string, init: RequestInit = {}) => {
-    const { pathname, searchParams } = new URL(url), method = init.method ?? 'GET', path = pathname.replace('/client/v4', '');
-    if (path === '/_pneuma-space/health') return Response.json({ service: 'pneuma-space-cf' });
-    calls.push(method + ' ' + path);
-    const body = init.body ? JSON.parse(String(init.body)) : undefined;
-    if (path === '/zones') return reply(searchParams.get('name') === 'example.com' ? [{ id: 'zone-example', name: 'example.com' }] : []);
-    if (path === '/accounts/' + account + '/tokens/verify') return reply({ id: 'token-id', status: 'active', expires_on: '2027-01-01T00:00:00Z' });
-    if (path === '/accounts/' + account + '/workers/scripts') return reply(scripts.map(id => ({ id })));
-    if (path === '/accounts/' + account + '/d1/database' && method === 'GET') return reply(databases);
-    if (path === '/accounts/' + account + '/d1/database') { databases.push({ name: body.name, uuid: 'database-' + body.name }); return reply(databases.at(-1)); }
-    const bucket = /^\/accounts\/[^/]+\/r2\/buckets\/([^/]+)(\/cors)?$/.exec(path);
-    if (bucket && !bucket[2]) return buckets.includes(bucket[1]) ? reply({ name: bucket[1] }) : reply(null, 404);
-    if (bucket) return reply({});
-    if (path === '/accounts/' + account + '/r2/buckets') { buckets.push(body.name); return reply({}); }
-    if (path === '/accounts/' + account + '/workers/scripts/space-test/secrets') return reply(secrets.map(name => ({ name, type: 'secret_text' })));
-    if (path.startsWith('/accounts/' + account + '/workers/scripts/space-test/secrets/') && method === 'DELETE') return reply(null);
-    if (path === '/accounts/' + account + '/workers/domains' && method === 'GET') return reply(domains);
-    if (path === '/accounts/' + account + '/workers/domains') { domains.push(body); return reply(body); }
-    throw new Error('unexpected ' + method + ' ' + path);
-  };
-  const run = (command: string, args: string[]) => {
-    if (command === 'docker') return { status: 0, stdout: '' };
-    const [verb, sub] = args.slice(1);
-    calls.push('wrangler ' + (verb === 'd1' ? 'd1 ' + sub : verb));
-    if (verb === 'whoami') return { status: 0, stdout: JSON.stringify({ loggedIn: true, accounts: [{ id: account, name: 'Example' }] }) };
-    if (verb === 'auth') return { status: 0, stdout: JSON.stringify({ type: 'oauth', token: 'session' }) };
-    const option = (name: string) => args.includes(name) ? args[args.indexOf(name) + 1] : '';
-    if (verb === 'd1' && option('--command').startsWith('PRAGMA')) return { status: 0, stdout: JSON.stringify([...option('--command').matchAll(/table_info\((\w+)\)/g)].map(([, table]) => ({ results: (columns[table] ?? []).map(name => ({ name })) }))) };
-    if (verb === 'd1' && option('--file').endsWith('upgrade.sql')) upgrades.push(readFileSync(option('--file'), 'utf8'));
-    if (verb === 'd1' && args.includes('--json')) return { status: 0, stdout: JSON.stringify([{ results: [{ owners: 1 }] }]) };
-    if (verb === 'deploy') return { status: deploys.shift() ?? 0, stdout: '' };
-    return { status: 0, stdout: '' };
-  };
-  return { calls, logs, upgrades, io: { fetch, run, sleep: async () => {}, log: (line: string) => logs.push(line) } };
-}
-
-async function host(saveToken = true) {
-  const stateDir = join(await mkdtemp(join(tmpdir(), 'pneuma-space-install-')), 'space.example.com');
-  const options = { domain: 'space.example.com', prefix: 'space-test', stateDir };
-  if (saveToken) { await mkdir(stateDir); await writeFile(statePaths(stateDir).token, token + '\n'); }
-  return { options, stateDir, done: () => rm(join(stateDir, '..'), { recursive: true, force: true }) };
-}
-
-const writes = (calls: string[]) => calls.filter(call => /^(POST|PUT|DELETE) |^wrangler (d1|deploy)/.test(call));
 
 test('CF-23 without a saved token the installer prints the prefilled token link and changes nothing in the account', async () => {
   const { options, done } = await host(false), cf = cloudflare();
@@ -90,7 +41,7 @@ test('CF-23 generated files live only in the private state directory', async () 
     await install(options, cloudflare().io);
     assert.equal((await stat(stateDir)).mode & 0o777, 0o700);
     for (const file of await readdir(stateDir)) assert.equal((await stat(join(stateDir, file))).mode & 0o777, 0o600, file);
-    assert.deepEqual((await readdir(stateDir)).sort(), ['api-token', 'owner.json', 'worker-secrets.json', 'wrangler.json']);
+    assert.deepEqual((await readdir(stateDir)).sort(), ['api-token', 'data.json', 'owner.json', 'worker-secrets.json', 'wrangler.json']);
   } finally { await done(); }
 });
 
@@ -177,7 +128,7 @@ test('CF-23 a rerun adds to an existing database the columns schema.sql gained s
 test('CF-23 the installer runs the column upgrade for the columns the deployed database lacks', async () => {
   const { options, done } = await host(), db = new DatabaseSync(':memory:');
   db.exec(before);
-  const cf = cloudflare({ columns: { ...columnsOf(fresh()), ...columnsOf(db) } });
+  const cf = cloudflare({ seed: { 'space-test': before } });
   try {
     await install(options, cf.io);
     assert.deepEqual(cf.upgrades, [columnUpgrades(schema, columnsOf(db)).join('\n')]);
@@ -190,5 +141,79 @@ test('CF-23 a first install upgrades no column', async () => {
   try {
     await install(options, cf.io);
     assert.deepEqual(cf.upgrades, []);
+  } finally { await done(); }
+});
+
+const dataOf = async (stateDir: string) => JSON.parse(await readFile(statePaths(stateDir).data, 'utf8'));
+const locations = (cf: ReturnType<typeof cloudflare>) => [cf.d1.get('space-test')!.location, cf.r2.get('space-test-artifacts')!.location, cf.r2.get('space-test-objects')!.location];
+
+test('CF-23 a first install learns where requests for the control domain enter before it creates data, and creates D1 and R2 there', async () => {
+  const { options, done } = await host(), cf = cloudflare({ colo: 'SJC' });
+  try {
+    await install(options, cf.io);
+    const [probe, attach, create] = ['wrangler deploy probe', 'PUT /accounts/' + account + '/workers/domains', 'POST /accounts/' + account + '/d1/database'].map(call => cf.calls.indexOf(call));
+    assert.ok(probe >= 0 && probe < attach && attach < create, cf.calls.join('\n'));
+    assert.deepEqual(locations(cf), ['wnam', 'wnam', 'wnam']);
+  } finally { await done(); }
+});
+
+test('CF-23 an explicit --location places the data without a placeholder Worker', async () => {
+  const { options, done } = await host(true, { location: 'weur' }), cf = cloudflare({ colo: 'SJC' });
+  try {
+    await install(options, cf.io);
+    assert.ok(!cf.calls.includes('wrangler deploy probe'));
+    assert.deepEqual(locations(cf), ['weur', 'weur', 'weur']);
+  } finally { await done(); }
+});
+
+test('CF-23 a first install that cannot learn where requests enter asks for --location and creates no data', async () => {
+  const { options, done } = await host(), cf = cloudflare({ colo: null });
+  try {
+    await assert.rejects(install(options, cf.io), /No database or bucket was created\. Rerun with --location wnam\|enam\|weur\|eeur\|apac\|oc/);
+    assert.equal(cf.d1.size + cf.r2.size, 0);
+  } finally { await done(); }
+});
+
+test('CF-23 the install records and prints where the data is and where requests enter', async () => {
+  const { options, stateDir, done } = await host(), cf = cloudflare({ colo: 'NRT' });
+  try {
+    await install(options, cf.io);
+    const data = await dataOf(stateDir);
+    assert.deepEqual([data.location, data.placed, data.entry], ['apac', { database: 'apac', artifacts: 'apac', objects: 'apac' }, { colo: 'NRT', location: 'apac' }]);
+    assert.ok(cf.logs.includes('Data: apac. Requests from this machine enter Cloudflare at NRT (apac), where the Worker runs.'), cf.logs.join('\n'));
+  } finally { await done(); }
+});
+
+test('CF-23 a rerun over data that is not where requests enter says so in one line naming --relocate and moves nothing', async () => {
+  const { options, done } = await host(true, { location: 'apac' }), cf = cloudflare({ colo: 'SJC' });
+  try {
+    await install(options, cf.io);
+    cf.calls.length = 0;
+    cf.logs.length = 0;
+    await install({ ...options, location: undefined }, cf.io);
+    assert.deepEqual(cf.logs.filter(line => line.includes('--relocate')), ['The data is not where requests enter, so each request crosses to it and back; to move it, run node cf/scripts/install.mjs space.example.com --prefix space-test --relocate wnam.']);
+    assert.deepEqual(writes(cf.calls).filter(call => !call.startsWith('PUT /accounts/' + account + '/r2/buckets/')), ['wrangler d1 execute', 'wrangler d1 execute', 'wrangler d1 execute', 'wrangler d1 execute', 'wrangler deploy']);
+  } finally { await done(); }
+});
+
+test('CF-23 a rerun refuses a --location other than where the data is', async () => {
+  const { options, done } = await host(true, { location: 'apac' }), cf = cloudflare();
+  try {
+    await install(options, cf.io);
+    cf.calls.length = 0;
+    await assert.rejects(install({ ...options, location: 'wnam' }, cf.io), /is in apac; --location only places new data\. To move it, run .* --relocate wnam/);
+    assert.deepEqual(writes(cf.calls), []);
+  } finally { await done(); }
+});
+
+test('CF-23 a rerun on a deployment installed before data locations were recorded records where Cloudflare put its data', async () => {
+  const { options, stateDir, done } = await host(true, { location: 'apac' }), cf = cloudflare({ colo: 'SJC' });
+  try {
+    await install(options, cf.io);
+    await rm(statePaths(stateDir).data);
+    cf.calls.length = 0;
+    await install({ ...options, location: undefined }, cf.io);
+    assert.equal((await dataOf(stateDir)).location, 'apac');
+    assert.ok(!cf.calls.some(call => call.startsWith('POST ') || call === 'wrangler deploy probe'), cf.calls.join('\n'));
   } finally { await done(); }
 });
