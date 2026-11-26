@@ -117,3 +117,41 @@ A second deployment in the same account, freshly installed from this change, wit
 - Every app was then discarded, or removed and purged with the manager's name after both answered 409 without it. The space held no apps and no reserved storage.
 
 Not verified: the publish, rollback, resume and discard approvals in the browser, and the dark theme on the real deployment.
+
+## Data location (2026-11-26)
+
+[ADR 0047](../../docs/adr/0047-cloudflare-data-location.md), run on the deployment measured in the open-path study: D1 and both buckets in APAC, requests from the operator's machine in Japan entering at SJC or SEA, where the Worker and the apps' Durable Objects run. Two apps of the owner, both managed by the governance Host, and no other live app.
+
+Before: no app purging, no ephemeral app, no upload ticket outstanding, no compute held. D1 held 1 user, 1 tenant, 100 apps (98 purged), 179 uploads, 312 sessions, 551 audit rows; the artifacts bucket 66 objects, the objects bucket none. The owner's apps were at release 10 (KV, 2 keys) and release 5 (SQL, one table of 5 rows), and each opened signed in. The plane shows no governance version, only the manager's name.
+
+- The plain rerun of the installer recorded the existing data as APAC and printed: requests from this machine enter at SJC (wnam), the data is in apac, and the `--relocate wnam` command. It moved nothing.
+- `--relocate wnam` without `--yes` printed the plan and changed nothing. With `--yes` it finished in one run of 81 s: it created the database and buckets, which Cloudflare reported in WNAM, copied 66 objects and every row, verified 12 tables, 66 objects and every artifact's SHA-256, redeployed, and appended nothing because nothing had reached the old data. None of the steps the local tests could not cover stopped it: reading `sqlite_master`, importing with `PRAGMA defer_foreign_keys`, the installer's own SigV4 requests to R2, and D1's `running_in_region`.
+- After the switch, the old database's row counts stayed as at the copy while the new one gained the sessions signed in since. Every one of the 551 audit rows was in the new database unchanged; an `UPDATE` and a `DELETE` on one of them were refused by its triggers and the count stayed 551. Listed through the S3 API, both artifacts buckets held the same 66 keys, sizes and ETags. `wrangler r2 bucket info` lags: right after the copy it reported 132 objects in the old bucket and none in the new.
+- The owner's apps kept their releases and their data digests. In headless Chrome signed in as the owner each showed its entries (3 and 5). An item added through the todo page was still listed after a reload. The page has no delete and its API answers 405 to one, so the item left by writing back the KV value read before through the owner's data command: the values match, one key's revision went from 6 to 8.
+- The same owner credentials signed in, and the console listed both apps.
+- The governance Host, with the token it holds: its owner signed in under a pseudo-terminal, created an agent token, and with it `create` published a test app in 17 s and an ordinary change went live as v2 in 15 s, a durable app managed by `appgov` whose page carried the change. The test app was then removed and purged with the manager's name, its previews had ended, the token was revoked and the owner signed out. The Host's own Worker, bucket and secrets were not touched; its record of the test app stays in its bucket.
+
+The open-path study's measurements, repeated the same way from the same machine (medians in ms; browser runs in a fresh context each, signed in; before: 2026-11-26 03:15 to 03:45, after: 04:49 to 05:12; "data" is the end of the page's first API call, owner "asleep" before is one sample):
+
+| Measurement | Before | After |
+| --- | --- | --- |
+| Starter awake, first visit: data | 1724 | 1397 |
+| Starter awake, reload: data | 1618 | 1152 |
+| Starter asleep: data | 4096 | 2499 |
+| Ten assets, first visit / reload: last asset | 1424 / 2203 | 959 / 1225 |
+| todo-list asleep / awake: data | 6202 / 2001 | 3343 / 1625 |
+| reading-journal asleep / awake: data | 4107 / 1893 | 3089 / 1314 |
+| Console dashboard / app page: first paint | 746 / 720 | 528 / 536 |
+| Console dashboard / app page: regions filled | 2001 / 1811 | 2081 / 2032 |
+| Warm `/api/v1/me`, token / session | 359 / 364 | 213 / 179 |
+| Warm static file: R2 read beside the request count write | 192 | 57 |
+| Warm static file, token: app state beside the membership read | 113 | 24 |
+| Warm static file: the app's admission | 23 | 56 |
+| Warm API call: the app's container | 103 | 170 |
+| Wake: compute reservation / package fetch | 491 / 312 | 156 / 153 |
+
+The warm rows are one keep-alive connection entering at SJC both times; a health request that touches nothing took 126 and 124. The wake row is the median over the starter apps' wakes (7 before, 8 after). The admission, a call to the app's Durable Object, and the container step depend on where each app's object and container landed, not on the data: in the browser runs the admission took 62 on this run's starter and 22 on its ten-asset sibling, against 24 and 55 for the study's two. Every request still crosses the Pacific once each way between the browser and the entry, about 120 ms per round trip, and an open makes three in a row (page, assets, API). Behind the entry no D1, R2 or Durable Object step took as long as a trans-Pacific round trip; the slowest, the todo-list object's admission, took 81 ms before and 84 after. Where Cloudflare runs the containers was not observed.
+
+An hour after the switch the old database and buckets still held exactly what was copied (551 audit rows, 314 sessions, 66 artifacts with the same key, size and ETag digest), and all 551 audit rows were in the new database unchanged, which by then also held the owner's own activity. `--remove-previous` found the deployed Worker bound to the new database and buckets alone, appended nothing, deleted the 66 objects, both old buckets and the old database in 14 s, and did not redeploy. Wrangler then listed only the new database and buckets, and the current version binds only them.
+
+Not verified: a move while apps are used, an upload in flight across the switch, a client entering outside western North America, and where Cloudflare runs the containers.
