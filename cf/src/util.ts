@@ -6,7 +6,11 @@ export function json(value: unknown, status = 200): Response {
 export type Failure = { requestId: string; error: string };
 /** `keep` stores an unexpected failure where the operator can read it: Workers Logs are sampled and need an API token. */
 export async function errorResponse(error: unknown, keep?: (failure: Failure) => Promise<unknown>): Promise<Response> {
-  if (error instanceof HttpError) return json({ error: { code: error.code, message: error.message, ...(error.requestId && { requestId: error.requestId }) } }, error.status);
+  if (error instanceof HttpError) {
+    const response = json({ error: { code: error.code, message: error.message, ...(error.requestId && { requestId: error.requestId }) } }, error.status);
+    if (error.retryAfter !== undefined) response.headers.set('retry-after', String(error.retryAfter));
+    return response;
+  }
   const failure: Failure = { requestId: crypto.randomUUID(), error: (error instanceof Error ? error.name + ': ' + error.message : 'Unknown error').slice(0, 1000) };
   console.error(JSON.stringify({ event: 'request-error', id: failure.requestId, message: failure.error }));
   // A parser's SyntaxError quotes its input, which can come from the request.

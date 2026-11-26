@@ -115,8 +115,10 @@ export class HttpError extends Error {
   readonly status: number;
   readonly code: string;
   readonly requestId: string | undefined;
-  constructor(status: number, code: string, message: string, requestId?: string) {
-    super(message); this.status = status; this.code = code; this.requestId = requestId;
+  /** Seconds after which the same request may succeed; the refusal is the platform's, not the caller's. */
+  readonly retryAfter: number | undefined;
+  constructor(status: number, code: string, message: string, detail: { requestId?: string; retryAfter?: number } = {}) {
+    super(message); this.status = status; this.code = code; this.requestId = detail.requestId; this.retryAfter = detail.retryAfter;
   }
 }
-export function fail(status: number, code: string, message: string): never { throw new HttpError(status, code, message); }
+export function fail(status: number, code: string, message: string, retryAfter?: number): never { throw new HttpError(status, code, message, { retryAfter }); }

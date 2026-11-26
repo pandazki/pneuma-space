@@ -6,7 +6,7 @@ import { NativeResources } from './resources.ts';
 import { nextSchedule } from './cron.ts';
 import { expectKind } from './ephemeral.ts';
 import { NAMED_ACTIONS, managerAfter, mustName } from './manager.ts';
-import { actionScope, fail, jobScope, WAKE_PHASES, type Actor, type AppAction, type AppRegistration, type AppSnapshot, type Artifact, type Capability, type Delivery, type EventRow, type ExecutionScope, type Json, type LogRow, type ManagerChange, type Policy, type Release, type Wake } from './model.ts';
+import { actionScope, fail, HttpError, jobScope, WAKE_PHASES, type Actor, type AppAction, type AppRegistration, type AppSnapshot, type Artifact, type Capability, type Delivery, type EventRow, type ExecutionScope, type Json, type LogRow, type ManagerChange, type Policy, type Release, type Wake } from './model.ts';
 import { errorResponse, id, input, integer, json, sha, text } from './util.ts';
 
 type Journal = { previous: Release | null; candidate: Release; key: string };
@@ -178,6 +178,7 @@ export class AppCell extends DurableObject<Env> {
     this.save(state);
     await this.retire();
     state = this.state();
+    const failures = state.runtime.failures;
     state.current = candidate;
     state.status = 'registered';
     state.capabilities = Object.keys(candidate.manifest.capabilities) as Capability[];
@@ -189,6 +190,8 @@ export class AppCell extends DurableObject<Env> {
       if (candidate.manifest.runtime === 'node') await this.containerAcquire();
       await authorizeApp(this.env, actor, state.id, 'publish');
     } catch (error) {
+      // The candidate's failures are not the previous release's.
+      state = this.state(); state.runtime.failures = failures; this.save(state);
       await this.retire(true);
       state = this.state();
       state.current = previous;
@@ -426,19 +429,21 @@ export class AppCell extends DurableObject<Env> {
   }
   private async deliver(attempt: DeliveryAttempt): Promise<void> {
     const job = attempt.job;
-    let error: string | null = null;
+    let error: string | null = null, retryAfter: number | undefined;
     try {
       const response = await this.forward(new Request('http://container/_pneuma-space/invoke/_pneuma-space/trigger/' + encodeURIComponent(job.name), { method: 'POST', headers: { 'content-type': 'application/json', 'x-pneuma-space-delivery': job.id, 'x-pneuma-space-delivery-attempt': String(job.attempts) }, body: JSON.stringify(job.payload) }), attempt);
       await response.arrayBuffer();
       if (!response.ok) throw new Error('Trigger returned HTTP ' + response.status);
-    } catch (failure) { error = failure instanceof Error ? failure.message : 'Delivery failed'; }
+    } catch (failure) { error = failure instanceof Error ? failure.message : 'Delivery failed'; if (failure instanceof HttpError) retryAfter = failure.retryAfter; }
     await this.serial(async () => {
       const current = this.ctx.storage.kv.get<Delivery>('platform:job:' + job.id);
       const state = this.state();
       if (state.status !== 'registered' || state.generation !== attempt.generation || current?.state !== 'delivering' || current.attempts !== job.attempts) return;
+      // A platform refusal, such as a full space, reached no trigger and spends no attempt.
+      if (retryAfter !== undefined) current.attempts--;
       current.state = error === null ? 'done' : current.attempts >= 5 ? 'failed' : 'due';
       current.error = error;
-      if (error !== null) current.nextAttemptAt = Date.now() + Math.min(3600000, 1000 * 2 ** current.attempts);
+      if (error !== null) current.nextAttemptAt = Date.now() + (retryAfter ?? Math.min(3600, 2 ** current.attempts)) * 1000;
       this.ctx.storage.kv.put('platform:job:' + job.id, current);
       await this.arm();
     });
@@ -666,6 +671,7 @@ class Runtime {
     const bootId = id('boot'), { digest } = state.current!.code ?? state.current!;
     const scope = { appId: state.id, generation: state.generation, bootId };
     const wake: Wake = { bootId, at: Date.now(), outcome: 'waking', error: null, phases: Object.fromEntries(WAKE_PHASES.map(phase => [phase, null])) as Wake['phases'] };
+    const before = { runtime: state.runtime, wake: state.wake };
     state.runtime = { ...state.runtime, state: 'waking', bootId, since: Date.now(), sleepsAt: Date.now() + 60000 };
     state.wake = wake;
     this.app.save(state);
@@ -688,7 +694,7 @@ class Runtime {
             for (const phase of ['fetch', 'unpack', 'listen'] as const) wake.phases[phase] = duration(report.phases?.[phase]);
             if (response.ok && report.ready === true && report.digest === digest) {
               if (wake.phases.container !== null) wake.phases.confirm = Math.max(0, Date.now() - wake.at - elapsed(wake));
-              state = this.app.state(); state.runtime.state = 'awake'; state.runtime.sleepsAt = Date.now() + state.policy.idleSeconds * 1000; state.usage.wakes++; this.app.save(state);
+              state = this.app.state(); state.runtime.state = 'awake'; state.runtime.failures = 0; state.runtime.sleepsAt = Date.now() + state.policy.idleSeconds * 1000; state.usage.wakes++; this.app.save(state);
               this.app.recordWake({ ...wake, outcome: 'ready' });
               await this.app.arm(); return port;
             }
@@ -698,7 +704,15 @@ class Runtime {
       }
       fail(503, 'startup', 'Application did not become ready.');
     } catch (error) {
-      state = this.app.state(); state.runtime.failures++; this.app.save(state);
+      state = this.app.state();
+      if (error instanceof HttpError && error.code === 'compute_quota') {
+        // Nothing was reserved or started, so the app is left as it was (ADR 0051).
+        state.runtime = before.runtime; state.wake = before.wake; this.app.save(state);
+        await this.app.arm(); throw error;
+      }
+      // Until the runner has unpacked the release, the app's code has not run and the failure is the platform's.
+      if (wake.phases.unpack !== null) state.runtime.failures++;
+      this.app.save(state);
       this.app.recordWake({ ...wake, outcome: 'failed', error: (error instanceof Error ? error.message : 'Startup failed.').slice(0, 200) });
       await this.app.retire(true); throw error;
     }

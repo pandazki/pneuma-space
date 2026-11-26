@@ -27,7 +27,7 @@ export async function cell(env: Env, appId: string, path: string, value?: unknow
 export async function cellValue<T>(env: Env, appId: string, path: string, value?: unknown): Promise<T> {
   const response = await cell(env, appId, path, value);
   const body = await response.json<{ error?: { code?: string; message?: string; requestId?: string } }>();
-  if (!response.ok) throw new HttpError(response.status, body.error?.code ?? 'app_error', body.error?.message ?? 'Application operation failed.', body.error?.requestId);
+  if (!response.ok) throw new HttpError(response.status, body.error?.code ?? 'app_error', body.error?.message ?? 'Application operation failed.', { requestId: body.error?.requestId, retryAfter: Number(response.headers.get('retry-after')) || undefined });
   return body as T;
 }
 export async function initialize(env: Env, row: AppRow & { storage_bytes: number }): Promise<void> {
@@ -105,7 +105,7 @@ export async function reserveCompute(env: Env, appId: string, bootId: string): P
     } catch {}
   }));
   const result = await db.prepare('INSERT INTO compute(app_id,boot_id,started_at) SELECT ?,?,? WHERE (SELECT count(*) FROM compute c JOIN apps a ON a.id=c.app_id WHERE a.tenant_id=?)<(SELECT awake_limit FROM tenants WHERE id=?) ON CONFLICT(app_id) DO NOTHING').bind(appId, bootId, Date.now(), app.tenant_id, app.tenant_id).run();
-  if (!result.meta.changes) fail(503, 'compute_quota', 'The space has reached its running application limit.');
+  if (!result.meta.changes) fail(503, 'compute_quota', 'The space has reached its running application limit.', 30);
 }
 export async function releaseCompute(env: Env, appId: string, bootId: string): Promise<void> {
   await env.PNEUMA_SPACE_DB.prepare('DELETE FROM compute WHERE app_id=? AND boot_id=?').bind(appId, bootId).run();
