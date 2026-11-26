@@ -80,6 +80,10 @@ export type AppAction =
 export function actionScope(type: AppAction['type']): Action | 'purge' | 'kill' {
   return type === 'purge' || type === 'kill' ? type : type === 'remove' || type === 'discard' ? 'remove' : 'manage';
 }
+/** Running a declared job on demand needs publish or manage: whoever may publish the app's code can already make it do anything. invoke is not enough, because every tenant member holds it. */
+export function jobScope(actor: Actor): Action {
+  return actor.kind === 'token' && !actor.scopes.includes('manage') ? 'publish' : 'manage';
+}
 export type SqlValue = null | string | number;
 export type SqlStatement = { sql: string; params: SqlValue[] };
 export type NativeCommand =

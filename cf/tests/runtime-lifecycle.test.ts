@@ -126,7 +126,7 @@ before(async () => {
     }
     export default {fetch(request, env) {
       if (new URL(request.url).pathname.startsWith('/test/trigger/')) return env.TEST_TRIGGER.fetch(request);
-      if (new URL(request.url).pathname.startsWith('/apps/')) return worker.fetch(request, env);
+      if (['/apps/', '/api/v1/'].some(prefix => new URL(request.url).pathname.startsWith(prefix))) return worker.fetch(request, env);
       return env.PNEUMA_SPACE_APPS.getByName(request.headers.get('x-test-app')).fetch(request);
     }};
   `;
@@ -496,7 +496,7 @@ async function nodeApp(mode = 'ready') {
   await call(app, '/test/runner', { mode });
   return app;
 }
-test('CF-35 a wake refused for lack of a slot answers 503 compute_quota with Retry-After, costs the app nothing, and wakes once a slot frees', async () => {
+test('CF-37 a wake refused for lack of a slot answers 503 compute_quota with Retry-After, costs the app nothing, and wakes once a slot frees', async () => {
   const app = await nodeApp();
   // An app whose cell cannot answer keeps its slot.
   await oneSlot('app_held' + crypto.randomUUID().replaceAll('-', ''), async () => {
@@ -511,7 +511,7 @@ test('CF-35 a wake refused for lack of a slot answers 503 compute_quota with Ret
   });
   assert.equal(await invoke(app), 'woken');
 });
-test('CF-35 a trigger delivery refused for lack of a slot is retried 30 s later without using an attempt', async () => {
+test('CF-37 a trigger delivery refused for lack of a slot is retried 30 s later without using an attempt', async () => {
   const app = await nodeApp();
   await call(app, '/test/configure-schedule', {});
   await oneSlot('app_held' + crypto.randomUUID().replaceAll('-', ''), async () => {
@@ -522,14 +522,14 @@ test('CF-35 a trigger delivery refused for lack of a slot is retried 30 s later 
     assert.ok(job!.nextAttemptAt - Date.now() > 25000, 'retried about 30 s later');
   });
 });
-test('CF-35 a wake whose app never becomes ready counts a failure and quarantines the app at maxFailures', async () => {
+test('CF-37 a wake whose app never becomes ready counts a failure and quarantines the app at maxFailures', async () => {
   const app = await nodeApp('unready');
   await setPolicy(app, { maxFailures: 1 });
   assert.equal(await invoke(app), 'startup');
   assert.deepEqual([await runtimeOf(app), await failedWakes(app)], [{ state: 'quarantined', failures: 1, wake: 'failed' }, 1]);
   assert.equal(await invoke(app), 'quarantined');
 });
-test('CF-35 a successful wake clears the failure count', async () => {
+test('CF-37 a successful wake clears the failure count', async () => {
   const app = await nodeApp('unready');
   assert.equal(await invoke(app), 'startup');
   assert.equal((await runtimeOf(app)).failures, 1);
@@ -537,13 +537,13 @@ test('CF-35 a successful wake clears the failure count', async () => {
   assert.equal(await invoke(app), 'woken');
   assert.deepEqual(await runtimeOf(app), { state: 'asleep', failures: 0, wake: 'ready' });
 });
-test('CF-35 a wake that fails before the app runs is recorded without counting a failure', async () => {
+test('CF-37 a wake that fails before the app runs is recorded without counting a failure', async () => {
   const app = await nodeApp('no-start');
   await setPolicy(app, { maxFailures: 1 });
   assert.equal((await call(app, '/_pneuma-space/invoke/')).status, 500);
   assert.deepEqual([await runtimeOf(app), await failedWakes(app)], [{ state: 'asleep', failures: 0, wake: 'failed' }, 1]);
 });
-test('CF-35 a publication whose release never becomes ready leaves the previous release uncounted', async () => {
+test('CF-37 a publication whose release never becomes ready leaves the previous release uncounted', async () => {
   const app = await nodeApp();
   await setPolicy(app, { maxFailures: 1 });
   const { generation } = await (await call(app, '/inspect')).json() as { generation: number };
@@ -626,4 +626,27 @@ test('CF-29 an ephemeral app schedules no trigger while a manual job still runs'
   const job = await call(app, '/jobs', { actor, name: 'tick', payload: null, idempotencyKey: 'manual' });
   assert.equal(job.status, 200);
   assert.equal((await job.json() as { name: string }).name, 'tick');
+});
+// The control API as the CLI calls it: a Bearer token, checked by the Worker and again by the AppCell.
+async function runJobWith(app: string, scopes: string[]) {
+  const secret = crypto.randomUUID().replaceAll('-', '').repeat(2), db = await mf.getD1Database('PNEUMA_SPACE_DB');
+  await db.prepare("INSERT INTO memberships(tenant_id,user_id,role) VALUES('tenant','owner','admin') ON CONFLICT DO NOTHING").run();
+  await db.prepare("INSERT INTO tokens(id,hash,tenant_id,user_id,label,scopes_json,app_ids_json,expires_at,created_at) VALUES(?,?,'tenant','owner','jobs',?,NULL,?,1)").bind('k_' + secret.slice(0, 16), createHash('sha256').update(secret).digest('hex'), JSON.stringify(scopes), Date.now() + 60000).run();
+  return mf.dispatchFetch('http://test/api/v1/apps/' + app + '/jobs', { method: 'POST', headers: { authorization: 'Bearer ' + secret, 'content-type': 'application/json', 'idempotency-key': secret }, body: JSON.stringify({ name: 'tick' }) });
+}
+test('CF-35 a token with publish or with manage runs a declared job on demand', async () => {
+  const { app } = await fixture();
+  await call(app, '/test/configure-schedule', {});
+  for (const scopes of [['publish'], ['manage']]) {
+    const job = await runJobWith(app, scopes);
+    assert.equal(job.status, 201, await job.clone().text());
+    assert.equal((await job.json() as { name: string }).name, 'tick');
+  }
+});
+test('CF-35 a token with only invoke and read cannot run a job on demand', async () => {
+  const { app } = await fixture();
+  await call(app, '/test/configure-schedule', {});
+  const job = await runJobWith(app, ['invoke', 'read']);
+  assert.equal(job.status, 403);
+  assert.equal((await job.json() as { error: { code: string } }).error.code, 'token_scope');
 });

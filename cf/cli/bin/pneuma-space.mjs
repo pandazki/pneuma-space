@@ -32,6 +32,10 @@ export async function packageApp(directory){
   await walk(join(directory,'app'));
   if(!files.length||files.length>256)throw Error('Use one to 256 application files.');
   if(!files.some(file=>file.path===manifest.entry))throw Error('The manifest entry is missing from app/.');
+  // A job is declared once, as a trigger in the manifest the platform reads, and run by app/jobs/<name>.mjs; neither may lack the other.
+  const declared=Object.keys(manifest.capabilities?.cron?.triggers??{}),handled=files.map(file=>/^jobs\/([^/]+)\.mjs$/.exec(file.path)?.[1]).filter(Boolean);
+  for(const name of declared)if(!handled.includes(name))throw Error(`pneuma-space.json declares the job ${name}, but app/jobs/${name}.mjs is missing.`);
+  for(const name of handled)if(!declared.includes(name))throw Error(`app/jobs/${name}.mjs is not declared. Add "${name}":{"schedule":"MINUTE HOUR DAY MONTH WEEKDAY"} (UTC), or "${name}":{} to run it only on demand, under capabilities.cron.triggers in pneuma-space.json. Every .mjs file directly in app/jobs/ is a job; keep shared code elsewhere.`);
   const bytes=Buffer.from(JSON.stringify({manifest,files}));
   if(bytes.length>4*1024*1024)throw Error('The application package exceeds 4 MiB. Bundle dependencies and remove unused files.');
   return {manifest,bytes,digest:digest(bytes)};
@@ -162,7 +166,7 @@ export async function benchmark(w,{awaitIdle=true}={}){
   for(let i=0;i<5;i++)warm.push((await call()).ms);
   const dashboard=client.origin+'/dashboard?view=projects&app='+project.app.id+'&tab=usage',sorted=[...warm].sort((a,b)=>a-b);
   const timings={firstRequestMs:first.ms,warmMedianMs:sorted[Math.floor(sorted.length/2)],warmP95Ms:sorted.at(-1),warmSamplesMs:warm};
-  const waitSeconds=before.policy.idleSeconds+90,links=()=>{log('ready','Open your app: '+appUrl(w));log('access','Use the browser where you are signed into '+client.origin+'. This app is private; a publishing token does not replace browser login.');log('stats','See real requests and wake/sleep counts: '+dashboard);};
+  const waitSeconds=before.policy.idleSeconds+90,links=()=>{log('ready','Open your app: '+appUrl(w));log('access','The app is private. A person opens it in a browser signed into '+client.origin+'; from this project, the get command requests its pages with the saved token.');log('stats','See real requests and wake/sleep counts: '+dashboard);};
   if(!awaitIdle){
     const after=await client.request(path);
     const report={complete:false,reason:`Natural idle was not awaited. npm run bench waits for it, up to ${waitSeconds}s under this app's policy.`,at:new Date().toISOString(),appId:project.app.id,app:appUrl(w),dashboard,...timings,wake:after.wake,naturalIdleObserved:false,before:before.usage,after:after.usage};
@@ -190,12 +194,64 @@ export async function benchmark(w,{awaitIdle=true}={}){
   links();
   return report;
 }
+const live=w=>{if(!w.project.app)throw Error('Publish the project first with npm run deploy.');return '/apps/'+w.project.app.id;};
+const utc=at=>new Date(at).toISOString().replace(/\.\d{3}Z$/,'Z');
+const latest=(items,count,key)=>[...items].sort((a,b)=>a[key]-b[key]).slice(-count);
+async function output(w,since,count){
+  const lines=latest((await w.client.request(live(w)+'/logs')).items.filter(row=>row.at>=since),count,'at').map(row=>utc(row.at)+'  '+row.level+'  '+row.message.slice(0,300));
+  return lines.length?'App output (UTC):\n'+lines.join('\n'):'No app output.';
+}
+export async function runJobNow(w,name,{interval=1000,timeout=180000}={}){
+  const path=live(w),since=Date.now();let job;
+  try{job=await w.client.request(path+'/jobs',{name,payload:null});}
+  catch(error){
+    if(error.code==='token_scope')throw Error('This token cannot run jobs on demand: that needs the publish or manage permission. Scheduled deliveries still run; follow them with the jobs command.');
+    if(error.code==='trigger'||error.code==='capability')throw Error(`The live release has no job ${name}. Declare it in pneuma-space.json, write app/jobs/${name}.mjs and run npm run deploy.`);
+    throw error;
+  }
+  log('run',`Delivery ${job.id} of ${name} is queued; waiting for the app to run it.`);
+  let settled=false;
+  for(const deadline=Date.now()+timeout;!settled&&Date.now()<deadline;){
+    await delay(interval);
+    job=(await w.client.request(path+'/jobs')).items.find(item=>item.id===job.id)??job;
+    settled=job.state==='done'||job.state==='failed'||job.state==='cancelled'||job.error!==null;
+  }
+  if(job.state==='done')log('run',`${name} finished delivery ${job.id} on attempt ${job.attempts}.`);
+  else if(job.state==='due'&&job.error)log('run',`Attempt ${job.attempts} of ${name} failed: ${job.error}. The platform retries it, up to 5 attempts; follow it with the jobs command.`);
+  else log('run',`Delivery ${job.id} of ${name} is ${job.state} after attempt ${job.attempts}${job.error?': '+job.error:''}.`);
+  if(job.state!=='done')process.exitCode=1;
+  await delay(interval);
+  console.log(await output(w,since,20));
+  return job;
+}
+export async function showJobs(w){
+  const path=live(w),[app,jobs]=await Promise.all([w.client.request(path),w.client.request(path+'/jobs')]);
+  const triggers=Object.entries(app.current?.manifest.capabilities.cron?.triggers??{}),last=latest(jobs.items,10,'scheduledFor').reverse();
+  console.log(triggers.length?'Jobs in the live release, schedules in UTC:\n'+triggers.map(([name,trigger])=>'  '+name+'  '+(trigger.schedule??'on demand only')).join('\n'):'The live release declares no jobs.');
+  if(triggers.length&&app.expiresAt!==null)console.log('This app is ephemeral: its schedules never fire. The run command still runs a job.');
+  console.log(last.length?`Last ${last.length} of ${jobs.items.length} deliveries, newest first:\n`+last.map(job=>`  ${utc(job.scheduledFor)}  ${job.name}  ${job.state}  attempts ${job.attempts}  ${job.id}${job.error?'  '+job.error.slice(0,200):''}`).join('\n'):'No deliveries yet.');
+  console.log(await output(w,0,20));
+}
+// The project's token reaches its own app as a Bearer credential. Only GET: the app's stored data is the user's real data.
+export async function getPath(w,path){
+  live(w);
+  const base=appUrl(w),url=new URL(path.replace(/^\/+/,''),base);
+  if(!url.href.startsWith(base))throw Error('Choose a path inside this app, such as / or api/items.');
+  const response=await fetch(url,{headers:w.client.headers,redirect:'manual',signal:AbortSignal.timeout(60000)});
+  const body=Buffer.from(await response.arrayBuffer()),type=response.headers.get('content-type')||'';
+  log('get',`GET ${url.pathname}${url.search}: ${response.status}, ${type||'no content type'}, ${body.length} bytes`);
+  console.log(/^text\/|json|javascript|xml/.test(type)?body.subarray(0,2000).toString('utf8')+(body.length>2000?'\n[first 2000 of '+body.length+' bytes]':''):`[${body.length} bytes not shown]`);
+  if(!response.ok)process.exitCode=1;
+  return response.status;
+}
 async function main(){
   const [command='help',...args]=process.argv.slice(2),options={},pos=[];
   for(let i=0;i<args.length;i++){if(args[i]==='--token-stdin'){options.tokenStdin=true;continue;}if(args[i]==='--ephemeral'){options.ephemeral=true;continue;}if(args[i].startsWith('--')){const key=args[i].slice(2);if(!['origin','tenant','name','ttl','manager','manager-url','app'].includes(key)||!args[i+1])throw Error('Unknown or incomplete option: '+args[i]);options[key]=args[++i];}else pos.push(args[i]);}
   if(options.ttl!==undefined&&(!options.ephemeral||!/^[1-9]\d*$/.test(options.ttl)))throw Error('--ttl takes whole seconds and needs --ephemeral.');
   if(options['manager-url']!==undefined&&!options.manager)throw Error('--manager-url needs --manager.');
-  if(['help','--help','-h'].includes(command)){console.log('PneumaSpace\n  start DIRECTORY --origin URL [--tenant ID]   Scaffold, publish and measure requests; natural idle is left to bench\n  init DIRECTORY --origin URL [--tenant ID]    Scaffold without publishing\n  publish [DIRECTORY]                         Publish app/ with your saved token\n    --ephemeral [--ttl SECONDS]               A new app that ends by itself after SECONDS or the deployment default\n  discard [DIRECTORY] [--app ID]              End the ephemeral app of this project and delete its data\n  unmanage [DIRECTORY]                        Clear the manager of this app\n  bench [DIRECTORY]                           Verify warm requests, natural idle and retained state\n  --manager NAME [--manager-url URL]          Name the manager of a managed app on a write; publish also sets it\n  status [DIRECTORY]                          Inspect real runtime and usage\n  package [DIRECTORY]                         Validate files without publishing\nToken: PNEUMA_SPACE_TOKEN from Dashboard → Create app. Node 22+ required.');return;}
+  if(['help','--help','-h'].includes(command)){console.log('PneumaSpace\n  start DIRECTORY --origin URL [--tenant ID]   Scaffold, publish and measure requests; natural idle is left to bench\n  init DIRECTORY --origin URL [--tenant ID]    Scaffold without publishing\n  publish [DIRECTORY]                         Publish app/ with your saved token\n    --ephemeral [--ttl SECONDS]               A new app that ends by itself after SECONDS or the deployment default\n  discard [DIRECTORY] [--app ID]              End the ephemeral app of this project and delete its data\n  unmanage [DIRECTORY]                        Clear the manager of this app\n  bench [DIRECTORY]                           Verify warm requests, natural idle and retained state\n  --manager NAME [--manager-url URL]          Name the manager of a managed app on a write; publish also sets it\n  status [DIRECTORY]                          Inspect real runtime and usage\n  run JOB [DIRECTORY]                         Run a job of app/jobs now and print its outcome and the app output\n  jobs [DIRECTORY]                            List the declared jobs, the last 10 deliveries and the last 20 lines of app output\n  get PATH [DIRECTORY]                        GET a path of this app with the saved token; print the status and the start of the reply\n  package [DIRECTORY]                         Validate files without publishing\nToken: PNEUMA_SPACE_TOKEN from Dashboard → Create app. Node 22+ required.');return;}
+  const view={run:runJobNow,get:getPath,jobs:showJobs}[command];
+  if(view){const argument=['run','get'].includes(command)?pos.shift():null;if(argument===undefined)throw Error(command==='run'?'Name the job: run JOB [DIRECTORY].':'Name a path: get PATH [DIRECTORY], such as get / or get api/items.');await view(await workspace(resolve(pos[0]||'.')),argument);return;}
   if(!['start','init','publish','bench','status','package','discard','unmanage'].includes(command))throw Error('Unknown command. Run pneuma-space help.');
   if(['start','init'].includes(command)&&!pos[0])throw Error('Choose a new project directory.');
   if(options.tokenStdin){let value='';for await(const chunk of process.stdin){value+=chunk;if(value.length>256)throw Error('Invalid token input.');}process.env.PNEUMA_SPACE_TOKEN=value.trim();}

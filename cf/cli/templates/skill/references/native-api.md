@@ -1,6 +1,6 @@
 # Native persistence
 
-The manifest at the project root declares contract pneuma-space.cf/1, runtime node, an entry relative to app/, and capability objects. Node listens on PNEUMA_SPACE_PORT. app/ is prebuilt code, not a build service. Public Internet egress is disabled; native services use this intercepted host:
+The manifest at the project root declares contract pneuma-space.cf/1, runtime node, an entry relative to app/, and capability objects. Node listens on PNEUMA_SPACE_PORT. app/ is prebuilt code, not a build service. Public Internet egress is disabled; native services use this intercepted host, and `native(command)` in `app/space.mjs` sends each command this way:
 
 ```js
 const response = await fetch('http://pneuma-space.internal/broker', {
@@ -66,7 +66,7 @@ Declare rtc for TURN relays.
 | --- | --- |
 | `{type:'rtc.credentials'}` | `{iceServers,expiresAt}`, each server `{urls,username?,credential?}`, valid 600 seconds |
 
-Declare static with a directory inside app/ for the page shell. A GET or HEAD for a file in that directory is answered from storage without starting Node, even while the app sleeps; a path ending in `/` serves that directory's `index.html`. Every other request reaches Node. The directory's files are not in the Node container: keep the entry and every file the server reads outside it. The starter declares static, kv and identity. Its one collection is limited to 24 entries and 16 KiB of JSON. Filter/search in the browser and avoid polling so the app can become idle. The benchmark proof marker is a separate small key and does not change the user's collection.
+Declare static with a directory inside app/ for the page shell. A GET or HEAD for a file in that directory is answered from storage without starting Node, even while the app sleeps; a path ending in `/` serves that directory's `index.html`. Every other request reaches Node. The directory's files are not in the Node container: keep the entry and every file the server reads outside it. The starter declares static, kv and identity; declare cron for jobs as SKILL.md shows. Its one collection is limited to 24 entries and 16 KiB of JSON. Filter/search in the browser and avoid polling so the app can become idle. The benchmark proof marker is a separate small key and does not change the user's collection.
 
 The app lives at `/apps/<name>/` on the workspace origin, which it shares with the workspace and every other app. Requests reach the server with that prefix removed and an `X-Forwarded-Prefix: /apps/<name>` header. Use relative URLs for pages, assets, API calls and WebSockets (`api/items`, not `/api/items`); a root path such as `/style.css` answers 404. Add the prefix to any absolute path the server writes, such as a redirect. `_pneuma-space/` is reserved under the prefix.
 
