@@ -659,7 +659,7 @@ export class AppCell extends DurableObject<Env> {
   webSocketError(socket: WebSocket): void { this.closeSubscriber(socket, 1011, 'Connection failed'); this.ctx.waitUntil(this.arm()); }
 }
 
-type RunnerReport = { bootId?: unknown; digest?: unknown; ready?: unknown; exited?: unknown; uptime?: unknown; phases?: Record<string, unknown> };
+type RunnerReport = { bootId?: unknown; digest?: unknown; ready?: unknown; uptime?: unknown; phases?: Record<string, unknown> };
 const duration = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
 const elapsed = (wake: Wake): number => WAKE_PHASES.reduce((sum, phase) => sum + (wake.phases[phase] ?? 0), 0);
 
@@ -699,8 +699,7 @@ class Runtime {
       container.start({ image: container.images.base, instance: 'lite', enableInternet: false, env: { PNEUMA_SPACE_BOOT_ID: bootId, PNEUMA_SPACE_DIGEST: digest } });
       await container.setInactivityTimeout((state.policy.requestSeconds + state.policy.idleSeconds + 60) * 1000);
       const port = container.getTcpPort(8080);
-      let exited = false;
-      for (const deadline = Date.now() + 45000; Date.now() < deadline && !exited;) {
+      for (const deadline = Date.now() + 45000; Date.now() < deadline;) {
         try {
           const response = await port.fetch('http://container/_pneuma-space/ready', { signal: AbortSignal.timeout(1000) });
           const report = await response.json<RunnerReport>();
@@ -714,12 +713,11 @@ class Runtime {
               this.app.recordWake({ ...wake, outcome: 'ready' });
               await this.app.arm(); return port;
             }
-            exited = report.exited === true;
           }
         } catch {}
-        if (!exited) await scheduler.wait(50);
+        await scheduler.wait(50);
       }
-      fail(503, 'startup', exited ? 'Application exited before it became ready.' : 'Application did not become ready.');
+      fail(503, 'startup', 'Application did not become ready.');
     } catch (error) {
       state = this.app.state();
       if (error instanceof HttpError && error.code === 'compute_quota') {

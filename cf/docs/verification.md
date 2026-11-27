@@ -211,7 +211,7 @@ Not verified: an app whose server reads its static directory (none was found in 
 
 ## Runner image rollout (2026-11-27)
 
-A deploy that changes `cf/runner/` pushes a new container image. The first such deploy, of the runner that reports an app's exit ([ADR 0053](../../docs/adr/0053-cloudflare-runner-reports-app-exit.md)), made healthy wakes slower, and it was rolled back after 35 minutes. This run measured how long a new runner image keeps wakes slow.
+A deploy that changes `cf/runner/` pushes a new container image. The first such deploy, of the runner that reports an app's exit ([ADR 0053](../../docs/adr/0053-cloudflare-runner-reports-app-exit.md)), made healthy wakes slower. These runs found how long that lasts and why. The outcome is [ADR 0054](../../docs/adr/0054-cloudflare-runner-image-stays.md): the runner change is reverted, and [#76](https://github.com/pandazki/pneuma-space/issues/76) holds what a new image needs before it serves.
 
 Each sample is one run of `node scripts/bench-wake.mjs --sizes 30000 --rounds 12`: a fresh ephemeral app with a 0.03 MiB Node package, put to sleep and woken by one request 12 times, then discarded. There were two samples on the old image. Then `origin/main` at `e14e0ad` was deployed at 18:35 UTC by a plain installer rerun, and a sample followed every 15 minutes for 3 hours. The new image had already been pushed at 17:49 by the trial deploy and had run until 18:22, so the installer skipped the push. "Fast" counts the wakes whose app listened within 175 ms; every wake on the old image did, at 157 to 172 ms.
 
@@ -236,11 +236,30 @@ Medians in ms, times in UTC on 2026-11-26:
 | 21:36 | 181 | new | 1834 | 131 | 778 | 144 | 274 | 33 | 0 of 12 |
 | 21:42 | 187 | new | 1484 | 103 | 660 | 126 | 220 | 41 | 0 of 12 |
 
-- The cost did not end within 3 hours. The median client time stayed at 1.49 to 1.91 s, against 1.35 to 1.39 s before, so a wake took 100 to 560 ms longer.
+Eleven more samples, one an hour from 22:44 to 08:55 UTC, stayed at 1539 to 1904 ms. Of the 300 wakes on the new image, 16 were fast, in 5 of the 25 samples.
+
 - The slow phases run inside the container: the container start (150 to 450 ms more), the package fetch (10 to 75 ms more) and the app's listen (50 to 140 ms more). The compute reservation and the readiness confirmation, which the AppCell measures on its own side, did not change.
-- The runner's code is not the cause. On a healthy wake the new runner differs only by one field in its readiness report, and ten interleaved local runs of each image took 1761 and 1762 ms. On the deployment the images alternated within 15 minutes with the same result each time: new at 18:20 (1636 ms), old at 18:23 (1332 ms) and at 18:32 (1394 ms), new at 18:35 (1616 ms).
-- All 48 wakes measured on the old image that day listened within 157 to 172 ms. Only 13 of 168 wakes on the new image did. The others fell into groups near 220, 270 and 340 ms. The groups are the runner's own steps: it asks the app's port every 50 ms, so a listen time is a whole number of steps, and an app that needs a few ms more than three steps is reported one step later. The share of fast wakes rose to 5 of 12 at 135 minutes and fell back to 0 of 12 by 180, so it shows no steady trend.
-- The old image has been this slow too. With no image change, the runs of [Open and release paths after the move](#open-and-release-paths-after-the-move-2026-11-26) measured a container start of 812 ms and a listen of 279 ms, against 627 and 165 ms the run before. So the slow range is not new with this image; what is new is that this image has not left it.
+- The runner's code is not the cause. On a healthy wake the new runner differs only by one field in its readiness report, the two images differ by one 20 KB layer, and ten interleaved local runs of each image took 1761 and 1762 ms.
+- Listen times fall into groups near 160, 220, 270 and 340 ms because the runner asks the app's port every 50 ms; a listen time is a whole number of those steps.
 - During the slow period, an app published on the old image woke on the new one in 1.7 s. An app that exits at startup answered 503 `startup` after 2.7 s, held its compute slot about 1.8 s and counted the failure. 25 on-demand runs of one job left the newest 20 in a listing of 20.
 
-This is one rollout of one image. It was not rolled back: a wake still takes under 2 s, the runner change ends a wake at once when the app exits, and a rollback would meet the same question at the next runner change. Not known: why the same container work takes longer at some times and on this image, whether the cost ends after more hours or more wakes, and whether a new image always meets it. The old image, pushed on 2026-11-25, was not measured in its first hours.
+### Which machines the wakes ran on
+
+A probe app answered with the CPU model it ran on and the time of a fixed loop at its startup. Each run is a fresh ephemeral app woken 2 or 4 times, on 2026-11-27 between about 09:05 and 09:37 UTC. The old image was deployed again at 08:59, a third image at 09:20 (the new runner plus one newline, pushed then), and the old image at 09:28.
+
+| Image | Apps | On AMD EPYC 9684X | On AMD EPYC 7713 |
+| --- | --- | --- | --- |
+| Old, pushed 2 days before | 9 | 6 | 3 |
+| Third, pushed minutes before | 8 | 0 | 8 |
+| Old, deployed again | 8 | 6 | 2 |
+
+| Machine | Container start | Fixed loop | Client |
+| --- | --- | --- | --- |
+| AMD EPYC 9684X | 396 to 629 | 68 to 81 | 1247 to 1701 |
+| AMD EPYC 7713 | 641 to 1104 | 89 to 181 | 1563 to 2564 |
+
+- Every wake of one probe app reported the same CPU model.
+- The fast wakes are the ones on the 9684X. A newly pushed image starts on the 7713, and the image that was two days old starts mostly on the 9684X. The cause is on Cloudflare's side and was not found.
+- The old image is not always on the fast machines: 5 of its 17 apps were not, and the runs of [Open and release paths after the move](#open-and-release-paths-after-the-move-2026-11-26), in its first day, measured a container start of 812 ms.
+
+Not known: whether a new image moves to the newer machines with age, and whether it must serve wakes for that. The image of the runner change did not move in 14 hours.
