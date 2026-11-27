@@ -1,6 +1,6 @@
 # ADR 0053：Cloudflare 运行器报告应用在启动中退出
 
-状态：接受。2026-11-27。补充 [CF 应用契约](../../cf/docs/app-contract.md) 中的失败计数一段；取代 [ADR 0051](0051-cloudflare-only-app-failures-quarantine.md) 后果中“分界靠就绪检查的采样”一条。
+状态：暂缓，见 [ADR 0054](0054-cloudflare-runner-image-stays.md)。设计不变，代码已撤回。2026-11-27。补充 [CF 应用契约](../../cf/docs/app-contract.md) 中的失败计数一段；取代 [ADR 0051](0051-cloudflare-only-app-failures-quarantine.md) 后果中“分界靠就绪检查的采样”一条。
 
 ## 背景
 

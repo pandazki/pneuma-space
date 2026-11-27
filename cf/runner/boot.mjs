@@ -27,7 +27,7 @@ async function flush() {
 const server = http.createServer((req, res) => {
   if (req.url === '/_pneuma-space/ready') {
     res.writeHead(ready && !exited ? 200 : 503, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ bootId: boot, digest, ready, exited, uptime: elapsed(started), phases }));
+    res.end(JSON.stringify({ bootId: boot, digest, ready, uptime: elapsed(started), phases }));
     return;
   }
   if (!ready) { res.writeHead(503); res.end(); return; }
@@ -79,7 +79,6 @@ for (let attempt = 0; attempt < 600 && !exited; attempt++) {
   if (ready) { phases.listen = elapsed(mark); break; }
   await new Promise(resolve => setTimeout(resolve, 50));
 }
-// The server keeps reporting the exit, so the platform ends the wake at once and destroys this container.
-if (!ready) { await flush(); child.kill('SIGKILL'); }
+if (!ready) { await flush(); child.kill('SIGKILL'); process.exitCode = 1; server.close(); }
 setInterval(flush, 1000).unref();
 process.on('SIGTERM', () => { child.kill('SIGTERM'); server.close(); setTimeout(() => process.exit(), 1000).unref(); });
