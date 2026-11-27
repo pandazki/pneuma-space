@@ -258,7 +258,7 @@ A probe app answered with the CPU model it ran on and the time of a fixed loop a
 | AMD EPYC 9684X | 396 to 629 | 68 to 81 | 1247 to 1701 |
 | AMD EPYC 7713 | 641 to 1104 | 89 to 181 | 1563 to 2564 |
 
-- Every wake of one probe app reported the same CPU model.
+- In these 25 apps every wake of one app reported the same CPU model. That is not a rule: of four more apps probed on the old image at 09:45, two reported both models in two wakes.
 - The fast wakes are the ones on the 9684X. A newly pushed image starts on the 7713, and the image that was two days old starts mostly on the 9684X. The cause is on Cloudflare's side and was not found.
 - The old image is not always on the fast machines: 5 of its 17 apps were not, and the runs of [Open and release paths after the move](#open-and-release-paths-after-the-move-2026-11-26), in its first day, measured a container start of 812 ms.
 
